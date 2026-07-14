@@ -649,6 +649,12 @@ const incidentReady = signals.hasFailure && signals.timelineEventCount >= 3;
 const adrReady = signals.explicitDecisionRefs.length > 0 && signals.alternativeRefs.length > 0;
 ```
 
+Implementation amendment (2026-07-13, frozen-production-label calibration): a runbook candidate
+may also come from a completed repeatable operating procedure when canonical evidence contains
+concrete performed changes, technical anchors, and successful verification. A preceding failure is
+not required for that positive form. Advice, plans, and unverified procedures remain ineligible.
+This broadens reusable positive evidence; it does not restore per-session artifact obligations.
+
 Text matches may nominate a candidate but must attach the exact evidence refs that triggered it. Multi-session grouping is allowed only for equal normalized error/decision signatures; project, topic, time, or generic file overlap never joins by itself.
 
 Discovery must be incremental and bounded: scan at most 100 publish-path sessions per call, persist each session's evidence revision, and rescan only when that revision changes. Add a performance fixture with 100 tool-heavy sessions; the page must complete within two seconds on the test runner after database setup.

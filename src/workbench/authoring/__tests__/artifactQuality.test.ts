@@ -25,6 +25,25 @@ describe("artifact claim support", () => {
     );
   });
 
+  test.each([
+    "I reviewed every item and limited assertions.",
+    "Read all canonical evidence through pagination.",
+    "Kept claims single session and avoided unsupported joins."
+  ])("rejects semantic authoring self-process leakage: %s", (value) => {
+    expect(findUnsupportedProtocolLanguage({ approach: [value] }, [], fixtureEvidence())).toContainEqual(
+      expect.objectContaining({ code: "unsupported_authoring_protocol_language", path: "approach[0]" })
+    );
+  });
+
+  test("does not confuse operational review details with authoring self-process leakage", () => {
+    const output = {
+      decision: "The authorization policy limits JWT assertions to one issuer.",
+      remediation: ["The incident review inspected every failed worker and limited retries to the affected batch."]
+    };
+
+    expect(findUnsupportedProtocolLanguage(output, [], fixtureEvidence())).toEqual([]);
+  });
+
   test("rejects a normalized excerpt shorter than 20 characters or absent from cited evidence", () => {
     const output = { rootCause: "The callback state check rejected the request." };
     const findings = validateClaimSupport(
@@ -124,7 +143,9 @@ describe("artifact claim support", () => {
       { ...fixtureEvidence().get(PASSED)!, exitCode: 1, status: "passed" },
       { ...fixtureEvidence().get(PASSED)!, exitCode: 0, status: "failed" },
       { ...fixtureEvidence().get(PASSED)!, text: "Verification tests completed with failures: 2." },
-      { ...fixtureEvidence().get(PASSED)!, text: "Verification did not pass and was not successful." }
+      { ...fixtureEvidence().get(PASSED)!, text: "Verification did not pass and was not successful." },
+      { ...fixtureEvidence().get(PASSED)!, text: "Zero verification tests passed." },
+      { ...fixtureEvidence().get(PASSED)!, text: "No production health check passed." }
     ];
 
     for (const [index, evidence] of cases.entries()) {
@@ -219,6 +240,138 @@ describe("artifact claim support", () => {
       provenanceSessionIds: ["session:a"],
       supports
     })).not.toContainEqual(expect.objectContaining({ code: "invalid_support_kind_evidence", path: "validationChecks[0]" }));
+  });
+
+  test("accepts grounded change and verification claims from an assistant completion receipt", () => {
+    const ref = "message:session:a:procedure-complete";
+    const text = "I installed the scheduled report job and configured the opener script. Verification passed: the report opened and no report server remains.";
+    const evidenceByRef = fixtureEvidence();
+    evidenceByRef.set(ref, {
+      kind: "message",
+      lowValue: false,
+      observedAt: "2026-07-12T12:20:00.000Z",
+      role: "assistant",
+      sessionId: "session:a",
+      text
+    });
+    const supports = validRunbookSupports().map((entry) => {
+      if (entry.supportKind === "change") {
+        return support(
+          "fixSteps[0]",
+          ref,
+          "I installed the scheduled report job and configured the opener script.",
+          "change"
+        );
+      }
+      if (entry.supportKind === "verification") {
+        return support(
+          "validationChecks[0]",
+          ref,
+          "Verification passed: the report opened and no report server remains.",
+          "verification"
+        );
+      }
+      return entry;
+    });
+
+    expect(validateArtifactQuality({
+      evidenceByRef,
+      kind: "runbook",
+      output: validRunbook(),
+      provenanceSessionIds: ["session:a"],
+      supports
+    })).not.toContainEqual(expect.objectContaining({ code: "invalid_support_kind_evidence" }));
+  });
+
+  test.each([
+    "Final production health check failed.",
+    "End-to-end verification remains untested and unresolved."
+  ])("rejects cherry-picked assistant verification before a later negative outcome: %s", (laterOutcome) => {
+    const ref = "message:session:a:verification-regressed";
+    const excerpt = "What I verified:\n- Callback regression checks passed.";
+    const evidenceByRef = fixtureEvidence();
+    evidenceByRef.set(ref, {
+      kind: "message",
+      lowValue: false,
+      observedAt: "2026-07-12T12:20:00.000Z",
+      role: "assistant",
+      sessionId: "session:a",
+      text: `${excerpt}\nFinal status:\n- ${laterOutcome}`
+    });
+    const supports = validRunbookSupports().map((entry) => entry.supportKind === "verification"
+      ? support("validationChecks[0]", ref, excerpt, "verification")
+      : entry);
+
+    expect(validateArtifactQuality({
+      evidenceByRef,
+      kind: "runbook",
+      output: validRunbook(),
+      provenanceSessionIds: ["session:a"],
+      supports
+    })).toContainEqual(expect.objectContaining({
+      code: "invalid_support_kind_evidence",
+      path: "validationChecks[0]"
+    }));
+  });
+
+  test("accepts a clean final verification section after an earlier failure narrative", () => {
+    const ref = "message:session:a:verification-recovered";
+    const excerpt = [
+      "Post-fix verification:",
+      "- Callback regression checks passed.",
+      "- The service is healthy."
+    ].join("\n");
+    const evidenceByRef = fixtureEvidence();
+    evidenceByRef.set(ref, {
+      kind: "message",
+      lowValue: false,
+      observedAt: "2026-07-12T12:20:00.000Z",
+      role: "assistant",
+      sessionId: "session:a",
+      text: `The initial production verification failed with two errors.\n${excerpt}`
+    });
+    const supports = validRunbookSupports().map((entry) => entry.supportKind === "verification"
+      ? support("validationChecks[0]", ref, excerpt, "verification")
+      : entry);
+
+    expect(validateArtifactQuality({
+      evidenceByRef,
+      kind: "runbook",
+      output: validRunbook(),
+      provenanceSessionIds: ["session:a"],
+      supports
+    })).not.toContainEqual(expect.objectContaining({
+      code: "invalid_support_kind_evidence",
+      path: "validationChecks[0]"
+    }));
+  });
+
+  test("rejects an assistant message that leaves end-to-end verification unresolved", () => {
+    const ref = "message:session:a:procedure-partial";
+    const text = "I patched the notification hint, but end-to-end verification remains untested and unresolved.";
+    const evidenceByRef = fixtureEvidence();
+    evidenceByRef.set(ref, {
+      kind: "message",
+      lowValue: false,
+      observedAt: "2026-07-12T12:20:00.000Z",
+      role: "assistant",
+      sessionId: "session:a",
+      text
+    });
+    const supports = validRunbookSupports().map((entry) => entry.supportKind === "verification"
+      ? support("validationChecks[0]", ref, text, "verification")
+      : entry);
+
+    expect(validateArtifactQuality({
+      evidenceByRef,
+      kind: "runbook",
+      output: validRunbook(),
+      provenanceSessionIds: ["session:a"],
+      supports
+    })).toContainEqual(expect.objectContaining({
+      code: "invalid_support_kind_evidence",
+      path: "validationChecks[0]"
+    }));
   });
 
   test("requires change support to be a file effect, command, or explicit assistant change statement", () => {

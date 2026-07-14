@@ -4,6 +4,12 @@ import type {
   WorkbenchClaimSupport
 } from "../../shared/workbenchAuthoring.ts";
 import type { WorkbenchValidationEvidence } from "../types.ts";
+import {
+  hasLaterNegativeVerificationOutcome,
+  hasNegativeVerificationOutcome,
+  hasPositiveVerificationOutcome,
+  hasStructuredVerificationReport
+} from "./verificationSemantics.ts";
 
 const MIN_SUPPORT_EXCERPT_LENGTH = 20;
 const PASSED_STATUSES = new Set(["completed", "passed", "success", "succeeded"]);
@@ -22,6 +28,20 @@ const PROTOCOL_PHRASES = [
   "single provenance",
   "weak multi-session join",
   "published artifact"
+] as const;
+const SELF_PROCESS_PROTOCOL_PATTERNS = [
+  {
+    label: "reviewing every item while limiting claims or assertions",
+    pattern: /\b(?:i|we)\s+(?:read|reviewed|inspected|processed)\s+(?:all|every)\s+(?:(?:canonical|available|provided|source)\s+)?(?:(?:evidence|source)\s+)?(?:items?|records?|entries?|evidence)\b[^.!?\n]{0,100}\b(?:kept|limited|restricted)\s+(?:all\s+|the\s+)?(?:claims?|assertions?)\b/i
+  },
+  {
+    label: "reading all canonical evidence through pagination",
+    pattern: /(?:^|[.!?]\s+|[-*]\s+)(?:(?:i|we)\s+)?(?:read|reviewed|inspect(?:ed)?|processed)\s+(?:all|every)\s+canonical\s+evidence(?:\s+items?)?\b[^.!?\n]{0,40}\b(?:through|using|via|with)\s+(?:cursor\s+)?pagination\b/i
+  },
+  {
+    label: "keeping claims or assertions single-session",
+    pattern: /(?:^|[.!?]\s+|[-*]\s+)(?:(?:i|we)\s+)?(?:kept|keep|limited|restrict(?:ed)?)\s+(?:all\s+|the\s+)?(?:claims?|assertions?)\s+(?:to\s+)?(?:(?:a|one)\s+)?single[- ]session\b/i
+  }
 ] as const;
 
 const REQUIRED_SUPPORT_KINDS: Record<WorkbenchAutomaticArtifactKind, readonly WorkbenchClaimSupport["supportKind"][]> = {
@@ -88,6 +108,15 @@ export function findUnsupportedProtocolLanguage(
   const findings: ArtifactQualityFinding[] = [];
   for (const field of humanFacingStrings(output)) {
     const normalizedValue = normalizeWhitespace(field.value).toLowerCase();
+    const selfProcessLeak = SELF_PROCESS_PROTOCOL_PATTERNS.find(({ pattern }) => pattern.test(normalizedValue));
+    if (selfProcessLeak) {
+      findings.push({
+        code: "unsupported_authoring_protocol_language",
+        message: `Human-facing artifact text contains unsupported authoring self-process language: ${selfProcessLeak.label}.`,
+        path: field.path
+      });
+      continue;
+    }
     for (const phrase of PROTOCOL_PHRASES) {
       if (!normalizedValue.includes(phrase)) continue;
       const directlySupported = supports.some((support) => {
@@ -281,14 +310,20 @@ function supportKindMatchesEvidence(
         !hasNegativeVerificationOutcome(evidence.text);
     }
     const checkpointLabel = evidence.label?.trim().toLowerCase() ?? "";
-    return evidence.kind === "checkpoint" &&
-      PASSED_CHECKPOINT_LABELS.has(checkpointLabel) &&
-      !hasNegativeVerificationOutcome(`${checkpointLabel} ${evidence.text}`);
+    if (evidence.kind === "checkpoint") {
+      return PASSED_CHECKPOINT_LABELS.has(checkpointLabel) &&
+        !hasNegativeVerificationOutcome(`${checkpointLabel} ${evidence.text}`);
+    }
+    return evidence.kind === "message" &&
+      evidence.role === "assistant" &&
+      (hasPositiveVerificationOutcome(support.excerpt) || hasStructuredVerificationReport(support.excerpt)) &&
+      !hasNegativeVerificationOutcome(support.excerpt) &&
+      !hasLaterNegativeVerificationOutcome(evidence.text, support.excerpt);
   }
   if (support.supportKind === "timeline") return Boolean(parseTimestamp(evidence.observedAt));
   if (support.supportKind === "change") {
     if (evidence.kind === "file_effect" || evidence.kind === "tool_call") return true;
-    return evidence.role === "assistant" && /\b(?:add(?:ed)?|chang(?:e|ed)|fix(?:ed)?|implement(?:ed)?|remov(?:e|ed)|replac(?:e|ed)|updat(?:e|ed)|wrote|created)\b/i.test(evidence.text);
+    return evidence.role === "assistant" && /\b(?:added|aligned|applied|backed\s+up|bound|broadened|built|changed|cleaned|closed|committed|configured|corrected|created|deployed|disabled|edited|enabled|fixed|forced|implemented|installed|launched|migrated|modified|moved|patched|pointed|preserved|published|pushed|recovered|recreated|removed|rendered|repaired|replaced|repointed|restarted|restored|retained|rotated|ran|saved|set|shifted|updated|used|wrote)\b/i.test(evidence.text);
   }
   return true;
 }
@@ -403,13 +438,6 @@ function isExplicitlyUnknown(value: string): boolean {
   return /^(?:(?:the )?root cause (?:is|remains) (?:unknown|undetermined|not (?:known|established|determined))(?: (?:from|based on) (?:the )?(?:available |current )?(?:canonical )?evidence)?|unknown (?:from|based on) (?:the )?(?:available |current )?(?:canonical )?evidence|(?:the )?(?:available |current )?(?:canonical )?evidence (?:does not establish|is insufficient to establish|cannot determine) (?:the )?root cause)[.!]?$/i.test(normalized);
 }
 
-function hasNegativeVerificationOutcome(value: string): boolean {
-  const withoutZeroCounts = value
-    .replace(/\b(?:0|zero)\s+(?:errors?|failures?)\b/gi, "")
-    .replace(/\b(?:errors?|failures?)\s*[:=]\s*0\b/gi, "");
-  return /\b(?:did not pass|not successful|unsuccessful|error|failed|failing|failure)\b/i.test(withoutZeroCounts) ||
-    /\b(?:[1-9]\d*\s+(?:errors?|failures?)|(?:errors?|failures?)\s*[:=]\s*[1-9]\d*)\b/i.test(withoutZeroCounts);
-}
 
 function arrayPaths(value: unknown, path: string): string[] {
   return Array.isArray(value)

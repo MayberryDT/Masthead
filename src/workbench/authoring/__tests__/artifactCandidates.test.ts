@@ -18,6 +18,7 @@ import {
   setWorkbenchArtifactCandidateStatus
 } from "../../../daemon/db/workbenchArtifactCandidateRepository.ts";
 import {
+  ARTIFACT_CANDIDATE_DETECTOR_REVISION,
   discoverArtifactCandidatePage,
   discoverArtifactCandidates,
   proposeArtifactCandidate
@@ -181,6 +182,28 @@ describe("artifact candidate discovery", () => {
     expect(discoverArtifactCandidatePage(db, { limit: 100 }).scannedSessionIds).toEqual([
       repeatedErrorPartTwo.id
     ]);
+    db.close();
+  });
+
+  test("rescans unchanged sessions after the detector revision advances", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    discoverArtifactCandidatePage(db, { limit: 100 });
+    db.prepare(
+      `UPDATE workbench_artifact_candidate_scans
+       SET detector_revision = ?`
+    ).run(ARTIFACT_CANDIDATE_DETECTOR_REVISION - 1);
+
+    const rescanned = discoverArtifactCandidatePage(db, { limit: 100 });
+
+    expect(rescanned.scannedSessionIds).toHaveLength(durableArtifactCorpus.length);
+    expect(
+      db.prepare(
+        `SELECT COUNT(*) AS count
+         FROM workbench_artifact_candidate_scans
+         WHERE detector_revision = ?`
+      ).get(ARTIFACT_CANDIDATE_DETECTOR_REVISION)
+    ).toEqual({ count: durableArtifactCorpus.length });
     db.close();
   });
 
@@ -924,6 +947,395 @@ describe("artifact candidate discovery", () => {
     db.close();
   });
 
+  test("discovers a compressed message-only recovery as all three reusable artifact kinds", async () => {
+    const db = await testDb();
+    const sessionId = "session:production-shaped:compressed-recovery";
+    seedMessageSession(db, sessionId, [
+      {
+        role: "user",
+        text: "Vault access is offline: the runtime reports a malformed token and cannot authenticate."
+      },
+      {
+        role: "assistant",
+        text: [
+          "Completed recovery.",
+          "I traced the authentication outage to a literal suffix in the writable host secret.",
+          "I rejected editing the read-only mounted copy and chose the host secret as the source of truth.",
+          "I backed up the secret, replaced only the malformed token, and recreated the service.",
+          "Verification passed: vault access was restored successfully."
+        ].join(" ")
+      }
+    ]);
+
+    const candidates = discoverArtifactCandidates(db, [sessionId]);
+
+    expect(countKinds(candidates)).toEqual({ runbook: 1, adr: 1, incident_timeline: 1 });
+    expect(candidates.every((candidate) => candidate.signalEvidenceRefs.includes(
+      "message:production-shaped:compressed-recovery:message:1"
+    ))).toBe(true);
+    db.close();
+  });
+
+  test("excludes injected skill and AGENTS process instructions from candidate evidence", async () => {
+    const db = await testDb();
+    const sessionId = "session:production-shaped:injected-process-instructions";
+    seedMessageSession(db, sessionId, [
+      {
+        role: "user",
+        text: [
+          "<skill>",
+          "The production service failed during an outage.",
+          "I identified the root cause, repaired the runtime configuration, and restarted the service.",
+          "Verification passed and the service recovered successfully.",
+          "Decision: use SQLite. Rejected alternative: hosted Postgres."
+        ].join("\n")
+      },
+      {
+        role: "user",
+        text: [
+          "# AGENTS.md instructions for /tmp/example",
+          "The deployment was broken and unavailable.",
+          "I diagnosed the failure, patched the worker, and verified that recovery succeeded."
+        ].join("\n")
+      },
+      {
+        role: "assistant",
+        text: "I inspected only the supplied process instructions; no product work was performed."
+      }
+    ]);
+
+    expect(discoverArtifactCandidates(db, [sessionId])).toEqual([]);
+    db.close();
+  });
+
+  test("orders equal epoch timestamps by numeric source record sequence", async () => {
+    const db = await testDb();
+    const sessionId = "session:production-shaped:epoch-source-order";
+    const epoch = "1970-01-01T00:00:00.000Z";
+    const sourcePath = "/tmp/epoch-source-order.jsonl";
+    seedMessageSession(db, sessionId, [
+      {
+        observedAt: epoch,
+        role: "user",
+        sourceRecordKey: `${sourcePath}:10`,
+        storageId: "epoch-source-order:z-impact",
+        text: "Vault access is offline and the runtime cannot authenticate."
+      },
+      {
+        observedAt: epoch,
+        role: "assistant",
+        sourceRecordKey: `${sourcePath}:20`,
+        storageId: "epoch-source-order:m-investigation",
+        text: "I traced the outage to a malformed token in the runtime configuration."
+      },
+      {
+        observedAt: epoch,
+        role: "assistant",
+        sourceRecordKey: `${sourcePath}:30`,
+        storageId: "epoch-source-order:a-remediation",
+        text: "I repaired the token and restarted the service. Verification passed and vault access was restored successfully."
+      }
+    ]);
+
+    const incident = discoverArtifactCandidates(db, [sessionId]).find(
+      (candidate) => candidate.kind === "incident_timeline"
+    );
+
+    expect(incident?.signalEvidenceRefs).toEqual([
+      "message:epoch-source-order:a-remediation",
+      "message:epoch-source-order:m-investigation",
+      "message:epoch-source-order:z-impact"
+    ]);
+    db.close();
+  });
+
+  test("accepts multiline structured verification after an earlier failure narrative", async () => {
+    const db = await testDb();
+    const sessionId = "session:production-shaped:multiline-verification";
+    seedMessageSession(db, sessionId, [
+      {
+        role: "user",
+        text: "Restore the failed gateway service and verify the live runtime."
+      },
+      {
+        role: "assistant",
+        text: [
+          "Done.",
+          "The gateway service failed because the runtime configuration was malformed.",
+          "I traced the root cause to a stale container environment.",
+          "What I changed",
+          "- I repaired the runtime configuration.",
+          "- I recreated and restarted the service container.",
+          "What I verified:",
+          "- The health check passed.",
+          "- The gateway service is healthy and running again."
+        ].join("\n")
+      }
+    ]);
+
+    const runbook = discoverArtifactCandidates(db, [sessionId]).find(
+      (candidate) => candidate.kind === "runbook"
+    );
+
+    expect(runbook?.signalEvidenceRefs).toEqual([
+      "message:production-shaped:multiline-verification:message:1"
+    ]);
+    db.close();
+  });
+
+  test("does not treat future rollout plans as an incident investigation", async () => {
+    const db = await testDb();
+    const sessionId = "session:production-shaped:future-rollout";
+    seedMessageSession(db, sessionId, [
+      {
+        role: "user",
+        text: "The billing rollout is broken because checkout cannot be configured."
+      },
+      {
+        role: "assistant",
+        text: "I’ll deploy each endpoint one at a time so any compile issue is isolated to a specific function."
+      },
+      {
+        role: "assistant",
+        text: "The checkout function was deployed as version 4. I’m deploying the portal endpoint next."
+      }
+    ]);
+
+    const candidates = discoverArtifactCandidates(db, [sessionId]);
+
+    expect(candidates.some((candidate) => candidate.kind === "incident_timeline")).toBe(false);
+    db.close();
+  });
+
+  test("discovers a verified repeatable operating procedure without inventing an incident", async () => {
+    const db = await testDb();
+    const sessionId = "session:production-shaped:operating-procedure";
+    seedMessageSession(db, sessionId, [
+      {
+        role: "user",
+        text: "Set up the daily report to open locally without leaving a web server running."
+      },
+      {
+        role: "assistant",
+        text: [
+          "Setup completed.",
+          "The repeatable procedure renders reports/latest.html, runs the opener script, and uses the configured default browser.",
+          "I installed the scheduled job and retained the file path as a fallback.",
+          "Verification succeeded: the report opened and no report server remains."
+        ].join(" ")
+      }
+    ]);
+
+    const candidates = discoverArtifactCandidates(db, [sessionId]);
+
+    expect(candidates.map((candidate) => candidate.kind)).toEqual(["runbook"]);
+    expect(candidates[0]!.signalEvidenceRefs).toEqual([
+      "message:production-shaped:operating-procedure:message:1"
+    ]);
+    db.close();
+  });
+
+  test("discovers an investigated and remediated incident even when recovery is not confirmed", async () => {
+    const db = await testDb();
+    const sessionId = "session:production-shaped:incomplete-incident";
+    seedMessageSession(db, sessionId, [
+      {
+        role: "user",
+        text: "The application is unreadable because the navigation is clipped off screen."
+      },
+      {
+        role: "assistant",
+        text: [
+          "I reproduced the unreadable layout and traced it to a fixed-height sidebar override.",
+          "I broadened the CSS override, then diagnosed a cached stylesheet on the normal launch path.",
+          "I applied cache busting before the user stopped the test; final recovery remains unconfirmed."
+        ].join(" ")
+      }
+    ]);
+
+    const incident = discoverArtifactCandidates(db, [sessionId]).find(
+      (candidate) => candidate.kind === "incident_timeline"
+    );
+
+    expect(incident?.signalEvidenceRefs).toEqual([
+      "message:production-shaped:incomplete-incident:message:0",
+      "message:production-shaped:incomplete-incident:message:1"
+    ]);
+    db.close();
+  });
+
+  test("discovers a bounded multi-message incident and observed could-not impact", async () => {
+    const db = await testDb();
+    const sessionId = "session:production-shaped:multi-message-incident";
+    seedMessageSession(db, sessionId, [
+      { role: "user", text: "The operator could not log in because the service was offline." },
+      { role: "assistant", text: "I investigated the outage and identified an exhausted worker pool." },
+      { role: "assistant", text: "I recycled the stuck workers and restarted the service." }
+    ]);
+
+    const incident = discoverArtifactCandidates(db, [sessionId]).find(
+      (candidate) => candidate.kind === "incident_timeline"
+    );
+
+    expect(incident?.signalEvidenceRefs).toEqual([
+      "message:production-shaped:multi-message-incident:message:0",
+      "message:production-shaped:multi-message-incident:message:1",
+      "message:production-shaped:multi-message-incident:message:2"
+    ]);
+    db.close();
+  });
+
+  test("does not join unrelated failure and repair stages by proximity alone", async () => {
+    const db = await testDb();
+    const sessionId = "session:production-shaped:unrelated-incident-stages";
+    seedMessageSession(db, sessionId, [
+      {
+        role: "user",
+        text: "Billing checkout is broken and card payments are unavailable.",
+      },
+      {
+        role: "assistant",
+        text: "I diagnosed the clipped navigation as a stale stylesheet in the dashboard sidebar.",
+      },
+      {
+        role: "assistant",
+        text: "I patched the dashboard CSS and verified that the sidebar recovered successfully.",
+      },
+    ]);
+
+    const candidates = discoverArtifactCandidates(db, [sessionId]);
+
+    expect(
+      candidates.some((candidate) => candidate.kind === "incident_timeline"),
+    ).toBe(false);
+    db.close();
+  });
+
+  test("does not nominate advice, future work, or syntax-only partial fixes", async () => {
+    const db = await testDb();
+    const cases = [
+      {
+        id: "session:production-shaped:advice",
+        messages: [
+          {
+            role: "user" as const,
+            text: "Wi-Fi captive portals and suspend are unreliable.",
+          },
+          {
+            role: "assistant" as const,
+            text: "You could try NetworkManager dispatcher scripts or may choose a systemd hook instead. No option was selected or applied.",
+          },
+        ],
+      },
+      {
+        id: "session:production-shaped:future-plan",
+        messages: [
+          {
+            role: "user" as const,
+            text: "Write a plan for recovering the pricing funnel.",
+          },
+          {
+            role: "assistant" as const,
+            text: "The proposed plan would compare deployment options, then we could implement and verify the selected direction later.",
+          },
+        ],
+      },
+      {
+        id: "session:production-shaped:partial-fix",
+        messages: [
+          {
+            role: "user" as const,
+            text: "Notifications remain stuck after completion.",
+          },
+          {
+            role: "assistant" as const,
+            text: "I patched the notification hint and the syntax check passed, but end-to-end behavior is still untested and unresolved.",
+          },
+        ],
+      },
+    ];
+    for (const entry of cases) seedMessageSession(db, entry.id, entry.messages);
+
+    expect(
+      discoverArtifactCandidates(
+        db,
+        cases.map((entry) => entry.id),
+      ),
+    ).toEqual([]);
+    db.close();
+  });
+
+  test("never treats tool output that quotes decision prose as ADR evidence", async () => {
+    const db = await testDb();
+    const sessionId = "session:production-shaped:tool-prose";
+    seedMessageSession(db, sessionId, [
+      { role: "user", text: "Search the repository for old decision documents." },
+      { role: "assistant", text: "I only inspected existing files; no product decision was made." }
+    ]);
+    db.prepare(
+      `INSERT INTO tool_calls (
+        tool_call_id, session_id, tool_name, started_at, source_ref_json
+      ) VALUES ('production-shaped:tool-prose:call', ?, 'read_file', '2026-07-01T13:05:00.000Z', '{}')`
+    ).run(sessionId);
+    db.prepare(
+      `INSERT INTO tool_results (
+        tool_result_id, tool_call_id, session_id, status, exit_code, output_redacted, completed_at, source_ref_json
+      ) VALUES ('production-shaped:tool-prose:result', 'production-shaped:tool-prose:call', ?, 'succeeded', 0,
+        'Decision: use hosted storage. Rejected alternative: SQLite.',
+        '2026-07-01T13:05:01.000Z', '{}')`
+    ).run(sessionId);
+
+    expect(discoverArtifactCandidates(db, [sessionId])).toEqual([]);
+    db.close();
+  });
+
+  test("does not turn routine implementation, replacement, or system instructions into artifacts", async () => {
+    const db = await testDb();
+    const routineId = "session:production-shaped:routine-feature";
+    seedMessageSession(db, routineId, [
+      { role: "user", text: "Add the small settings label." },
+      {
+        role: "assistant",
+        text: "Completed. I implemented the label, updated the config file, and added a unit test. The build passed."
+      }
+    ]);
+    const replacementId = "session:production-shaped:routine-replacement";
+    seedMessageSession(db, replacementId, [
+      { role: "user", text: "Swap the icon." },
+      { role: "assistant", text: "I replaced the old icon with the new icon and confirmed it over HTTPS." }
+    ]);
+    const systemId = "session:production-shaped:system-instruction";
+    seedMessageSession(db, systemId, [
+      { role: "user", text: "Inspect the instructions only." },
+      { role: "assistant", text: "No implementation or decision was made." }
+    ]);
+    db.prepare(
+      `INSERT INTO messages (
+        message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence
+      ) VALUES ('production-shaped:system-instruction:system', ?, 'system',
+        'The default is local storage rather than hosted storage.', 'production-shaped:system-instruction:system:hash',
+        '2026-07-01T13:05:00.000Z', '{}', 'authoritative')`
+    ).run(systemId);
+
+    expect(discoverArtifactCandidates(db, [routineId, replacementId, systemId])).toEqual([]);
+    db.close();
+  });
+
+  test("rejects explicitly negative verification counts", async () => {
+    const db = await testDb();
+    const sessionId = "session:production-shaped:negative-verification";
+    seedMessageSession(db, sessionId, [
+      { role: "user", text: "Repair the deployment." },
+      {
+        role: "assistant",
+        text: "Recovery procedure completed. I configured the service and restarted the worker. Zero tests passed and no health check passed."
+      }
+    ]);
+
+    expect(discoverArtifactCandidates(db, [sessionId])).toEqual([]);
+    db.close();
+  });
+
   test("rejects incoherent runbook chronology, nonexistent sessions, and unrelated provenance padding", async () => {
     const db = await testDb();
     seedDurableArtifactCorpus(db);
@@ -1603,4 +2015,51 @@ function seedRunbookSignals(db: MastheadDatabase, sessionId: string): void {
     ) VALUES ('decision-runbook:verified', ?, 'verification_passed',
       'Configuration verification test passed.', '2026-07-01T12:04:00.000Z', '{}')`
   ).run(sessionId);
+}
+
+function seedMessageSession(
+  db: MastheadDatabase,
+  sessionId: string,
+  messages: Array<{
+    observedAt?: string;
+    role: "assistant" | "user";
+    sourceRecordKey?: string;
+    storageId?: string;
+    text: string;
+  }>
+): void {
+  const fixedAt = "2026-07-01T13:00:00.000Z";
+  db.prepare(
+    "INSERT OR IGNORE INTO hosts (host_id, hostname, first_seen_at, last_seen_at) VALUES ('host:production-shaped', 'production-shaped', ?, ?)"
+  ).run(fixedAt, fixedAt);
+  db.prepare(
+    "INSERT OR IGNORE INTO runtimes (runtime_id, runtime_kind, runtime_version, first_seen_at, last_seen_at) VALUES ('runtime:production-shaped', 'codex', 'fixture', ?, ?)"
+  ).run(fixedAt, fixedAt);
+  db.prepare(
+    `INSERT INTO sessions (
+      session_id, host_id, runtime_id, source_session_id, project_label, title, lifecycle,
+      started_at, last_activity_at, ended_at, source_confidence, created_at, updated_at
+    ) VALUES (?, 'host:production-shaped', 'runtime:production-shaped', ?, 'Production-shaped', ?, 'ended',
+      ?, ?, ?, 'authoritative', ?, ?)`
+  ).run(sessionId, sessionId, sessionId, fixedAt, fixedAt, fixedAt, fixedAt, fixedAt);
+  db.prepare(
+    "INSERT INTO workbench_session_state (session_id, publication_status) VALUES (?, 'publish_path')"
+  ).run(sessionId);
+  const insertMessage = db.prepare(
+    `INSERT INTO messages (
+      message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'authoritative')`
+  );
+  messages.forEach((message, index) => {
+    const storageId = message.storageId ?? `${sessionId.replace(/^session:/, "")}:message:${index}`;
+    insertMessage.run(
+      storageId,
+      sessionId,
+      message.role,
+      message.text,
+      `${storageId}:hash`,
+      message.observedAt ?? `2026-07-01T13:${String(index).padStart(2, "0")}:00.000Z`,
+      message.sourceRecordKey ? JSON.stringify([{ sourceRecordKey: message.sourceRecordKey }]) : "{}"
+    );
+  });
 }

@@ -89,7 +89,7 @@ describe("artifact authoring product contract", () => {
 
     expect(design).toContain("Author candidate");
     expect(design).not.toContain("Copy Agent Prompt");
-    expect(readme).toMatch(/schema 23\b/);
+    expect(readme).toMatch(/schema 24\b/);
     expect(adr).toContain("`masthead.workbench.authoring/v1`");
     expect(adr).toContain("`workbench-authoring-v2`");
     expect(adr).toMatch(/`path`,\s*`evidenceRef`,\s*`excerpt`,\s*and `supportKind`/);

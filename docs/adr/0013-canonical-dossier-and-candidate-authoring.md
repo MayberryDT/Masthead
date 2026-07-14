@@ -39,6 +39,9 @@ Optional artifact authoring follows that V2 bundle contract:
 
 1. The daemon discovers positive-evidence candidates for `runbook`, `adr`, and
    `incident_timeline` from canonical session evidence.
+   A runbook may represent either a verified recovery or a verified repeatable operating
+   procedure; both require concrete performed steps and successful verification, while advice and
+   future plans remain ineligible.
 2. Candidates may be grouped only by a strong, evidence-backed join key. One V2 authoring run owns
    exactly one candidate group and no more than 12 provenance sessions.
 3. The bundle contains only the candidate's optional artifact output. It cannot contain a dossier

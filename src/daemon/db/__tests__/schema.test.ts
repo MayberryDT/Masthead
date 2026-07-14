@@ -4,10 +4,16 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
+import { ARTIFACT_CANDIDATE_DETECTOR_REVISION } from "../../../workbench/authoring/artifactCandidates.ts";
+import { migrateTestDatabaseThrough } from "./schemaTestHelpers.ts";
 import { seedSession } from "./sessionTestHelpers.ts";
 import { applySessionArtifact, publishSessionArtifact } from "../sessionArtifactRepository.ts";
 import { CURRENT_SCHEMA_VERSION, migrateDatabase } from "../schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../sqlite.ts";
+import {
+  hasWorkbenchArtifactCandidateScan,
+  recordWorkbenchArtifactCandidateScan
+} from "../workbenchArtifactCandidateRepository.ts";
 import { ensureWorkbenchSessionState } from "../workbenchPipelineRepository.ts";
 
 const tempDirs: string[] = [];
@@ -27,7 +33,7 @@ describe("daemon database schema", () => {
     migrateDatabase(db);
     migrateDatabase(db);
 
-    expect(CURRENT_SCHEMA_VERSION).toBe(23);
+    expect(CURRENT_SCHEMA_VERSION).toBe(24);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'virtual') ORDER BY name").all() as Array<{ name: string }>;
     expect(tables.map((row) => row.name)).toEqual(
@@ -112,8 +118,14 @@ describe("daemon database schema", () => {
       { version: 20, name: "020_normalize_workbench_optional_statuses" },
       { version: 21, name: "021_artifact_body_search" },
       { version: 22, name: "022_workbench_authoring_v2" },
-      { version: 23, name: "023_workbench_artifact_candidates" }
+      { version: 23, name: "023_workbench_artifact_candidates" },
+      { version: 24, name: "024_artifact_candidate_detector_revision" }
     ]);
+    expect(
+      (db.prepare("PRAGMA table_info(workbench_artifact_candidate_scans)").all() as Array<{ name: string }>).map(
+        (column) => column.name
+      )
+    ).toContain("detector_revision");
     const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' ORDER BY name").all() as Array<{ name: string }>;
     expect(indexes.map((row) => row.name)).toEqual(
       expect.arrayContaining([
@@ -333,6 +345,120 @@ describe("daemon database schema", () => {
     ]) {
       expect(db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get()).toEqual({ count: 0 });
     }
+    db.close();
+  });
+
+  test("migration 024 backfills populated scans and requires the current detector revision", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-db-v24-detector-revision-"));
+    tempDirs.push(tempDir);
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+    migrateTestDatabaseThrough(db, 23);
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:detector-revision",
+      title: "Detector revision migration"
+    });
+    db.prepare(
+      `INSERT INTO workbench_artifact_candidate_scans (
+        session_id, evidence_revision, source_revision, scanned_at
+      ) VALUES (?, ?, ?, ?)`
+    ).run(
+      "session:detector-revision",
+      "sha256:legacy-detector",
+      0,
+      "2026-07-13T12:00:00.000Z"
+    );
+
+    expect(
+      (db.prepare("PRAGMA table_info(workbench_artifact_candidate_scans)").all() as Array<{ name: string }>).map(
+        (column) => column.name
+      )
+    ).not.toContain("detector_revision");
+
+    migrateDatabase(db);
+
+    expect(CURRENT_SCHEMA_VERSION).toBe(24);
+    expect(db.prepare("SELECT version, name FROM schema_migrations ORDER BY version DESC LIMIT 1").get()).toEqual({
+      name: "024_artifact_candidate_detector_revision",
+      version: 24
+    });
+    expect(
+      (db.prepare("PRAGMA table_info(workbench_artifact_candidate_scans)").all() as Array<{
+        dflt_value: string | null;
+        name: string;
+        notnull: number;
+        type: string;
+      }>).find((column) => column.name === "detector_revision")
+    ).toMatchObject({
+      dflt_value: "1",
+      name: "detector_revision",
+      notnull: 1,
+      type: "INTEGER"
+    });
+    expect(
+      db.prepare(
+        `SELECT evidence_revision AS evidenceRevision,
+                source_revision AS sourceRevision,
+                detector_revision AS detectorRevision
+         FROM workbench_artifact_candidate_scans
+         WHERE session_id = ?`
+      ).get("session:detector-revision")
+    ).toEqual({
+      detectorRevision: 1,
+      evidenceRevision: "sha256:legacy-detector",
+      sourceRevision: 0
+    });
+
+    expect(ARTIFACT_CANDIDATE_DETECTOR_REVISION).toBeGreaterThan(1);
+    expect(
+      hasWorkbenchArtifactCandidateScan(db, {
+        detectorRevision: 1,
+        sessionId: "session:detector-revision",
+        sourceRevision: 0
+      })
+    ).toBe(true);
+    expect(
+      hasWorkbenchArtifactCandidateScan(db, {
+        detectorRevision: ARTIFACT_CANDIDATE_DETECTOR_REVISION,
+        sessionId: "session:detector-revision",
+        sourceRevision: 0
+      })
+    ).toBe(false);
+
+    recordWorkbenchArtifactCandidateScan(db, {
+      detectorRevision: ARTIFACT_CANDIDATE_DETECTOR_REVISION,
+      evidenceRevision: "sha256:current-detector",
+      sessionId: "session:detector-revision",
+      sourceRevision: 0
+    });
+
+    expect(
+      hasWorkbenchArtifactCandidateScan(db, {
+        detectorRevision: ARTIFACT_CANDIDATE_DETECTOR_REVISION,
+        sessionId: "session:detector-revision",
+        sourceRevision: 0
+      })
+    ).toBe(true);
+    expect(
+      hasWorkbenchArtifactCandidateScan(db, {
+        detectorRevision: 1,
+        sessionId: "session:detector-revision",
+        sourceRevision: 0
+      })
+    ).toBe(false);
+    expect(
+      db.prepare(
+        `SELECT evidence_revision AS evidenceRevision,
+                detector_revision AS detectorRevision
+         FROM workbench_artifact_candidate_scans
+         WHERE session_id = ? AND source_revision = ?`
+      ).get("session:detector-revision", 0)
+    ).toEqual({
+      detectorRevision: ARTIFACT_CANDIDATE_DETECTOR_REVISION,
+      evidenceRevision: "sha256:current-detector"
+    });
     db.close();
   });
 

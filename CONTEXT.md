@@ -454,13 +454,17 @@ recipes and eval packs are out of the default set until a later phase.
 _Avoid_: Attempt every kind per session, mandatory N/A resolution, agent-authored session package
 
 **Runbook**:
-A multi-session-capable artifact body that captures a reproducible fix recipe. V1 body shape is the
-merged schema: Masthead envelope (title, confidence, evidenceRefs, missingEvidence,
+A multi-session-capable artifact body that captures a verified repeatable operating procedure or
+recovery recipe. A failure is not required when canonical evidence records concrete performed
+steps and a successful outcome. For an operating procedure, `problemSignature` states the
+operational need and affected scope, and `rootCause` remains explicitly unknown when causality is
+not applicable or not established. V1 body shape is the merged schema: Masthead envelope (title,
+confidence, evidenceRefs, missingEvidence,
 provenanceSessionIds, joinRationale when multi-session, optional signatureKey), research-shaped
 core (problemSignature, preconditions, reproSteps, deadEnds, fixSteps, commands, changedFiles,
 validationChecks, environmentRequirements), plus rootCause, preventionNotes, and risksOrGaps.
 It replaces and evolves the former bug-fix trace kind.
-_Avoid_: Bug-fix trace (product name), raw debug log, session dossier, fixSummary-only blob
+_Avoid_: Unexecuted advice, future plan, bug-fix trace (product name), raw debug log, session dossier, fixSummary-only blob
 
 **ADR artifact**:
 A multi-session-capable artifact body for a material architecture or design decision: context,

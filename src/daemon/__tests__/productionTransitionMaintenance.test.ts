@@ -72,7 +72,7 @@ describe("offline production transition maintenance", () => {
       oldBundle,
       state: "ready_to_activate"
     });
-    expect(receipt).toMatchObject({ sourceSchemaVersion: 21, targetSchemaVersion: 23 });
+    expect(receipt).toMatchObject({ sourceSchemaVersion: 21, targetSchemaVersion: 24 });
     expect(receipt.snapshot.sha256).toMatch(/^[a-f0-9]{64}$/u);
     expect(JSON.parse(await readFile(productionTransitionJournalPath(databasePath), "utf8"))).toEqual(receipt);
     const { readdir } = await import("node:fs/promises");

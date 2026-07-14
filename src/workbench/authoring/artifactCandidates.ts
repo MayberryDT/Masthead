@@ -22,8 +22,15 @@ import { withImmediateTransaction, type MastheadDatabase } from "../../daemon/db
 import type { WorkbenchAutomaticKind } from "../../daemon/db/workbenchPipelineRepository.ts";
 import type { SessionTranscriptItem } from "../../shared/sessionTranscript.ts";
 import { authoringEvidenceRevision } from "./evidenceCatalog.ts";
+import {
+  hasNegativeVerificationOutcome,
+  hasPositiveVerificationOutcome,
+  hasStructuredVerificationReport
+} from "./verificationSemantics.ts";
 
 export type WorkbenchArtifactCandidate = StoredWorkbenchArtifactCandidate;
+
+export const ARTIFACT_CANDIDATE_DETECTOR_REVISION = 3;
 
 export type ArtifactCandidateProposal = {
   kind: WorkbenchAutomaticKind;
@@ -34,16 +41,33 @@ export type ArtifactCandidateProposal = {
   signatureKey?: string;
 };
 
-type SignalRef = { index: number; observedAt: string; ref: string; sessionId: string };
+type SignalRef = {
+  index: number;
+  itemKind: SessionTranscriptItem["kind"];
+  messageIndex?: number;
+  observedAt: string;
+  ref: string;
+  role: SessionTranscriptItem["role"];
+  sessionId: string;
+};
+
+type IncidentStage = "impact" | "investigation" | "remediation" | "recovery";
+
+type IncidentStageRef = SignalRef & {
+  anchors: string[];
+  stage: IncidentStage;
+  textOffset: number;
+};
 
 type SessionSignals = {
   sessionId: string;
   failureRefs: SignalRef[];
   changeRefs: SignalRef[];
   verificationRefs: SignalRef[];
+  completedProcedureRefs: SignalRef[];
   explicitDecisionRefs: SignalRef[];
   alternativeRefs: SignalRef[];
-  timelineEventRefs: SignalRef[];
+  incidentStageRefs: IncidentStageRef[];
   signatures: string[];
   signatureRefs: Array<SignalRef & { signatureKey: string }>;
   evidenceRefs: Set<string>;
@@ -118,13 +142,14 @@ export function discoverNextArtifactCandidatePage(
        LEFT JOIN workbench_artifact_candidate_scans scans
          ON scans.session_id = sessions.session_id
         AND scans.source_revision = COALESCE(revisions.source_revision, 0)
+        AND scans.detector_revision = ?
        WHERE sessions.deleted_at IS NULL
          AND workbench_session_state.publication_status = 'publish_path'
          AND scans.session_id IS NULL
        ORDER BY sessions.session_id
        LIMIT ?`
     )
-    .all(limit) as Array<{ sessionId: string }>;
+    .all(ARTIFACT_CANDIDATE_DETECTOR_REVISION, limit) as Array<{ sessionId: string }>;
   const reconciled = reconcileCandidateScanRows(db, rows);
   return {
     candidates: reconciled.candidates,
@@ -139,7 +164,11 @@ function reconcileCandidateScanRows(
   return withImmediateTransaction(db, () => {
     const changed = rows.flatMap((row) => {
       const sourceRevision = getWorkbenchArtifactCandidateSourceRevision(db, row.sessionId);
-      return hasWorkbenchArtifactCandidateScan(db, { sessionId: row.sessionId, sourceRevision })
+      return hasWorkbenchArtifactCandidateScan(db, {
+        detectorRevision: ARTIFACT_CANDIDATE_DETECTOR_REVISION,
+        sessionId: row.sessionId,
+        sourceRevision
+      })
         ? []
         : [{ sessionId: row.sessionId, sourceRevision }];
     });
@@ -152,6 +181,7 @@ function reconcileCandidateScanRows(
       if (acknowledged.has(entry.sessionId)) {
         recordWorkbenchArtifactCandidateScan(db, {
           ...entry,
+          detectorRevision: ARTIFACT_CANDIDATE_DETECTOR_REVISION,
           evidenceRevision: authoringEvidenceRevision(db, [entry.sessionId])
         });
       }
@@ -310,7 +340,14 @@ function proposalAllowedEvidenceRefs(
 ): Set<string> {
   const allowed = new Set<string>();
   if (kind === "runbook") {
-    for (const entry of runbookChain(signals, selected) ?? []) allowed.add(entry.ref);
+    for (const entry of signals.flatMap((signal) => [
+      ...signal.failureRefs,
+      ...signal.changeRefs,
+      ...signal.verificationRefs,
+      ...signal.completedProcedureRefs
+    ])) {
+      if (selected.has(entry.ref)) allowed.add(entry.ref);
+    }
   } else if (kind === "adr") {
     for (const entry of signals.flatMap((signal) => [
       ...signal.explicitDecisionRefs,
@@ -319,10 +356,7 @@ function proposalAllowedEvidenceRefs(
       if (selected.has(entry.ref)) allowed.add(entry.ref);
     }
   } else {
-    for (const entry of signals.flatMap((signal) => [
-      ...signal.failureRefs,
-      ...signal.timelineEventRefs
-    ])) {
+    for (const entry of signals.flatMap((signal) => signal.incidentStageRefs)) {
       if (selected.has(entry.ref)) allowed.add(entry.ref);
     }
   }
@@ -632,8 +666,8 @@ function signatureMembersFromSeeds(
 function seedsForSignals(db: MastheadDatabase, signals: SessionSignals): CandidateSeed[] {
   const seeds: CandidateSeed[] = [];
   const signatureKey = signals.signatures.length === 1 ? signals.signatures[0] : undefined;
-  const chain = runbookChain([signals]);
-  if (chain) {
+  const runbookRefs = runbookEvidence([signals]);
+  if (runbookRefs) {
     const signatureEvidenceRefs = signatureKey
       ? signals.signatureRefs
           .filter((entry) => entry.signatureKey === signatureKey)
@@ -643,33 +677,31 @@ function seedsForSignals(db: MastheadDatabase, signals: SessionSignals): Candida
       kind: "runbook",
       seedSessionId: signals.sessionId,
       provenanceSessionIds: [signals.sessionId],
-      signalEvidenceRefs: normalizedStrings([...chain.map(refValue), ...signatureEvidenceRefs]),
+      signalEvidenceRefs: normalizedStrings([...runbookRefs.map(refValue), ...signatureEvidenceRefs]),
       signalSummary: signalSummary("runbook", 1),
       evidenceRevision: authoringEvidenceRevision(db, [signals.sessionId]),
       ...(signatureKey ? { signatureKey } : {})
     });
   }
-  if (adrReady(signals)) {
+  const adrRefs = adrEvidence([signals]);
+  if (adrRefs) {
     seeds.push({
       kind: "adr",
       seedSessionId: signals.sessionId,
       provenanceSessionIds: [signals.sessionId],
-      signalEvidenceRefs: normalizedStrings([
-        ...signals.explicitDecisionRefs.map(refValue),
-        ...signals.alternativeRefs.map(refValue)
-      ]),
+      signalEvidenceRefs: normalizedStrings(adrRefs.map(refValue)),
       signalSummary: signalSummary("adr", 1),
       evidenceRevision: authoringEvidenceRevision(db, [signals.sessionId])
     });
   }
-  if (incidentReady(signals)) {
+  const incidentRefs = incidentChain([signals]);
+  if (incidentRefs) {
     seeds.push({
       kind: "incident_timeline",
       seedSessionId: signals.sessionId,
       provenanceSessionIds: [signals.sessionId],
       signalEvidenceRefs: normalizedStrings([
-        ...signals.failureRefs.map(refValue),
-        ...signals.timelineEventRefs.map(refValue),
+        ...incidentRefs.map(refValue),
         ...(signatureKey
           ? signals.signatureRefs
               .filter((entry) => entry.signatureKey === signatureKey)
@@ -690,33 +722,71 @@ function extractSessionSignals(db: MastheadDatabase, sessionId: string): Session
     failureRefs: [],
     changeRefs: [],
     verificationRefs: [],
+    completedProcedureRefs: [],
     explicitDecisionRefs: [],
     alternativeRefs: [],
-    timelineEventRefs: [],
+    incidentStageRefs: [],
     signatures: [],
     signatureRefs: [],
     evidenceRefs: new Set<string>()
   };
   let index = 0;
-  for (const item of iterateSessionTranscriptItems(db, { order: "asc", sessionId })) {
+  let messageIndex = 0;
+  const transcript = [...iterateSessionTranscriptItems(db, { order: "asc", sessionId })]
+    .map((item, originalIndex) => ({ item, originalIndex }))
+    .sort(compareTranscriptOrder);
+  for (const { item } of transcript) {
     result.evidenceRefs.add(item.itemId);
     const normalized = normalizedItemText(item);
-    const ref = { index, observedAt: item.observedAt, ref: item.itemId, sessionId };
-    if (isFailure(item, normalized)) result.failureRefs.push(ref);
-    if (isChange(item, normalized)) result.changeRefs.push(ref);
-    if (isPassedVerification(item, normalized)) result.verificationRefs.push(ref);
-    if (isExplicitDecision(item, normalized)) result.explicitDecisionRefs.push(ref);
-    if (isRejectedAlternative(normalized)) result.alternativeRefs.push(ref);
-    if (isIncidentTimelineEvent(item, normalized)) result.timelineEventRefs.push(ref);
-    const signature = strongSignature(item.text);
-    if (signature) {
-      result.signatures.push(signature);
-      result.signatureRefs.push({ ...ref, signatureKey: signature });
+    const processInstruction = isInjectedProcessInstructionMessage(item);
+    const narrativeMessage =
+      !processInstruction &&
+      item.kind === "message" &&
+      (item.role === "user" || item.role === "assistant");
+    const ref = {
+      index,
+      itemKind: item.kind,
+      observedAt: item.observedAt,
+      ref: item.itemId,
+      role: item.role,
+      sessionId,
+      ...(narrativeMessage ? { messageIndex } : {})
+    };
+    if (!processInstruction) {
+      if (isFailure(item, normalized)) result.failureRefs.push(ref);
+      if (isChange(item, normalized)) result.changeRefs.push(ref);
+      if (isPassedVerification(item, normalized)) result.verificationRefs.push(ref);
+      if (isCompletedProcedure(item, normalized)) result.completedProcedureRefs.push(ref);
+      if (isAdrEvidenceItem(item) && isExplicitDecision(item, normalized)) {
+        result.explicitDecisionRefs.push(ref);
+      }
+      if (isAdrEvidenceItem(item) && isRejectedAlternative(normalized)) {
+        result.alternativeRefs.push(ref);
+      }
+      result.incidentStageRefs.push(...incidentStageOccurrences(item, normalized, ref));
+      const signature = strongSignature(item.text);
+      if (signature) {
+        result.signatures.push(signature);
+        result.signatureRefs.push({ ...ref, signatureKey: signature });
+      }
     }
     index += 1;
+    if (narrativeMessage) messageIndex += 1;
   }
   result.signatures = normalizedStrings(result.signatures);
   return result;
+}
+
+function isInjectedProcessInstructionMessage(item: SessionTranscriptItem): boolean {
+  if (item.kind !== "message") return false;
+  const text = item.text.trimStart().toLowerCase();
+  return (
+    text.startsWith("<skill>") ||
+    text.startsWith("<environment_context>") ||
+    text.startsWith("<turn_aborted>") ||
+    text.startsWith("<subagent_notification>") ||
+    text.startsWith("# agents.md instructions")
+  );
 }
 
 function runbookChain(signals: SessionSignals[], selected?: Set<string>): [SignalRef, SignalRef, SignalRef] | undefined {
@@ -732,6 +802,17 @@ function runbookChain(signals: SessionSignals[], selected?: Set<string>): [Signa
     }
   }
   return undefined;
+}
+
+function runbookEvidence(signals: SessionSignals[], selected?: Set<string>): SignalRef[] | undefined {
+  const eligible = (ref: SignalRef): boolean => !selected || selected.has(ref.ref);
+  const completedProcedures = signals
+    .flatMap((signal) => signal.completedProcedureRefs)
+    .filter(eligible)
+    .sort(compareSignalRefs);
+  const chain = runbookChain(signals, selected);
+  const completion = completedProcedures.at(-1);
+  return completion ? [completion] : chain;
 }
 
 function signalComesBefore(left: SignalRef, right: SignalRef): boolean {
@@ -753,12 +834,100 @@ function compareSignalRefs(left: SignalRef, right: SignalRef): number {
   );
 }
 
-function adrReady(signals: SessionSignals): boolean {
-  return signals.explicitDecisionRefs.length > 0 && signals.alternativeRefs.length > 0;
+function compareTranscriptOrder(
+  left: { item: SessionTranscriptItem; originalIndex: number },
+  right: { item: SessionTranscriptItem; originalIndex: number }
+): number {
+  const leftTime = Date.parse(left.item.observedAt);
+  const rightTime = Date.parse(right.item.observedAt);
+  const timeOrder =
+    Number.isFinite(leftTime) && Number.isFinite(rightTime)
+      ? leftTime - rightTime
+      : left.item.observedAt.localeCompare(right.item.observedAt);
+  if (timeOrder !== 0) return timeOrder;
+  const leftSource = transcriptSourceSequence(left.item);
+  const rightSource = transcriptSourceSequence(right.item);
+  if (leftSource && rightSource && leftSource.scope === rightSource.scope) {
+    const sourceOrder = leftSource.ordinal - rightSource.ordinal;
+    if (sourceOrder !== 0) return sourceOrder;
+  }
+  return left.originalIndex - right.originalIndex;
 }
 
-function incidentReady(signals: SessionSignals): boolean {
-  return signals.failureRefs.length > 0 && signals.timelineEventRefs.length >= 3;
+function transcriptSourceSequence(
+  item: SessionTranscriptItem
+): { ordinal: number; scope: string } | undefined {
+  const refs = Array.isArray(item.sourceRef) ? item.sourceRef : [item.sourceRef];
+  for (const value of refs) {
+    if (!value || typeof value !== "object") continue;
+    const sourceRecordKey = (value as { sourceRecordKey?: unknown }).sourceRecordKey;
+    if (typeof sourceRecordKey !== "string") continue;
+    const match = /^(.*):(\d+)(?::[^:]*)?$/.exec(sourceRecordKey);
+    if (!match) continue;
+    const ordinal = Number.parseInt(match[2]!, 10);
+    if (Number.isSafeInteger(ordinal)) return { ordinal, scope: match[1]! };
+  }
+  return undefined;
+}
+
+function adrEvidence(signals: SessionSignals[], selected?: Set<string>): SignalRef[] | undefined {
+  const eligible = (ref: SignalRef): boolean => !selected || selected.has(ref.ref);
+  const decisions = signals.flatMap((signal) => signal.explicitDecisionRefs).filter(eligible);
+  const alternatives = signals.flatMap((signal) => signal.alternativeRefs).filter(eligible);
+  const sameRef = decisions.find((decision) => alternatives.some((entry) => entry.ref === decision.ref));
+  if (sameRef) return [sameRef];
+  const pairs = decisions.flatMap((decision) =>
+    alternatives
+      .filter((alternative) => areDecisionSignalsLinked(decision, alternative))
+      .map((alternative) => ({
+        decision,
+        alternative,
+        distance: Math.abs(decision.index - alternative.index)
+      }))
+  ).sort(
+    (left, right) =>
+      left.distance - right.distance ||
+      compareSignalRefs(left.decision, right.decision) ||
+      compareSignalRefs(left.alternative, right.alternative)
+  );
+  const pair = pairs[0];
+  return pair ? [pair.decision, pair.alternative].sort(compareSignalRefs) : undefined;
+}
+
+function incidentChain(signals: SessionSignals[], selected?: Set<string>): IncidentStageRef[] | undefined {
+  const eligible = (ref: IncidentStageRef): boolean => !selected || selected.has(ref.ref);
+  const stages = signals.flatMap((signal) => signal.incidentStageRefs).filter(eligible).sort(compareIncidentStages);
+  const impacts = stages.filter((entry) => entry.stage === "impact").reverse();
+  for (const requireRecovery of [true, false]) {
+    for (const impact of impacts) {
+      const investigations = stages.filter(
+        (entry) =>
+          entry.stage === "investigation" &&
+          incidentStageComesBefore(impact, entry) &&
+          areIncidentStagesLinked(impact, entry)
+      );
+      for (const investigation of investigations) {
+        const remediation = stages.find(
+          (entry) =>
+            entry.stage === "remediation" &&
+            incidentStageComesBefore(investigation, entry) &&
+            areIncidentStagesLinked(investigation, entry)
+        );
+        if (!remediation) continue;
+        const recovery = stages.find(
+          (entry) =>
+            entry.stage === "recovery" &&
+            incidentStageComesBefore(remediation, entry) &&
+            areIncidentStagesLinked(remediation, entry)
+        );
+        if (requireRecovery && !recovery) continue;
+        if (!requireRecovery && recovery) continue;
+        if (!recovery && impact.role !== "user" && !isStructuredIncidentStage(impact)) continue;
+        return uniqueSignalRefs([impact, investigation, remediation, ...(recovery ? [recovery] : [])]);
+      }
+    }
+  }
+  return undefined;
 }
 
 function proposalHasKindSignals(
@@ -766,22 +935,9 @@ function proposalHasKindSignals(
   signals: SessionSignals[],
   selected: Set<string>
 ): boolean {
-  const selectedCount = (refs: SignalRef[]): number => refs.filter((entry) => selected.has(entry.ref)).length;
-  const countAcrossSessions = (select: (session: SessionSignals) => SignalRef[]): number =>
-    signals.reduce((count, session) => count + selectedCount(select(session)), 0);
-  if (kind === "runbook") {
-    return Boolean(runbookChain(signals, selected));
-  }
-  if (kind === "adr") {
-    return (
-      countAcrossSessions((session) => session.explicitDecisionRefs) > 0 &&
-      countAcrossSessions((session) => session.alternativeRefs) > 0
-    );
-  }
-  return (
-    countAcrossSessions((session) => session.failureRefs) > 0 &&
-    countAcrossSessions((session) => session.timelineEventRefs) >= 3
-  );
+  if (kind === "runbook") return Boolean(runbookEvidence(signals, selected));
+  if (kind === "adr") return Boolean(adrEvidence(signals, selected));
+  return Boolean(incidentChain(signals, selected));
 }
 
 function sessionContributesKindSignal(
@@ -794,14 +950,15 @@ function sessionContributesKindSignal(
     return (
       selectedCount(signals.failureRefs) +
         selectedCount(signals.changeRefs) +
-        selectedCount(signals.verificationRefs) >
+        selectedCount(signals.verificationRefs) +
+        selectedCount(signals.completedProcedureRefs) >
       0
     );
   }
   if (kind === "adr") {
     return selectedCount(signals.explicitDecisionRefs) + selectedCount(signals.alternativeRefs) > 0;
   }
-  return selectedCount(signals.failureRefs) + selectedCount(signals.timelineEventRefs) > 0;
+  return selectedCount(signals.incidentStageRefs) > 0;
 }
 
 function isFailure(item: SessionTranscriptItem, normalized: string): boolean {
@@ -834,7 +991,9 @@ function isFailure(item: SessionTranscriptItem, normalized: string): boolean {
 }
 
 function isChange(item: SessionTranscriptItem, normalized: string): boolean {
-  if (item.kind === "file_effect") return true;
+  if (item.kind === "file_effect") {
+    return !/(?:^|\/)plans?(?:\/|$)|(?:^|[\/_-])roadmap(?:[\/_-]|$)/i.test(item.filePath ?? item.text);
+  }
   const changeTerm = "(?:change(?:d)?|fix(?:ed)?|patch(?:ed)?|repair(?:ed)?|update(?:d)?|migrat(?:ed)?|mitigat(?:ed)?)";
   if (
     new RegExp(`\\b(?:no|not|never|without)\\b[^.\\n]{0,40}\\b${changeTerm}\\b`).test(normalized) ||
@@ -850,78 +1009,651 @@ function isChange(item: SessionTranscriptItem, normalized: string): boolean {
 function isPassedVerification(item: SessionTranscriptItem, normalized: string): boolean {
   const toolName = (item.toolName ?? "").toLowerCase();
   const verificationText = `${toolName} ${normalized}`.replace(/[_-]+/g, " ");
-  const verificationSemantics =
-    /\b(?:verification|verify|verified|tests?|checks?|typecheck|lint|build|smoke|health|probe)\b/.test(
-      verificationText
-    );
-  const passedSemantics = /\b(?:pass|passed|succeed|succeeded|success|successful|ok|verified)\b/.test(
+  const verificationSemantics = /\b(?:verification|verify|verified|tests?|checks?|typecheck|lint|build|smoke|health|probe)\b/.test(
     verificationText
   );
-  const negativeOutcome =
-    /\b(?:failed|failure|failing|errors?|exceptions?|false|not|no|0\s+tests?\s+passed|zero\s+tests?\s+passed)\b/.test(
-      verificationText
-    );
-  if (negativeOutcome) return false;
+  if (hasNegativeVerificationOutcome(verificationText)) return false;
   if (
     item.kind === "tool_result" &&
     item.status === "succeeded" &&
     (item.exitCode ?? 0) === 0 &&
     !/(?:^|[._-])(?:read|cat|open|list|search|find|view)(?:[._-]|$)/.test(toolName) &&
     verificationSemantics &&
-    passedSemantics
+    hasPositiveVerificationOutcome(verificationText)
   ) {
     return true;
   }
-  if (item.kind === "checkpoint" && verificationSemantics && passedSemantics) return true;
+  if (item.kind === "checkpoint" && verificationSemantics && hasPositiveVerificationOutcome(verificationText)) {
+    return true;
+  }
   return false;
 }
 
-function isExplicitDecision(item: SessionTranscriptItem, normalized: string): boolean {
-  if (item.kind === "checkpoint" && /decision_(?:recorded|approved)/.test(item.label.toLowerCase())) return true;
+function isCompletedProcedure(item: SessionTranscriptItem, normalized: string): boolean {
+  if (item.kind !== "message" || item.role !== "assistant") return false;
   if (
-    /\b(?:if|could|might|may|would|should)\b[^.\n]{0,80}\b(?:decision|decided|adopted)\b/.test(
+    /\b(?:still|remains?)\s+(?:untested|unverified|unresolved|broken|failing|pending)\b/.test(normalized) ||
+    /\b(?:end[- ]to[- ]end|final|production)\b[^.\n]{0,50}\b(?:untested|unverified|unconfirmed|pending|not\s+(?:tested|verified|confirmed))\b/.test(
       normalized
     ) ||
-    /\b(?:no|not|never)\b[^.\n]{0,40}\b(?:decision|decided|adopted|approved|recorded)\b/.test(
-      normalized
-    ) ||
-    /\b(?:proposed|hypothetical|possible)\s+decision\b/.test(normalized) ||
-    /\b(?:rejected|declined)\b[^.\n]{0,30}\bdecision\b|\bdecision\b[^.\n]{0,30}\b(?:rejected|declined)\b/.test(
+    /\b(?:aborted|did not complete|not applied|stopped before completion|no option was (?:selected|applied))\b/.test(
       normalized
     )
   ) {
     return false;
   }
+  const semanticText = normalized
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/`[^`]+`/g, " ")
+    .replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/g, " ")
+    .replace(/(?:^|\s)\/(?:[\w.-]+\/)+[\w.-]+/g, " ");
+  const actionMatches = normalized.match(
+    /\b(?:applied|added|aligned|backed\s+up|bound|broadened|built|changed|cleaned|closed|committed|configured|corrected|created|deployed|disabled|edited|enabled|fixed|forced|implemented|installed|launched|migrated|modified|moved|patched|pointed|preserved|published|pushed|recovered|recreated|removed|rendered|repaired|replaced|repointed|restarted|restored|retained|rotated|ran|saved|set|shifted|updated|used|wrote)\b/g
+  ) ?? [];
+  const anchorMatches = normalized.match(
+    /\b(?:browser|check|command|config(?:uration)?|container|cron|database|deployment|directory|file|health|host|job|launcher|path|port|process|report|script|service|setting|snapshot|test|url|worker|workflow)\b|`[^`]+`|(?:^|\s)[\w.-]+\/[\w./-]+/g
+  ) ?? [];
+  const hasExplicitProcedureShape =
+    /\b(?:operations?|operating|repeatable|procedure|runbook|setup|workflow|deployment|recovery|reusable\s+(?:flow|process|steps))\b/.test(
+      semanticText
+    );
+  const hasRecoveryShape =
+    /\b(?:failed|failures?|errors?|outage|offline|unavailable|broken|unreadable|blocked|stalled|stuck|crashed?|regression|permission\s+denied|pairing\s+required|malformed)\b/.test(
+      semanticText
+    ) &&
+    /\b(?:traced|diagnosed|root\s+cause|isolated|investigated|reproduced|identified|determined|what\s+(?:actually\s+)?(?:caused|was\s+wrong)|failures?\s+(?:were|was)\s+stale)\b/.test(
+      semanticText
+    );
+  const hasVerification =
+    hasStructuredVerificationReport(normalized) ||
+    evidenceClauses(normalized).some((clause) => hasPositiveVerificationOutcome(clause.text));
+  const planOnly =
+    /\b(?:plan|roadmap|proposal|handoff)\b/.test(semanticText) &&
+    (/\bno\s+(?:app|product|runtime|source)(?:\s+source)?\s+files?\s+(?:were\s+)?changed\b/.test(semanticText) ||
+      /\bnext\s+(?:best\s+)?(?:move|step)\b[^.\n]{0,100}\b(?:start|implement|execute|touch)\b/.test(
+        semanticText
+      ));
+  if (planOnly) return false;
+  const executed =
+    /\b(?:done|finished|implemented|got it fixed|i\s+(?:changed|moved)|live now)\b/.test(semanticText);
+  const concreteChange =
+    /\b(?:what i changed|what i did|what changed|changed files|files changed)\b/.test(semanticText) ||
+    actionMatches.length >= 2;
+  const reusableOperations =
+    /\b(?:fast path next time|cron|scheduled?|daily|fallback path|canonical\s+(?:path|source)|restart command|container|gateway|uid|gid|permission|global\s+(?:codex\s+)?defaults?|approval_policy|sandbox_mode|verifier|status[- ]color|blocked predicate)\b/.test(
+      semanticText
+    ) ||
+    (/\b(?:production|live now)\b/.test(semanticText) &&
+      /\b(?:deploy(?:ed|ment)?|custom domains?|worker)\b/.test(semanticText));
+  const fastPath =
+    /\bfast path next time\b/.test(semanticText) && /(?:^|\n)\s*(?:[-*]\s*)?(?:ssh|docker|npm|npx|pnpm|yarn|node|curl|op|openclaw)\b/m.test(
+      normalized
+    );
+  const completedOperationalReceipt =
+    executed &&
+    (concreteChange || (fastPath && actionMatches.length >= 1)) &&
+    anchorMatches.length >= 2 &&
+    hasVerification &&
+    reusableOperations;
   return (
-    /\bdecision\s*:/.test(normalized) ||
-    /\bdecided\s+to\b/.test(normalized) ||
-    /\bdecision\s+(?:was\s+)?(?:approved|recorded)\b/.test(normalized)
+    completedOperationalReceipt ||
+    (actionMatches.length >= 2 &&
+      anchorMatches.length >= 2 &&
+      (hasExplicitProcedureShape || hasRecoveryShape) &&
+      hasVerification)
+  );
+}
+
+function isExplicitDecision(item: SessionTranscriptItem, normalized: string): boolean {
+  if (item.kind === "checkpoint" && /decision_(?:recorded|approved)/.test(item.label.toLowerCase())) {
+    return hasMaterialDecisionContext(normalized);
+  }
+  if (item.kind === "message" && item.role === "assistant") {
+    const compact = normalized.replace(/\s+/g, " ");
+    const completed = /\b(?:done|completed|finished|what i changed|behavior now)\b/.test(compact);
+    const transitionAnchor =
+      "(?:architecture|defaults?|approvals?[^.]{0,24}mode|policy|source[- ]of[- ]truth|workflow|model)";
+    const completedTransition =
+      new RegExp(
+        `\\b(?:set|updated|changed|reworked|moved|switched|migrated|replaced)\\b[^.]{0,140}\\b${transitionAnchor}\\b|\\b${transitionAnchor}\\b[^.]{0,100}\\b(?:set|updated|changed|reworked|moved|switched|migrated|replaced)\\b`
+      ).test(compact);
+    const decisionHeading = /\b(?:canonical|final|selected|settled)\s+[^.!?;]{0,40}\bdecision\b/.test(
+      compact
+    );
+    if (completed && hasMaterialDecisionContext(compact) && (completedTransition || decisionHeading)) {
+      return true;
+    }
+  }
+  return hasMaterialDecisionContext(normalized) && evidenceClauses(normalized).some((clause) => {
+    if (
+      /\bif\b[^.\n]{0,100}\b(?:decision|decided|choice|chose|selected|adopted|approved|confirmed|settled)\b/.test(
+        clause.text
+      ) ||
+      /\b(?:no|not|never)\b[^.\n]{0,45}\b(?:decision|decided|choice|chose|selected|adopted|approved|confirmed|settled)\b/.test(
+        clause.text
+      ) ||
+      /\b(?:rejected|declined)\b[^.\n]{0,30}\b(?:decision|choice)\b|\b(?:decision|choice)\b[^.\n]{0,30}\b(?:rejected|declined)\b/.test(
+        clause.text
+      )
+    ) {
+      return false;
+    }
+    const committed =
+      /\b(?:decided|chose|selected|adopted|committed|settled(?:\s+on)?)\b/.test(clause.text) ||
+      /\b(?:approved|confirmed)\b[^.\n]{0,60}\b(?:decision|choice|direction|contract|policy|approach|architecture|design|default|selection)\b/.test(
+        clause.text
+      ) ||
+      /\b(?:decision|choice|direction|contract|policy|approach|architecture|design|default|source\s+of\s+truth)\s*(?::|\bis\b|\bwas\b|\bwill\s+be\b)/.test(
+        clause.text
+      ) ||
+      /\b(?:final|durable|settled)\s+(?:decision|choice|direction|contract|policy|approach)\b/.test(
+        clause.text
+      ) ||
+      /\b(?:establishes?|resolves?|settles?)\b[^.\n]{0,100}\b(?:contract|direction|decision|choice|policy|architecture|design|workflow|approach)\b/.test(
+        clause.text
+      );
+    if (!committed) return false;
+    return !/\b(?:if|could|might|may|would|should|proposed|hypothetical|possible)\b/.test(clause.text) ||
+      /\b(?:decided|chose|selected|adopted|committed|settled)\b/.test(clause.text);
+  });
+}
+
+function hasMaterialDecisionContext(normalized: string): boolean {
+  return /\b(?:adr|api|application|approval|architecture|artifact|automation|browser|cli|configuration|contract|database|deploy(?:ment)?|design|engine|filesystem|framework|infrastructure|integration|interface|jwt|logbook|migration|mode|permission|platform|policy|pricing|product|protocol|queue|rollback|runtime|schema|security|server|service|session\s+store|source\s+of\s+truth|sqlite|storage|strategy|system|technology|ui|uid|gid|worker|workflow)\b/.test(
+    normalized
   );
 }
 
 function isRejectedAlternative(normalized: string): boolean {
-  if (
-    /\b(?:if|could|might|may|would|should)\b[^.\n]{0,100}\b(?:alternatives?|considered|rejected|instead\s+of)\b/.test(
-      normalized
-    ) ||
-    /\b(?:no|not|never)\b[^.\n]{0,60}\b(?:alternatives?|considered|rejected)\b/.test(normalized) ||
-    /\balternatives?\b[^.\n]{0,40}\b(?:not|never)\s+(?:considered|rejected)\b/.test(normalized)
-  ) {
-    return false;
-  }
-  return (
-    /\brejected\s+alternatives?\b/.test(normalized) ||
-    /\balternatives?\b.*\brejected\b/.test(normalized) ||
-    /\bconsidered\b.*\balternatives?\b/.test(normalized) ||
-    /\bconsidered\b.*\binstead\s+of\b/.test(normalized)
+  return evidenceClauses(normalized).some((clause) => {
+    if (
+      /\b(?:no|not|never)\b[^.\n]{0,60}\b(?:alternatives?|options?|considered|compared|evaluated|rejected)\b/.test(
+        clause.text
+      ) ||
+      /\b(?:if|could|might|may|would|should|proposed|hypothetical|possible)\b/.test(clause.text) &&
+        !/\b(?:rejected|declined|ruled\s+out|chose|selected|adopted)\b/.test(clause.text)
+    ) {
+      return false;
+    }
+    return (
+      /\b(?:rejected|declined|ruled\s+out|avoided)\b/.test(clause.text) ||
+      /\b(?:instead\s+of|rather\s+than|versus|vs\.?)\b/.test(clause.text) ||
+      /\b(?:chose|selected|preferred)\b[^.\n]{1,100}\bover\b/.test(clause.text) ||
+      /\b(?:compared|evaluated|considered)\b[^.\n]{0,80}\b(?:alternatives?|options?|approaches?|directions?)\b/.test(
+        clause.text
+      ) ||
+      /\b(?:replaced?|moved?|switched?|migrated?)\b[^.\n]{1,100}\b(?:with|to|away\s+from)\b/.test(
+        clause.text
+      ) ||
+      /\b(?:changed|moved|switched|migrated|replaced)\b[^.\n]{1,100}\bfrom\b[^.\n]{1,100}\bto\b/.test(
+        clause.text
+      ) ||
+      /\b(?:fix|repair|use|read|write|configure|change)\w*\b[^.\n]{0,160}\bnot\s+by\b/.test(
+        clause.text
+      ) ||
+      /\bdistinguish(?:ed|es)?\b[^.\n]{0,80}\bfrom\b/.test(clause.text)
+    );
+  });
+}
+
+function isAdrEvidenceItem(item: SessionTranscriptItem): boolean {
+  return item.kind === "message" && (item.role === "user" || item.role === "assistant") || (
+    item.kind === "checkpoint" && /decision_(?:recorded|approved)/.test(item.label.toLowerCase())
   );
 }
 
-function isIncidentTimelineEvent(item: SessionTranscriptItem, normalized: string): boolean {
-  if (item.kind !== "runtime_signal" && item.kind !== "checkpoint") return false;
-  return /\bincident[_ -](?:detected|triage|investigated|mitigated|recovered|restored|resolved)\b/.test(
-    `${item.label.toLowerCase()} ${normalized}`
+function incidentStageOccurrences(
+  item: SessionTranscriptItem,
+  normalized: string,
+  ref: SignalRef
+): IncidentStageRef[] {
+  const anchors = incidentAnchors(item.text);
+  if (
+    item.kind === "tool_result" &&
+    (item.status === "failed" || (item.exitCode !== undefined && item.exitCode !== 0))
+  ) {
+    return [{ ...ref, anchors, stage: "impact", textOffset: 0 }];
+  }
+  if (item.kind === "runtime_signal" || item.kind === "checkpoint") {
+    const label = `${item.label.toLowerCase()} ${normalized}`;
+    const stage = /\bincident[_ -]detected\b/.test(label)
+      ? "impact"
+      : /\bincident[_ -](?:triage|investigated)\b/.test(label)
+        ? "investigation"
+        : /\bincident[_ -]mitigated\b/.test(label)
+          ? "remediation"
+          : /\bincident[_ -](?:recovered|restored|resolved)\b/.test(label)
+            ? "recovery"
+            : item.kind === "runtime_signal" && /^(?:critical|error|fatal)$/.test((item.status ?? "").toLowerCase())
+              ? "impact"
+            : undefined;
+    return stage ? [{ ...ref, anchors, stage, textOffset: 0 }] : [];
+  }
+  if (item.kind !== "message" || (item.role !== "user" && item.role !== "assistant")) return [];
+  if (/\b(?:implementation plan|goal prompt|optimized plan|plan written|replacing the plan|recovery roadmap|visual repair roadmap)\b/.test(normalized)) {
+    return [];
+  }
+  const unresolvedMessage = /\b(?:what is not live yet|still serving|not logged in|need (?:one )?authorization|blocked piece)\b/.test(
+    normalized
   );
+  const occurrences = evidenceClauses(normalized).flatMap((clause) => {
+    if (isHypotheticalOrAdvisoryClause(clause.text)) return [];
+    const occurrences: IncidentStageRef[] = [];
+    addIncidentStage(
+      occurrences,
+      ref,
+      anchors,
+      clause,
+      "impact",
+      /\b(?:failed|failure|failing|error|exception|outage|offline|unavailable|broken|unreadable|blocked|stalled|stuck|crashed?|data\s+loss|permission\s+denied|pairing\s+required|blank|incorrect|could\s+not|cannot|unable\s+to)\b/
+    );
+    addIncidentStage(
+      occurrences,
+      ref,
+      anchors,
+      clause,
+      "investigation",
+      /\b(?:traced|diagnosed|diagnosis|root[-\s]+cause|isolated|investigated|reproduced|identified|determined|narrowed|attributed|confirmed\s+(?:the\s+)?cause|found\s+that|showed\s+that|was\s+not\s+the\s+(?:correct\s+)?target|(?:wrong|incorrect)\s+(?:target|binding|route|source|path)|(?:helper|component|path)\s+is\s+(?:the\s+)?(?:unstable\s+(?:piece|path)|cause|culprit))\b/
+    );
+    addIncidentStage(
+      occurrences,
+      ref,
+      anchors,
+      clause,
+      "remediation",
+      /\b(?:applied|broadened|changed|configured|corrected|deployed|disabled|enabled|fixed|implemented|installed|migrated|moved|patched|recreated|recycled|remapped|removed|repaired|replaced|repointed|restarted|shifted|updated)\b/
+    );
+    addIncidentStage(
+      occurrences,
+      ref,
+      anchors,
+      clause,
+      "recovery",
+      /\b(?:verified|passed|succeeded|successful|restored|recovered|resolved|returned\s+to\s+baseline|working\s+again|healthy|green|available\s+again|opened\s+successfully|delivered\s+successfully)\b/
+    );
+    return occurrences;
+  });
+  return unresolvedMessage ? occurrences.filter((entry) => entry.stage !== "recovery") : occurrences;
+}
+
+function evidenceClauses(normalized: string): Array<{ offset: number; text: string }> {
+  return [...normalized.matchAll(/[^.!?;\n]+(?:[.!?;]+|\n+|$)/g)]
+    .map((match) => ({ offset: match.index, text: match[0].trim() }))
+    .filter((clause) => clause.text.length > 0);
+}
+
+function isHypotheticalOrAdvisoryClause(clause: string): boolean {
+  const withoutObservedInability = clause.replace(/\bcould\s+not\b/g, "");
+  if (
+    /\b(?:if|could|might|may|would|should|recommend(?:ed|ation)?|suggest|proposal|proposed|plan(?:ned)?\s+to|going\s+to|(?:i|we|you|it|they)\s*(?:['’]ll|will|won['’]t)|will(?:\s+not)?)\b/.test(
+      withoutObservedInability
+    )
+  ) {
+    return true;
+  }
+  return (
+    /\b(?:no|not|never|without)\b[^.\n]{0,35}\b(?:failure|error|outage|crash|blocked|stalled|stuck|unavailable|broken|unreadable)\b/.test(
+      clause
+    ) ||
+    /\b(?:remains?|still)\s+(?:unconfirmed|unverified|untested)\b/.test(clause)
+    || /\bcannot\s+(?:blur|drift|regress|creep|diverge|be\s+confused)\b/.test(clause)
+  );
+}
+
+function addIncidentStage(
+  occurrences: IncidentStageRef[],
+  ref: SignalRef,
+  anchors: string[],
+  clause: { offset: number; text: string },
+  stage: IncidentStage,
+  pattern: RegExp
+): void {
+  const match = clause.text.match(pattern);
+  if (!match || match.index === undefined) return;
+  if (
+    ref.role === "user" &&
+    (stage === "remediation" || stage === "recovery") &&
+    /^(?:[-*]\s*|\d+[.)]\s*)?(?:task\s*:\s*)?(?:add|apply|back\s+up|change|configure|create|deploy|enable|fix|inspect|install|migrate|move|patch|recreate|remove|repair|replace|restart|restore|run|set|update|verify)\b/.test(
+      clause.text
+    )
+  ) {
+    return;
+  }
+  if (
+    stage === "recovery" &&
+    /\b(?:not|never|unconfirmed|unverified|untested|failed|failing|coming_up|rather\s+than\s+healthy)\b/.test(
+      clause.text
+    )
+  ) {
+    return;
+  }
+  occurrences.push({ ...ref, anchors, stage, textOffset: clause.offset + match.index });
+}
+
+function incidentStageComesBefore(left: IncidentStageRef, right: IncidentStageRef): boolean {
+  if (left.sessionId === right.sessionId && left.index === right.index) {
+    return left.textOffset < right.textOffset || (
+      left.textOffset === right.textOffset && incidentStageOrder(left.stage) < incidentStageOrder(right.stage)
+    );
+  }
+  return signalComesBefore(left, right);
+}
+
+function compareIncidentStages(left: IncidentStageRef, right: IncidentStageRef): number {
+  return (
+    compareSignalRefs(left, right) ||
+    left.textOffset - right.textOffset ||
+    incidentStageOrder(left.stage) - incidentStageOrder(right.stage)
+  );
+}
+
+function incidentStageOrder(stage: IncidentStage): number {
+  if (stage === "impact") return 0;
+  if (stage === "investigation") return 1;
+  if (stage === "remediation") return 2;
+  return 3;
+}
+
+function isStructuredIncidentStage(entry: IncidentStageRef): boolean {
+  return entry.itemKind === "checkpoint" || entry.itemKind === "runtime_signal" || entry.itemKind === "tool_result";
+}
+
+function areIncidentStagesLinked(left: IncidentStageRef, right: IncidentStageRef): boolean {
+  if (
+    left.ref === right.ref ||
+    (
+      left.itemKind === "message" &&
+      right.itemKind === "message" &&
+      left.messageIndex !== undefined &&
+      left.messageIndex === right.messageIndex
+    )
+  ) {
+    return true;
+  }
+  if (left.sessionId !== right.sessionId) return false;
+  const exactStructuredEpisode = areExactStructuredIncidentEpisode(left, right);
+  if (!exactStructuredEpisode && !hasSharedIncidentAnchor(left, right)) return false;
+  if (
+    left.messageIndex !== undefined &&
+    right.messageIndex !== undefined &&
+    right.messageIndex >= left.messageIndex &&
+    right.messageIndex - left.messageIndex <= 32
+  ) {
+    const leftTime = Date.parse(left.observedAt);
+    const rightTime = Date.parse(right.observedAt);
+    return (
+      !Number.isFinite(leftTime) ||
+      !Number.isFinite(rightTime) ||
+      rightTime - leftTime <= 30 * 60 * 1_000
+    );
+  }
+  if (
+    left.stage === "impact" &&
+    left.role === "user" &&
+    left.messageIndex !== undefined &&
+    right.messageIndex !== undefined &&
+    right.messageIndex >= left.messageIndex &&
+    right.messageIndex - left.messageIndex <= 100
+  ) {
+    const leftTime = Date.parse(left.observedAt);
+    const rightTime = Date.parse(right.observedAt);
+    return (
+      Number.isFinite(leftTime) &&
+      Number.isFinite(rightTime) &&
+      rightTime - leftTime >= 0 &&
+      rightTime - leftTime <= 2 * 60 * 60 * 1_000
+    );
+  }
+  if (isStructuredIncidentStage(left) && isStructuredIncidentStage(right)) {
+    return exactStructuredEpisode && right.index >= left.index && right.index - left.index <= 40;
+  }
+  return (
+    (isStructuredIncidentStage(left) || isStructuredIncidentStage(right)) &&
+    right.index >= left.index &&
+    right.index - left.index <= 20
+  );
+}
+
+const INCIDENT_ANCHOR_STOP_WORDS = new Set([
+  "about",
+  "actual",
+  "after",
+  "again",
+  "all",
+  "already",
+  "also",
+  "and",
+  "another",
+  "any",
+  "are",
+  "around",
+  "back",
+  "because",
+  "been",
+  "before",
+  "being",
+  "both",
+  "but",
+  "can",
+  "cannot",
+  "changed",
+  "checking",
+  "completed",
+  "confirmed",
+  "could",
+  "current",
+  "did",
+  "does",
+  "done",
+  "each",
+  "earlier",
+  "error",
+  "even",
+  "every",
+  "failed",
+  "failure",
+  "final",
+  "first",
+  "fixed",
+  "for",
+  "found",
+  "from",
+  "had",
+  "has",
+  "have",
+  "healthy",
+  "here",
+  "how",
+  "identified",
+  "implemented",
+  "into",
+  "investigated",
+  "issue",
+  "its",
+  "just",
+  "keep",
+  "later",
+  "left",
+  "live",
+  "missing",
+  "more",
+  "most",
+  "new",
+  "next",
+  "not",
+  "now",
+  "only",
+  "other",
+  "our",
+  "passed",
+  "patched",
+  "plan",
+  "previous",
+  "recovered",
+  "repaired",
+  "replaced",
+  "resolved",
+  "restored",
+  "right",
+  "running",
+  "same",
+  "second",
+  "separate",
+  "should",
+  "still",
+  "stuck",
+  "succeeded",
+  "successful",
+  "successfully",
+  "task",
+  "test",
+  "than",
+  "that",
+  "the",
+  "their",
+  "them",
+  "then",
+  "there",
+  "these",
+  "they",
+  "this",
+  "those",
+  "through",
+  "too",
+  "true",
+  "unavailable",
+  "updated",
+  "verified",
+  "very",
+  "was",
+  "were",
+  "what",
+  "when",
+  "where",
+  "which",
+  "while",
+  "who",
+  "will",
+  "with",
+  "without",
+  "work",
+  "working",
+  "would",
+  "you",
+  "your",
+]);
+
+const INCIDENT_ANCHOR_FAMILIES: Array<[string, RegExp]> = [
+  ["availability", /\b(?:offline|outage|unavailable|availability)\b/],
+  [
+    "authentication",
+    /\b(?:auth|authenticate\w*|credentials?|log(?:ged|ging)?\s+in|login|oauth|tokens?|vault)\b/,
+  ],
+  ["display", /\b(?:blank|clipped|overflow\w*|unreadable)\b/],
+  [
+    "runtime",
+    /\b(?:containers?|daemons?|gateways?|operators?|pools?|process(?:es)?|runtimes?|services?|workers?)\b/,
+  ],
+  [
+    "ui",
+    /\b(?:applications?|css|interfaces?|layouts?|modals?|navigation|pages?|screens?|sidebars?|stylesheets?|ui|views?)\b/,
+  ],
+];
+
+function incidentAnchors(text: string): string[] {
+  const normalized = text.toLowerCase();
+  const anchors = new Set<string>();
+  const signature = strongSignature(normalized);
+  if (signature) anchors.add(`signature:${signature}`);
+  for (const match of normalized.matchAll(
+    /\b[a-z0-9]+(?:[._:/][a-z0-9_-]+)+\b/g,
+  )) {
+    anchors.add(`literal:${match[0]}`);
+  }
+  for (const match of normalized.matchAll(/\b[a-z][a-z0-9]{2,}\b/g)) {
+    const token = normalizeIncidentAnchorToken(match[0]);
+    if (!INCIDENT_ANCHOR_STOP_WORDS.has(token)) anchors.add(`term:${token}`);
+  }
+  for (const [family, pattern] of INCIDENT_ANCHOR_FAMILIES) {
+    if (pattern.test(normalized)) anchors.add(`family:${family}`);
+  }
+  return [...anchors].sort();
+}
+
+function normalizeIncidentAnchorToken(token: string): string {
+  if (token.length > 4 && token.endsWith("ies"))
+    return `${token.slice(0, -3)}y`;
+  if (
+    token.length > 4 &&
+    token.endsWith("s") &&
+    !token.endsWith("ss") &&
+    !token.endsWith("us")
+  ) {
+    return token.slice(0, -1);
+  }
+  return token;
+}
+
+function hasSharedIncidentAnchor(
+  left: IncidentStageRef,
+  right: IncidentStageRef,
+): boolean {
+  const leftAnchors = new Set(left.anchors);
+  let sharedFamilyCount = 0;
+  for (const anchor of right.anchors) {
+    if (!leftAnchors.has(anchor)) continue;
+    if (!anchor.startsWith("family:")) return true;
+    sharedFamilyCount += 1;
+  }
+  return sharedFamilyCount >= 2;
+}
+
+function areExactStructuredIncidentEpisode(
+  left: IncidentStageRef,
+  right: IncidentStageRef,
+): boolean {
+  if (!isStructuredIncidentStage(left) || !isStructuredIncidentStage(right))
+    return false;
+  const leftEpisode = structuredIncidentEpisodeKey(left.ref);
+  return (
+    leftEpisode !== undefined &&
+    leftEpisode === structuredIncidentEpisodeKey(right.ref)
+  );
+}
+
+function structuredIncidentEpisodeKey(ref: string): string | undefined {
+  const parts = ref.split(":");
+  if (
+    parts.length < 3 ||
+    !/^(?:detected|investigated|mitigated|recovered|resolved|restored|triage)$/.test(
+      parts.at(-1)!,
+    )
+  ) {
+    return undefined;
+  }
+  return parts.slice(1, -1).join(":") || undefined;
+}
+
+function areDecisionSignalsLinked(left: SignalRef, right: SignalRef): boolean {
+  if (left.ref === right.ref) return true;
+  if (left.sessionId !== right.sessionId) return false;
+  if (
+    left.messageIndex !== undefined &&
+    right.messageIndex !== undefined &&
+    Math.abs(left.messageIndex - right.messageIndex) <= 4
+  ) {
+    return true;
+  }
+  return Math.abs(left.index - right.index) <= 12;
+}
+
+function uniqueSignalRefs(entries: IncidentStageRef[]): IncidentStageRef[] {
+  const refs = new Set<string>();
+  return entries.filter((entry) => {
+    if (refs.has(entry.ref)) return false;
+    refs.add(entry.ref);
+    return true;
+  });
 }
 
 function strongSignature(text: string): string | undefined {
@@ -1030,9 +1762,9 @@ function candidateId(
 
 function signalSummary(kind: WorkbenchAutomaticKind, sessionCount: number): string {
   const provenance = sessionCount === 1 ? "one session" : `${sessionCount} strongly matched sessions`;
-  if (kind === "runbook") return `Failure, corrective change, and later passed verification found in ${provenance}.`;
-  if (kind === "adr") return `An explicit decision and rejected alternative were found in ${provenance}.`;
-  return `A failure and at least three explicit incident timeline events were found in ${provenance}.`;
+  if (kind === "runbook") return `A verified repeatable procedure or recovery recipe was found in ${provenance}.`;
+  if (kind === "adr") return `A committed decision and material alternative were found in ${provenance}.`;
+  return `An ordered impact, investigation, and remediation history was found in ${provenance}.`;
 }
 
 function normalizedItemText(item: SessionTranscriptItem): string {

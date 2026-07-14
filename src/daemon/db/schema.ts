@@ -120,6 +120,11 @@ const migrations = [
     version: 23,
     name: "023_workbench_artifact_candidates",
     path: resolve(currentDir, "migrations/023_workbench_artifact_candidates.sql")
+  },
+  {
+    version: 24,
+    name: "024_artifact_candidate_detector_revision",
+    path: resolve(currentDir, "migrations/024_artifact_candidate_detector_revision.sql")
   }
 ];
 

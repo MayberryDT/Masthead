@@ -365,16 +365,16 @@ export function dismissWorkbenchArtifactCandidate(
 
 export function hasWorkbenchArtifactCandidateScan(
   db: MastheadDatabase,
-  input: { sessionId: string; sourceRevision: number }
+  input: { detectorRevision: number; sessionId: string; sourceRevision: number }
 ): boolean {
   return Boolean(
     db
       .prepare(
         `SELECT 1
          FROM workbench_artifact_candidate_scans
-         WHERE session_id = ? AND source_revision = ?`
+         WHERE session_id = ? AND source_revision = ? AND detector_revision = ?`
       )
-      .get(input.sessionId, input.sourceRevision)
+      .get(input.sessionId, input.sourceRevision, input.detectorRevision)
   );
 }
 
@@ -394,13 +394,23 @@ export function getWorkbenchArtifactCandidateSourceRevision(
 
 export function recordWorkbenchArtifactCandidateScan(
   db: MastheadDatabase,
-  input: { evidenceRevision: string; sessionId: string; sourceRevision: number }
+  input: { detectorRevision: number; evidenceRevision: string; sessionId: string; sourceRevision: number }
 ): void {
   db.prepare(
-    `INSERT OR IGNORE INTO workbench_artifact_candidate_scans (
-      session_id, evidence_revision, source_revision, scanned_at
-    ) VALUES (?, ?, ?, ?)`
-  ).run(input.sessionId, input.evidenceRevision, input.sourceRevision, new Date().toISOString());
+    `INSERT INTO workbench_artifact_candidate_scans (
+      session_id, evidence_revision, source_revision, detector_revision, scanned_at
+    ) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(session_id, source_revision) DO UPDATE SET
+      evidence_revision = excluded.evidence_revision,
+      detector_revision = excluded.detector_revision,
+      scanned_at = excluded.scanned_at`
+  ).run(
+    input.sessionId,
+    input.evidenceRevision,
+    input.sourceRevision,
+    input.detectorRevision,
+    new Date().toISOString()
+  );
 }
 
 export function listWorkbenchArtifactSignatureMembersForSessions(
