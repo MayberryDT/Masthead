@@ -178,14 +178,66 @@ describe("offline production transition maintenance", () => {
       active.close();
       await writeFile(productionTransitionJournalPath(databasePath), `${JSON.stringify({ ...receipt, state })}\n`);
 
-      await expect(restoreProductionTransition({ databasePath, newBundle, nonce, oldBundle }))
+      const fullIntegrityChecks: string[] = [];
+      await expect(restoreProductionTransition({ databasePath, newBundle, nonce, oldBundle }, {
+        onFullIntegrityCheck: (path) => fullIntegrityChecks.push(path)
+      }))
         .resolves.toMatchObject({ state: "restored" });
+      expect(fullIntegrityChecks).toEqual(state === "snapshot_ready" ? [receipt.snapshot.path] : []);
       const restored = new DatabaseSync(databasePath, { readOnly: true });
       expect(restored.prepare("SELECT setting_json FROM app_settings WHERE setting_key = ?").get("transition_marker"))
         .toEqual({ setting_json: JSON.stringify({ value: "before" }) });
       restored.close();
     }
   );
+
+  test("resumes a restoring receipt without repeating full snapshot integrity while preserving receipt and restore verification", async () => {
+    const { databasePath, newBundle, oldBundle, root } = await fixture();
+    const nonce = "12121212-1212-4212-8212-121212121212";
+    const receipt = await prepareProductionTransition({ databasePath, newBundle, nonce, oldBundle });
+    const journalPath = productionTransitionJournalPath(databasePath);
+    const restoringReceipt = { ...receipt, state: "restoring" as const };
+
+    for (const snapshot of [
+      { ...receipt.snapshot, path: `${receipt.snapshot.path}.replacement` },
+      { ...receipt.snapshot, sizeBytes: receipt.snapshot.sizeBytes + 1 },
+      { ...receipt.snapshot, sha256: "0".repeat(64) }
+    ]) {
+      await writeFile(journalPath, `${JSON.stringify({ ...restoringReceipt, snapshot })}\n`);
+      await expect(restoreProductionTransition({ databasePath, newBundle, nonce, oldBundle }))
+        .rejects.toThrow(/transition_(?:receipt|snapshot_receipt)_mismatch/u);
+    }
+
+    const active = new DatabaseSync(databasePath);
+    active.prepare("UPDATE app_settings SET setting_json = ? WHERE setting_key = ?")
+      .run(JSON.stringify({ value: "interrupted-restore" }), "transition_marker");
+    active.close();
+    const stagePath = join(root, ".masthead.sqlite.production-transition-restore-stage");
+    await writeFile(stagePath, "stale interrupted stage");
+    await writeFile(journalPath, `${JSON.stringify(restoringReceipt)}\n`);
+    const boundaries: string[] = [];
+    const fullIntegrityChecks: string[] = [];
+
+    const restoredReceipt = await restoreProductionTransition({ databasePath, newBundle, nonce, oldBundle }, {
+      onBoundary: (boundary, database) => {
+        boundaries.push(boundary);
+        if (boundary === "after_restore_promotion") {
+          expect(database?.prepare("SELECT setting_json FROM app_settings WHERE setting_key = ?").get("transition_marker"))
+            .toEqual({ setting_json: JSON.stringify({ value: "before" }) });
+        }
+      },
+      onFullIntegrityCheck: (path) => fullIntegrityChecks.push(path)
+    });
+
+    expect(restoredReceipt.state).toBe("restored");
+    expect(fullIntegrityChecks).toEqual([]);
+    expect(boundaries).toEqual(["before_restore_promotion", "after_restore_promotion", "restored"]);
+    await expect(readFile(stagePath)).rejects.toMatchObject({ code: "ENOENT" });
+    const restored = new DatabaseSync(databasePath, { readOnly: true });
+    expect(restored.prepare("PRAGMA quick_check").all()).toEqual([{ quick_check: "ok" }]);
+    expect(restored.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    restored.close();
+  });
 
   test("rolls back a partial migration failure before returning and records no trusted journal", async () => {
     const { databasePath, newBundle, oldBundle } = await fixture(21);

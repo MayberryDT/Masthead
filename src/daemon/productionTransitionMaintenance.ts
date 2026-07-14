@@ -143,7 +143,7 @@ export async function prepareProductionTransition(
       return receipt;
     } catch (error) {
       try {
-        await restoreSnapshotInsideOwnership(receipt, ownership, options, false);
+        await restoreSnapshotInsideOwnership(receipt, ownership, options, "database");
         await rm(productionTransitionJournalPath(input.databasePath), { force: true });
       } catch (restoreError) {
         receipt.state = "restore_failed";
@@ -169,7 +169,12 @@ export async function restoreProductionTransition(
     if (!["snapshot_ready", "ready_to_activate", "restoring", "restore_failed", "restored"].includes(receipt.state)) {
       throw new Error(`transition_restore_state_invalid:${receipt.state}`);
     }
-    await restoreSnapshotInsideOwnership(receipt, ownership, options);
+    await restoreSnapshotInsideOwnership(
+      receipt,
+      ownership,
+      options,
+      receipt.state === "restoring" ? "receipt" : "full"
+    );
     return receipt;
   });
 }
@@ -193,10 +198,10 @@ async function restoreSnapshotInsideOwnership(
   receipt: ProductionTransitionReceipt,
   ownership: ExclusiveDatabaseMaintenance,
   options: ProductionTransitionOptions,
-  requireFullSnapshotIntegrity = true
+  snapshotVerification: "database" | "full" | "receipt" = "full"
 ): Promise<void> {
   if (ownership.databasePath !== receipt.databasePath) throw new Error("transition_restore_ownership_mismatch");
-  await verifySnapshot(receipt, options, requireFullSnapshotIntegrity);
+  await verifySnapshot(receipt, options, snapshotVerification);
   receipt.state = "restoring";
   receipt.updatedAt = new Date().toISOString();
   await writeJournal(receipt);
@@ -308,7 +313,7 @@ async function readAndValidateJournal(input: ProductionTransitionInput): Promise
 async function verifySnapshot(
   receipt: ProductionTransitionReceipt,
   options: ProductionTransitionOptions,
-  requireFullIntegrity: boolean
+  verification: "database" | "full" | "receipt"
 ): Promise<void> {
   const info = await lstat(receipt.snapshot.path);
   if (!info.isFile() || info.isSymbolicLink() || await realpath(receipt.snapshot.path) !== receipt.snapshot.path) {
@@ -317,6 +322,8 @@ async function verifySnapshot(
   if (info.size !== receipt.snapshot.sizeBytes || await hashFile(receipt.snapshot.path) !== receipt.snapshot.sha256) {
     throw new Error("transition_snapshot_receipt_mismatch");
   }
+  if (verification === "receipt") return;
+  const requireFullIntegrity = verification === "full";
   if (requireFullIntegrity) options.onFullIntegrityCheck?.(receipt.snapshot.path);
   const verified = verifyDatabase(receipt.snapshot.path, { foreignKeys: true, fullIntegrity: requireFullIntegrity });
   if (!matchesSourceDatabase(verified, receipt)) {
