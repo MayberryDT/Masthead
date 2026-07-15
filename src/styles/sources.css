@@ -248,6 +248,7 @@
 }
 
 .source-state.importing,
+.source-state.warning,
 .source-state.needs_attention,
 .source-state.transcript_approval_required {
   border-color: rgba(247, 201, 72, 0.32);
@@ -255,6 +256,7 @@
   color: #ffe18a;
 }
 
+.source-state.error,
 .source-state.schema_unrecognized {
   border-color: rgba(255, 77, 77, 0.34);
   background-color: #2c161a;

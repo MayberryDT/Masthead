@@ -51,4 +51,12 @@ describe("App component architecture", () => {
     expect(appSource).not.toContain("UsagePanel");
     expect(appSource).not.toContain("useUsageStatsController");
   });
+
+  test("wires receipt repair preview through the Sources controller without an apply action", async () => {
+    const appPath = fileURLToPath(new URL("../App.tsx", import.meta.url));
+    const appSource = await readFile(appPath, "utf8");
+
+    expect(appSource).toContain("onPreviewImportRepair={sourcesController.previewImportRepair}");
+    expect(appSource).not.toContain("onApplyImportRepair=");
+  });
 });

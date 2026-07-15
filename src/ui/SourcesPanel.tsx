@@ -45,6 +45,9 @@ type Props = {
   sources: SourceStatus[];
   busy: boolean;
   status?: string;
+  importReceiptIntent?: { importJobId: string };
+  onImportReceiptIntentConsumed?: () => void;
+  onPreviewImportRepair?: (importJobId: string) => void;
   /** Sources V2 live-connect snapshot. When set (or Discover is wired), render connector inventory. */
   connectorsSnapshot?: HarnessConnectorsSnapshotDto;
   selectedConnectorRuntime?: string;
@@ -87,12 +90,36 @@ type Props = {
 
 export function SourcesPanel(props: Props) {
   const v2Mode = props.connectorsSnapshot !== undefined || props.onDiscoverConnectors !== undefined;
+  const [selectedReceipt, setSelectedReceipt] = useState<ImportJob["completionReport"]>();
 
-  if (v2Mode) {
-    return <SourcesPanelV2 {...props} />;
-  }
+  useEffect(() => {
+    const intent = props.importReceiptIntent;
+    if (!intent) return;
+    const job = props.imports?.find((candidate) =>
+      candidate.importJobId === intent.importJobId &&
+      !["queued", "running", "cancelling"].includes(candidate.status) &&
+      candidate.completionReport
+    );
+    setSelectedReceipt(job?.completionReport);
+    props.onImportReceiptIntentConsumed?.();
+  }, [props.importReceiptIntent, props.imports, props.onImportReceiptIntentConsumed]);
 
-  return <SourcesPanelLegacy {...props} />;
+  return (
+    <>
+      {v2Mode ? <SourcesPanelV2 {...props} /> : <SourcesPanelLegacy {...props} />}
+      <SourcesImportModal
+        adapters={props.adapters ?? []}
+        busy={props.busy || props.readOnly}
+        completionReports={selectedReceipt ? [selectedReceipt] : []}
+        onClose={() => setSelectedReceipt(undefined)}
+        onPreviewImport={props.onPreviewImport}
+        onPreviewRepair={props.onPreviewImportRepair}
+        onRunSetup={props.onRunSetup}
+        open={Boolean(selectedReceipt)}
+        previews={[]}
+      />
+    </>
+  );
 }
 
 function SourcesPanelV2(props: Props) {

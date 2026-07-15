@@ -3,6 +3,51 @@ import { describe, expect, test } from "vitest";
 import { ImportCompletionReport } from "../ImportCompletionReport";
 
 describe("ImportCompletionReport", () => {
+  test.each([
+    { status: "failed" as const, expectedText: "Failed", expectedClass: "error" },
+    { status: "succeeded_with_issues" as const, expectedText: "Completed with issues", expectedClass: "warning" },
+    { status: "succeeded" as const, expectedText: "Completed", expectedClass: "ready" }
+  ])("renders $status with matching $expectedClass badge semantics", ({ status, expectedText, expectedClass }) => {
+    const html = renderToStaticMarkup(
+      <ImportCompletionReport
+        report={{
+          anomalies: [], cappedUnits: 0, dossierReadySessions: 0, enrichedSessions: 0, failedUnits: status === "failed" ? 1 : 0,
+          generatedAt: "2026-07-15T12:00:00.000Z", importJobId: `job-${status}`, logbookSearchableSessions: 0,
+          mcpVisibleSessions: 0, nextActions: [], outOfRangeSessions: 0, recordsFailed: status === "failed" ? 1 : 0,
+          recordsImported: 1, recordsRecognized: 1, recordsRejected: 0, recordsSkipped: 0, runtime: "opencode",
+          sessionsCreated: 1, sessionsDiscovered: 1, sessionsFinalized: 1, sessionsOnPackagePath: 1,
+          sessionsRepairRequired: status === "failed" ? 1 : 0, sessionsSuppressed: 0, sessionsUpdated: 0, skippedUnits: 0, status,
+          timestampBasis: { file_modified: 0, semantic: 1, source_path: 0, unknown: 0 }, transcriptsImported: 1
+        }}
+      />
+    );
+
+    expect(html).toContain(`class="source-state ${expectedClass}"`);
+    expect(html).toContain(`>${expectedText}</span>`);
+  });
+
+  test("does not label outside-range deferrals as safety-cap deferrals", () => {
+    const html = renderToStaticMarkup(
+      <ImportCompletionReport
+        report={{
+          anomalies: [], cappedUnits: 300, dossierReadySessions: 0, enrichedSessions: 0, failedUnits: 0,
+          generatedAt: "2026-07-15T12:00:00.000Z", importJobId: "job-mixed", logbookSearchableSessions: 0,
+          mcpVisibleSessions: 0, nextActions: [], outOfRangeSessions: 120, recordsFailed: 0, recordsImported: 500,
+          recordsRecognized: 500, recordsRejected: 0, recordsSkipped: 0, runtime: "opencode", sessionsCreated: 500,
+          sessionsDiscovered: 500, sessionsFinalized: 500, sessionsOnPackagePath: 500, sessionsRepairRequired: 0,
+          sessionsSuppressed: 0, sessionsUpdated: 0, skippedUnits: 420, sourceUnitsDeferred: 420,
+          sourceUnitsHydrated: 500, status: "succeeded", timestampBasis: { file_modified: 0, semantic: 500, source_path: 0, unknown: 0 },
+          transcriptsImported: 500
+        }}
+      />
+    );
+    const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+
+    expect(text).toContain("300 recent units deferred by the safety cap");
+    expect(text).toContain("120 units deferred for other scope reasons");
+    expect(text).not.toContain("420 recent units deferred by the safety cap");
+  });
+
   test("shows what Masthead gained from an import", () => {
     const html = renderToStaticMarkup(
       <ImportCompletionReport

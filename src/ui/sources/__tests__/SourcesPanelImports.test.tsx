@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { act } from "react";
+import { act, useState } from "react";
 import { readFileSync } from "node:fs";
 import { createRoot } from "react-dom/client";
 import { describe, expect, test, vi } from "vitest";
@@ -9,10 +9,42 @@ import type { SourcesOnboardingScanDto, SourcesSetupDto } from "../../../shared/
 import type { SourceScanResult } from "../../../daemon/sources/sourceScanService";
 import { scanResultToOnboardingScan } from "../../../daemon/sources/sourceSetupService";
 import { SourcesPanel } from "../../SourcesPanel";
+import { WorkbenchPanel } from "../../workbench/WorkbenchPanel";
+import type { ImportCompletionReportDto } from "../../../shared/sourceImport";
 
 const noop = () => undefined;
 
 describe("SourcesPanel import controls", () => {
+  test("opens the exact terminal receipt requested from Workbench and consumes the navigation intent", async () => {
+    const reports = [completionReport("job-opencode", "opencode", 12), completionReport("job-cursor", "cursor", 3)];
+    const imports = reports.map((report) => importJob({
+      completionReport: report,
+      importJobId: report.importJobId,
+      sourceId: `${report.runtime}:history`,
+      status: "succeeded_with_issues"
+    }));
+    const onPreviewImportRepair = vi.fn();
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<ReceiptNavigationHarness imports={imports} onPreviewImportRepair={onPreviewImportRepair} />);
+    });
+    await act(async () => {
+      const buttons = Array.from(container.querySelectorAll("button")).filter((button) => button.textContent === "Open import receipt");
+      (buttons[1] as HTMLButtonElement).click();
+    });
+
+    expect(container.textContent).toContain("Cursor");
+    expect(container.textContent).toContain("3 sessions need import repair");
+    expect(container.textContent).not.toContain("12 sessions need import repair");
+    expect(container.querySelector('[aria-label="cursor import report"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="opencode import report"]')).toBeNull();
+    await act(async () => buttonByText(container, "Preview import repair").click());
+    expect(onPreviewImportRepair).toHaveBeenCalledWith("job-cursor");
+    await act(async () => root.unmount());
+  });
+
   test("opens import history modal from the connected-source dashboard", async () => {
     const onPreviewImport = vi.fn(async () => []);
     const container = document.createElement("div");
@@ -897,6 +929,48 @@ function importJob(overrides: Partial<ImportJob> = {}): ImportJob {
     status: "running",
     updatedAt: "2026-06-25T12:00:00.000Z",
     ...overrides
+  };
+}
+
+function ReceiptNavigationHarness({ imports, onPreviewImportRepair }: { imports: ImportJob[]; onPreviewImportRepair: (importJobId: string) => void }) {
+  const [surface, setSurface] = useState<"workbench" | "sources">("workbench");
+  const [receiptIntent, setReceiptIntent] = useState<{ importJobId: string }>();
+  if (surface === "workbench") {
+    return (
+      <WorkbenchPanel
+        importHealthSummary={{ ok: true, importJobIds: imports.map((job) => job.importJobId), reasons: [], repairRequired: imports.length }}
+        onOpenImportReceipt={(importJobId) => {
+          setReceiptIntent({ importJobId });
+          setSurface("sources");
+        }}
+      />
+    );
+  }
+  return (
+    <SourcesPanel
+      adapters={[opencodeAdapter()]}
+      busy={false}
+      importReceiptIntent={receiptIntent}
+      imports={imports}
+      onExcludePath={noop}
+      onImportReceiptIntentConsumed={() => setReceiptIntent(undefined)}
+      onPreviewImportRepair={onPreviewImportRepair}
+      onRefresh={noop}
+      sources={[]}
+    />
+  );
+}
+
+function completionReport(importJobId: string, runtime: ImportCompletionReportDto["runtime"], repair: number): ImportCompletionReportDto {
+  return {
+    anomalies: [], cappedUnits: 0, dossierReadySessions: 0, enrichedSessions: 0, failedUnits: 0,
+    generatedAt: runtime === "cursor" ? "2026-07-15T13:00:00.000Z" : "2026-07-15T12:00:00.000Z",
+    importJobId, logbookSearchableSessions: 0, mcpVisibleSessions: 0, nextActions: ["repair_import"],
+    outOfRangeSessions: 0, recordsFailed: 0, recordsImported: 20, recordsRecognized: 20, recordsRejected: 0,
+    recordsSkipped: 0, runtime, sessionsCreated: 20, sessionsDiscovered: 20, sessionsFinalized: 20,
+    sessionsOnPackagePath: 20 - repair, sessionsRepairRequired: repair, sessionsSuppressed: 0, sessionsUpdated: 0,
+    skippedUnits: 0, status: "succeeded_with_issues", timestampBasis: { file_modified: 0, semantic: 20, source_path: 0, unknown: 0 },
+    transcriptsImported: 20
   };
 }
 

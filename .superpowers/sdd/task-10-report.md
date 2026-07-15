@@ -33,3 +33,19 @@ Blocked. The required in-app Browser runtime reported no available browser insta
 
 - Repair mutation remains daemon/CLI-controlled. UI repair affordances are preview/read-only only.
 - Sources receipt history uses the latest completion receipt per runtime; Workbench does not derive its current repair total from historical receipts.
+
+## Review Follow-up — Receipt Navigation and Truthful State
+
+- Workbench receipt buttons now carry the exact `importJobId` through a one-shot App intent. Sources resolves only a matching terminal job, opens the receipt modal with that report alone, then consumes the intent so normal Sources navigation is unchanged.
+- The receipt exposes `Preview import repair` through the Sources controller. It calls preview only; no apply action was added.
+- Safety-cap copy now uses `cappedUnits` exclusively. Any additional `sourceUnitsDeferred` count is shown separately as other scope deferrals.
+- Receipt badge semantics now agree with status: failed/error, succeeded-with-issues/warning, clean succeeded/ready. A failed run remains error even when it also needs repair.
+
+### Follow-up RED/GREEN
+
+- RED: Workbench navigation reached Sources but did not open the requested receipt.
+- RED: 420 mixed deferred units were incorrectly described as safety-capped instead of 300 capped + 120 other-scope.
+- RED: failed and succeeded-with-issues reports used the ready badge class.
+- GREEN: 6 focused files passed, 59 tests passed.
+- GREEN: surface contract, typecheck, citation guard, and diff check passed.
+- Browser evidence remains unavailable because the in-app Browser runtime has no browser instance; no fallback was used.

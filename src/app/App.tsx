@@ -106,6 +106,7 @@ const emptyLiveBoard: LiveBoardProjection = {
 
 export function App() {
   const [activeSurface, setActiveSurface] = useState<AppSurface>(() => readOnboardingDismissed() ? "now" : "sources");
+  const [importReceiptIntent, setImportReceiptIntent] = useState<{ importJobId: string }>();
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<BoardFilter>("all");
@@ -636,6 +637,7 @@ export function App() {
           imports={imports}
           importTotal={importPage.total}
           importFilterRuntime={importFilterRuntime}
+          importReceiptIntent={importReceiptIntent}
           lastRefreshAt={sourcesLastRefreshAt}
           setup={sourcesSetup}
           busy={sourcesBusy || sourcesConnectors.busy}
@@ -670,11 +672,13 @@ export function App() {
           onConnectSelected={handleConnectSelectedSources}
           onExcludePath={handleExcludeSourcePath}
           onImportMetadata={handleImportMetadata}
+          onImportReceiptIntentConsumed={() => setImportReceiptIntent(undefined)}
           onLoadAdapterSources={handleLoadAdapterSources}
           onOpenImportJobsForRuntime={handleOpenImportJobsForRuntime}
           onOpenOnboarding={sourcesConnectors.openOnboarding}
           onPollImports={handlePollActiveImports}
           onPreviewImport={sourcesController.previewImport}
+          onPreviewImportRepair={sourcesController.previewImportRepair}
           onRepairSources={handleRepairSources}
           onRefresh={() => {
             // Sources V2: refresh only live harness connections (not history import scan).
@@ -741,7 +745,10 @@ export function App() {
           notAddedSessions={workbench.notAddedSessions}
           notAddedSummary={workbench.notAddedSummary}
           importHealthSummary={workbench.importHealthSummary}
-          onOpenImportReceipt={() => setActiveSurface("sources")}
+          onOpenImportReceipt={(importJobId) => {
+            setImportReceiptIntent({ importJobId });
+            setActiveSurface("sources");
+          }}
           onClearSelection={workbench.clearSelection}
           onRetry={workbench.retry}
           onSelectAll={workbench.selectAll}
