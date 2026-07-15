@@ -110,25 +110,31 @@
 - [x] Historical V2 candidate/control inspection is retained as release evidence only. Current V3 Workbench exposes Copy Agent Prompt as its primary authoring control and has no independent canonical-dossier publication control.
 - [x] Gate C code readiness is signed from the exact app candidate plus proportionate verification of later surgical deltas. Evidence: app commit `95b23fc1` passed Workbench focused suites 88/88, durable-artifact dogfood with `machineGatePassed: true` and `productionAccessed: false`, full verification at 274 files/2,138 tests, build, schema-24 endpoint matrix, all smokes, and responsive inspection. The later Logbook-only `claimSupport` renderer follow-up passed its 14-test inspector suite, no-citation/product/surface contracts, typecheck, production build, read-only responsive live-fixture inspection, and independent focused review; it is not part of the running `95b23fc1` evaluation package.
 
+The former V2 candidate canary and candidate-driven rehearsal are historical,
+audit-only evidence. They are not executable production instructions.
+
 Fixture machine PASS does not authorize production. A separately authorized
-25-session canary must sample five sessions from each evidence band (sparse,
-ordinary, tool-heavy, failure/fix, decision-heavy), publish and visually compare
-all canonical dossiers, author every positive candidate one run at a time, and
-receive human scores for findability, grounding, reusability, specificity, and
-readability. Passing requires 100% review, median overall score at least 4.0, and
-no artifact below 3.0. Record authorization, identity, backup, rehearsal,
-invalidation, review, rollback, and rollout evidence in the
+25-session V3 canary must sample five sessions from each evidence band (sparse,
+ordinary, tool-heavy, failure/fix, decision-heavy) and divide them into bounded
+selection runs of 1–12 sessions. For every run, the agent enriches each selected
+session, treats detector suggestions as advisory, chooses zero or more useful
+optional artifacts, and completes the atomic V3 finish. Reviewers visually
+compare every rebuilt canonical dossier and score every authored optional
+artifact for findability, grounding, reusability, specificity, and readability.
+Passing requires 100% review, median overall score at least 4.0, and no artifact
+below 3.0. Record authorization, identity, backup, V3 canary, review, rollback,
+and rollout evidence in the
 [production canary worksheet](durable-artifact-production-canary.md); empty
 fields never imply a pass.
 
 Stop and restore the single backup if any dossier section differs materially from
-the original; unsupported authoring-protocol language appears; a claim excerpt
-does not exactly match canonical evidence; unrelated provenance shares a
-substantive fingerprint; any expected kind has zero yield; any V2 run exceeds 12
-provenance sessions; candidate recall is below 90%; candidate precision is below
-80%; any artifact scores below 3/5; or median usefulness is below 4/5. Only after
-human approval may rollout continue in waves of 25 candidates, with a 20%
-stratified review sample and automatic pause on any stop condition.
+the original; any selected session lacks current agent enrichment; V3 finish is
+not atomic or idempotent; unsupported authoring-protocol language appears; a
+claim excerpt does not exactly match canonical evidence; unrelated provenance
+shares a substantive fingerprint; any artifact scores below 3/5; or median
+usefulness is below 4/5. Only after human approval may rollout continue in waves
+of 25 sessions, using bounded V3 selection runs with a 20% stratified review
+sample and automatic pause on any stop condition.
 
 ## Verification
 - [x] `npm run verify` passes on app commit `95b23fc1`. Evidence: 274 test files / 2,138 tests, production build, schema-24 endpoint matrix, and live/compatibility/import/MCP smokes passed. The operator explicitly prohibited another long suite for the later surgical Logbook-only follow-up; its focused delta checks are recorded above.
