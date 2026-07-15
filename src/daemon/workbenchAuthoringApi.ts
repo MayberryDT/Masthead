@@ -2,24 +2,19 @@ import type { SessionTranscriptOrder } from "../shared/sessionTranscript.ts";
 import type {
   WorkbenchAuthoringBundle,
   WorkbenchAuthoringBundleV2,
-  WorkbenchArtifactCandidateStatus,
-  WorkbenchAutomaticArtifactKind,
+  WorkbenchAuthoringBundleV3,
   WorkbenchAuthoringCapabilitiesDto
 } from "../shared/workbenchAuthoring.ts";
 import {
   finishAuthoringRun,
+  getAuthoringRunContext,
   getAuthoringRunEvidence,
   getAuthoringRunStatus,
-  openCandidateAuthoringRun,
+  openAgentLedAuthoringRun,
   submitAuthoringBundle
 } from "../workbench/authoring/authoringService.ts";
-import {
-  dismissArtifactCandidate,
-  discoverNextArtifactCandidatePage,
-  proposeArtifactCandidate
-} from "../workbench/authoring/artifactCandidates.ts";
-import { listWorkbenchArtifactCandidatePage } from "./db/workbenchArtifactCandidateRepository.ts";
-import { parseAuthoringBundleV2 } from "../workbench/authoring/authoringSchemas.ts";
+import { getArtifactSuggestions } from "../workbench/authoring/advisorySuggestions.ts";
+import { parseAuthoringBundleV2, parseAuthoringBundleV3 } from "../workbench/authoring/authoringSchemas.ts";
 import type { SessionTranscriptKindFilter } from "./db/sessionTranscriptRepository.ts";
 import { getOrCreateDatabaseIdentity } from "./db/schema.ts";
 import type { MastheadDatabase } from "./db/sqlite.ts";
@@ -33,14 +28,6 @@ const evidenceKinds = new Set<SessionTranscriptKindFilter>([
   "checkpoints",
   "files",
   "signals"
-]);
-const candidateKinds = new Set<WorkbenchAutomaticArtifactKind>(["runbook", "adr", "incident_timeline"]);
-const candidateStatuses = new Set<WorkbenchArtifactCandidateStatus>([
-  "pending",
-  "claimed",
-  "published",
-  "dismissed",
-  "superseded"
 ]);
 
 export type WorkbenchAuthoringHttpResult = {
@@ -59,66 +46,25 @@ export async function routeWorkbenchAuthoringRequest(
     if (pathname === "/workbench/authoring/capabilities") {
       if (request.method !== "GET") return methodNotAllowed();
       const body: WorkbenchAuthoringCapabilitiesDto = {
-        bundleVersion: "workbench-authoring-v2",
+        bundleVersion: "workbench-authoring-v3",
         capability: "artifact_authoring",
         command: context.authoringCommand.trim() || "mastheadctl",
         databaseId: getOrCreateDatabaseIdentity(context.db),
-        evidencePolicy: "candidate_scoped_canonical_evidence",
-        evidenceRequirements: {
-          adr: ["context", "decision", "alternatives"],
-          incident_timeline: ["symptom", "ordered_events", "remediation"],
-          runbook: ["problem", "change", "verification"]
-        },
-        operations: ["candidates", "open", "status", "evidence", "submit", "finish"],
+        evidencePolicy: "selected_session_canonical_evidence",
+        maxSessionsPerRun: 12,
+        operations: ["suggestions", "open", "status", "evidence", "context", "submit", "finish"],
         protocol: "masthead.workbench.authoring/v1",
+        suggestionsAreBinding: false,
         transport: "daemon_http"
       };
       return { body, status: 200 };
     }
 
-    if (pathname === "/workbench/authoring/candidates") {
-      if (request.method === "GET") {
-        discoverNextArtifactCandidatePage(context.db, { limit: 100 });
-        const status = optionalCandidateStatus(request.url.searchParams.get("status"));
-        const kind = optionalCandidateKind(request.url.searchParams.get("kind"));
-        const limit = optionalCandidateLimit(request.url.searchParams.get("limit"));
-        const cursor = decodeCandidateCursor(request.url.searchParams.get("cursor"));
-        const page = listWorkbenchArtifactCandidatePage(context.db, { cursor, kind, limit, status });
-        return {
-          body: {
-            candidates: page.candidates,
-            ...(page.nextCursor ? { nextCursor: encodeCandidateCursor(page.nextCursor) } : {})
-          },
-          status: 200
-        };
-      }
-      if (request.method === "POST") {
-        const body = requireRecord(request.body);
-        const candidate = proposeArtifactCandidate(context.db, {
-          kind: requireCandidateKind(body.kind),
-          provenanceSessionIds: requireStringArray(body.provenanceSessionIds, "provenanceSessionIds"),
-          seedSessionId: requireNonBlankString(body.seedSessionId, "seedSessionId"),
-          signalEvidenceRefs: requireStringArray(body.signalEvidenceRefs, "signalEvidenceRefs"),
-          signalSummary: requireNonBlankString(body.signalSummary, "signalSummary"),
-          ...(body.signatureKey === undefined
-            ? {}
-            : { signatureKey: requireNonBlankString(body.signatureKey, "signatureKey") })
-        });
-        return { body: { candidate, ok: true }, status: 201 };
-      }
-      return methodNotAllowed();
-    }
-
-    const dismissMatch = pathname.match(/^\/workbench\/authoring\/candidates\/([^/]+)\/dismiss$/);
-    if (dismissMatch?.[1]) {
+    if (pathname === "/workbench/authoring/suggestions") {
       if (request.method !== "POST") return methodNotAllowed();
       const body = requireRecord(request.body);
-      const candidate = dismissArtifactCandidate(context.db, {
-        candidateId: decodePathSegment(dismissMatch[1]),
-        reason: requireNonBlankString(body.reason, "reason"),
-        signalEvidenceRefs: requireStringArray(body.signalEvidenceRefs, "signalEvidenceRefs")
-      });
-      return { body: { candidate, ok: true }, status: 200 };
+      const sessionIds = requireSessionIds(body.sessionIds);
+      return { body: getArtifactSuggestions(context.db, sessionIds), status: 200 };
     }
 
     if (pathname === "/workbench/authoring/runs") {
@@ -126,16 +72,15 @@ export async function routeWorkbenchAuthoringRequest(
       const body = requireRecord(request.body);
       const actorId = requireNonBlankString(body.actorId, "actorId");
       const databaseId = requireNonBlankString(body.databaseId, "databaseId");
-      if (body.candidateId === undefined) throw new Error("candidate_id_required");
-      if (body.sessionIds !== undefined) throw new Error("arbitrary_session_list_not_allowed");
-      const candidateId = requireNonBlankString(body.candidateId, "candidateId");
+      if (body.candidateId !== undefined) throw new Error("candidate_id_not_allowed");
+      const sessionIds = requireSessionIds(body.sessionIds);
       return {
-        body: openCandidateAuthoringRun(context.db, { actorId, candidateId, databaseId }),
+        body: openAgentLedAuthoringRun(context.db, { actorId, databaseId, sessionIds }),
         status: 201
       };
     }
 
-    const match = pathname.match(/^\/workbench\/authoring\/runs\/([^/]+)(?:\/(evidence|submit|finish))?$/);
+    const match = pathname.match(/^\/workbench\/authoring\/runs\/([^/]+)(?:\/(context|evidence|submit|finish))?$/);
     if (!match?.[1]) return undefined;
     const runId = decodePathSegment(match[1]);
     const operation = match[2];
@@ -166,6 +111,11 @@ export async function routeWorkbenchAuthoringRequest(
       };
     }
 
+    if (operation === "context") {
+      if (request.method !== "GET") return methodNotAllowed();
+      return { body: getAuthoringRunContext(context.db, runId), status: 200 };
+    }
+
     if (operation === "submit") {
       if (request.method !== "POST") return methodNotAllowed();
       const bundle = requireBundleEnvelope(request.body);
@@ -191,10 +141,9 @@ export async function routeWorkbenchAuthoringRequest(
 export function isWorkbenchAuthoringPath(pathname: string): boolean {
   return (
     pathname === "/workbench/authoring/capabilities" ||
-    pathname === "/workbench/authoring/candidates" ||
-    /^\/workbench\/authoring\/candidates\/[^/]+\/dismiss$/.test(pathname) ||
+    pathname === "/workbench/authoring/suggestions" ||
     pathname === "/workbench/authoring/runs" ||
-    /^\/workbench\/authoring\/runs\/[^/]+(?:\/(?:evidence|submit|finish))?$/.test(pathname)
+    /^\/workbench\/authoring\/runs\/[^/]+(?:\/(?:context|evidence|submit|finish))?$/.test(pathname)
   );
 }
 
@@ -216,13 +165,12 @@ function authoringErrorResult(error: unknown): WorkbenchAuthoringHttpResult {
   if (
     code === "invalid_request" ||
     authoringBadRequestCodes.has(code) ||
-    code.startsWith("candidate_proposal_") ||
     code.startsWith("invalid_authoring_bundle") ||
     code.startsWith("unexpected_authoring_bundle_property")
   ) {
     return { body: { error: { code, message }, ok: false }, status: 400 };
   }
-  if (code === "authoring_run_not_found" || code === "authoring_session_not_found" || code === "session_not_found" || code === "artifact_candidate_not_found") {
+  if (code === "authoring_run_not_found" || code === "authoring_session_not_found" || code === "session_not_found") {
     return { body: { error: { code, message }, ok: false }, status: 404 };
   }
   if (authoringConflictCodes.has(code)) {
@@ -238,16 +186,15 @@ function authoringErrorResult(error: unknown): WorkbenchAuthoringHttpResult {
 }
 
 const authoringBadRequestCodes = new Set([
-  "arbitrary_session_list_not_allowed",
-  "candidate_id_required",
-  "candidate_dismissal_evidence_invalid",
-  "candidate_dismissal_reason_too_short"
+  "authoring_session_count_invalid",
+  "candidate_id_not_allowed"
 ]);
 
 const authoringConflictCodes = new Set([
   "authoring_actor_mismatch",
   "authoring_claim_conflict",
   "authoring_claim_missing",
+  "authoring_contract_audit_only",
   // A contribution can become non-current after submit; refreshing evidence and
   // resubmitting against a current published artifact resolves this conflict.
   "authoring_finish_invalid_contribution",
@@ -257,14 +204,6 @@ const authoringConflictCodes = new Set([
   "authoring_run_not_ready",
   "authoring_session_not_in_run",
   "authoring_session_not_on_publish_path",
-  "artifact_candidate_claim_conflict",
-  "artifact_candidate_not_openable",
-  "artifact_candidate_transition_invalid",
-  "candidate_dismissal_evidence_changed",
-  "candidate_evidence_revision_changed",
-  "authoring_candidate_artifact_mismatch",
-  "authoring_candidate_signature_mismatch",
-  "authoring_candidate_mismatch",
   "database_identity_mismatch",
   "evidence_revision_changed",
   "evidence_revision_mismatch",
@@ -279,11 +218,12 @@ function methodNotAllowed(): WorkbenchAuthoringHttpResult {
   };
 }
 
-function requireBundleEnvelope(value: unknown): WorkbenchAuthoringBundle | WorkbenchAuthoringBundleV2 {
+function requireBundleEnvelope(value: unknown): WorkbenchAuthoringBundle | WorkbenchAuthoringBundleV2 | WorkbenchAuthoringBundleV3 {
   const bundle = requireRecord(value);
+  if (bundle.bundleVersion === "workbench-authoring-v3") return parseAuthoringBundleV3(bundle);
   if (bundle.bundleVersion === "workbench-authoring-v2") return parseAuthoringBundleV2(bundle);
   if (bundle.bundleVersion !== "workbench-authoring-v1") {
-    throw invalidRequest("bundleVersion must be workbench-authoring-v1 or workbench-authoring-v2");
+    throw invalidRequest("bundleVersion must be workbench-authoring-v1, workbench-authoring-v2, or workbench-authoring-v3");
   }
   requireNonBlankString(bundle.runId, "runId");
   requireNonBlankString(bundle.evidenceRevision, "evidenceRevision");
@@ -312,6 +252,12 @@ function requireStringArray(value: unknown, name: string): string[] {
   return value.map((item) => requireNonBlankString(item, `${name}[]`));
 }
 
+function requireSessionIds(value: unknown): string[] {
+  const requestedSessionIds = requireStringArray(value, "sessionIds");
+  if (requestedSessionIds.length > 12) throw new Error("authoring_session_count_invalid");
+  return [...new Set(requestedSessionIds)];
+}
+
 function optionalNonBlank(value: string | null): string | undefined {
   return value?.trim() || undefined;
 }
@@ -333,47 +279,6 @@ function optionalLimit(value: string | null): number | undefined {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 1 || parsed > 250) throw invalidRequest("limit must be between 1 and 250");
   return parsed;
-}
-
-function optionalCandidateLimit(value: string | null): number {
-  if (value === null) return 100;
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 100) throw invalidRequest("limit must be between 1 and 100");
-  return parsed;
-}
-
-function optionalCandidateKind(value: string | null): WorkbenchAutomaticArtifactKind | undefined {
-  if (value === null) return undefined;
-  return requireCandidateKind(value);
-}
-
-function requireCandidateKind(value: unknown): WorkbenchAutomaticArtifactKind {
-  if (!candidateKinds.has(value as WorkbenchAutomaticArtifactKind)) throw invalidRequest("kind is invalid");
-  return value as WorkbenchAutomaticArtifactKind;
-}
-
-function optionalCandidateStatus(value: string | null): WorkbenchArtifactCandidateStatus | undefined {
-  if (value === null) return undefined;
-  if (!candidateStatuses.has(value as WorkbenchArtifactCandidateStatus)) throw invalidRequest("status is invalid");
-  return value as WorkbenchArtifactCandidateStatus;
-}
-
-function encodeCandidateCursor(cursor: { candidateId: string; updatedAt: string }): string {
-  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
-}
-
-function decodeCandidateCursor(value: string | null): { candidateId: string; updatedAt: string } | undefined {
-  if (value === null) return undefined;
-  try {
-    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as unknown;
-    if (!isRecord(parsed)) throw new Error("invalid");
-    return {
-      candidateId: requireNonBlankString(parsed.candidateId, "cursor.candidateId"),
-      updatedAt: requireNonBlankString(parsed.updatedAt, "cursor.updatedAt")
-    };
-  } catch {
-    throw invalidRequest("cursor is invalid");
-  }
 }
 
 function decodePathSegment(value: string): string {

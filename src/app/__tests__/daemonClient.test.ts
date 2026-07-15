@@ -372,18 +372,15 @@ describe("daemon client review dispositions", () => {
 
   test("loads authoring capabilities relative to the active connector", async () => {
     const capabilities = {
-      bundleVersion: "workbench-authoring-v2",
+      bundleVersion: "workbench-authoring-v3",
       capability: "artifact_authoring",
       command: "/home/test/.local/bin/mastheadctl",
       databaseId: "database:test",
-      evidencePolicy: "candidate_scoped_canonical_evidence",
-      evidenceRequirements: {
-        adr: ["context", "decision", "alternatives"],
-        incident_timeline: ["symptom", "ordered_events", "remediation"],
-        runbook: ["problem", "change", "verification"]
-      },
-      operations: ["candidates", "open", "status", "evidence", "submit", "finish"],
+      evidencePolicy: "selected_session_canonical_evidence",
+      maxSessionsPerRun: 12,
+      operations: ["suggestions", "open", "status", "evidence", "context", "submit", "finish"],
       protocol: "masthead.workbench.authoring/v1",
+      suggestionsAreBinding: false,
       transport: "daemon_http"
     };
     vi.stubGlobal("fetch", vi.fn(async () => response(capabilities)));

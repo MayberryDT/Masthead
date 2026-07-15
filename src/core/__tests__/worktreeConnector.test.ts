@@ -156,12 +156,18 @@ describe("Masthead worktree connector planning", () => {
     "/workbench/not-added",
     "/workbench/authoring/capabilities",
     "/workbench/authoring/runs/authoring%3Arun",
-    "/workbench/authoring/runs/authoring%3Arun/evidence"
+    "/workbench/authoring/runs/authoring%3Arun/evidence",
+    "/workbench/authoring/runs/authoring%3Arun/context"
   ])("forwards canonical read endpoint %s", async (pathname) => {
     expect(isAllowedReadOnlyBridgeRequest("GET", pathname)).toBe(true);
   });
 
-  test.each(["/mcp/launch-config/validate", "/mcp/test-connection", "/settings/llm-provider/models"])("forwards read-only POST endpoint %s", async (pathname) => {
+  test.each([
+    "/mcp/launch-config/validate",
+    "/mcp/test-connection",
+    "/settings/llm-provider/models",
+    "/workbench/authoring/suggestions"
+  ])("forwards read-only POST endpoint %s", async (pathname) => {
     expect(isAllowedReadOnlyBridgeRequest("POST", pathname)).toBe(true);
   });
 

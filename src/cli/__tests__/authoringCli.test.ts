@@ -29,6 +29,55 @@ const tempDirs: string[] = [];
 const daemons: MastheadDaemon[] = [];
 const execFileAsync = promisify(execFile);
 
+function validCliV3Bundle(runId: string, evidenceRevision: string, sessionId: string) {
+  const evidenceRef = {
+    id: `message:${sessionId}:message`,
+    kind: "event",
+    observedAt: "2026-07-10T12:00:00.000Z",
+    source: "canonical"
+  };
+  return {
+    artifacts: [],
+    bundleVersion: "workbench-authoring-v3",
+    evidenceRevision,
+    runId,
+    sessionEnrichments: [{
+      enrichment: {
+        sessionDossier: {
+          blockers: [],
+          continuation: { constraints: [], openQuestions: [] },
+          decisions: ["Publish only after enrichment is current."],
+          evidenceRefs: [evidenceRef],
+          keyWork: ["Applied grounded durable enrichment before dossier rendering."],
+          outcome: "Published an enriched canonical dossier atomically.",
+          verification: {
+            commands: [],
+            evidenceRefs: [evidenceRef],
+            failures: [],
+            status: "unknown",
+            summary: "Canonical message evidence supports the enrichment."
+          },
+          warnings: []
+        },
+        sessionSummary: {
+          confidence: "low",
+          evidenceRefs: [evidenceRef],
+          state: "completed",
+          text: "Agent-enriched summary grounded in the selected canonical evidence."
+        },
+        sessionTitle: {
+          basis: "dominant_work",
+          confidence: "low",
+          evidenceRefs: [evidenceRef],
+          text: "Agent-enriched title"
+        },
+        version: "session-capsule-v4"
+      },
+      sessionId
+    }]
+  };
+}
+
 afterEach(async () => {
   vi.restoreAllMocks();
   await Promise.all(daemons.map((daemon) => daemon.close()));
@@ -38,37 +87,100 @@ afterEach(async () => {
 });
 
 describe("mastheadctl daemon-owned Workbench authoring", () => {
-  test("discovers candidates by kind and opens exactly one candidate", async () => {
+  test("gets advisory suggestions and opens a multi-session V3 selection", async () => {
     const { baseUrl, daemon } = await startTestDaemon();
     seedDurableArtifactCorpus(daemon.database);
     const env = { MASTHEAD_DAEMON_URL: baseUrl };
     const databaseId = getOrCreateDatabaseIdentity(daemon.database);
+    const sessionIds = ["session:oauth-fixed", "session:migration-fixed"];
+    const normalizedSessionIds = [...sessionIds].sort();
 
-    const listed = await runMastheadCli(
-      ["workbench", "candidates", "--kind", "runbook", "--limit", "2", "--json"],
-      { env }
+    const suggested = await runMastheadCli([
+      "workbench", "suggestions",
+      "--session", sessionIds[0]!,
+      "--session", sessionIds[1]!,
+      "--json"
+    ], { env });
+    expect(suggested.exitCode).toBe(0);
+    expect(JSON.parse(suggested.stdout).suggestions).toEqual(
+      expect.arrayContaining([expect.objectContaining({ advisory: true })])
     );
-    expect(listed.exitCode).toBe(0);
-    const listedBody = JSON.parse(listed.stdout);
-    expect(listedBody.candidates).toHaveLength(2);
-    expect(listedBody.candidates.every((candidate: any) => candidate.kind === "runbook")).toBe(true);
 
-    const candidateId = listedBody.candidates[0].candidateId as string;
-    const opened = await runMastheadCli(
-      ["workbench", "open", "--database-id", databaseId, "--candidate", candidateId, "--json"],
-      { env }
-    );
+    const opened = await runMastheadCli([
+      "workbench", "open",
+      "--database-id", databaseId,
+      "--session", sessionIds[0]!,
+      "--session", sessionIds[1]!,
+      "--json"
+    ], { env });
     expect(opened.exitCode).toBe(0);
-    expect(JSON.parse(opened.stdout)).toMatchObject({
-      run: { candidateId, contractVersion: "workbench-authoring-v2" }
+    const openedBody = JSON.parse(opened.stdout);
+    expect(openedBody.run).toMatchObject({
+      contractVersion: "workbench-authoring-v3",
+      sessionIds: normalizedSessionIds
+    });
+    expect(openedBody.run).not.toHaveProperty("candidateId");
+
+    const context = await runMastheadCli([
+      "workbench", "context", "--run", openedBody.run.runId, "--json"
+    ], { env });
+    expect(context.exitCode).toBe(0);
+    expect(JSON.parse(context.stdout)).toMatchObject({
+      ok: true,
+      runId: openedBody.run.runId,
+      sessions: normalizedSessionIds.map((sessionId) => ({ sessionId }))
+    });
+  });
+
+  test("submits and finishes a V3 selection through the CLI", async () => {
+    const { baseUrl, daemon } = await startTestDaemon();
+    seedSession(daemon.database, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:cli-v3",
+      title: "CLI V3 lifecycle"
+    });
+    const env = { MASTHEAD_DAEMON_URL: baseUrl };
+    const opened = await runMastheadCli([
+      "workbench", "open",
+      "--database-id", getOrCreateDatabaseIdentity(daemon.database),
+      "--session", "session:cli-v3",
+      "--json"
+    ], { env });
+    expect(opened.exitCode).toBe(0);
+    const run = JSON.parse(opened.stdout).run;
+    const tempDir = await makeTempDir("masthead-cli-v3-bundle-");
+    const bundlePath = join(tempDir, "bundle.json");
+    await writeFile(
+      bundlePath,
+      JSON.stringify(validCliV3Bundle(run.runId, run.evidenceRevision, "session:cli-v3")),
+      "utf8"
+    );
+
+    const submitted = await runMastheadCli([
+      "workbench", "submit", "--run", run.runId, "--file", bundlePath, "--json"
+    ], { env });
+    expect(JSON.parse(submitted.stdout)).toMatchObject({
+      accepted: true,
+      ok: true,
+      run: { status: "ready_to_finish" }
     });
 
-    const arbitrary = await runMastheadCli(
-      ["workbench", "open", "--database-id", databaseId, "--session", "session:oauth-fixed", "--json"],
-      { env }
-    );
-    expect(arbitrary.exitCode).toBe(1);
-    expect(JSON.parse(arbitrary.stderr)).toMatchObject({ error: { code: "missing_argument" } });
+    const finished = await runMastheadCli([
+      "workbench", "finish", "--run", run.runId, "--json"
+    ], { env });
+    const receipt = JSON.parse(finished.stdout).receipt;
+    expect(receipt).toMatchObject({
+      contractVersion: "workbench-authoring-v3",
+      optionalArtifacts: [],
+      resolvedSessionIds: ["session:cli-v3"],
+      runId: run.runId
+    });
+    const retried = await runMastheadCli([
+      "workbench", "finish", "--run", run.runId, "--json"
+    ], { env });
+    expect(JSON.parse(retried.stdout).receipt).toEqual(receipt);
   });
 
   test("advertises only daemon authoring commands plus explicit wipe maintenance", async () => {
@@ -78,18 +190,18 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
 
     const result = await runMastheadCli(["workbench", "--help"], { env: {} });
     for (const command of [
-      "capabilities", "candidates", "open", "status", "evidence", "submit", "finish",
+      "capabilities", "suggestions", "open", "status", "context", "evidence", "submit", "finish",
       "audit-v1-generation", "prepare-v1-recovery", "invalidate-v1-generation", "restore-v1-recovery",
       "wipe-published"
     ]) {
       expect(result.stdout).toContain(`workbench ${command}`);
     }
-    for (const removed of ["queue", "next", "apply", "publish", "not-applicable", "batch"]) {
+    for (const removed of ["candidates", "--candidate", "queue", "next", "apply", "publish", "not-applicable", "batch"]) {
       expect(result.stdout).not.toContain(`workbench ${removed}`);
     }
   });
 
-  test("uses daemon-owned commands without --db and preserves revision findings", async () => {
+  test("uses daemon-owned commands without --db and preserves historical run reads", async () => {
     const { baseUrl, daemon } = await startTestDaemon();
     seedSession(daemon.database, {
       lifecycle: "ended",
@@ -159,14 +271,14 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
       ["workbench", "submit", "--run", runId, "--file", bundlePath, "--json"],
       { env }
     );
-    expect(submitted.exitCode).toBe(0);
-    expect(JSON.parse(submitted.stdout)).toMatchObject({ accepted: false, ok: true, run: { status: "needs_revision" } });
+    expect(submitted.exitCode).toBe(1);
+    expect(JSON.parse(submitted.stderr)).toMatchObject({ error: { code: "authoring_contract_audit_only" } });
 
     const finish = await runMastheadCli(["workbench", "finish", "--run", runId, "--json"], { env });
     expect(finish.exitCode).toBe(1);
     expect(JSON.parse(finish.stderr)).toMatchObject({
       ok: false,
-      error: { code: "run_not_ready", status: 409, body: { error: { code: "authoring_run_not_ready" } } }
+      error: { code: "authoring_contract_audit_only", status: 409 }
     });
   });
 
@@ -180,7 +292,7 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
       title: "Identity boundary"
     });
     const result = await runMastheadCli(
-      ["workbench", "open", "--database-id", "wrong", "--candidate", "candidate:any", "--json"],
+      ["workbench", "open", "--database-id", "wrong", "--session", "session:identity", "--json"],
       { env: { MASTHEAD_DAEMON_URL: baseUrl } }
     );
     expect(result.exitCode).toBe(1);
@@ -203,9 +315,19 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
     expect(JSON.parse(missing.stderr)).toMatchObject({ ok: false, error: { code: "missing_argument" } });
   });
 
+  test("rejects more than 12 repeated session arguments before network access", async () => {
+    const repeated = Array.from({ length: 13 }, () => ["--session", "session:a"]).flat();
+    const result = await runMastheadCli(
+      ["workbench", "suggestions", ...repeated, "--json"],
+      { env: { MASTHEAD_DAEMON_URL: "http://127.0.0.1:1" } }
+    );
+    expect(JSON.parse(result.stderr)).toMatchObject({ error: { code: "invalid_argument" } });
+  });
+
   test.each([
-    { args: ["workbench", "open", "--database-id", "--candidate", "candidate:any", "--json"], option: "--database-id" },
-    { args: ["workbench", "open", "--database-id", "database", "--candidate", "--json"], option: "--candidate" },
+    { args: ["workbench", "open", "--database-id", "--session", "session:a", "--json"], option: "--database-id" },
+    { args: ["workbench", "open", "--database-id", "database", "--session", "--json"], option: "--session" },
+    { args: ["workbench", "suggestions", "--session", "--json"], option: "--session" },
     { args: ["workbench", "status", "--run", "--json"], option: "--run" },
     { args: ["workbench", "submit", "--run", "run", "--file", "--json"], option: "--file" },
     { args: ["workbench", "evidence", "--run", "run", "--session", "--json"], option: "--session" },
@@ -231,18 +353,15 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
-          bundleVersion: "workbench-authoring-v2",
+          bundleVersion: "workbench-authoring-v3",
           capability: "artifact_authoring",
           command: "mastheadctl",
           databaseId: "database",
-          evidencePolicy: "candidate_scoped_canonical_evidence",
-          evidenceRequirements: {
-            adr: ["context", "decision", "alternatives"],
-            incident_timeline: ["symptom", "ordered_events", "remediation"],
-            runbook: ["problem", "change", "verification"]
-          },
-          operations: ["candidates", "open", "status", "evidence", "submit", "finish"],
+          evidencePolicy: "selected_session_canonical_evidence",
+          maxSessionsPerRun: 12,
+          operations: ["suggestions", "open", "status", "evidence", "context", "submit", "finish"],
           protocol: "masthead.workbench.authoring/v1",
+          suggestionsAreBinding: false,
           transport: "daemon_http"
         }),
         { headers: { "content-type": "application/json" }, status: 200 }

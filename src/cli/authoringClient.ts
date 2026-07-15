@@ -1,13 +1,14 @@
 import type {
   WorkbenchAuthoringBundle,
   WorkbenchAuthoringBundleV2,
-  WorkbenchArtifactCandidateDto,
-  WorkbenchArtifactCandidatePageDto,
+  WorkbenchAuthoringBundleV3,
+  WorkbenchArtifactSuggestionDto,
   WorkbenchAuthoringCapabilitiesDto,
   WorkbenchAuthoringEvidencePage,
   WorkbenchAuthoringReceipt,
   WorkbenchAuthoringRunDto
 } from "../shared/workbenchAuthoring.ts";
+import type { SessionDossierDto } from "../shared/sessionDossier.ts";
 
 export const DEFAULT_MASTHEAD_DAEMON_URL = "http://127.0.0.1:17373";
 
@@ -36,35 +37,11 @@ export class MastheadAuthoringClient {
     return this.request("GET", "/workbench/authoring/capabilities");
   }
 
-  candidates(query: URLSearchParams): Promise<WorkbenchArtifactCandidatePageDto> {
-    const suffix = query.size > 0 ? `?${query.toString()}` : "";
-    return this.request("GET", `/workbench/authoring/candidates${suffix}`);
+  suggestions(sessionIds: string[]): Promise<WorkbenchArtifactSuggestionDto[]> {
+    return this.request("POST", "/workbench/authoring/suggestions", { sessionIds });
   }
 
-  proposeCandidate(input: {
-    kind: WorkbenchArtifactCandidateDto["kind"];
-    provenanceSessionIds: string[];
-    seedSessionId: string;
-    signalEvidenceRefs: string[];
-    signalSummary: string;
-    signatureKey?: string;
-  }): Promise<{ candidate: WorkbenchArtifactCandidateDto; ok: true }> {
-    return this.request("POST", "/workbench/authoring/candidates", input);
-  }
-
-  dismissCandidate(input: {
-    candidateId: string;
-    reason: string;
-    signalEvidenceRefs: string[];
-  }): Promise<{ candidate: WorkbenchArtifactCandidateDto; ok: true }> {
-    return this.request(
-      "POST",
-      `/workbench/authoring/candidates/${encodeURIComponent(input.candidateId)}/dismiss`,
-      { reason: input.reason, signalEvidenceRefs: input.signalEvidenceRefs }
-    );
-  }
-
-  open(input: { actorId: string; candidateId: string; databaseId: string }): Promise<{
+  open(input: { actorId: string; databaseId: string; sessionIds: string[] }): Promise<{
     ok: true;
     run: WorkbenchAuthoringRunDto;
     [key: string]: unknown;
@@ -76,12 +53,22 @@ export class MastheadAuthoringClient {
     return this.request("GET", `/workbench/authoring/runs/${encodeURIComponent(runId)}`);
   }
 
+  context(runId: string): Promise<{
+    evidenceRevision: string;
+    ok: true;
+    runId: string;
+    sessions: Array<{ dossier: SessionDossierDto; sessionId: string }>;
+    suggestions: WorkbenchArtifactSuggestionDto[];
+  }> {
+    return this.request("GET", `/workbench/authoring/runs/${encodeURIComponent(runId)}/context`);
+  }
+
   evidence(runId: string, query: URLSearchParams): Promise<WorkbenchAuthoringEvidencePage> {
     const suffix = query.size > 0 ? `?${query.toString()}` : "";
     return this.request("GET", `/workbench/authoring/runs/${encodeURIComponent(runId)}/evidence${suffix}`);
   }
 
-  submit(runId: string, bundle: WorkbenchAuthoringBundle | WorkbenchAuthoringBundleV2): Promise<{
+  submit(runId: string, bundle: WorkbenchAuthoringBundle | WorkbenchAuthoringBundleV2 | WorkbenchAuthoringBundleV3): Promise<{
     accepted: boolean;
     findings: unknown[];
     ok: true;

@@ -2,7 +2,8 @@ import { describe, expect, test } from "vitest";
 import {
   BLOCKED_MUTATION_ENDPOINTS,
   endpointProbePasses,
-  READ_ONLY_ENDPOINTS
+  READ_ONLY_ENDPOINTS,
+  READ_ONLY_POST_ENDPOINTS
 } from "../../../scripts/masthead-endpoint-matrix.js";
 
 describe("endpoint matrix probe pass policy", () => {
@@ -33,6 +34,7 @@ describe("endpoint matrix probe pass policy", () => {
     expect(reads).toContain("GET /workbench/authoring/capabilities");
     expect(reads).toContain("GET /workbench/authoring/runs/run-1");
     expect(reads).toContain("GET /workbench/authoring/runs/run-1/evidence?sessionId=session-1");
+    expect(reads).toContain("GET /workbench/authoring/runs/run-1/context");
   });
 
   test("probes the artifact-only Logbook endpoint", () => {
@@ -48,5 +50,10 @@ describe("endpoint matrix probe pass policy", () => {
     expect(mutations).toContain("POST /workbench/authoring/runs");
     expect(mutations).toContain("POST /workbench/authoring/runs/run-1/submit");
     expect(mutations).toContain("POST /workbench/authoring/runs/run-1/finish");
+  });
+
+  test("classifies advisory suggestions as a bridge-safe read-only POST", () => {
+    const reads = new Set(READ_ONLY_POST_ENDPOINTS.map((entry) => `${entry.method} ${entry.path}`));
+    expect(reads).toContain("POST /workbench/authoring/suggestions");
   });
 });

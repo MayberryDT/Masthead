@@ -4,16 +4,19 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
-import type { WorkbenchAuthoringBundle } from "../../shared/workbenchAuthoring.ts";
+import type {
+  WorkbenchAuthoringBundle,
+  WorkbenchAuthoringBundleV3
+} from "../../shared/workbenchAuthoring.ts";
 import type { DaemonConfig } from "../config.ts";
 import { seedSession } from "../db/__tests__/sessionTestHelpers.ts";
 import { getOrCreateDatabaseIdentity } from "../db/schema.ts";
-import { applySessionArtifact, publishSessionArtifact } from "../db/sessionArtifactRepository.ts";
 import { createMastheadDaemon, type MastheadDaemon } from "../server.ts";
 import type { MastheadDatabase } from "../db/sqlite.ts";
-import { authoringEvidenceRevision } from "../../workbench/authoring/evidenceCatalog.ts";
-import { openAuthoringRun } from "../../workbench/authoring/authoringService.ts";
-import { saveWorkbenchArtifactCandidate } from "../db/workbenchArtifactCandidateRepository.ts";
+import {
+  openAgentLedAuthoringRun,
+  openAuthoringRun
+} from "../../workbench/authoring/authoringService.ts";
 import {
   seedDurableArtifactCorpus
 } from "../../workbench/authoring/__fixtures__/durableArtifactCorpus.ts";
@@ -34,227 +37,19 @@ afterEach(async () => {
 });
 
 describe("Workbench authoring HTTP API", () => {
-  test("lists, proposes, dismisses, and opens only evidence-sized artifact candidates", async () => {
-    const { baseUrl, daemon } = await startTestDaemon();
-    seedDurableArtifactCorpus(daemon.database);
-    const databaseId = getOrCreateDatabaseIdentity(daemon.database);
-
-    const capabilities = await getJson(baseUrl, "/workbench/authoring/capabilities");
-    expect(capabilities.body).toMatchObject({
-      bundleVersion: "workbench-authoring-v2",
-      evidencePolicy: "candidate_scoped_canonical_evidence",
-      evidenceRequirements: {
-        adr: ["context", "decision", "alternatives"],
-        incident_timeline: ["symptom", "ordered_events", "remediation"],
-        runbook: ["problem", "change", "verification"]
-      },
-      operations: ["candidates", "open", "status", "evidence", "submit", "finish"]
-    });
-
-    const page = await getJson(
-      baseUrl,
-      "/workbench/authoring/candidates?status=pending&kind=runbook&limit=2"
-    );
-    expect(page.body.candidates).toHaveLength(2);
-    expect(page.body.candidates.every((candidate: any) => candidate.kind === "runbook")).toBe(true);
-    expect(page.body.nextCursor).toEqual(expect.any(String));
-    const next = await getJson(
-      baseUrl,
-      `/workbench/authoring/candidates?status=pending&kind=runbook&limit=2&cursor=${encodeURIComponent(page.body.nextCursor)}`
-    );
-    expect(next.body.candidates.map((candidate: any) => candidate.candidateId)).not.toEqual(
-      expect.arrayContaining(page.body.candidates.map((candidate: any) => candidate.candidateId))
-    );
-
-    const allRunbooks = await getJson(
-      baseUrl,
-      "/workbench/authoring/candidates?status=pending&kind=runbook&limit=100"
-    );
-    const grouped = allRunbooks.body.candidates.find(
-      (entry: any) => entry.provenanceSessionIds.length > 1
-    );
-    expect(grouped).toBeDefined();
-    const groupedOpen = await postJson(
-      baseUrl,
-      "/workbench/authoring/runs",
-      { actorId: "codex", candidateId: grouped.candidateId, databaseId },
-      201
-    );
-    expect(groupedOpen.body.run.sessionIds).toEqual(grouped.provenanceSessionIds);
-
-    const candidate = allRunbooks.body.candidates.find(
-      (entry: any) => entry.seedSessionId === "session:migration-fixed"
-    );
-    expect(candidate).toBeDefined();
-    const opened = await postJson(
-      baseUrl,
-      "/workbench/authoring/runs",
-      { actorId: "codex", candidateId: candidate.candidateId, databaseId },
-      201
-    );
-    expect(opened.body.run).toMatchObject({
-      candidateId: candidate.candidateId,
-      contractVersion: "workbench-authoring-v2",
-      sessionIds: candidate.provenanceSessionIds
-    });
-    expect(
-      daemon.database
-        .prepare("SELECT status FROM workbench_artifact_candidates WHERE candidate_id = ?")
-        .get(candidate.candidateId)
-    ).toEqual({ status: "claimed" });
-    const claimsBeforeDismiss = daemon.database
-      .prepare(
-        `SELECT claim_id AS claimId, released_at AS releasedAt
-         FROM workbench_claims
-         WHERE claim_id IN (
-           SELECT claim_id FROM workbench_authoring_run_sessions WHERE run_id = ?
-         )
-         ORDER BY claim_id`
-      )
-      .all(opened.body.run.runId);
-    const claimedDismissal = await postJson(
-      baseUrl,
-      `/workbench/authoring/candidates/${encodeURIComponent(candidate.candidateId)}/dismiss`,
-      {
-        reason: "An active authoring run must keep ownership of this candidate.",
-        signalEvidenceRefs: candidate.signalEvidenceRefs
-      },
-      409
-    );
-    expect(claimedDismissal.body).toMatchObject({
-      error: { code: "artifact_candidate_transition_invalid" },
-      ok: false
-    });
-    expect(
-      daemon.database
-        .prepare("SELECT status FROM workbench_artifact_candidates WHERE candidate_id = ?")
-        .get(candidate.candidateId)
-    ).toEqual({ status: "claimed" });
-    expect(
-      daemon.database
-        .prepare(
-          `SELECT claim_id AS claimId, released_at AS releasedAt
-           FROM workbench_claims
-           WHERE claim_id IN (
-             SELECT claim_id FROM workbench_authoring_run_sessions WHERE run_id = ?
-           )
-           ORDER BY claim_id`
-        )
-        .all(opened.body.run.runId)
-    ).toEqual(claimsBeforeDismiss);
-    expect((await getJson(baseUrl, `/workbench/authoring/runs/${encodeURIComponent(opened.body.run.runId)}`)).body)
-      .toMatchObject({ run: { status: "open" } });
-
-    const mismatched = await postJson(
-      baseUrl,
-      `/workbench/authoring/runs/${encodeURIComponent(opened.body.run.runId)}/submit`,
-      validBundle(opened.body.run.runId, opened.body.run.evidenceRevision, candidate.seedSessionId),
-      409
-    );
-    expect(mismatched.body).toMatchObject({
-      error: { code: "unsupported_authoring_bundle_version" },
-      ok: false
-    });
-    const candidateBundle = validCandidateBundle(opened.body.run, candidate);
-    seedAuthoringSession(daemon, "session:disjoint-duplicate");
-    const duplicate = applySessionArtifact(daemon.database, {
-      artifactKind: "runbook",
-      content: candidateBundle.artifact.output,
-      contentFingerprint: "duplicate:substantive-human-content",
-      createdBy: "workbench_authoring:test",
-      evidenceRefs: [],
-      provenanceSessionIds: ["session:disjoint-duplicate"],
-      schemaVersion: "runbook-v2",
-      sessionId: "session:disjoint-duplicate",
-      title: candidateBundle.artifact.output.title,
-      validation: { ok: true }
-    });
-    publishSessionArtifact(daemon.database, duplicate.artifactId);
-    const rejectedDuplicate = await postJson(
-      baseUrl,
-      `/workbench/authoring/runs/${encodeURIComponent(opened.body.run.runId)}/submit`,
-      candidateBundle
-    );
-    expect(rejectedDuplicate.body).toMatchObject({ accepted: false, run: { status: "needs_revision" } });
-    expect(rejectedDuplicate.body.findings).toContainEqual(
-      expect.objectContaining({ code: "duplicate_human_content", path: "artifact.output" })
-    );
-    daemon.database.prepare("UPDATE session_artifacts SET status = 'invalid' WHERE artifact_id = ?").run(duplicate.artifactId);
-
-    const submittedV2 = await postJson(
-      baseUrl,
-      `/workbench/authoring/runs/${encodeURIComponent(opened.body.run.runId)}/submit`,
-      candidateBundle
-    );
-    expect(submittedV2.body).toMatchObject({
-      accepted: true,
-      ok: true,
-      run: { contractVersion: "workbench-authoring-v2", status: "ready_to_finish" }
-    });
-
-    const secondCandidate = allRunbooks.body.candidates.find(
-      (entry: any) => entry.seedSessionId === "session:oauth-fixed"
-    );
-    expect(secondCandidate).toBeDefined();
-    const secondOpened = await postJson(
-      baseUrl,
-      "/workbench/authoring/runs",
-      { actorId: "codex-two", candidateId: secondCandidate.candidateId, databaseId },
-      201
-    );
-    const duplicatePending = await postJson(
-      baseUrl,
-      `/workbench/authoring/runs/${encodeURIComponent(secondOpened.body.run.runId)}/submit`,
-      validCandidateBundle(secondOpened.body.run, secondCandidate)
-    );
-    expect(duplicatePending.body).toMatchObject({ accepted: false, run: { status: "needs_revision" } });
-    expect(duplicatePending.body.findings).toContainEqual(
-      expect.objectContaining({ code: "duplicate_human_content", path: "artifact.output" })
-    );
-
-    const arbitrary = await postJson(
-      baseUrl,
-      "/workbench/authoring/runs",
-      { actorId: "codex", databaseId, sessionIds: ["session:oauth-fixed"] },
-      400
-    );
-    expect(arbitrary.body).toMatchObject({ error: { code: "candidate_id_required" }, ok: false });
-
-    const proposed = await postJson(baseUrl, "/workbench/authoring/candidates", {
-      kind: "adr",
-      provenanceSessionIds: ["session:decision-local-first"],
-      seedSessionId: "session:decision-local-first",
-      signalEvidenceRefs: [
-        "message:decision-local-first:decision",
-        "message:decision-local-first:alternative"
-      ],
-      signalSummary: "SQLite was selected over hosted storage to preserve offline operation."
-    }, 201);
-    expect(proposed.body.candidate).toMatchObject({ kind: "adr", origin: "proposal", status: "pending" });
-
-    const dismissed = await postJson(
-      baseUrl,
-      `/workbench/authoring/candidates/${encodeURIComponent(proposed.body.candidate.candidateId)}/dismiss`,
-      {
-        reason: "This exact signal chain is a false positive for reusable guidance.",
-        signalEvidenceRefs: proposed.body.candidate.signalEvidenceRefs
-      }
-    );
-    expect(dismissed.body.candidate).toMatchObject({ status: "dismissed" });
-  });
-
-  test("runs the complete daemon-owned authoring lifecycle", async () => {
+  test("advertises V3 capabilities and preserves historical run reads", async () => {
     const { baseUrl, daemon } = await startTestDaemon();
     seedAuthoringSession(daemon, "session:a");
 
     const capabilities = await getJson(baseUrl, "/workbench/authoring/capabilities");
     expect(capabilities.body).toMatchObject({
-      bundleVersion: "workbench-authoring-v2",
+      bundleVersion: "workbench-authoring-v3",
       capability: "artifact_authoring",
       command: expect.any(String),
       databaseId: getOrCreateDatabaseIdentity(daemon.database),
-      evidencePolicy: "candidate_scoped_canonical_evidence",
-      operations: ["candidates", "open", "status", "evidence", "submit", "finish"],
+      evidencePolicy: "selected_session_canonical_evidence",
+      maxSessionsPerRun: 12,
+      operations: ["suggestions", "open", "status", "evidence", "context", "submit", "finish"],
       protocol: "masthead.workbench.authoring/v1",
       transport: "daemon_http"
     });
@@ -303,24 +98,111 @@ describe("Workbench authoring HTTP API", () => {
     const submitted = await postJson(
       baseUrl,
       `/workbench/authoring/runs/${encodeURIComponent(runId)}/submit`,
-      validBundle(runId, opened.body.run.evidenceRevision, "session:a")
+      validBundle(runId, opened.body.run.evidenceRevision, "session:a"),
+      409
     );
-    expect(submitted).toMatchObject({ status: 200, body: { accepted: true, ok: true, run: { status: "ready_to_finish" } } });
+    expect(submitted.body).toMatchObject({ error: { code: "authoring_contract_audit_only" }, ok: false });
 
-    const finished = await postJson(baseUrl, `/workbench/authoring/runs/${encodeURIComponent(runId)}/finish`, {});
-    expect(finished).toMatchObject({
-      status: 200,
-      body: { ok: true, receipt: { resolvedSessionIds: ["session:a"], runId } }
-    });
-
-    const retried = await postJson(baseUrl, `/workbench/authoring/runs/${encodeURIComponent(runId)}/finish`, {});
-    expect(retried.body.receipt).toEqual(finished.body.receipt);
+    const finished = await postJson(baseUrl, `/workbench/authoring/runs/${encodeURIComponent(runId)}/finish`, {}, 409);
+    expect(finished.body).toMatchObject({ error: { code: "authoring_contract_audit_only" }, ok: false });
   });
 
-  test("keeps deterministic revision findings in a successful domain response", async () => {
+  test("exposes advisory suggestions and canonical context for selected sessions", async () => {
+    const { baseUrl, daemon } = await startTestDaemon();
+    seedDurableArtifactCorpus(daemon.database);
+    const sessionIds = ["session:oauth-fixed", "session:migration-fixed"];
+    const normalizedSessionIds = [...sessionIds].sort();
+
+    const suggestions = await postJson(baseUrl, "/workbench/authoring/suggestions", { sessionIds });
+    expect(suggestions.body).toEqual(
+      expect.arrayContaining([expect.objectContaining({ advisory: true })])
+    );
+
+    const opened = await postJson(baseUrl, "/workbench/authoring/runs", {
+      actorId: "agent:test",
+      databaseId: getOrCreateDatabaseIdentity(daemon.database),
+      sessionIds
+    }, 201);
+    expect(opened.body.run).toMatchObject({
+      contractVersion: "workbench-authoring-v3",
+      sessionIds: normalizedSessionIds
+    });
+    expect(opened.body.run).not.toHaveProperty("candidateId");
+
+    const context = await getJson(
+      baseUrl,
+      `/workbench/authoring/runs/${encodeURIComponent(opened.body.run.runId)}/context`
+    );
+    expect(context.body).toMatchObject({
+      evidenceRevision: opened.body.run.evidenceRevision,
+      ok: true,
+      runId: opened.body.run.runId,
+      sessions: normalizedSessionIds.map((sessionId) => ({ sessionId })),
+      suggestions: expect.arrayContaining([expect.objectContaining({ advisory: true })])
+    });
+    expect(context.body.sessions.every((entry: any) => entry.dossier)).toBe(true);
+  });
+
+  test("submits and finishes a V3 selection through HTTP", async () => {
+    const { baseUrl, daemon } = await startTestDaemon();
+    seedAuthoringSession(daemon, "session:v3");
+    const opened = await postJson(baseUrl, "/workbench/authoring/runs", {
+      actorId: "agent:test",
+      databaseId: getOrCreateDatabaseIdentity(daemon.database),
+      sessionIds: ["session:v3"]
+    }, 201);
+    const runId = opened.body.run.runId as string;
+    const bundle = validV3Bundle(runId, opened.body.run.evidenceRevision, "session:v3");
+
+    const submitted = await postJson(
+      baseUrl,
+      `/workbench/authoring/runs/${encodeURIComponent(runId)}/submit`,
+      bundle
+    );
+    expect(submitted.body).toMatchObject({ accepted: true, ok: true, run: { status: "ready_to_finish" } });
+
+    const finished = await postJson(baseUrl, `/workbench/authoring/runs/${encodeURIComponent(runId)}/finish`);
+    expect(finished.body).toMatchObject({
+      ok: true,
+      receipt: {
+        contractVersion: "workbench-authoring-v3",
+        optionalArtifacts: [],
+        resolvedSessionIds: ["session:v3"],
+        runId
+      }
+    });
+    expect((await postJson(baseUrl, `/workbench/authoring/runs/${encodeURIComponent(runId)}/finish`)).body)
+      .toEqual(finished.body);
+  });
+
+  test("rejects candidate-based and oversized V3 run opens", async () => {
+    const { baseUrl, daemon } = await startTestDaemon();
+    seedAuthoringSession(daemon, "session:a");
+    const databaseId = getOrCreateDatabaseIdentity(daemon.database);
+
+    expect((await postJson(baseUrl, "/workbench/authoring/runs", {
+      actorId: "agent:test",
+      candidateId: "candidate:legacy",
+      databaseId,
+      sessionIds: ["session:a"]
+    }, 400)).body).toMatchObject({ error: { code: "candidate_id_not_allowed" }, ok: false });
+
+    expect((await postJson(baseUrl, "/workbench/authoring/runs", {
+      actorId: "agent:test",
+      databaseId,
+      sessionIds: Array.from({ length: 13 }, (_, index) => `session:${index}`)
+    }, 400)).body).toMatchObject({ error: { code: "authoring_session_count_invalid" }, ok: false });
+
+    expect((await postJson(baseUrl, "/workbench/authoring/runs", {
+      actorId: "agent:test",
+      databaseId,
+      sessionIds: Array.from({ length: 13 }, () => "session:a")
+    }, 400)).body).toMatchObject({ error: { code: "authoring_session_count_invalid" }, ok: false });
+  });
+
+  test("keeps historical submissions audit-only", async () => {
     const { baseUrl, daemon } = await startTestDaemon();
     seedAuthoringSession(daemon, "session:revision");
-    const databaseId = getOrCreateDatabaseIdentity(daemon.database);
     const opened = openLegacyRun(daemon, "session:revision", "codex");
     const runId = opened.body.run.runId as string;
 
@@ -333,11 +215,9 @@ describe("Workbench authoring HTTP API", () => {
       padding: "x".repeat(1_100_000),
       runId,
       sessionPackages: []
-    });
+    }, 409);
 
-    expect(submitted.status).toBe(200);
-    expect(submitted.body).toMatchObject({ accepted: false, ok: true, run: { status: "needs_revision" } });
-    expect(submitted.body.findings.length).toBeGreaterThan(0);
+    expect(submitted.body).toMatchObject({ error: { code: "authoring_contract_audit_only" }, ok: false });
   });
 
   test("maps malformed, missing, identity, and state failures to transport statuses", async () => {
@@ -357,7 +237,7 @@ describe("Workbench authoring HTTP API", () => {
         await postJson(
           baseUrl,
           "/workbench/authoring/runs",
-          { actorId: "codex", candidateId: "candidate:any", databaseId: "wrong" },
+          { actorId: "codex", databaseId: "wrong", sessionIds: ["session:errors"] },
           409
         )
       ).body
@@ -367,11 +247,11 @@ describe("Workbench authoring HTTP API", () => {
         await postJson(
           baseUrl,
           "/workbench/authoring/runs",
-          { actorId: "codex", candidateId: "candidate:missing", databaseId: getOrCreateDatabaseIdentity(daemon.database) },
+          { actorId: "codex", databaseId: getOrCreateDatabaseIdentity(daemon.database), sessionIds: ["session:missing"] },
           404
         )
       ).body
-    ).toMatchObject({ ok: false, error: { code: "artifact_candidate_not_found" } });
+    ).toMatchObject({ ok: false, error: { code: "session_not_found" } });
     expect((await getJson(baseUrl, "/workbench/authoring/runs/missing", 404)).body).toMatchObject({
       ok: false,
       error: { code: "authoring_run_not_found" }
@@ -388,28 +268,18 @@ describe("Workbench authoring HTTP API", () => {
           409
         )
       ).body
-    ).toMatchObject({ ok: false, error: { code: "authoring_run_not_ready" } });
+    ).toMatchObject({ ok: false, error: { code: "authoring_contract_audit_only" } });
 
     seedAuthoringSession(daemon, "session:no-evidence");
     for (const table of ["messages", "tool_results", "tool_calls", "file_effects"]) {
       daemon.database.prepare(`DELETE FROM ${table} WHERE session_id = ?`).run("session:no-evidence");
     }
-    saveWorkbenchArtifactCandidate(daemon.database, {
-      candidateId: "candidate:no-evidence",
-      evidenceRevision: authoringEvidenceRevision(daemon.database, ["session:no-evidence"]),
-      kind: "runbook",
-      origin: "proposal",
-      provenanceSessionIds: ["session:no-evidence"],
-      seedSessionId: "session:no-evidence",
-      signalEvidenceRefs: ["message:deleted"],
-      signalSummary: "A deliberately empty candidate exercises the canonical evidence gate."
-    });
     expect(
       (
         await postJson(
           baseUrl,
           "/workbench/authoring/runs",
-          { actorId: "codex", candidateId: "candidate:no-evidence", databaseId },
+          { actorId: "codex", databaseId, sessionIds: ["session:no-evidence"] },
           409
         )
       ).body
@@ -418,8 +288,11 @@ describe("Workbench authoring HTTP API", () => {
 
   test("matches only authoring routes and gives submit a five MiB body budget", () => {
     expect(isWorkbenchAuthoringPath("/workbench/authoring/capabilities")).toBe(true);
+    expect(isWorkbenchAuthoringPath("/workbench/authoring/suggestions")).toBe(true);
     expect(isWorkbenchAuthoringPath("/workbench/authoring/runs")).toBe(true);
     expect(isWorkbenchAuthoringPath("/workbench/authoring/runs/run%3A1/evidence")).toBe(true);
+    expect(isWorkbenchAuthoringPath("/workbench/authoring/runs/run%3A1/context")).toBe(true);
+    expect(isWorkbenchAuthoringPath("/workbench/authoring/candidates")).toBe(false);
     expect(isWorkbenchAuthoringPath("/workbench/sessions")).toBe(false);
     expect(getWorkbenchAuthoringBodyLimit("/workbench/authoring/runs/run%3A1/submit", 1024)).toBe(5 * 1024 * 1024);
     expect(getWorkbenchAuthoringBodyLimit("/workbench/authoring/runs", 1024)).toBe(1024);
@@ -469,8 +342,12 @@ describe("Workbench authoring HTTP API", () => {
   test("returns sanitized 500 responses for corrupted run invariants and unexpected adapter errors", async () => {
     const { baseUrl, daemon } = await startTestDaemon();
     seedAuthoringSession(daemon, "session:corrupted");
-    const opened = openLegacyRun(daemon, "session:corrupted", "codex");
-    const runId = opened.body.run.runId as string;
+    const opened = openAgentLedAuthoringRun(daemon.database, {
+      actorId: "codex",
+      databaseId: getOrCreateDatabaseIdentity(daemon.database),
+      sessionIds: ["session:corrupted"]
+    });
+    const runId = opened.run.runId;
     daemon.database
       .prepare("UPDATE workbench_authoring_runs SET status = 'ready_to_finish', bundle_json = NULL WHERE run_id = ?")
       .run(runId);
@@ -512,52 +389,6 @@ describe("Workbench authoring HTTP API", () => {
     expect(JSON.stringify(unexpected)).not.toContain("secret database invariant detail");
   });
 
-  test("returns 409 when an accepted contribution becomes invalid before finish", async () => {
-    const { baseUrl, daemon } = await startTestDaemon();
-    seedAuthoringSession(daemon, "session:contribution");
-    const existing = applySessionArtifact(daemon.database, {
-      artifactKind: "runbook",
-      content: { title: "Published contribution" },
-      contentFingerprint: "published-contribution",
-      createdBy: "test",
-      evidenceRefs: ["message:session:contribution:message"],
-      provenanceSessionIds: ["session:contribution"],
-      schemaVersion: "runbook-v1",
-      sessionId: "session:contribution",
-      title: "Published contribution",
-      validation: { ok: true }
-    });
-    publishSessionArtifact(daemon.database, existing.artifactId);
-    const opened = openLegacyRun(daemon, "session:contribution", "codex");
-    const runId = opened.body.run.runId as string;
-    const bundle = validBundle(runId, opened.body.run.evidenceRevision, "session:contribution");
-    bundle.notApplicable = bundle.notApplicable.filter((decision) => decision.kind !== "runbook");
-    bundle.contributions = [
-      {
-        kind: "runbook",
-        publishedArtifactId: existing.artifactId,
-        sessionId: "session:contribution"
-      }
-    ];
-    const submitted = await postJson(
-      baseUrl,
-      `/workbench/authoring/runs/${encodeURIComponent(runId)}/submit`,
-      bundle
-    );
-    expect(submitted.body).toMatchObject({ accepted: true, run: { status: "ready_to_finish" } });
-
-    daemon.database.prepare("UPDATE session_artifacts SET status = 'superseded' WHERE artifact_id = ?").run(existing.artifactId);
-    const finished = await postJson(
-      baseUrl,
-      `/workbench/authoring/runs/${encodeURIComponent(runId)}/finish`,
-      {},
-      409
-    );
-    expect(finished.body).toMatchObject({
-      error: { code: "authoring_finish_invalid_contribution" },
-      ok: false
-    });
-  });
 });
 
 async function startTestDaemon(): Promise<{ baseUrl: string; daemon: MastheadDaemon }> {
@@ -661,146 +492,57 @@ function validBundle(runId: string, evidenceRevision: string, sessionId: string)
   };
 }
 
-function validCandidateBundle(run: any, candidate: any) {
-  const failureRef = candidate.signalEvidenceRefs.find((ref: string) => ref.startsWith("tool_result:"));
-  const changeRef = candidate.signalEvidenceRefs.find((ref: string) => ref.startsWith("file:"));
-  const verificationRef = candidate.signalEvidenceRefs.find(
-    (ref: string) => ref.startsWith("checkpoint:") || ref.includes(":verified")
-  );
-  const joinSupports = candidate.provenanceSessionIds.length > 1
-    ? candidate.provenanceSessionIds.map((sessionId: string) => {
-        const sessionToken = sessionId.replace(/^session:/, "");
-        const evidenceRef = candidate.signalEvidenceRefs.find((ref: string) => ref.includes(sessionToken));
-        if (!evidenceRef) throw new Error(`candidate_join_fixture_evidence_missing:${sessionId}`);
-        return {
-          evidenceRef,
-          excerpt: candidateExcerpt(evidenceRef),
-          path: "joinRationale",
-          supportKind: "problem"
-        };
-      })
-    : [];
+function validV3Bundle(
+  runId: string,
+  evidenceRevision: string,
+  sessionId: string
+): WorkbenchAuthoringBundleV3 {
+  const evidenceRef = {
+    id: `message:${sessionId}:message`,
+    kind: "event" as const,
+    observedAt: "2026-07-10T12:00:00.000Z",
+    source: "canonical"
+  };
   return {
-    artifact: {
-      kind: candidate.kind,
-      output: {
-        changedFiles: ["src/workbench/authoring/authoringService.ts"],
-        claimSupport: [
-          {
-            evidenceRef: failureRef,
-            excerpt: candidateExcerpt(failureRef),
-            path: "problemSignature.symptoms[0]",
-            supportKind: "problem"
+    artifacts: [],
+    bundleVersion: "workbench-authoring-v3",
+    evidenceRevision,
+    runId,
+    sessionEnrichments: [{
+      enrichment: {
+        sessionDossier: {
+          blockers: [],
+          continuation: { constraints: [], openQuestions: [] },
+          decisions: ["Publish only after enrichment is current."],
+          evidenceRefs: [evidenceRef],
+          keyWork: ["Applied grounded durable enrichment before dossier rendering."],
+          outcome: "Published an enriched canonical dossier atomically.",
+          verification: {
+            commands: [],
+            evidenceRefs: [evidenceRef],
+            failures: [],
+            status: "unknown",
+            summary: "Canonical message evidence supports the enrichment."
           },
-          {
-            evidenceRef: failureRef,
-            excerpt: candidateExcerpt(failureRef),
-            path: "problemSignature.errorStrings[0]",
-            supportKind: "problem"
-          },
-          {
-            evidenceRef: failureRef,
-            excerpt: candidateExcerpt(failureRef),
-            path: "problemSignature.affectedScope",
-            supportKind: "problem"
-          },
-          {
-            evidenceRef: failureRef,
-            excerpt: candidateExcerpt(failureRef),
-            path: "preconditions[0]",
-            supportKind: "problem"
-          },
-          {
-            evidenceRef: failureRef,
-            excerpt: candidateExcerpt(failureRef),
-            path: "reproSteps[0]",
-            supportKind: "problem"
-          },
-          {
-            evidenceRef: changeRef,
-            excerpt: candidateExcerpt(changeRef),
-            path: "fixSteps[0]",
-            supportKind: "change"
-          },
-          {
-            evidenceRef: changeRef,
-            excerpt: candidateExcerpt(changeRef),
-            path: "commands[0]",
-            supportKind: "change"
-          },
-          {
-            evidenceRef: changeRef,
-            excerpt: candidateExcerpt(changeRef),
-            path: "changedFiles[0]",
-            supportKind: "change"
-          },
-          {
-            evidenceRef: failureRef,
-            excerpt: candidateExcerpt(failureRef),
-            path: "environmentRequirements[0]",
-            supportKind: "problem"
-          },
-          {
-            evidenceRef: failureRef,
-            excerpt: candidateExcerpt(failureRef),
-            path: "rootCause",
-            supportKind: "root_cause"
-          },
-          {
-            evidenceRef: verificationRef,
-            excerpt: candidateExcerpt(verificationRef),
-            path: "preventionNotes[0]",
-            supportKind: "remediation"
-          },
-          {
-            evidenceRef: verificationRef,
-            excerpt: candidateExcerpt(verificationRef),
-            path: "validationChecks[0]",
-            supportKind: "verification"
-          },
-          ...joinSupports
-        ],
-        commands: ["npm test"],
-        confidence: "low",
-        deadEnds: [],
-        environmentRequirements: ["Node.js"],
-        evidenceRefs: candidate.signalEvidenceRefs,
-        fixSteps: ["Apply the evidence-backed corrective change."],
-        missingEvidence: ["Only the candidate-scoped canonical evidence was reviewed."],
-        preconditions: ["The observed failure is reproducible."],
-        preventionNotes: ["Keep the focused verification check in regression coverage."],
-        problemSignature: {
-          affectedScope: "The candidate's affected runtime scope",
-          errorStrings: ["The exact observed failure signature"],
-          symptoms: ["The recorded operation failed before the corrective change"]
+          warnings: []
         },
-        provenanceSessionIds: candidate.provenanceSessionIds,
-        reproSteps: ["Reproduce the recorded failure under the same preconditions."],
-        risksOrGaps: [],
-        rootCause: "The cited failure evidence identifies the pre-change behavior.",
-        title: "Recover the verified candidate failure",
-        validationChecks: ["The cited post-change verification completed successfully."]
+        sessionSummary: {
+          confidence: "low",
+          evidenceRefs: [evidenceRef],
+          state: "completed",
+          text: "Agent-enriched summary grounded in the selected canonical evidence."
+        },
+        sessionTitle: {
+          basis: "dominant_work",
+          confidence: "low",
+          evidenceRefs: [evidenceRef],
+          text: "Agent-enriched title"
+        },
+        version: "session-capsule-v4"
       },
-      provenanceSessionIds: candidate.provenanceSessionIds,
-      seedSessionId: candidate.seedSessionId
-    },
-    bundleVersion: "workbench-authoring-v2",
-    candidateId: candidate.candidateId,
-    evidenceRevision: run.evidenceRevision,
-    runId: run.runId
+      sessionId
+    }]
   };
-}
-
-function candidateExcerpt(ref: string): string {
-  const excerpts: Record<string, string> = {
-    "file:migration:change": "modified migrations/041_retry.sql",
-    "file:oauth:change": "modified auth/callback.ts",
-    "checkpoint:oauth:verified": "Callback regression test passed after the nonce repair.",
-    "tool_result:migration:failure": "Migration 41 failed because the index already existed.",
-    "tool_result:migration:verified": "Migration smoke test passed on a restored snapshot.",
-    "tool_result:oauth:failure": "OAuth callback test failed with an invalid state nonce."
-  };
-  return excerpts[ref] ?? `Canonical evidence excerpt for ${ref}`;
 }
 
 async function getJson(baseUrl: string, path: string, expectedStatus = 200) {
