@@ -16,7 +16,6 @@ import type {
 } from "../../shared/workbenchAuthoring.ts";
 import type { PublishedSessionDossierV1, SessionDossierDto } from "../../shared/sessionDossier.ts";
 import type { DurableSessionEnrichment } from "../../shared/sessionEnrichment.ts";
-import type { CanonicalDossierPublicationReceipt } from "../../shared/workbench.ts";
 import { hasSemanticRedactedText } from "../../core/redaction.ts";
 import type { SessionArtifactRecord } from "../../daemon/db/sessionArtifactRepository.ts";
 import {
@@ -202,7 +201,6 @@ export function openAgentLedAuthoringRun(
     for (const sessionId of sessionIds) assertSessionExists(db, sessionId);
     const databaseId = getOrCreateDatabaseIdentity(db);
     if (input.databaseId !== databaseId) throw new Error("database_identity_mismatch");
-    assertSessionsOnPublishPath(db, sessionIds);
     const evidence = authoringEvidenceManifestWithWarnings(db, sessionIds);
     assertCanonicalEvidence(db, evidence);
     const reusable = findReusableWorkbenchAuthoringRun(db, {
@@ -213,6 +211,20 @@ export function openAgentLedAuthoringRun(
     });
     if (reusable?.evidenceRevision === evidence.evidenceRevision) {
       const run = reusable.status === "completed" ? reusable : renewOrReacquireAuthoringClaimsInTransaction(db, {
+        actorId: input.actorId,
+        expiresAt: authoringLeaseExpiry(),
+        runId: reusable.runId
+      });
+      return openAgentLedResult(db, run, evidence);
+    }
+    assertSessionsOnPublishPath(db, sessionIds);
+    if (reusable && reusable.status !== "completed") {
+      resetWorkbenchAuthoringRunEvidence(db, {
+        evidenceRevision: evidence.evidenceRevision,
+        runId: reusable.runId,
+        updatedAt: new Date().toISOString()
+      });
+      const run = renewOrReacquireAuthoringClaimsInTransaction(db, {
         actorId: input.actorId,
         expiresAt: authoringLeaseExpiry(),
         runId: reusable.runId
@@ -671,13 +683,6 @@ function publishCanonicalDossierForRecoveryInTransaction(
   });
   const published = publishSessionArtifactInTransaction(db, applied.artifactId)!;
   return published;
-}
-
-export function publishCanonicalDossiers(
-  _db: MastheadDatabase,
-  _input: { actorId: string; sessionIds: string[] }
-): CanonicalDossierPublicationReceipt {
-  throw new Error("authoring_contract_audit_only");
 }
 
 function requireLegacyAuthoringBundle(run: WorkbenchAuthoringRunDto): WorkbenchAuthoringBundle {

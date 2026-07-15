@@ -62,6 +62,16 @@ describe("Workbench authoring service", () => {
       snapshotVersion: "canonical-session-dossier-v1"
     });
     expect(finishAuthoringRun(db, { runId: opened.run.runId })).toEqual(receipt);
+    const reopened = openAgentLedAuthoringRun(db, {
+      actorId: "codex",
+      databaseId: testDatabaseId(db),
+      sessionIds: ["session:a"]
+    });
+    expect(reopened.run).toMatchObject({
+      receipt,
+      runId: opened.run.runId,
+      status: "completed"
+    });
     db.close();
   });
 
@@ -88,6 +98,45 @@ describe("Workbench authoring service", () => {
     if (receipt.contractVersion !== "workbench-authoring-v3") throw new Error("expected_v3_receipt");
     expect(receipt.optionalArtifacts.map(({ kind }) => kind)).toEqual(["runbook"]);
     expect(getAuthoringRunStatus(db, opened.run.runId).run).not.toHaveProperty("candidateId");
+    db.close();
+  });
+
+  test("publishes agent-selected runbook and ADR artifacts in one V3 bundle", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    const sessionIds = ["session:oauth-fixed", "session:decision-local-first"];
+    const candidates = discoverArtifactCandidates(db, sessionIds);
+    const runbook = candidates.find((entry) => entry.kind === "runbook")!;
+    const adr = candidates.find((entry) => entry.kind === "adr")!;
+    const opened = openAgentLedAuthoringRun(db, {
+      actorId: "codex",
+      databaseId: testDatabaseId(db),
+      sessionIds
+    });
+    const bundle = validV3Bundle(
+      opened.run.runId,
+      opened.run.evidenceRevision,
+      "session:oauth-fixed",
+      runbook.signalEvidenceRefs.find((ref) => ref.startsWith("tool_result:"))!
+    );
+    bundle.sessionEnrichments.push(validV3Bundle(
+      opened.run.runId,
+      opened.run.evidenceRevision,
+      "session:decision-local-first",
+      adr.signalEvidenceRefs[0]!
+    ).sessionEnrichments[0]!);
+    bundle.artifacts = [
+      validCandidateBundle(opened.run, runbook).artifact,
+      validAdrArtifactDraft(adr)
+    ];
+    const submitted = submitAuthoringBundle(db, { bundle, runId: opened.run.runId });
+    expect(submitted.accepted, JSON.stringify(submitted.findings, null, 2)).toBe(true);
+
+    const receipt = finishAuthoringRun(db, { runId: opened.run.runId });
+    if (receipt.contractVersion !== "workbench-authoring-v3") throw new Error("expected_v3_receipt");
+    expect(receipt.optionalArtifacts.map(({ kind }) => kind)).toEqual(["runbook", "adr"]);
+    expect(receipt.optionalArtifacts.map(({ artifactId }) => getSessionArtifact(db, artifactId)?.artifactKind))
+      .toEqual(["runbook", "adr"]);
     db.close();
   });
 
@@ -160,6 +209,26 @@ describe("Workbench authoring service", () => {
     expect(() => openAgentLedAuthoringRun(db, { ...input, sessionIds: tooMany })).toThrow(
       "authoring_session_count_invalid"
     );
+    db.close();
+  });
+
+  test("resets an open V3 run onto changed evidence without conflicting with its own stale claim", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-10T12:00:00.000Z"));
+    const db = await readyAuthoringDb();
+    const input = { actorId: "codex", databaseId: testDatabaseId(db), sessionIds: ["session:a"] };
+    const opened = openAgentLedAuthoringRun(db, input);
+    const staleClaimId = opened.run.claimIds[0]!;
+    expireAuthoringClaims(db, opened.run.runId);
+    insertMessage(db, "session:a", "changed", "New canonical evidence changes the pinned authoring revision.");
+
+    const reset = openAgentLedAuthoringRun(db, input);
+
+    expect(reset.run).toMatchObject({ runId: opened.run.runId, status: "open" });
+    expect(reset.run.evidenceRevision).not.toBe(opened.run.evidenceRevision);
+    expect(reset.run.claimIds[0]).not.toBe(staleClaimId);
+    expect(reset.run.claimStatus).toBe("active");
+    expect(db.prepare("SELECT COUNT(*) AS count FROM workbench_authoring_runs").get()).toEqual({ count: 1 });
     db.close();
   });
 
@@ -916,6 +985,39 @@ function validCandidateBundle(
   };
 }
 
+function validAdrArtifactDraft(
+  candidate: StoredWorkbenchArtifactCandidate
+): WorkbenchAuthoringBundleV3["artifacts"][number] {
+  const decisionRef = candidate.signalEvidenceRefs.find((ref) => ref.includes("decision"))!;
+  const alternativeRef = candidate.signalEvidenceRefs.find((ref) => ref.includes("alternative"))!;
+  const decisionExcerpt = canonicalCandidateExcerpt(decisionRef);
+  const alternativeExcerpt = canonicalCandidateExcerpt(alternativeRef);
+  return {
+    kind: "adr",
+    output: {
+      alternatives: [alternativeExcerpt],
+      claimSupport: [
+        { evidenceRef: decisionRef, excerpt: decisionExcerpt, path: "context", supportKind: "problem" },
+        { evidenceRef: decisionRef, excerpt: decisionExcerpt, path: "decision", supportKind: "decision" },
+        { evidenceRef: alternativeRef, excerpt: alternativeExcerpt, path: "alternatives[0]", supportKind: "alternative" },
+        { evidenceRef: decisionRef, excerpt: decisionExcerpt, path: "consequences[0]", supportKind: "decision" },
+        { evidenceRef: decisionRef, excerpt: decisionExcerpt, path: "status", supportKind: "decision" }
+      ],
+      confidence: "medium",
+      consequences: ["Masthead remains available when hosted services are unavailable."],
+      context: "The canonical session compared local and hosted persistence for offline operation.",
+      decision: decisionExcerpt,
+      evidenceRefs: [decisionRef, alternativeRef],
+      missingEvidence: [],
+      provenanceSessionIds: candidate.provenanceSessionIds,
+      status: "accepted",
+      title: "Choose local-first canonical session storage"
+    },
+    provenanceSessionIds: candidate.provenanceSessionIds,
+    seedSessionId: candidate.seedSessionId
+  };
+}
+
 function canonicalCandidateExcerpt(ref: string): string {
   const excerpts: Record<string, string> = {
     "checkpoint:oauth:verified": "Callback regression test passed after the nonce repair.",
@@ -927,7 +1029,9 @@ function canonicalCandidateExcerpt(ref: string): string {
     "file:repeated-error:revision-change": "modified remote shell bootstrap retry guard",
     "tool_result:oauth:failure": "OAuth callback test failed with an invalid state nonce.",
     "tool_result:repeated-error:1:failure": "ssh: codex: command not found. ERROR_SIGNATURE: ssh codex command not found",
-    "tool_result:repeated-error:2:failure": "ssh: codex: command not found. ERROR_SIGNATURE: SSH / Codex command not found"
+    "tool_result:repeated-error:2:failure": "ssh: codex: command not found. ERROR_SIGNATURE: SSH / Codex command not found",
+    "message:decision-local-first:decision": "Decision: adopt SQLite as the canonical local-first session store.",
+    "message:decision-local-first:alternative": "Rejected alternative: a hosted database would break offline operation."
   };
   return excerpts[ref] ?? `Canonical evidence excerpt for ${ref}`;
 }
