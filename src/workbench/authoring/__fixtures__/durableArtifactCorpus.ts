@@ -1,6 +1,9 @@
 import { withImmediateTransaction, type MastheadDatabase } from "../../../daemon/db/sqlite.ts";
 import type {
   WorkbenchAuthoringBundleV2,
+  WorkbenchAuthoringBundleV3,
+  WorkbenchAuthoringRunDto,
+  WorkbenchAutomaticArtifactKind,
   WorkbenchClaimSupport
 } from "../../../shared/workbenchAuthoring.ts";
 import type { WorkbenchArtifactCandidate } from "../artifactCandidates.ts";
@@ -37,6 +40,33 @@ export const dossierOnlySparseSession: DurableArtifactCorpusSession = {
   title: "Sparse orientation",
   evidence: [
     { id: "message:dossier-sparse:1", kind: "message", observedAt: at(0), text: "Please inspect the repository." }
+  ]
+};
+
+export const completedImplementationForEnrichedDossier: DurableArtifactCorpusSession = {
+  id: "session:implementation-complete",
+  title: "Complete artifact search pagination",
+  evidence: [
+    {
+      id: "message:implementation-complete:objective",
+      kind: "message",
+      observedAt: at(0),
+      text: "Implemented stable pagination for artifact search results."
+    },
+    {
+      id: "file:implementation-complete:change",
+      kind: "file_effect",
+      observedAt: at(1),
+      text: "modified src/daemon/db/sessionArtifactRepository.ts",
+      label: "modified"
+    },
+    {
+      id: "checkpoint:implementation-complete:verified",
+      kind: "checkpoint",
+      observedAt: at(2),
+      text: "Artifact search pagination tests passed.",
+      label: "verification_passed"
+    }
   ]
 };
 
@@ -117,6 +147,25 @@ export const explicitArchitectureDecision: DurableArtifactCorpusSession = {
       kind: "message",
       observedAt: at(1),
       text: "Rejected alternative: a hosted database would break offline operation."
+    }
+  ]
+};
+
+export const misleadingSuggestionSession: DurableArtifactCorpusSession = {
+  id: "session:agent-judgment-only",
+  title: "Set authorization cache location",
+  evidence: [
+    {
+      id: "message:agent-judgment-only:direction",
+      kind: "message",
+      observedAt: at(0),
+      text: "The authorization cache stays process-local to preserve offline startup."
+    },
+    {
+      id: "message:agent-judgment-only:tradeoff",
+      kind: "message",
+      observedAt: at(1),
+      text: "A hosted cache would prevent offline startup and add a network dependency."
     }
   ]
 };
@@ -323,11 +372,25 @@ export const durableArtifactCorpus = [
   veryLargeNoisySession
 ] as const;
 
+export const focusedAgentLedCorpus = [
+  completedImplementationForEnrichedDossier,
+  databaseMigrationFailureFixedAndVerified,
+  explicitArchitectureDecision,
+  productionIncidentWithRootCause
+] as const;
+
 export function corpusSessionIds(): string[] {
   return durableArtifactCorpus.map((session) => session.id);
 }
 
 export function seedDurableArtifactCorpus(db: MastheadDatabase): void {
+  seedFocusedAgentLedCorpus(db, durableArtifactCorpus);
+}
+
+export function seedFocusedAgentLedCorpus(
+  db: MastheadDatabase,
+  sessions: readonly DurableArtifactCorpusSession[]
+): void {
   const fixedAt = "2026-07-01T12:00:00.000Z";
   db.prepare(
     "INSERT OR IGNORE INTO hosts (host_id, hostname, first_seen_at, last_seen_at) VALUES ('host:corpus', 'corpus', ?, ?)"
@@ -345,12 +408,26 @@ export function seedDurableArtifactCorpus(db: MastheadDatabase): void {
     "INSERT INTO workbench_session_state (session_id, publication_status) VALUES (?, 'publish_path')"
   );
 
-  for (const session of durableArtifactCorpus) {
+  for (const session of sessions) {
     const lastAt = session.evidence.at(-1)?.observedAt ?? fixedAt;
     insertSession.run(session.id, session.id, session.title, fixedAt, lastAt, lastAt, fixedAt, lastAt);
     insertState.run(session.id);
     for (const evidence of session.evidence) insertEvidence(db, session.id, evidence);
   }
+}
+
+export function buildFocusedAgentLedBundle(
+  run: Pick<WorkbenchAuthoringRunDto, "evidenceRevision" | "runId">,
+  sessions: readonly DurableArtifactCorpusSession[],
+  optionalKinds: readonly WorkbenchAutomaticArtifactKind[] = ["runbook", "adr", "incident_timeline"]
+): WorkbenchAuthoringBundleV3 {
+  return {
+    artifacts: optionalKinds.map((kind) => focusedOptionalArtifact(kind, sessions)),
+    bundleVersion: "workbench-authoring-v3",
+    evidenceRevision: run.evidenceRevision,
+    runId: run.runId,
+    sessionEnrichments: sessions.map((session) => focusedSessionEnrichment(session))
+  };
 }
 
 export function seedToolHeavyPerformanceSessions(
@@ -471,6 +548,210 @@ function canonicalPrefix(kind: CorpusEvidence["kind"]): string {
   if (kind === "runtime_signal") return "signal";
   if (kind === "file_effect") return "file";
   return kind;
+}
+
+function focusedSessionEnrichment(
+  session: DurableArtifactCorpusSession
+): WorkbenchAuthoringBundleV3["sessionEnrichments"][number] {
+  const evidence = session.evidence[0];
+  if (!evidence) throw new Error(`focused_corpus_evidence_missing:${session.id}`);
+  const evidenceRef = {
+    id: evidence.id,
+    kind: "event" as const,
+    observedAt: evidence.observedAt,
+    source: "canonical"
+  };
+  return {
+    enrichment: {
+      sessionDossier: {
+        blockers: [],
+        continuation: { constraints: [], openQuestions: [] },
+        decisions: [],
+        evidenceRefs: [evidenceRef],
+        keyWork: [`Reviewed the canonical evidence for ${session.title}.`],
+        outcome: `Captured the completed outcome for ${session.title}.`,
+        verification: {
+          commands: [],
+          evidenceRefs: [evidenceRef],
+          failures: [],
+          status: "unknown",
+          summary: "The selected canonical evidence supports this durable enrichment."
+        },
+        warnings: []
+      },
+      sessionSummary: {
+        confidence: "low",
+        evidenceRefs: [evidenceRef],
+        state: "completed",
+        text: `Agent-enriched account of ${session.title}, grounded in the selected canonical evidence.`
+      },
+      sessionTitle: {
+        basis: "dominant_work",
+        confidence: "low",
+        evidenceRefs: [evidenceRef],
+        text: session.title
+      },
+      version: "session-capsule-v4"
+    },
+    sessionId: session.id
+  };
+}
+
+function focusedOptionalArtifact(
+  kind: WorkbenchAutomaticArtifactKind,
+  sessions: readonly DurableArtifactCorpusSession[]
+): WorkbenchAuthoringBundleV3["artifacts"][number] {
+  if (kind === "runbook") return focusedMigrationRunbook(sessions);
+  if (kind === "incident_timeline") return focusedIncidentTimeline(sessions);
+  return focusedAdr(sessions);
+}
+
+function focusedMigrationRunbook(
+  sessions: readonly DurableArtifactCorpusSession[]
+): WorkbenchAuthoringBundleV3["artifacts"][number] {
+  const session = requireFocusedSession(sessions, databaseMigrationFailureFixedAndVerified.id);
+  const failure = requireFocusedEvidence(session, "tool_result:migration:failure");
+  const change = requireFocusedEvidence(session, "file:migration:change");
+  const verified = requireFocusedEvidence(session, "tool_result:migration:verified");
+  return {
+    kind: "runbook",
+    output: {
+      changedFiles: ["migrations/041_retry.sql"],
+      claimSupport: [
+        durableSupport("problemSignature.symptoms[0]", failure.id, failure.text, "problem"),
+        durableSupport("problemSignature.errorStrings[0]", failure.id, failure.text, "problem"),
+        durableSupport("problemSignature.affectedScope", failure.id, failure.text, "problem"),
+        durableSupport("preconditions[0]", failure.id, failure.text, "problem"),
+        durableSupport("reproSteps[0]", failure.id, failure.text, "problem"),
+        durableSupport("fixSteps[0]", change.id, change.text, "change"),
+        durableSupport("commands[0]", change.id, change.text, "change"),
+        durableSupport("changedFiles[0]", change.id, change.text, "change"),
+        durableSupport("environmentRequirements[0]", failure.id, failure.text, "problem"),
+        durableSupport("rootCause", failure.id, failure.text, "root_cause"),
+        durableSupport("preventionNotes[0]", verified.id, verified.text, "remediation"),
+        durableSupport("validationChecks[0]", verified.id, verified.text, "verification")
+      ],
+      commands: ["Apply the recorded migration repair."],
+      confidence: "low",
+      deadEnds: [],
+      environmentRequirements: ["A restorable database snapshot is available."],
+      evidenceRefs: [failure.id, change.id, verified.id],
+      fixSteps: [`Apply the recorded migration change: ${change.text}.`],
+      missingEvidence: [],
+      preconditions: [failure.text],
+      preventionNotes: [verified.text],
+      problemSignature: {
+        affectedScope: "Database migration 41",
+        errorStrings: [failure.text],
+        symptoms: [failure.text]
+      },
+      provenanceSessionIds: [session.id],
+      reproSteps: [failure.text],
+      risksOrGaps: [],
+      rootCause: failure.text,
+      title: "Recover migration 41 after an existing-index failure",
+      validationChecks: [verified.text]
+    },
+    provenanceSessionIds: [session.id],
+    seedSessionId: session.id
+  };
+}
+
+function focusedAdr(
+  sessions: readonly DurableArtifactCorpusSession[]
+): WorkbenchAuthoringBundleV3["artifacts"][number] {
+  const session = sessions.find(({ id }) => id === explicitArchitectureDecision.id)
+    ?? requireFocusedSession(sessions, misleadingSuggestionSession.id);
+  const [decision, alternative] = session.evidence;
+  if (!decision || !alternative) throw new Error(`focused_adr_evidence_missing:${session.id}`);
+  return {
+    kind: "adr",
+    output: {
+      alternatives: [alternative.text],
+      claimSupport: [
+        durableSupport("context", decision.id, decision.text, "problem"),
+        durableSupport("decision", decision.id, decision.text, "decision"),
+        durableSupport("alternatives[0]", alternative.id, alternative.text, "alternative"),
+        durableSupport("consequences[0]", decision.id, decision.text, "decision"),
+        durableSupport("status", decision.id, decision.text, "decision")
+      ],
+      confidence: "low",
+      consequences: ["Offline operation remains available without a hosted dependency."],
+      context: "The selected evidence records a durable storage direction and its operational tradeoff.",
+      decision: decision.text,
+      evidenceRefs: [decision.id, alternative.id],
+      missingEvidence: [],
+      provenanceSessionIds: [session.id],
+      status: "accepted",
+      title: session.id === misleadingSuggestionSession.id
+        ? "Keep the authorization cache process-local"
+        : "Keep the canonical session store local-first"
+    },
+    provenanceSessionIds: [session.id],
+    seedSessionId: session.id
+  };
+}
+
+function focusedIncidentTimeline(
+  sessions: readonly DurableArtifactCorpusSession[]
+): WorkbenchAuthoringBundleV3["artifacts"][number] {
+  const session = requireFocusedSession(sessions, productionIncidentWithRootCause.id);
+  const [detected, triage, mitigated, restored] = session.evidence;
+  if (!detected || !triage || !mitigated || !restored) {
+    throw new Error(`focused_incident_evidence_missing:${session.id}`);
+  }
+  return {
+    kind: "incident_timeline",
+    output: {
+      claimSupport: [
+        durableSupport("symptom", detected.id, detected.text, "problem"),
+        durableSupport("impact", detected.id, detected.text, "problem"),
+        durableSupport("timeline[0].summary", detected.id, detected.text, "timeline"),
+        durableSupport("timeline[1].summary", triage.id, triage.text, "timeline"),
+        durableSupport("timeline[2].summary", mitigated.id, mitigated.text, "timeline"),
+        durableSupport("timeline[3].summary", restored.id, restored.text, "timeline"),
+        durableSupport("rootCause", triage.id, triage.text, "root_cause"),
+        durableSupport("contributingFactors[0]", triage.id, triage.text, "problem"),
+        durableSupport("remediation[0]", mitigated.id, mitigated.text, "remediation"),
+        durableSupport("prevention[0]", restored.id, restored.text, "remediation"),
+        durableSupport("status", restored.id, restored.text, "verification")
+      ],
+      confidence: "low",
+      contributingFactors: [triage.text],
+      evidenceRefs: session.evidence.map(({ id }) => id),
+      impact: detected.text,
+      missingEvidence: [],
+      prevention: [restored.text],
+      provenanceSessionIds: [session.id],
+      remediation: [mitigated.text],
+      rootCause: triage.text,
+      status: "resolved",
+      symptom: detected.text,
+      timeline: session.evidence.map((item) => ({
+        at: item.observedAt,
+        evidenceRefs: [item.id],
+        summary: item.text
+      })),
+      title: "Restore ingestion after SQLite writer lease exhaustion"
+    },
+    provenanceSessionIds: [session.id],
+    seedSessionId: session.id
+  };
+}
+
+function requireFocusedSession(
+  sessions: readonly DurableArtifactCorpusSession[],
+  sessionId: string
+): DurableArtifactCorpusSession {
+  const session = sessions.find(({ id }) => id === sessionId);
+  if (!session) throw new Error(`focused_corpus_session_missing:${sessionId}`);
+  return session;
+}
+
+function requireFocusedEvidence(session: DurableArtifactCorpusSession, evidenceId: string): CorpusEvidence {
+  const evidence = session.evidence.find(({ id }) => id === evidenceId);
+  if (!evidence) throw new Error(`focused_corpus_evidence_missing:${evidenceId}`);
+  return evidence;
 }
 
 export function buildDurableArtifactFixtureBundle(

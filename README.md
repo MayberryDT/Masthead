@@ -76,10 +76,16 @@ MASTHEAD_BRIDGE_PORT=17374 npm run dev
 
 ## Artifact Authoring
 
-Workbench’s **Copy Agent Prompt** action copies a disposable request for the selected sessions.
-Under `workbench-authoring-v3`, the agent writes current durable enrichment for each selected
-session and chooses zero or more optional artifacts. Deterministic analysis may supply an artifact
-suggestion privately to the agent, but suggestions are nonbinding.
+The user flow is:
+
+**Select sessions → Copy Agent Prompt → give it to the coding agent → agent enriches and authors →
+Masthead validates and atomically publishes → inspect/reuse in Logbook and MCP.**
+
+The copied prompt is a disposable request for exactly the selected sessions. Under
+`workbench-authoring-v3`, the coding agent writes current durable enrichment for every selected
+session and chooses zero or more useful runbooks, ADRs, or incident timelines. Deterministic
+analysis may privately supply suggestions, but suggestions are nonbinding: they neither require nor
+prohibit an artifact kind.
 
 The daemon then rebuilds the original canonical dossier structure from current enriched session
 data; agents do not replace its presentation. Every substantive optional-artifact claim supplies a
@@ -88,21 +94,12 @@ evidence. Unsupported authoring-process language, weak joins, and duplicate subs
 are rejected. Publication is atomic admission of validated enriched artifacts into Logbook, and
 nothing enters Logbook until enrichment is current.
 
-The normal installed CLI is a thin daemon HTTP adapter:
-
-```bash
-mastheadctl workbench capabilities --json
-mastheadctl workbench candidates --status pending --limit 100 --json
-mastheadctl workbench open --database-id <id> --candidate <candidate-id> --json
-mastheadctl workbench evidence --run <run-id> --session <session-id> --limit 100 --json
-mastheadctl workbench submit --run <run-id> --file <bundle.json> --json
-mastheadctl workbench finish --run <run-id> --json
-```
-
-The listed V2 commands remain audit-only during the V3 cutover. V3 submit stores validation
-findings without output rows; finish atomically applies enrichment, publishes the rebuilt dossiers
-and useful optional artifacts, updates search and pipeline state, and persists one retry-safe
-receipt. See [ADR 0014](docs/adr/0014-agent-led-enriched-artifact-authoring.md),
+The installed CLI is thin agent-facing transport to the daemon-owned V3 authoring boundary; it is
+not the user workflow and does not open SQLite. V1 and V2 authoring rows remain readable for audit
+but cannot be reopened or mutated as V3. V3 submit stores validation findings without publication;
+finish atomically applies enrichment, publishes rebuilt dossiers and useful optional artifacts,
+updates search and pipeline state, and persists one retry-safe receipt. See
+[ADR 0014](docs/adr/0014-agent-led-enriched-artifact-authoring.md),
 [ADR 0012](docs/adr/0012-daemon-owned-artifact-authoring.md), and the
 [daemon API reference](docs/reference/daemon-api.md).
 
@@ -164,11 +161,11 @@ verify` runs the product and surface contracts, typecheck, Vitest, build,
 endpoint matrix, and smoke suite.
 
 `npm run dogfood:durable-artifacts` remains a fixture-only audit gate for the superseded V2 flow;
-its detector precision/recall and 12-session limit are not V3 product requirements. V3 acceptance
-must cover current enrichment for every selected session, original dossier fidelity, grounded claim
-support, agent judgment over optional kinds, atomic publication, Logbook/MCP recall, and artifact-only
-reuse. A machine gate cannot satisfy the production human gate, which requires every canary artifact
-reviewed, median usefulness at least 4/5, and no artifact below 3/5.
+its detector precision/recall is not a V3 product requirement. Current V3 release acceptance uses
+the focused isolated corpus in
+[durable-artifact-production-canary.md](docs/acceptance/durable-artifact-production-canary.md) to
+prove enrichment-only publication, agent judgment over optional kinds, grounded claim support,
+atomic publication, and Logbook/MCP retrieval without touching production data.
 
 ## Data Path
 

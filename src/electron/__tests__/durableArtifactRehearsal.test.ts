@@ -39,7 +39,7 @@ function config(overrides: Record<string, unknown> = {}) {
   };
 }
 
-describe("durable artifact temporary-copy rehearsal coordinator", () => {
+describe("obsolete V2 production-scale rehearsal coordinator", () => {
   test("keeps the historical V2 rehearsal fail-closed", () => {
     expect(() => assertHistoricalRehearsalNotExecutable()).toThrow("obsolete_v2_rehearsal");
   });
