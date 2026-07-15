@@ -1,11 +1,13 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
 import { hermesAdapter } from "../hermes/adapter.ts";
 import type { AdapterRecord, DiscoveredSource } from "../types.ts";
 
 const tempDirs: string[] = [];
+const fixturesDir = join(dirname(fileURLToPath(import.meta.url)), "..", "__fixtures__");
 
 afterEach(async () => {
   await Promise.all(tempDirs.map((path) => rm(path, { force: true, recursive: true })));
@@ -63,6 +65,15 @@ describe("Hermes adapter", () => {
     expect(records.flatMap((record) => record.diagnostics)).toEqual([]);
   });
 
+  test("normalizes Hermes tool-role rows as tool calls and results", async () => {
+    const records = await collect(hermesAdapter.backfill(hermesFixtureSource()));
+
+    expect(records.filter((record) => record.normalized.kind === "message")).toHaveLength(3);
+    expect(records.filter((record) => record.normalized.kind === "tool_call")).toHaveLength(1);
+    expect(records.filter((record) => record.normalized.kind === "tool_result")).toHaveLength(1);
+    expect(new Set(records.flatMap(normalizedSessionIds))).toEqual(new Set(["20260710_100000_fixture"]));
+  });
+
   test("discovers Hermes session files without crawling request dumps or logs", async () => {
     const homeDir = await makeTempDir();
     const sessionsDir = join(homeDir, ".hermes", "sessions");
@@ -102,6 +113,14 @@ function source(path: string): DiscoveredSource {
   };
 }
 
+function hermesFixtureSource(): DiscoveredSource {
+  const path = join(fixturesDir, "hermes", "session.jsonl");
+  return {
+    ...source(path),
+    sourceSessionId: "20260710_100000_fixture"
+  };
+}
+
 async function collect(records: AsyncIterable<AdapterRecord>): Promise<AdapterRecord[]> {
   const output: AdapterRecord[] = [];
   for await (const record of records) output.push(record);
@@ -111,4 +130,10 @@ async function collect(records: AsyncIterable<AdapterRecord>): Promise<AdapterRe
 function messageValue(record: AdapterRecord): Record<string, unknown> {
   expect(record.normalized.kind).toBe("message");
   return record.normalized.value as Record<string, unknown>;
+}
+
+function normalizedSessionIds(record: AdapterRecord): string[] {
+  const value = record.normalized.value;
+  if (typeof value !== "object" || value === null || !("sessionId" in value)) return [];
+  return typeof value.sessionId === "string" ? [value.sessionId] : [];
 }

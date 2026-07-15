@@ -1,0 +1,5 @@
+{"type":"system","content":"You are a coding agent."}
+{"type":"user","content":"Fix the import range bug."}
+{"type":"reasoning","id":"rs_fixture_001","summary":"Inspect the recent-range predicate.","status":"completed"}
+{"type":"assistant","content":"I found the cursor fallback bug.","tool_calls":[{"id":"call_fixture_001","name":"read_file","arguments":{"path":"src/daemon/import/importManifestService.ts"}}]}
+{"type":"tool_result","tool_call_id":"call_fixture_001","content":"includeUnit returns true when no cursor exists"}
