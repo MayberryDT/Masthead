@@ -119,6 +119,55 @@ describe("useWorkbenchController", () => {
     expect(machineRequest().sessionIds).toEqual(["session:page-1", "session:page-2"]);
     expect(latest().canRun("copy_agent_prompt")).toBe(true);
   });
+
+  test("reconciles off-page compile readiness across refreshes without clearing selection", async () => {
+    let firstPageReady = true;
+    vi.mocked(getWorkbenchAuthoringCapabilities).mockResolvedValue(
+      authoringCapabilities("database:test", "/home/test/.local/bin/mastheadctl")
+    );
+    vi.mocked(getWorkbenchActivity).mockResolvedValue(activityResponse());
+    vi.mocked(getWorkbenchNotAddedSummary).mockResolvedValue(notAddedSummary());
+    vi.mocked(getWorkbenchSessions).mockImplementation(async (_base, options = {}) => {
+      if (options.offset === 100) {
+        return { ...response([session("session:page-2", "Second page")]), offset: 100, total: 101 };
+      }
+      const firstPage = session("session:page-1", "First page", firstPageReady
+        ? {}
+        : { qualityStatus: "unchecked" });
+      return { ...response([firstPage]), limit: options.limit ?? 100, offset: options.offset ?? 0, total: 101 };
+    });
+
+    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
+    await waitFor(() => latest().sessions[0]?.sessionId === "session:page-1");
+    await act(async () => {
+      latest().selectPage();
+      latest().setPage(1);
+      await Promise.resolve();
+    });
+    await waitFor(() => latest().sessions[0]?.sessionId === "session:page-2");
+    await act(async () => {
+      latest().selectPage();
+      await Promise.resolve();
+    });
+    expect(latest().canRun("copy_agent_prompt")).toBe(true);
+
+    firstPageReady = false;
+    await rerenderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 2 });
+    await waitFor(() => latest().loading === false);
+
+    expect(Array.from(latest().selectedSessionIds)).toEqual(["session:page-1", "session:page-2"]);
+    expect(latest().canRun("copy_agent_prompt")).toBe(false);
+    expect(latest().handoffText).toBe("");
+
+    firstPageReady = true;
+    await rerenderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 3 });
+    await waitFor(() => latest().loading === false);
+
+    expect(Array.from(latest().selectedSessionIds)).toEqual(["session:page-1", "session:page-2"]);
+    expect(latest().canRun("copy_agent_prompt")).toBe(true);
+    expect(machineRequest().sessionIds).toEqual(["session:page-1", "session:page-2"]);
+  });
+
   test("requires V3 capabilities and a compile-ready selection for Copy Agent Prompt", async () => {
     mockWorkbenchResponse([
       session("session:ready", "Ready", { nextAction: "enrich", qualityStatus: "passed", transcriptStatus: "imported" }),

@@ -16,7 +16,8 @@ import type {
   WorkbenchActivityDto,
   WorkbenchNotAddedSessionDto,
   WorkbenchNotAddedSummaryDto,
-  WorkbenchQueueSessionDto
+  WorkbenchQueueSessionDto,
+  WorkbenchSessionsResponse
 } from "../../shared/workbench";
 import type { WorkbenchAuthoringCapabilitiesDto } from "../../shared/workbenchAuthoring";
 import { buildWorkbenchHandoff } from "../../ui/workbench/workbenchHandoff";
@@ -99,6 +100,8 @@ export function useWorkbenchController({
   const [total, setTotal] = useState(0);
   const pageSize = WORKBENCH_PAGE_SIZE;
   const loadRequestId = useRef(0);
+  const selectedSessionIdsRef = useRef(selectedSessionIds);
+  selectedSessionIdsRef.current = selectedSessionIds;
 
   const load = useCallback(async (options: { signal?: AbortSignal; page?: number } = {}) => {
     const requestId = ++loadRequestId.current;
@@ -121,11 +124,30 @@ export function useWorkbenchController({
         capabilitiesPromise
       ]);
       if (options.signal?.aborted || requestId !== loadRequestId.current) return;
+      const selectedAtLoad = new Set(selectedSessionIdsRef.current);
+      const compileReadySelected = await resolveSelectedCompileReadiness(
+        activeProjectionUrl,
+        selectedAtLoad,
+        response,
+        options.signal
+      );
+      if (options.signal?.aborted || requestId !== loadRequestId.current) return;
       setSessions(response.sessions);
       setTotal(typeof response.total === "number" ? response.total : response.sessions.length);
       setActivity(activityResponse.activity);
       setNotAddedSummary(notAdded);
       setAuthoringCapabilities(capabilities);
+      setSelectedCompileReadySessionIds((current) => {
+        const next = new Set(current);
+        for (const sessionId of selectedAtLoad) next.delete(sessionId);
+        for (const sessionId of compileReadySelected) {
+          if (selectedSessionIdsRef.current.has(sessionId)) next.add(sessionId);
+        }
+        for (const sessionId of next) {
+          if (!selectedSessionIdsRef.current.has(sessionId)) next.delete(sessionId);
+        }
+        return next;
+      });
     } catch (loadError) {
       if (!options.signal?.aborted && requestId === loadRequestId.current) {
         setError(loadError instanceof Error ? loadError.message : String(loadError));
@@ -192,8 +214,7 @@ export function useWorkbenchController({
   const handoffText = useMemo(
     () =>
       authoringCapabilities?.bundleVersion === "workbench-authoring-v3" &&
-      selectedSessionIds.size > 0 &&
-      selectedCompileReadySessionIds.size === selectedSessionIds.size
+      isCompileReadySelection(selectedSessionIds, selectedCompileReadySessionIds)
         ? buildWorkbenchHandoff({
             authoringCommand: authoringCapabilities.command,
             databaseId: authoringCapabilities.databaseId,
@@ -210,8 +231,7 @@ export function useWorkbenchController({
       if (kind === "enroll_missing") return true;
       if (kind === "copy_agent_prompt") {
         return authoringCapabilities?.bundleVersion === "workbench-authoring-v3" &&
-          selectedSessionIds.size > 0 &&
-          selectedCompileReadySessionIds.size === selectedSessionIds.size;
+          isCompileReadySelection(selectedSessionIds, selectedCompileReadySessionIds);
       }
       if (selectedSessions.length === 0) return false;
 
@@ -446,6 +466,48 @@ export function useWorkbenchController({
 function isCompileReadySession(session: WorkbenchQueueSessionDto): boolean {
   return (session.transcriptStatus === "available" || session.transcriptStatus === "imported") &&
     session.qualityStatus === "passed";
+}
+
+function isCompileReadySelection(selectedSessionIds: Set<string>, compileReadySessionIds: Set<string>): boolean {
+  return selectedSessionIds.size > 0 &&
+    Array.from(selectedSessionIds).every((sessionId) => compileReadySessionIds.has(sessionId));
+}
+
+async function resolveSelectedCompileReadiness(
+  activeProjectionUrl: string,
+  selectedSessionIds: Set<string>,
+  visibleResponse: WorkbenchSessionsResponse,
+  signal?: AbortSignal
+): Promise<Set<string>> {
+  const unresolved = new Set(selectedSessionIds);
+  const compileReady = new Set<string>();
+  collectCompileReadiness(visibleResponse.sessions, unresolved, compileReady);
+  if (unresolved.size === 0 || visibleResponse.offset === 0 && visibleResponse.sessions.length >= visibleResponse.total) {
+    return compileReady;
+  }
+
+  const limit = 500;
+  let offset = 0;
+  let total = Number.POSITIVE_INFINITY;
+  while (unresolved.size > 0 && offset < total) {
+    const response = await getWorkbenchSessions(activeProjectionUrl, { limit, offset, signal });
+    collectCompileReadiness(response.sessions, unresolved, compileReady);
+    total = typeof response.total === "number" ? response.total : response.sessions.length;
+    if (response.sessions.length === 0) break;
+    offset += response.sessions.length;
+  }
+  return compileReady;
+}
+
+function collectCompileReadiness(
+  sessions: WorkbenchQueueSessionDto[],
+  unresolved: Set<string>,
+  compileReady: Set<string>
+): void {
+  for (const session of sessions) {
+    if (!unresolved.delete(session.sessionId)) continue;
+    if (isCompileReadySession(session)) compileReady.add(session.sessionId);
+  }
 }
 
 function formatActionError(error: unknown): string {
