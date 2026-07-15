@@ -116,6 +116,7 @@ import {
 } from "./import/importCoordinator.ts";
 import { buildImportCompletionReport, settleImportSessionClassifications } from "./import/importCompletionReport.ts";
 import { buildImportManifestPlan, createManifestForJob } from "./import/importManifestService.ts";
+import { planTranscriptImportUnits, transcriptPlanForWorkUnit } from "./import/transcriptImportPlanner.ts";
 import { countImportedRecord, emptyImportResult } from "./import/importWorker.ts";
 import { runImportWorkUnit } from "./import/importWorkUnitRunner.ts";
 import { applyImportRepair, previewImportRepair } from "./import/importRepair.ts";
@@ -1319,6 +1320,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       await Promise.all(sources.map((source) => transcriptSources(source)))
     ).flat().filter((source) => !source.path || !sourceIsExcluded(database, { sourceId: source.sourceId, sourcePath: source.path }));
     const cursors = readCursorsForSources(transcriptFiles);
+    const manifestTranscriptUnits = await planTranscriptImportUnits(transcriptFiles);
     controls.updateProgress({
       currentPath: sources[0]?.path ?? sources[0]?.sourceId ?? runtime,
       heartbeatAt: new Date().toISOString(),
@@ -1337,7 +1339,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           runtime,
           scope,
           sourceId: sources[0]?.sourceId,
-          sources: transcriptFiles
+          sources: transcriptFiles,
+          transcriptUnits: manifestTranscriptUnits
         });
     controls.updateProgress({
       stage: "transcript",
@@ -1384,13 +1387,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         }),
         onSessionImported: undefined,
         onSessionHydrated: (sessionId) => reconcileImportedTranscript(database, sessionId, { finalizeNoise: false }),
-        parseTranscriptUnit: async (fallbackPlan, cursor) => {
-          const plannedUnits = await adapter.planTranscriptUnits(fallbackPlan.source);
-          const plannedUnit = plannedUnits.find((candidate) =>
-            candidate.source.path === unit.sourcePath ||
-            Boolean(unit.sourceSessionId && candidate.sourceSessionId === unit.sourceSessionId)
-          ) ?? (plannedUnits.length === 1 ? plannedUnits[0] : fallbackPlan);
-          return adapter.parseTranscriptUnit(plannedUnit, cursor);
+        parseTranscriptUnit: async (_fallbackPlan, cursor) => {
+          return adapter.parseTranscriptUnit(transcriptPlanForWorkUnit(manifestTranscriptUnits, unit), cursor);
         },
         runtimeKind: unit.runtime,
         workUnitId: unit.workUnitId,
@@ -2205,6 +2203,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           const adapterScan = scan.adapters.find((adapter) => adapter.runtime === runtime);
           const sources = sourcesForBodySelection(body, adapterScan?.sources ?? []);
           const transcriptFiles = (await Promise.all(sources.map((source) => transcriptSources(source)))).flat();
+          const transcriptUnits = await planTranscriptImportUnits(transcriptFiles);
           const summary = await buildImportManifestPlan({
             cursors: readCursorsForSources(transcriptFiles),
             generatedAt,
@@ -2213,7 +2212,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
             runtime,
             scope,
             sourceId: sources[0]?.sourceId,
-            sources: transcriptFiles
+            sources: transcriptFiles,
+            transcriptUnits
           });
           summary.summary.estimatedRecords = adapterScan && adapterScan.discoveredSessions > 0 ? adapterScan.discoveredSessions : undefined;
           previews.push({ runtime, summary: summary.summary });

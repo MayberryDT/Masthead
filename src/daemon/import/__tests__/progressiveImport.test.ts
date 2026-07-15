@@ -1,4 +1,4 @@
-import { writeFile, mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
+import { writeFile, mkdir, mkdtemp, rm, symlink, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -462,6 +462,74 @@ describe("progressive OpenCode imports", () => {
     expect(cancelled.job).toMatchObject({ importJobId: job.importJobId, status: "cancelled" });
     expect(getImportJob(daemon.database, job.importJobId)?.status).toBe("cancelled");
   });
+
+  test("uses semantic transcript activity for real preview and queued import admission", async () => {
+    const { daemon, tempDir } = await createTestHarness();
+    const hermesRoot = join(tempDir, ".hermes", "sessions");
+    const now = new Date();
+    const currentActivityAt = new Date(now.getTime() - 24 * 60 * 60 * 1_000).toISOString();
+    const oldActivityAt = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1_000).toISOString();
+    const recentMtime = new Date(now.getTime() - 60 * 1_000);
+    const oldPath = join(hermesRoot, "session_20260401_120000_old.jsonl");
+    const currentPath = join(hermesRoot, "session_20260714_120000_current.jsonl");
+    await writeRawJsonl(oldPath, [
+      { content: "This semantic transcript is old.", last_updated: oldActivityAt, role: "user", session_id: "old-semantic" }
+    ]);
+    await writeRawJsonl(currentPath, [
+      { content: "This semantic transcript is current.", last_updated: currentActivityAt, role: "user", session_id: "current-semantic" }
+    ]);
+    await utimes(oldPath, recentMtime, recentMtime);
+    await utimes(currentPath, recentMtime, recentMtime);
+    const baseUrl = await listen(daemon);
+    const sourceIds = await approveRuntimeTranscriptSources(baseUrl, daemon, "hermes", hermesRoot);
+
+    const previewResponse = await fetch(`${baseUrl}/sources/import/preview`, {
+      body: JSON.stringify({
+        importScope: { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 },
+        runtimes: ["hermes"],
+        sourceIds
+      }),
+      headers: { accept: "application/json", "content-type": "application/json" },
+      method: "POST"
+    });
+    expect(previewResponse.status).toBe(200);
+    await expect(previewResponse.json()).resolves.toMatchObject({
+      ok: true,
+      previews: [{ runtime: "hermes", summary: { excludedUnits: 1, includedUnits: 1, totalUnits: 2 } }]
+    });
+
+    const sourceRows = daemon.database
+      .prepare("SELECT source_id AS sourceId, source_path AS sourcePath FROM ingest_sources WHERE source_id IN (?, ?)")
+      .all(...sourceIds) as Array<{ sourceId: string; sourcePath: string }>;
+    const queuedJobs = await Promise.all(
+      sourceRows.map(async (source) => {
+        const response = await postJson(baseUrl, "/imports", { kind: "transcript", sourceId: source.sourceId });
+        return response.job ?? response.jobs[0]!;
+      })
+    );
+    expect(queuedJobs.every(Boolean)).toBe(true);
+    await waitFor(() => queuedJobs.every((job) => ["failed", "succeeded", "succeeded_with_issues"].includes(getImportJob(daemon.database, job.importJobId)?.status ?? "")));
+
+    expect(countWhere(daemon.database, "sessions", "source_session_id = ?", "current-semantic")).toBe(1);
+    expect(countWhere(daemon.database, "sessions", "source_session_id = ?", "old-semantic")).toBe(0);
+    const oldSourceId = sourceRows.find((source) => source.sourcePath === oldPath)?.sourceId;
+    const oldJobId = queuedJobs.find((job) => job.sourceId === oldSourceId)?.importJobId;
+    const currentSourceId = sourceRows.find((source) => source.sourcePath === currentPath)?.sourceId;
+    const currentJobId = queuedJobs.find((job) => job.sourceId === currentSourceId)?.importJobId;
+    expect(oldJobId).toBeDefined();
+    expect(currentJobId).toBeDefined();
+    expect(["succeeded", "succeeded_with_issues"]).toContain(getImportJob(daemon.database, oldJobId ?? "")?.status);
+    expect(["succeeded", "succeeded_with_issues"]).toContain(getImportJob(daemon.database, currentJobId ?? "")?.status);
+    expect(
+      daemon.database
+        .prepare(
+          `SELECT scope_reason AS scopeReason, status, timestamp_basis AS timestampBasis
+          FROM import_work_units
+          WHERE import_job_id = ? AND source_path = ?`
+        )
+        .get(oldJobId ?? "", oldPath)
+    ).toMatchObject({ scopeReason: "outside_recent_range", status: "skipped", timestampBasis: "semantic" });
+  });
 });
 
 async function createTestHarness(
@@ -498,6 +566,11 @@ async function writeJsonl(path: string, rows: unknown[]): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   const supportedRows = supportedTranscriptRows(rows);
   await writeFile(path, `${supportedRows.map((row) => JSON.stringify(row)).join("\n")}\n`, "utf8");
+}
+
+async function writeRawJsonl(path: string, rows: unknown[]): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`, "utf8");
 }
 
 function supportedTranscriptRows(rows: unknown[]): unknown[] {
@@ -617,6 +690,36 @@ async function approveTranscriptSource(baseUrl: string, daemon: MastheadDaemon, 
     sourceId
   });
   return sourceId;
+}
+
+async function approveRuntimeTranscriptSources(
+  baseUrl: string,
+  daemon: MastheadDaemon,
+  runtime: string,
+  sourceRoot: string
+): Promise<string[]> {
+  const scan = await fetch(`${baseUrl}/sources/scan`, { headers: { accept: "application/json" }, method: "POST" });
+  expect(scan.status).toBe(202);
+  const rows = daemon.database
+    .prepare(
+      `SELECT source_id AS sourceId
+      FROM ingest_sources
+      WHERE adapter = ?
+        AND source_path LIKE ?
+      ORDER BY source_path ASC, source_id ASC`
+    )
+    .all(runtime, `${sourceRoot}%`) as Array<{ sourceId: string }>;
+  expect(rows).toHaveLength(2);
+  for (const { sourceId } of rows) {
+    setSourcePolicy(daemon.database, {
+      decidedAt: new Date().toISOString(),
+      enabled: true,
+      policyKind: "transcript_import",
+      reason: "Production-path semantic admission regression.",
+      sourceId
+    });
+  }
+  return rows.map(({ sourceId }) => sourceId);
 }
 
 async function ingestHook(baseUrl: string, body: Record<string, unknown>): Promise<void> {

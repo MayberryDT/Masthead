@@ -12,6 +12,7 @@ import { setSourcePolicy } from "../src/daemon/db/sourcePolicyRepository.ts";
 import { openMastheadDatabase } from "../src/daemon/db/sqlite.ts";
 import { buildImportCompletionReport, settleImportSessionClassifications } from "../src/daemon/import/importCompletionReport.ts";
 import { createManifestForJob } from "../src/daemon/import/importManifestService.ts";
+import { planTranscriptImportUnits, transcriptPlanForWorkUnit } from "../src/daemon/import/transcriptImportPlanner.ts";
 import { previewImportRepair } from "../src/daemon/import/importRepair.ts";
 import { runImportWorkUnit } from "../src/daemon/import/importWorkUnitRunner.ts";
 import { reconcileImportedTranscript } from "../src/workbench/transcriptQualityReconciler.ts";
@@ -77,9 +78,7 @@ export async function replayImportTrustCorpus(input) {
         reason: "sanitized isolated acceptance replay",
         sourceId
       });
-      const transcriptUnits = (await Promise.all(
-        entry.sources.map((source) => entry.adapter.planTranscriptUnits(source))
-      )).flat();
+      const transcriptUnits = await planTranscriptImportUnits(entry.sources);
       const manifest = await createManifestForJob(db, {
         generatedAt: GENERATED_AT,
         importJobId: job.importJobId,
@@ -99,12 +98,8 @@ export async function replayImportTrustCorpus(input) {
           hostname: "isolated-import-trust-acceptance",
           now: () => GENERATED_AT,
           onSessionHydrated: (sessionId) => reconcileImportedTranscript(db, sessionId, { finalizeNoise: false }),
-          parseTranscriptUnit: async (fallbackPlan, cursor) => {
-            const planned = transcriptUnits.find((candidate) =>
-              candidate.source.path === fallbackPlan.source.path ||
-              Boolean(fallbackPlan.sourceSessionId && candidate.sourceSessionId === fallbackPlan.sourceSessionId)
-            );
-            return entry.adapter.parseTranscriptUnit(planned ?? fallbackPlan, cursor);
+          parseTranscriptUnit: async (_fallbackPlan, cursor) => {
+            return entry.adapter.parseTranscriptUnit(transcriptPlanForWorkUnit(transcriptUnits, unit), cursor);
           },
           runtimeKind: entry.runtime,
           workUnitId: unit.workUnitId
