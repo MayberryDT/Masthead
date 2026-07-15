@@ -8,6 +8,7 @@ import {
   type CreateImportWorkUnitInput
 } from "../db/importLedgerRepository.ts";
 import type { MastheadDatabase } from "../db/sqlite.ts";
+import { decideImportUnitScope } from "./importScope.ts";
 
 export type PlannedImportWorkUnit = Omit<CreateImportWorkUnitInput, "importJobId" | "manifestId"> & {
   status: ImportWorkUnitStatus;
@@ -24,6 +25,7 @@ export type ImportManifestPlan = {
     generatedAt: string;
     totalUnits: number;
     includedUnits: number;
+    cappedUnits: number;
     excludedUnits: number;
     totalBytes: number;
     estimatedRecords?: number;
@@ -44,8 +46,10 @@ export async function buildImportManifestPlan(input: {
   const candidates = await candidateUnits(input.sources, input.importKind, input.scope, input.generatedAt, input.cursors ?? new Map());
   const totalBytes = candidates.reduce((sum, unit) => sum + (unit.fileSizeBytes ?? 0), 0);
   const includedUnits = candidates.filter((unit) => unit.status !== "skipped").length;
+  const cappedUnits = candidates.filter((unit) => unit.statusReason === "Deferred by the selected recent-history range.").length;
   return {
     summary: {
+      cappedUnits,
       excludedUnits: candidates.length - includedUnits,
       generatedAt: input.generatedAt,
       importJobId: input.importJobId,
@@ -77,6 +81,7 @@ export async function createManifestForJob(
 ): Promise<{ summary: ImportManifestPlan["summary"]; units: ImportWorkUnitDto[] }> {
   const plan = await buildImportManifestPlan(input);
   const summary = createImportManifest(db, {
+    cappedUnits: plan.summary.cappedUnits,
     excludedUnits: plan.summary.excludedUnits,
     generatedAt: plan.summary.generatedAt,
     importJobId: plan.summary.importJobId,
@@ -140,20 +145,23 @@ async function unitsForSource(
       const info = path ? await stat(path) : undefined;
       const modifiedAt = info?.mtime.toISOString();
       const cursor = cursorForSource(cursors, source, path);
-      const included = includeUnit({ cursor, generatedAt, info, modifiedAt, scope });
+      const scopeDecision = decideImportUnitScope({ cursor, generatedAt, scope, unit: { modifiedAt } });
       return {
         confidence: source.confidence,
         cursorBefore: cursor,
         estimatedRecords: undefined,
         fileSizeBytes: info?.size,
         modifiedAt,
+        scopeReason: scopeDecision.reason,
+        semanticActivityAt: undefined,
         runtime: source.runtime,
         schemaVersion: source.schemaVersion,
         sourceId: source.sourceId,
         sourceKind: source.sourceKind,
         sourcePath: path,
-        status: included ? "queued" : "skipped",
-        statusReason: included ? undefined : "Outside selected import age.",
+        status: scopeDecision.include ? "queued" : "skipped",
+        statusReason: scopeDecision.include ? undefined : "Outside selected import age.",
+        timestampBasis: info ? "file_modified" : "unknown",
         unitKind: importKind === "metadata" ? "metadata_source" : importKind === "enrichment" ? "enrichment_session" : "transcript_file"
       };
     })
@@ -179,23 +187,6 @@ async function jsonlFiles(directory: string): Promise<string[]> {
     }
   }
   return files;
-}
-
-function includeUnit(input: {
-  cursor: IngestCursor | undefined;
-  generatedAt: string;
-  info: Awaited<ReturnType<typeof stat>> | undefined;
-  modifiedAt: string | undefined;
-  scope: ImportScopeDto;
-}): boolean {
-  if (input.scope.mode === "metadata_all" || input.scope.mode === "transcript_full" || input.scope.mode === "enrichment_missing") return true;
-  const modifiedTime = input.modifiedAt ? new Date(input.modifiedAt).getTime() : 0;
-  const cutoff = Date.parse(input.generatedAt) - (input.scope.days ?? 30) * 24 * 60 * 60 * 1000;
-  if (Number.isFinite(modifiedTime) && modifiedTime >= cutoff) return true;
-  if (!input.scope.includeChangedSinceCursor) return false;
-  if (!input.cursor) return true;
-  if (input.info && input.info.size > input.cursor.byteOffset) return true;
-  return Boolean(input.modifiedAt && input.cursor.modifiedAt && input.modifiedAt !== input.cursor.modifiedAt);
 }
 
 function cursorForSource(cursors: Map<string, IngestCursor>, source: DiscoveredSource, path?: string): IngestCursor | undefined {

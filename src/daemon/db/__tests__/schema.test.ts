@@ -33,7 +33,7 @@ describe("daemon database schema", () => {
     migrateDatabase(db);
     migrateDatabase(db);
 
-    expect(CURRENT_SCHEMA_VERSION).toBe(24);
+    expect(CURRENT_SCHEMA_VERSION).toBe(25);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'virtual') ORDER BY name").all() as Array<{ name: string }>;
     expect(tables.map((row) => row.name)).toEqual(
@@ -119,7 +119,8 @@ describe("daemon database schema", () => {
       { version: 21, name: "021_artifact_body_search" },
       { version: 22, name: "022_workbench_authoring_v2" },
       { version: 23, name: "023_workbench_artifact_candidates" },
-      { version: 24, name: "024_artifact_candidate_detector_revision" }
+      { version: 24, name: "024_artifact_candidate_detector_revision" },
+      { version: 25, name: "025_import_unit_scope" }
     ]);
     expect(
       (db.prepare("PRAGMA table_info(workbench_artifact_candidate_scans)").all() as Array<{ name: string }>).map(
@@ -377,9 +378,14 @@ describe("daemon database schema", () => {
       )
     ).not.toContain("detector_revision");
 
-    migrateDatabase(db);
+    db.exec(readFileSync(join(migrationsDir, "024_artifact_candidate_detector_revision.sql"), "utf8"));
+    db.prepare("INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)").run(
+      24,
+      "024_artifact_candidate_detector_revision",
+      "2026-07-15T00:00:00.000Z"
+    );
 
-    expect(CURRENT_SCHEMA_VERSION).toBe(24);
+    expect(CURRENT_SCHEMA_VERSION).toBe(25);
     expect(db.prepare("SELECT version, name FROM schema_migrations ORDER BY version DESC LIMIT 1").get()).toEqual({
       name: "024_artifact_candidate_detector_revision",
       version: 24
@@ -459,6 +465,38 @@ describe("daemon database schema", () => {
       detectorRevision: ARTIFACT_CANDIDATE_DETECTOR_REVISION,
       evidenceRevision: "sha256:current-detector"
     });
+    db.close();
+  });
+
+  test("migration 025 records import unit scope evidence and manifest caps", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-db-v25-import-unit-scope-"));
+    tempDirs.push(tempDir);
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+    migrateTestDatabaseThrough(db, 24);
+
+    expect(
+      (db.prepare("PRAGMA table_info(import_work_units)").all() as Array<{ name: string }>).map((column) => column.name)
+    ).not.toContain("semantic_activity_at");
+
+    migrateDatabase(db);
+
+    expect(db.prepare("SELECT version, name FROM schema_migrations ORDER BY version DESC LIMIT 1").get()).toEqual({
+      name: "025_import_unit_scope",
+      version: 25
+    });
+    expect(
+      (db.prepare("PRAGMA table_info(import_work_units)").all() as Array<{
+        dflt_value: string | null;
+        name: string;
+        notnull: number;
+      }>).find((column) => column.name === "timestamp_basis")
+    ).toMatchObject({ dflt_value: "'unknown'", name: "timestamp_basis", notnull: 1 });
+    expect(
+      (db.prepare("PRAGMA table_info(import_work_units)").all() as Array<{ name: string }>).map((column) => column.name)
+    ).toEqual(expect.arrayContaining(["semantic_activity_at", "scope_reason"]));
+    expect(
+      (db.prepare("PRAGMA table_info(import_manifests)").all() as Array<{ name: string }>).map((column) => column.name)
+    ).toContain("capped_units");
     db.close();
   });
 

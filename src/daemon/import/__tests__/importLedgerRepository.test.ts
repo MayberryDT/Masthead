@@ -52,6 +52,9 @@ describe("import ledger repository", () => {
       importJobId: "import-1",
       manifestId: manifest.manifestId,
       modifiedAt: "2026-07-01T00:00:30.000Z",
+      scopeReason: "inside_recent_range",
+      semanticActivityAt: "2026-07-01T00:00:00.000Z",
+      timestampBasis: "semantic",
       runtime: "opencode",
       confidence: "authoritative",
       sourceId: "opencode-sessions",
@@ -65,8 +68,11 @@ describe("import ledger repository", () => {
     expect(units).toHaveLength(1);
     expect(units[0]).toMatchObject({
       processedRecords: 0,
+      scopeReason: "inside_recent_range",
+      semanticActivityAt: "2026-07-01T00:00:00.000Z",
       sourcePath: "/tmp/.opencode/sessions/thread.jsonl",
-      status: "queued"
+      status: "queued",
+      timestampBasis: "semantic"
     });
 
     updateImportWorkUnit(db, units[0].workUnitId, {

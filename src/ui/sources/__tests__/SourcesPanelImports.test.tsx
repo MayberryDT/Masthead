@@ -904,6 +904,7 @@ function previewForRuntime(runtime: SourcesImportPreview["summary"]["runtime"], 
   return {
     runtime,
     summary: {
+      cappedUnits: 0,
       excludedUnits,
       generatedAt: "2026-07-01T00:00:00.000Z",
       importJobId: `preview:${runtime}`,

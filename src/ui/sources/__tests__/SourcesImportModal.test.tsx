@@ -31,6 +31,7 @@ describe("SourcesImportModal", () => {
           {
             runtime: "opencode",
             summary: {
+              cappedUnits: 0,
               excludedUnits: 1,
               generatedAt: "2026-07-01T00:00:00.000Z",
               importJobId: "preview:opencode",
@@ -193,6 +194,7 @@ function previewForRuntime(
   estimatedRecords: number | undefined
 ): SourcesImportPreview {
   const summary: SourcesImportPreview["summary"] = {
+    cappedUnits: 0,
     excludedUnits,
     generatedAt: "2026-07-01T00:00:00.000Z",
     importJobId: `preview:${runtime}`,

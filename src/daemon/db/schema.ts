@@ -125,6 +125,11 @@ const migrations = [
     version: 24,
     name: "024_artifact_candidate_detector_revision",
     path: resolve(currentDir, "migrations/024_artifact_candidate_detector_revision.sql")
+  },
+  {
+    version: 25,
+    name: "025_import_unit_scope",
+    path: resolve(currentDir, "migrations/025_import_unit_scope.sql")
   }
 ];
 

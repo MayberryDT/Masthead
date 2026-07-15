@@ -4,6 +4,8 @@ import type {
   ImportJobKind,
   ImportManifestSummaryDto,
   ImportScopeDto,
+  ImportTimestampBasis,
+  ImportUnitScopeReason,
   ImportWorkUnitDto,
   ImportWorkUnitKind,
   ImportWorkUnitStatus
@@ -23,6 +25,7 @@ export type CreateImportManifestInput = {
   generatedAt: string;
   totalUnits: number;
   includedUnits: number;
+  cappedUnits?: number;
   excludedUnits: number;
   totalBytes: number;
   estimatedRecords?: number;
@@ -44,6 +47,9 @@ export type CreateImportWorkUnitInput = {
   statusReason?: string;
   fileSizeBytes?: number;
   modifiedAt?: string;
+  semanticActivityAt?: string;
+  timestampBasis?: ImportTimestampBasis;
+  scopeReason?: ImportUnitScopeReason;
   estimatedRecords?: number;
 };
 
@@ -88,16 +94,18 @@ export function createImportManifest(db: MastheadDatabase, input: CreateImportMa
       generated_at,
       total_units,
       included_units,
+      capped_units,
       excluded_units,
       total_bytes,
       estimated_records
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(manifest_id) DO UPDATE SET
       source_id = excluded.source_id,
       scope_json = excluded.scope_json,
       generated_at = excluded.generated_at,
       total_units = excluded.total_units,
       included_units = excluded.included_units,
+      capped_units = excluded.capped_units,
       excluded_units = excluded.excluded_units,
       total_bytes = excluded.total_bytes,
       estimated_records = excluded.estimated_records`
@@ -111,6 +119,7 @@ export function createImportManifest(db: MastheadDatabase, input: CreateImportMa
     input.generatedAt,
     input.totalUnits,
     input.includedUnits,
+    input.cappedUnits ?? 0,
     input.excludedUnits,
     input.totalBytes,
     input.estimatedRecords ?? null
@@ -150,8 +159,11 @@ export function createImportWorkUnit(db: MastheadDatabase, input: CreateImportWo
       status_reason,
       file_size_bytes,
       modified_at,
+      semantic_activity_at,
+      timestamp_basis,
+      scope_reason,
       estimated_records
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(work_unit_id) DO UPDATE SET
       source_kind = excluded.source_kind,
       confidence = excluded.confidence,
@@ -160,6 +172,9 @@ export function createImportWorkUnit(db: MastheadDatabase, input: CreateImportWo
       status_reason = excluded.status_reason,
       file_size_bytes = excluded.file_size_bytes,
       modified_at = excluded.modified_at,
+      semantic_activity_at = excluded.semantic_activity_at,
+      timestamp_basis = excluded.timestamp_basis,
+      scope_reason = excluded.scope_reason,
       estimated_records = excluded.estimated_records`
   ).run(
     workUnitId,
@@ -178,6 +193,9 @@ export function createImportWorkUnit(db: MastheadDatabase, input: CreateImportWo
     input.statusReason ?? null,
     input.fileSizeBytes ?? null,
     input.modifiedAt ?? null,
+    input.semanticActivityAt ?? null,
+    input.timestampBasis ?? "unknown",
+    input.scopeReason ?? null,
     input.estimatedRecords ?? null
   );
   const unit = getImportWorkUnit(db, workUnitId);
@@ -353,6 +371,7 @@ export function listImportFailureGroups(db: MastheadDatabase, importJobId: strin
 
 function manifestFromRow(row: Record<string, unknown>): ImportManifestSummaryDto {
   return {
+    cappedUnits: numberValue(row.capped_units),
     excludedUnits: numberValue(row.excluded_units),
     generatedAt: stringValue(row.generated_at),
     importJobId: stringValue(row.import_job_id),
@@ -378,6 +397,9 @@ function workUnitFromRow(row: Record<string, unknown>): ImportWorkUnitDto {
     importJobId: stringValue(row.import_job_id),
     manifestId: stringValue(row.manifest_id),
     modifiedAt: nullableString(row.modified_at) ?? undefined,
+    semanticActivityAt: nullableString(row.semantic_activity_at) ?? undefined,
+    timestampBasis: stringValue(row.timestamp_basis) as ImportTimestampBasis,
+    scopeReason: nullableString(row.scope_reason) as ImportUnitScopeReason | undefined,
     processedRecords: numberValue(row.processed_records),
     runtime: stringValue(row.runtime_kind) as RuntimeKind,
     sourceKind: stringValue(row.source_kind) as SourceKind,

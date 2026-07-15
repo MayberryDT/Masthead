@@ -58,12 +58,15 @@ export type ImportManifestSummaryDto = {
   generatedAt: string;
   totalUnits: number;
   includedUnits: number;
+  cappedUnits: number;
   excludedUnits: number;
   totalBytes: number;
   estimatedRecords?: number;
 };
 
 export type ImportWorkUnitKind = "metadata_source" | "transcript_file" | "source_session" | "enrichment_session";
+export type ImportTimestampBasis = "semantic" | "source_path" | "file_modified" | "unknown";
+export type ImportUnitScopeReason = "full_archive" | "inside_recent_range" | "changed_since_cursor" | "outside_recent_range";
 
 export type ImportWorkUnitDto = {
   workUnitId: string;
@@ -81,6 +84,9 @@ export type ImportWorkUnitDto = {
   statusReason?: string;
   fileSizeBytes?: number;
   modifiedAt?: string;
+  semanticActivityAt?: string;
+  timestampBasis: ImportTimestampBasis;
+  scopeReason?: ImportUnitScopeReason;
   estimatedRecords?: number;
   processedRecords: number;
   importedRecords: number;
