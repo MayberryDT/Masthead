@@ -68,6 +68,13 @@ describe("import work unit runner", () => {
       hostname: "test",
       now: () => "2026-07-01T00:00:05.000Z",
       onSessionHydrated: (sessionId) => hydratedSessionIds.push(sessionId),
+      parseTranscriptUnit: async (unit) => ({
+        completeness: "complete",
+        diagnostics: [],
+        records,
+        sourceSessionIds: ["s1"],
+        unit
+      }),
       runtimeKind: "opencode",
       workUnitId: unitId
     });
@@ -80,6 +87,9 @@ describe("import work unit runner", () => {
     expect(db.prepare("SELECT COUNT(*) AS count FROM sessions").get()).toEqual({ count: 1 });
     expect(hydratedSessionIds).toHaveLength(1);
     expect(hydratedSessionIds[0]).toMatch(/^session:/);
+    expect(
+      db.prepare("SELECT status, reason FROM session_import_health WHERE session_id = ?").get(hydratedSessionIds[0])
+    ).toEqual({ reason: null, status: "complete" });
   });
 
   test("adds a filtered session to Not Added as soon as its hydration unit completes", async () => {
@@ -123,6 +133,62 @@ describe("import work unit runner", () => {
       publicationStatus: "not_added_to_logbook",
       qualityStatus: "failed"
     });
+  });
+
+  test("partial transcript units require import repair and never enter Not Added", async () => {
+    const sourcePath = join(tempDir, "partial-thread.jsonl");
+    const unitId = seedWorkUnit(db, sourcePath);
+    const record: AdapterRecord = {
+      diagnostics: [],
+      normalized: {
+        confidence: "authoritative",
+        kind: "message",
+        sourceRef: { sourceKind: "jsonl", sourcePath },
+        value: {
+          observedAt: "2026-07-01T00:00:00.000Z",
+          role: "user",
+          sessionId: "partial-session",
+          text: "Recoverable message"
+        }
+      },
+      observedAt: "2026-07-01T00:00:00.000Z",
+      payload: { role: "user", text: "Recoverable message" },
+      payloadHash: "partial-hash",
+      source: sourceForPath(sourcePath),
+      sourceRecordKey: `${sourcePath}:1`
+    };
+
+    const result = await runImportWorkUnit({
+      adapterBackfill: async function* () {
+        yield record;
+      },
+      db,
+      hostId: "host:test",
+      hostname: "test",
+      now: () => "2026-07-01T00:00:05.000Z",
+      onSessionHydrated: (sessionId) => reconcileImportedTranscript(db, sessionId),
+      parseTranscriptUnit: async (unit) => ({
+        completeness: "partial",
+        diagnostics: [{
+          code: "recoverable_parse_gap",
+          message: "Some transcript rows were not recognized.",
+          observedAt: "2026-07-01T00:00:00.000Z",
+          severity: "warning"
+        }],
+        records: [record],
+        sourceSessionIds: ["partial-session"],
+        unit
+      }),
+      runtimeKind: "opencode",
+      workUnitId: unitId
+    });
+
+    expect(result.sessionIds).toHaveLength(1);
+    const sessionId = result.sessionIds[0];
+    expect(readWorkbenchSessionState(db, sessionId)).toBeUndefined();
+    expect(
+      db.prepare("SELECT status, reason FROM session_import_health WHERE session_id = ?").get(sessionId)
+    ).toEqual({ reason: "partial_parse", status: "repair_required" });
   });
 
   test("skips records whose project metadata is excluded", async () => {

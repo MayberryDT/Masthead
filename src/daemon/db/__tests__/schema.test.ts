@@ -33,7 +33,7 @@ describe("daemon database schema", () => {
     migrateDatabase(db);
     migrateDatabase(db);
 
-    expect(CURRENT_SCHEMA_VERSION).toBe(25);
+    expect(CURRENT_SCHEMA_VERSION).toBe(26);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'virtual') ORDER BY name").all() as Array<{ name: string }>;
     expect(tables.map((row) => row.name)).toEqual(
@@ -74,6 +74,7 @@ describe("daemon database schema", () => {
         "import_work_units",
         "import_failure_groups",
         "import_session_impacts",
+        "session_import_health",
         "legacy_migrations",
         "board_headline_frames",
         "board_headline_generations",
@@ -120,7 +121,8 @@ describe("daemon database schema", () => {
       { version: 22, name: "022_workbench_authoring_v2" },
       { version: 23, name: "023_workbench_artifact_candidates" },
       { version: 24, name: "024_artifact_candidate_detector_revision" },
-      { version: 25, name: "025_import_unit_scope" }
+      { version: 25, name: "025_import_unit_scope" },
+      { version: 26, name: "026_session_import_health" }
     ]);
     expect(
       (db.prepare("PRAGMA table_info(workbench_artifact_candidate_scans)").all() as Array<{ name: string }>).map(
@@ -144,7 +146,8 @@ describe("daemon database schema", () => {
         "idx_workbench_candidates_session_history",
         "idx_workbench_candidate_provenance_session",
         "idx_workbench_signature_members_session",
-        "idx_workbench_candidate_scans_session_time"
+        "idx_workbench_candidate_scans_session_time",
+        "idx_session_import_health_status"
       ])
     );
     const sourceRevisionTriggers = db
@@ -385,7 +388,7 @@ describe("daemon database schema", () => {
       "2026-07-15T00:00:00.000Z"
     );
 
-    expect(CURRENT_SCHEMA_VERSION).toBe(25);
+    expect(CURRENT_SCHEMA_VERSION).toBe(26);
     expect(db.prepare("SELECT version, name FROM schema_migrations ORDER BY version DESC LIMIT 1").get()).toEqual({
       name: "024_artifact_candidate_detector_revision",
       version: 24
@@ -480,7 +483,7 @@ describe("daemon database schema", () => {
 
     migrateDatabase(db);
 
-    expect(db.prepare("SELECT version, name FROM schema_migrations ORDER BY version DESC LIMIT 1").get()).toEqual({
+    expect(db.prepare("SELECT version, name FROM schema_migrations WHERE version = 25").get()).toEqual({
       name: "025_import_unit_scope",
       version: 25
     });

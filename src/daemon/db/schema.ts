@@ -130,6 +130,11 @@ const migrations = [
     version: 25,
     name: "025_import_unit_scope",
     path: resolve(currentDir, "migrations/025_import_unit_scope.sql")
+  },
+  {
+    version: 26,
+    name: "026_session_import_health",
+    path: resolve(currentDir, "migrations/026_session_import_health.sql")
   }
 ];
 
@@ -171,6 +176,7 @@ const criticalTables = [
   "import_work_units",
   "import_failure_groups",
   "import_session_impacts",
+  "session_import_health",
   "legacy_migrations",
   "board_headline_frames",
   "board_headline_generations",

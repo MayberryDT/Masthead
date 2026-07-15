@@ -1,4 +1,5 @@
 import type { RuntimeKind, SourceConfidence, SourceKind } from "../adapters/types.ts";
+import type { SessionImportHealthSummaryDto } from "./workbench.ts";
 
 export type ImportJobKind = "metadata" | "transcript" | "enrichment";
 export type ImportJobStatus =
@@ -138,6 +139,7 @@ export type ImportCompletionReportDto = {
   sourceUnitsDeferred?: number;
   sourceUnitsFailed?: number;
   sourceUnitsRemaining?: number;
+  importHealth?: SessionImportHealthSummaryDto;
   nextActions: Array<"retry_failed_units" | "import_full_archive" | "approve_transcripts" | "run_enrichment" | "open_logbook">;
 };
 

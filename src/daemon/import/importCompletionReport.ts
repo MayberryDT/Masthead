@@ -1,6 +1,7 @@
 import type { RuntimeKind } from "../../adapters/types.ts";
 import type { ImportCompletionReportDto, ImportVisibilityState } from "../../shared/sourceImport.ts";
 import { summarizeImportSessionImpacts } from "../db/importSessionImpactRepository.ts";
+import { summarizeSessionImportHealth } from "../db/sessionImportHealthRepository.ts";
 import type { MastheadDatabase } from "../db/sqlite.ts";
 
 export function buildImportCompletionReport(
@@ -52,6 +53,7 @@ export function buildImportCompletionReport(
     failedUnits: input.failedUnits,
     generatedAt: input.generatedAt,
     importJobId: input.importJobId,
+    importHealth: summarizeSessionImportHealth(db, input.importJobId),
     logbookSearchableSessions: logbookSearchable,
     mcpVisibleSessions: mcpVisible,
     nextActions: [...new Set(nextActions)],

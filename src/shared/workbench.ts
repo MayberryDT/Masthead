@@ -10,6 +10,16 @@ export type WorkbenchMissingSessionDto = {
 
 export type WorkbenchPublicationStatus = "publish_path" | "published" | "not_added_to_logbook";
 
+export type SessionImportHealthStatus = "complete" | "partial" | "repair_required";
+
+export type SessionImportHealthSummaryDto = {
+  total: number;
+  complete: number;
+  partial: number;
+  repairRequired: number;
+  reasons: Array<{ reason: string; count: number }>;
+};
+
 export type WorkbenchNextAction =
   | "check_transcript"
   | "import_transcript"

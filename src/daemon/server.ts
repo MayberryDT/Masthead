@@ -87,6 +87,7 @@ import {
 import { getSessionDetail, getSessionExcerpts, listProjects, querySessions, type SessionQuery } from "./db/sessionQueryRepository.ts";
 import { getOrCreateDatabaseIdentity, hasPendingMigrations, migrateDatabase } from "./db/schema.ts";
 import { canonicalSessionId, createSessionRepository, ingestAdapterRecord, runtimeIdFor, type SessionRepository } from "./db/sessionRepository.ts";
+import { readSessionImportHealth } from "./db/sessionImportHealthRepository.ts";
 import { saveSourceScanRun, saveSourceSetupState } from "./db/sourceSetupRepository.ts";
 import { getSessionUsageSummaries, getUsageStats, type UsageWindow } from "./db/usageStatsRepository.ts";
 import {
@@ -1306,7 +1307,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         processed: checkpointBaseUnits.reduce((total, candidate) => total + candidate.processedRecords, 0)
       };
       const unitResult = await runImportWorkUnit({
-        adapterBackfill: (source) => adapter.backfill(source, source.path ? readCursor(database, source.sourceId, source.path) : undefined),
         approvedSourceIds: sources.map((source) => source.sourceId),
         db: database,
         hostId: `host:${config.host}`,
@@ -1323,12 +1323,22 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         }),
         onSessionImported: undefined,
         onSessionHydrated: (sessionId) => reconcileImportedTranscript(database, sessionId),
+        parseTranscriptUnit: async (fallbackPlan, cursor) => {
+          const plannedUnits = await adapter.planTranscriptUnits(fallbackPlan.source);
+          const plannedUnit = plannedUnits.find((candidate) =>
+            candidate.source.path === unit.sourcePath ||
+            Boolean(unit.sourceSessionId && candidate.sourceSessionId === unit.sourceSessionId)
+          ) ?? (plannedUnits.length === 1 ? plannedUnits[0] : fallbackPlan);
+          return adapter.parseTranscriptUnit(plannedUnit, cursor);
+        },
         runtimeKind: unit.runtime,
         workUnitId: unit.workUnitId,
         indexSession: queueSessionSearchIndex
       });
       if (queueEnrichmentForImport && unitResult.failed === 0) {
-        for (const sessionId of unitResult.sessionIds) queueSessionEnrichment(sessionId);
+        for (const sessionId of unitResult.sessionIds) {
+          if (sessionImportIsCompleteOrUntracked(sessionId)) queueSessionEnrichment(sessionId);
+        }
       }
       const completedUnit = getImportWorkUnit(database, unit.workUnitId);
       if (unit.sourcePath && completedUnit && ["succeeded", "succeeded_with_issues"].includes(completedUnit.status)) {
@@ -1363,7 +1373,9 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     const remainingUnits = finalUnits.filter((unit) => ["queued", "running"].includes(unit.status)).length;
     if (failedUnits === 0 && remainingUnits === 0) {
       for (const sessionId of listImportImpactSessionIds(database, controls.importJobId)) {
-        reconcileImportedTranscript(database, sessionId, { finalizeNoise: true });
+        if (sessionImportIsCompleteOrUntracked(sessionId)) {
+          reconcileImportedTranscript(database, sessionId, { finalizeNoise: true });
+        }
       }
     }
     const report = buildImportCompletionReport(database, {
@@ -1395,6 +1407,11 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       updatedAt: new Date().toISOString()
     });
     return result;
+  }
+
+  function sessionImportIsCompleteOrUntracked(sessionId: string): boolean {
+    const health = readSessionImportHealth(database, sessionId);
+    return !health || health.status === "complete";
   }
 
   function runImportWorkerForSource(

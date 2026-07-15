@@ -1,9 +1,12 @@
+import { createHash } from "node:crypto";
 import type { AdapterRecord, DiscoveredSource, IngestCursor, RuntimeKind } from "../../adapters/types.ts";
+import type { ParsedTranscriptUnit, TranscriptUnitPlan } from "../../adapters/transcriptUnits.ts";
 import { upsertCursor } from "../db/cursorRepository.ts";
 import { indexCanonicalSessionSearch } from "../db/searchRepository.ts";
 import { getImportWorkUnit, recordImportFailureGroup, updateImportWorkUnit } from "../db/importLedgerRepository.ts";
 import { listImportImpactSessionIds, recordImportSessionImpact } from "../db/importSessionImpactRepository.ts";
 import { ingestAdapterRecord } from "../db/sessionRepository.ts";
+import { recordSessionImportHealth } from "../db/sessionImportHealthRepository.ts";
 import { sourceRecordIsExcluded } from "../db/sourceRepository.ts";
 import { sourcePolicyExplicitlyEnabled } from "../db/sourcePolicyRepository.ts";
 import { type MastheadDatabase, withImmediateTransaction } from "../db/sqlite.ts";
@@ -24,7 +27,8 @@ export async function runImportWorkUnit(input: {
   hostId: string;
   hostname?: string;
   now?: () => string;
-  adapterBackfill: (source: DiscoveredSource) => AsyncIterable<AdapterRecord>;
+  adapterBackfill?: (source: DiscoveredSource) => AsyncIterable<AdapterRecord>;
+  parseTranscriptUnit?: (unit: TranscriptUnitPlan, cursor?: IngestCursor) => Promise<ParsedTranscriptUnit>;
   approvedSourceIds?: string[];
   indexSession?: (sessionId: string) => void;
   onSessionImported?: (sessionId: string) => void;
@@ -92,6 +96,16 @@ export async function runImportWorkUnit(input: {
     sourceId: unit.sourceId,
     sourceKind: unit.sourceKind
   };
+  const transcriptUnit: TranscriptUnitPlan = {
+    fileSizeBytes: unit.fileSizeBytes,
+    modifiedAt: unit.modifiedAt,
+    runtime: unit.runtime,
+    semanticActivityAt: unit.semanticActivityAt,
+    source,
+    sourceSessionId: unit.sourceSessionId,
+    timestampBasis: unit.timestampBasis,
+    unitId: unit.workUnitId
+  };
 
   const flushCheckpoint = async (force = false): Promise<void> => {
     if (recordsSinceCheckpoint === 0 || (!force && recordsSinceCheckpoint < CHECKPOINT_RECORD_INTERVAL)) return;
@@ -138,7 +152,14 @@ export async function runImportWorkUnit(input: {
   };
 
   try {
-    for await (const record of input.adapterBackfill(source)) {
+    const parsedUnit = input.parseTranscriptUnit
+      ? await input.parseTranscriptUnit(transcriptUnit, latestCursorAfter ? { cursorId: "", ...latestCursorAfter } : undefined)
+      : undefined;
+    const records = parsedUnit
+      ? recordsFromParsedUnit(parsedUnit)
+      : input.adapterBackfill?.(source);
+    if (!records) throw new Error("Import work unit runner requires a transcript parser or adapter backfill.");
+    for await (const record of records) {
       processed += 1;
       recordsSinceYield += 1;
       recordsSinceCheckpoint += 1;
@@ -199,7 +220,10 @@ export async function runImportWorkUnit(input: {
       } else {
         indexCanonicalSessionSearch(input.db, sessionId);
       }
-      input.onSessionHydrated?.(sessionId);
+      const health = unit.unitKind === "transcript_file" && parsedUnit
+        ? recordHealthForParsedUnit(input.db, parsedUnit, sessionId, unit, now())
+        : undefined;
+      if (!health || health.status === "complete") input.onSessionHydrated?.(sessionId);
     }
 
     updateImportWorkUnit(input.db, unit.workUnitId, {
@@ -235,6 +259,48 @@ export async function runImportWorkUnit(input: {
     });
     return { failed: Math.max(1, failed), imported, processed, sessionIds: [...sessionIds] };
   }
+}
+
+async function* recordsFromParsedUnit(unit: ParsedTranscriptUnit): AsyncIterable<AdapterRecord> {
+  yield* unit.records;
+}
+
+function recordHealthForParsedUnit(
+  db: MastheadDatabase,
+  parsedUnit: ParsedTranscriptUnit,
+  sessionId: string,
+  unit: NonNullable<ReturnType<typeof getImportWorkUnit>>,
+  updatedAt: string
+) {
+  const reason = importHealthReason(parsedUnit);
+  return recordSessionImportHealth(db, {
+    evidenceRevision: importEvidenceRevision(parsedUnit),
+    importJobId: unit.importJobId,
+    ...(reason ? { reason } : {}),
+    sessionId,
+    status: reason ? "repair_required" : "complete",
+    updatedAt,
+    workUnitId: unit.workUnitId
+  });
+}
+
+function importHealthReason(unit: ParsedTranscriptUnit): string | undefined {
+  if (unit.completeness === "partial") return "partial_parse";
+  if (unit.completeness === "unrecognized") return "unrecognized_schema";
+  if (unit.sourceSessionIds.length === 0) return "missing_identity";
+  if (unit.sourceSessionIds.length > 1) return "ambiguous_identity";
+  return undefined;
+}
+
+function importEvidenceRevision(unit: ParsedTranscriptUnit): string {
+  const evidence = JSON.stringify({
+    completeness: unit.completeness,
+    diagnostics: unit.diagnostics.map(({ code, message, severity }) => ({ code, message, severity })),
+    records: unit.records.map((record) => record.payloadHash),
+    sourceSessionIds: unit.sourceSessionIds,
+    unitId: unit.unit.unitId
+  });
+  return `sha256:${createHash("sha256").update(evidence).digest("hex")}`;
 }
 
 async function yieldToRequestHandling(recordsSinceYield: number): Promise<number> {
