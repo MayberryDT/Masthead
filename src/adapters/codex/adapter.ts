@@ -13,6 +13,7 @@ import { adapterPayload, hash, isRecord, normalizeRole, readNumber, readPath, re
 import { discoverLocalSources } from "../generic/localAdapterFactory.ts";
 import { codexCandidatePaths } from "./discovery.ts";
 import { streamJsonlLines } from "../generic/streamJsonl.ts";
+import { collectAdapterRecords, parsedTranscriptUnit, planLocalTranscriptFiles } from "../transcriptUnits.ts";
 
 export const codexAdapter: SessionAdapter = {
   runtime: "codex",
@@ -22,6 +23,11 @@ export const codexAdapter: SessionAdapter = {
   },
   inspect: inspectCodexSource,
   backfill: backfillCodexSource,
+  planTranscriptUnits: (source) => planLocalTranscriptFiles(source),
+  parseTranscriptUnit: async (unit, cursor) => {
+    const records = await collectAdapterRecords(backfillCodexSource(unit.source, cursor));
+    return parsedTranscriptUnit(unit, records);
+  },
   async *watch() {
     return;
   }

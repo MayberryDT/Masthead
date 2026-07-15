@@ -14,6 +14,7 @@ import {
   readPath
 } from "./jsonlAdapterKit.ts";
 import { quoteIdentifier, sqliteTables, tableColumns, withReadonlySqliteCopy } from "./sqliteAdapterKit.ts";
+import { collectAdapterRecords, parsedTranscriptUnit, planLocalTranscriptFiles } from "../transcriptUnits.ts";
 
 export type LocalAdapterOptions = {
   runtime: RuntimeKind;
@@ -28,6 +29,11 @@ export function createLocalAdapter(options: LocalAdapterOptions): SessionAdapter
     discover: (context) => discoverLocalSources(context, options),
     inspect: inspectLocalSource,
     backfill: (source, cursor) => backfillLocalSource(source, cursor, options),
+    planTranscriptUnits: (source) => planLocalTranscriptFiles(source),
+    parseTranscriptUnit: async (unit, cursor) => {
+      const records = await collectAdapterRecords(backfillLocalSource(unit.source, cursor, options));
+      return parsedTranscriptUnit(unit, records);
+    },
     async *watch() {
       return;
     }
