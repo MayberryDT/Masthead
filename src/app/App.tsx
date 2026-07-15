@@ -16,9 +16,11 @@ import { buildObservabilityDemoBoard, observabilitySessionTotal } from "../ui/ob
 import { OperationsPanel } from "../ui/OperationsPanel";
 import {
   prefersReducedMotion,
+  readStoredKeepRunningInTray,
   readStoredMotionDisabled,
   readStoredSessionEndedNotificationsEnabled,
   writeStoredMotionDisabled,
+  writeStoredKeepRunningInTray,
   writeStoredSessionEndedNotificationsEnabled
 } from "../ui/motionPreference";
 import { emitSessionTransitionNotifications } from "./liveSessionEndedNotifications";
@@ -51,7 +53,7 @@ import {
   normalizeLiveBoardProjection,
 } from "./liveProjectionClient";
 import { startLiveConnector } from "./connectorClient";
-import { isDesktopBridgeAvailable } from "./desktopBridge";
+import { invokeDesktopCommand, isDesktopBridgeAvailable } from "./desktopBridge";
 import { useMastheadConnection } from "./connection/useMastheadConnection";
 import { MastheadApiClient } from "./api/MastheadApiClient";
 import { ConnectionRecoveryPanel, type CollectorStartupLogEntry, type ConnectorActionView } from "../ui/ConnectionRecoveryPanel";
@@ -114,6 +116,7 @@ export function App() {
   const [refreshRateMs, setRefreshRateMs] = useState(10_000);
   const [density, setDensity] = useState<CardDensity>("comfortable");
   const [motionDisabled, setMotionDisabled] = useState(() => readStoredMotionDisabled());
+  const [keepRunningInTray, setKeepRunningInTray] = useState(() => readStoredKeepRunningInTray());
   const [sessionEndedNotificationsEnabled, setSessionEndedNotificationsEnabled] = useState(() =>
     readStoredSessionEndedNotificationsEnabled()
   );
@@ -281,6 +284,11 @@ export function App() {
   useEffect(() => {
     writeStoredMotionDisabled(motionDisabled);
   }, [motionDisabled]);
+
+  useEffect(() => {
+    writeStoredKeepRunningInTray(keepRunningInTray);
+    void invokeDesktopCommand("set_keep_running_in_tray_command", { enabled: keepRunningInTray });
+  }, [keepRunningInTray]);
 
   useEffect(() => {
     writeStoredSessionEndedNotificationsEnabled(sessionEndedNotificationsEnabled);
@@ -761,6 +769,7 @@ export function App() {
             deletionScopeKind={settingsData.deletionScopeKind}
             deletionScopeTarget={settingsData.deletionScopeTarget}
             localDataStatus={settingsData.localDataStatus}
+            keepRunningInTray={keepRunningInTray}
             motionDisabled={motionDisabled}
             sessionEndedNotificationsEnabled={sessionEndedNotificationsEnabled}
             onSessionEndedNotificationsEnabledChange={setSessionEndedNotificationsEnabled}
@@ -771,6 +780,7 @@ export function App() {
             onDeletionScopeKindChange={settingsData.changeDeletionScopeKind}
             onDeletionScopeTargetChange={settingsData.changeDeletionScopeTarget}
             onExportLocalData={settingsData.exportLocalData}
+            onKeepRunningInTrayChange={setKeepRunningInTray}
             onMotionDisabledChange={handleMotionDisabledChange}
             onReloadSettings={() => void settingsData.loadSettingsState()}
             onRequestPruneLocalData={settingsData.requestPruneLocalData}

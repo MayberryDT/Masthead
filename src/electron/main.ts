@@ -30,6 +30,7 @@ import {
   rendererEntryUrl,
   rendererTrustedOrigins
 } from "./window";
+import { shouldHideWindowOnClose } from "./windowCloseBehavior";
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -48,6 +49,8 @@ configureElectronRuntime(app);
 const ownedDaemonChildren = new Set<ChildProcess>();
 let mainWindow: BrowserWindow | undefined;
 let tray: unknown;
+let keepRunningInTray = true;
+let quitting = false;
 let smokeRendererConnectorResult: StartLiveConnectorResult | undefined;
 let smokeRendererConnectorError: unknown;
 const smokeRendererConnectorWaiters = new Set<{
@@ -97,6 +100,7 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.on("before-quit", () => {
+    quitting = true;
     stopOwnedDaemons(ownedDaemonChildren);
   });
 
@@ -235,6 +239,11 @@ async function createMainWindow(iconPath = mastheadAppIconPath()): Promise<Brows
     width: 1400
   });
   window.setMenuBarVisibility(false);
+  window.on("close", (event) => {
+    if (!shouldHideWindowOnClose({ keepRunningInTray, quitting })) return;
+    event.preventDefault();
+    window.hide();
+  });
 
   window.webContents.setWindowOpenHandler(({ url }) => {
     return isAllowedRendererUrl(url, { allowDevServer: isElectronDevMode() }) ? { action: "allow" } : { action: "deny" };
@@ -380,6 +389,10 @@ function registerDesktopIpc(): void {
       [ELECTRON_CHANNELS.windowClose]: () => {
         mainWindow?.close();
         return { ok: true };
+      },
+      [ELECTRON_CHANNELS.setKeepRunningInTray]: (args) => {
+        keepRunningInTray = args?.enabled !== false;
+        return { ok: true, enabled: keepRunningInTray };
       },
       [ELECTRON_CHANNELS.windowMaximize]: () => {
         if (mainWindow?.isMaximized()) {
