@@ -15,6 +15,34 @@ import type { ImportCompletionReportDto } from "../../../shared/sourceImport";
 const noop = () => undefined;
 
 describe("SourcesPanel import controls", () => {
+  test("keeps an exact receipt load error visible before consuming the intent", async () => {
+    const onConsumed = vi.fn();
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <SourcesPanel
+          adapters={[]}
+          busy={false}
+          importReceiptIntent={{ importJobId: "job-missing" }}
+          imports={[]}
+          onExcludePath={noop}
+          onImportReceiptIntentConsumed={onConsumed}
+          onLoadImportReport={async () => { throw new Error("receipt endpoint unavailable"); }}
+          onRefresh={noop}
+          sources={[]}
+        />
+      );
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("job-missing");
+    expect(container.textContent).toContain("receipt endpoint unavailable");
+    expect(onConsumed).toHaveBeenCalledTimes(1);
+    await act(async () => root.unmount());
+  });
+
   test("opens the exact terminal receipt requested from Workbench and consumes the navigation intent", async () => {
     const reports = [completionReport("job-opencode", "opencode", 12), completionReport("job-cursor", "cursor", 3)];
     const imports = reports.map((report) => importJob({
@@ -23,23 +51,33 @@ describe("SourcesPanel import controls", () => {
       sourceId: `${report.runtime}:history`,
       status: "succeeded_with_issues"
     }));
+    const visibleImports = [imports[0]];
+    const onLoadImportReport = vi.fn(async (importJobId: string) => reports.find((report) => report.importJobId === importJobId));
     const onPreviewImportRepair = vi.fn();
     const container = document.createElement("div");
     const root = createRoot(container);
 
     await act(async () => {
-      root.render(<ReceiptNavigationHarness imports={imports} onPreviewImportRepair={onPreviewImportRepair} />);
+      root.render(
+        <ReceiptNavigationHarness
+          importJobIds={imports.map((job) => job.importJobId)}
+          onLoadImportReport={onLoadImportReport}
+          onPreviewImportRepair={onPreviewImportRepair}
+          visibleImports={visibleImports}
+        />
+      );
     });
     await act(async () => {
       const buttons = Array.from(container.querySelectorAll("button")).filter((button) => button.textContent === "Open import receipt");
       (buttons[1] as HTMLButtonElement).click();
     });
 
-    expect(container.textContent).toContain("Cursor");
+    expect(container.textContent).toContain("job-cursor");
     expect(container.textContent).toContain("3 sessions need import repair");
     expect(container.textContent).not.toContain("12 sessions need import repair");
     expect(container.querySelector('[aria-label="cursor import report"]')).not.toBeNull();
     expect(container.querySelector('[aria-label="opencode import report"]')).toBeNull();
+    expect(onLoadImportReport).toHaveBeenCalledWith("job-cursor");
     await act(async () => buttonByText(container, "Preview import repair").click());
     expect(onPreviewImportRepair).toHaveBeenCalledWith("job-cursor");
     await act(async () => root.unmount());
@@ -932,13 +970,18 @@ function importJob(overrides: Partial<ImportJob> = {}): ImportJob {
   };
 }
 
-function ReceiptNavigationHarness({ imports, onPreviewImportRepair }: { imports: ImportJob[]; onPreviewImportRepair: (importJobId: string) => void }) {
+function ReceiptNavigationHarness({ importJobIds, onLoadImportReport, onPreviewImportRepair, visibleImports }: {
+  importJobIds: string[];
+  onLoadImportReport: (importJobId: string) => Promise<ImportCompletionReportDto | undefined>;
+  onPreviewImportRepair: (importJobId: string) => void;
+  visibleImports: ImportJob[];
+}) {
   const [surface, setSurface] = useState<"workbench" | "sources">("workbench");
   const [receiptIntent, setReceiptIntent] = useState<{ importJobId: string }>();
   if (surface === "workbench") {
     return (
       <WorkbenchPanel
-        importHealthSummary={{ ok: true, importJobIds: imports.map((job) => job.importJobId), reasons: [], repairRequired: imports.length }}
+        importHealthSummary={{ ok: true, importJobIds, reasons: [], repairRequired: importJobIds.length }}
         onOpenImportReceipt={(importJobId) => {
           setReceiptIntent({ importJobId });
           setSurface("sources");
@@ -950,10 +993,13 @@ function ReceiptNavigationHarness({ imports, onPreviewImportRepair }: { imports:
     <SourcesPanel
       adapters={[opencodeAdapter()]}
       busy={false}
+      importFilterRuntime="opencode"
       importReceiptIntent={receiptIntent}
-      imports={imports}
+      imports={visibleImports}
+      importTotal={99}
       onExcludePath={noop}
       onImportReceiptIntentConsumed={() => setReceiptIntent(undefined)}
+      onLoadImportReport={onLoadImportReport}
       onPreviewImportRepair={onPreviewImportRepair}
       onRefresh={noop}
       sources={[]}

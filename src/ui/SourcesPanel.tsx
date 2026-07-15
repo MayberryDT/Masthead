@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   AdapterStatus,
   CodexHookSettingsDto,
@@ -24,7 +24,7 @@ import { SourcesOnboardingModal } from "./sources/SourcesOnboardingModal";
 import type { SourcesImportPreview } from "../app/daemonClient";
 import { SourceDiagnosticPanel } from "./sources/SourceDiagnosticPanel";
 import { AppButton } from "./primitives/AppButton";
-import { latestImportCompletionReportsByRuntime } from "../shared/sourceImport";
+import { latestImportCompletionReportsByRuntime, type ImportCompletionReportDto } from "../shared/sourceImport";
 
 type HookAction = "install" | "test" | "uninstall";
 
@@ -47,6 +47,7 @@ type Props = {
   status?: string;
   importReceiptIntent?: { importJobId: string };
   onImportReceiptIntentConsumed?: () => void;
+  onLoadImportReport?: (importJobId: string) => Promise<ImportCompletionReportDto | undefined> | ImportCompletionReportDto | undefined;
   onPreviewImportRepair?: (importJobId: string) => void;
   /** Sources V2 live-connect snapshot. When set (or Discover is wired), render connector inventory. */
   connectorsSnapshot?: HarnessConnectorsSnapshotDto;
@@ -90,19 +91,50 @@ type Props = {
 
 export function SourcesPanel(props: Props) {
   const v2Mode = props.connectorsSnapshot !== undefined || props.onDiscoverConnectors !== undefined;
-  const [selectedReceipt, setSelectedReceipt] = useState<ImportJob["completionReport"]>();
+  const [selectedReceipt, setSelectedReceipt] = useState<ImportCompletionReportDto>();
+  const [receiptLoading, setReceiptLoading] = useState(false);
+  const [receiptError, setReceiptError] = useState<string>();
+  const [receiptJobId, setReceiptJobId] = useState<string>();
+  const consumeReceiptIntentRef = useRef(props.onImportReceiptIntentConsumed);
+  consumeReceiptIntentRef.current = props.onImportReceiptIntentConsumed;
 
   useEffect(() => {
-    const intent = props.importReceiptIntent;
-    if (!intent) return;
-    const job = props.imports?.find((candidate) =>
-      candidate.importJobId === intent.importJobId &&
-      !["queued", "running", "cancelling"].includes(candidate.status) &&
-      candidate.completionReport
-    );
-    setSelectedReceipt(job?.completionReport);
-    props.onImportReceiptIntentConsumed?.();
-  }, [props.importReceiptIntent, props.imports, props.onImportReceiptIntentConsumed]);
+    const importJobId = props.importReceiptIntent?.importJobId;
+    if (!importJobId) return;
+    let current = true;
+    setReceiptJobId(importJobId);
+    setSelectedReceipt(undefined);
+    setReceiptError(undefined);
+    setReceiptLoading(true);
+    void Promise.resolve(props.onLoadImportReport?.(importJobId))
+      .then((report) => {
+        if (!current) return;
+        if (!report) {
+          setReceiptError(`Import receipt ${importJobId} was not found.`);
+          return;
+        }
+        setSelectedReceipt(report);
+      })
+      .catch((error: unknown) => {
+        if (!current) return;
+        setReceiptError(`Import receipt ${importJobId} could not be loaded: ${error instanceof Error ? error.message : String(error)}`);
+      })
+      .finally(() => {
+        if (!current) return;
+        setReceiptLoading(false);
+        consumeReceiptIntentRef.current?.();
+      });
+    return () => {
+      current = false;
+    };
+  }, [props.importReceiptIntent?.importJobId, props.onLoadImportReport]);
+
+  const closeReceipt = () => {
+    setSelectedReceipt(undefined);
+    setReceiptError(undefined);
+    setReceiptJobId(undefined);
+    setReceiptLoading(false);
+  };
 
   return (
     <>
@@ -111,12 +143,16 @@ export function SourcesPanel(props: Props) {
         adapters={props.adapters ?? []}
         busy={props.busy || props.readOnly}
         completionReports={selectedReceipt ? [selectedReceipt] : []}
-        onClose={() => setSelectedReceipt(undefined)}
+        onClose={closeReceipt}
         onPreviewImport={props.onPreviewImport}
         onPreviewRepair={props.onPreviewImportRepair}
         onRunSetup={props.onRunSetup}
-        open={Boolean(selectedReceipt)}
+        open={receiptLoading || Boolean(receiptError) || Boolean(selectedReceipt)}
         previews={[]}
+        receiptError={receiptError}
+        receiptJobId={receiptJobId}
+        receiptLoading={receiptLoading}
+        receiptOnly
       />
     </>
   );

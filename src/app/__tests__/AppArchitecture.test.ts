@@ -57,6 +57,7 @@ describe("App component architecture", () => {
     const appSource = await readFile(appPath, "utf8");
 
     expect(appSource).toContain("onPreviewImportRepair={sourcesController.previewImportRepair}");
+    expect(appSource).toContain("onLoadImportReport={sourcesController.loadImportReport}");
     expect(appSource).not.toContain("onApplyImportRepair=");
   });
 });

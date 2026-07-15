@@ -140,6 +140,7 @@ describe("Masthead worktree connector planning", () => {
     "/projects",
     "/adapters",
     "/imports",
+    "/imports/job-1/report",
     "/data/summary",
     "/knowledge-flow/summary",
     "/logbook/summary",
@@ -188,6 +189,7 @@ describe("Masthead worktree connector planning", () => {
     expect(isAllowedReadOnlyBridgeRequest("POST", "/imports/repair/preview")).toBe(true);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/imports/repair/apply")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/imports")).toBe(false);
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/imports/job-1/report")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/data/delete")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/runs")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/runs/authoring%3Arun/submit")).toBe(false);

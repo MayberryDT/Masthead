@@ -5,6 +5,7 @@ import {
   cancelImport,
   connectSources,
   getLiveHookSettings,
+  getImportReport,
   getSourcesSetup,
   importAdapterMetadata,
   installRuntimeHooks,
@@ -363,6 +364,10 @@ export function useSourcesController({ activeProjectionUrl, activeSurface, isLiv
     return previewSourcesImport(activeProjectionUrl, input);
   }, [activeProjectionUrl]);
 
+  const loadImportReport = useCallback(async (importJobId: string) => {
+    return getImportReport(activeProjectionUrl, importJobId);
+  }, [activeProjectionUrl]);
+
   const previewImportRepair = useCallback(async (importJobId: string) => {
     try {
       const preview = await requestImportRepairPreview([importJobId], activeProjectionUrl);
@@ -481,6 +486,7 @@ export function useSourcesController({ activeProjectionUrl, activeSurface, isLiv
     importPage,
     imports,
     lastRefreshAt,
+    loadImportReport,
     loadAdapterSources,
     openImportJobsForRuntime,
     pollActiveImports,

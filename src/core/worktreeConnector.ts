@@ -103,7 +103,7 @@ export function isAllowedReadOnlyBridgeRequest(method: string | undefined, pathn
     /^\/settings\/hooks\/[^/]+$/.test(pathname) ||
     /^\/logbook\/artifacts\/[^/]+$/.test(pathname) ||
     /^\/sessions\/[^/]+(?:\/excerpts|\/dossier|\/transcript)?$/.test(pathname) ||
-    /^\/imports\/[^/]+$/.test(pathname)
+    /^\/imports\/[^/]+(?:\/report)?$/.test(pathname)
   );
 }
 

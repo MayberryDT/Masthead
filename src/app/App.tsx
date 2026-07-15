@@ -673,6 +673,7 @@ export function App() {
           onExcludePath={handleExcludeSourcePath}
           onImportMetadata={handleImportMetadata}
           onImportReceiptIntentConsumed={() => setImportReceiptIntent(undefined)}
+          onLoadImportReport={sourcesController.loadImportReport}
           onLoadAdapterSources={handleLoadAdapterSources}
           onOpenImportJobsForRuntime={handleOpenImportJobsForRuntime}
           onOpenOnboarding={sourcesConnectors.openOnboarding}

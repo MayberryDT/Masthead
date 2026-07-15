@@ -49,3 +49,19 @@ Blocked. The required in-app Browser runtime reported no available browser insta
 - GREEN: 6 focused files passed, 59 tests passed.
 - GREEN: surface contract, typecheck, citation guard, and diff check passed.
 - Browser evidence remains unavailable because the in-app Browser runtime has no browser instance; no fallback was used.
+
+## Final Follow-up — Exact Receipt Fetch
+
+- Receipt navigation now fetches `GET /imports/:id/report` by the requested job ID instead of searching the currently filtered/paginated import rows.
+- The receipt modal preserves a loading state and shows explicit not-found or request-error text before consuming the one-shot navigation intent.
+- The read-only worktree bridge permits only `GET /imports/:id/report`; the corresponding POST remains blocked.
+
+### Final RED/GREEN
+
+- RED: a requested Cursor receipt outside the visible OpenCode-filtered page did not open.
+- RED: an exact receipt request failure had no visible error.
+- RED: App omitted the exact-report loader and the bridge rejected the report read endpoint.
+- GREEN: Sources/App/client focused set passed: 5 files, 80 tests.
+- GREEN: bridge route-policy set passed: 29 tests (12 socket/integration cases skipped by the focus filter).
+- GREEN: surface contract, typecheck, citation guard, and diff check passed.
+- The full bridge suite's socket proxy case could not bind `127.0.0.1` in the sandbox (`EPERM`); its route-policy regression passed. Browser evidence remains unavailable as noted above.
