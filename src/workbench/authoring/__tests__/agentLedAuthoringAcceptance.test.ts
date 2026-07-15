@@ -1,11 +1,19 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { afterEach, describe, expect, test } from "vitest";
-import { getLogbookArtifactDetail } from "../../../daemon/db/logbookArtifactRepository.ts";
+import {
+  getLogbookArtifactDetail,
+  searchLogbookArtifacts
+} from "../../../daemon/db/logbookArtifactRepository.ts";
+import { getSessionDossier } from "../../../daemon/db/sessionDossierRepository.ts";
 import { getOrCreateDatabaseIdentity, migrateDatabase } from "../../../daemon/db/schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../../../daemon/db/sqlite.ts";
+import { routeWorkbenchAuthoringRequest } from "../../../daemon/workbenchAuthoringApi.ts";
 import { handleMcpLine } from "../../../mcp/protocol.ts";
+import type { WorkbenchAuthoringReceiptV3, WorkbenchAuthoringRunDto } from "../../../shared/workbenchAuthoring.ts";
+import { buildWorkbenchHandoff } from "../../../ui/workbench/workbenchHandoff.ts";
 import {
   buildFocusedAgentLedBundle,
   focusedAgentLedCorpus,
@@ -31,18 +39,57 @@ describe("focused agent-led authoring acceptance", () => {
     const db = await openFixtureDb();
     seedFocusedAgentLedCorpus(db, focusedAgentLedCorpus);
     const sessionIds = focusedAgentLedCorpus.map(({ id }) => id);
-    const opened = openAgentLedAuthoringRun(db, {
-      actorId: "acceptance-agent",
-      databaseId: getOrCreateDatabaseIdentity(db),
-      sessionIds
+    const databaseId = getOrCreateDatabaseIdentity(db);
+    const handoff = buildWorkbenchHandoff({
+      authoringCommand: "/opt/masthead/bin/mastheadctl",
+      databaseId,
+      sessionIds,
+      sessions: focusedAgentLedCorpus.map((session) => ({
+        bugFixTraceStatus: "unknown",
+        lastActivityAt: session.evidence.at(-1)!.observedAt,
+        lifecycle: "ended",
+        nextAction: "enrich",
+        publicationStatus: "publish_path",
+        qualityStatus: "passed",
+        runtime: "codex",
+        sessionDossierStatus: "missing",
+        sessionEnrichmentStatus: "missing",
+        sessionId: session.id,
+        title: session.title,
+        transcriptStatus: "imported"
+      }))
     });
-    const bundle = buildFocusedAgentLedBundle(opened.run, focusedAgentLedCorpus);
+    const machineRequest = JSON.parse(handoff.split("\n").find((line) => line.startsWith("{")) ?? "{}") as {
+      bundleVersion?: string;
+      sessionIds?: string[];
+    };
+    expect(machineRequest).toMatchObject({ bundleVersion: "workbench-authoring-v3", sessionIds });
 
-    const submitted = submitAuthoringBundle(db, { bundle, runId: opened.run.runId });
+    const originals = new Map(sessionIds.map((sessionId) => [sessionId, getSessionDossier(db, sessionId)!]));
+    const openedResponse = await authoringRoute(db, "POST", "/workbench/authoring/runs", {
+      actorId: "acceptance-agent",
+      databaseId,
+      sessionIds: machineRequest.sessionIds
+    });
+    expect(openedResponse.status).toBe(201);
+    const opened = (openedResponse.body as { run: WorkbenchAuthoringRunDto }).run;
+    const bundle = buildFocusedAgentLedBundle(opened, focusedAgentLedCorpus);
+
+    const submittedResponse = await authoringRoute(
+      db,
+      "POST",
+      `/workbench/authoring/runs/${encodeURIComponent(opened.runId)}/submit`,
+      bundle
+    );
+    const submitted = submittedResponse.body as ReturnType<typeof submitAuthoringBundle>;
     expect(submitted.accepted, JSON.stringify(submitted.findings, null, 2)).toBe(true);
-    const receipt = finishAuthoringRun(db, { runId: opened.run.runId });
-    expect(receipt.contractVersion).toBe("workbench-authoring-v3");
-    if (receipt.contractVersion !== "workbench-authoring-v3") throw new Error("expected_v3_receipt");
+    const finishedResponse = await authoringRoute(
+      db,
+      "POST",
+      `/workbench/authoring/runs/${encodeURIComponent(opened.runId)}/finish`,
+      {}
+    );
+    const receipt = (finishedResponse.body as { receipt: WorkbenchAuthoringReceiptV3 }).receipt;
 
     expect(receipt.dossierArtifactIds).toHaveLength(4);
     expect(receipt.optionalArtifacts.map((item) => item.kind).sort()).toEqual([
@@ -60,19 +107,24 @@ describe("focused agent-led authoring acceptance", () => {
       "incident_timeline"
     ]);
     expect(allDossiersHaveCurrentEnrichment(db, receipt.dossierArtifactIds)).toBe(true);
+    expect(allDossiersPreserveCanonicalShape(db, receipt, originals)).toBe(true);
     expect(allOptionalClaimsHaveVerbatimSupport(db, receipt.optionalArtifacts.map(({ artifactId }) => artifactId)))
       .toBe(true);
 
-    for (const optionalArtifact of receipt.optionalArtifacts) {
-      const detail = getLogbookArtifactDetail(db, optionalArtifact.artifactId)!;
+    const publishedArtifactIds = [
+      ...receipt.dossierArtifactIds,
+      ...receipt.optionalArtifacts.map(({ artifactId }) => artifactId)
+    ];
+    for (const artifactId of publishedArtifactIds) {
+      const detail = getLogbookArtifactDetail(db, artifactId)!;
       const search = callMcp(db, "search_artifacts", { query: detail.capsule.title });
       expect(search.artifacts).toEqual(expect.arrayContaining([
-        expect.objectContaining({ artifactId: optionalArtifact.artifactId })
+        expect.objectContaining({ artifactId })
       ]));
-      expect(callMcp(db, "get_artifact", { artifactId: optionalArtifact.artifactId })).toMatchObject({
+      expect(callMcp(db, "get_artifact", { artifactId })).toMatchObject({
         artifact: {
-          capsule: { artifactId: optionalArtifact.artifactId },
-          provenanceSessionIds: optionalArtifact.provenanceSessionIds
+          capsule: { artifactId },
+          provenanceSessionIds: detail.provenanceSessionIds
         }
       });
     }
@@ -113,12 +165,54 @@ async function openFixtureDb(): Promise<MastheadDatabase> {
 
 function logbookKinds(
   db: MastheadDatabase,
-  receipt: Extract<ReturnType<typeof finishAuthoringRun>, { contractVersion: "workbench-authoring-v3" }>
+  receipt: WorkbenchAuthoringReceiptV3
 ): string[] {
-  return [
+  const expectedOrder = [
     ...receipt.dossierArtifactIds,
     ...receipt.optionalArtifacts.map(({ artifactId }) => artifactId)
-  ].map((artifactId) => getLogbookArtifactDetail(db, artifactId)?.capsule.kind ?? "missing");
+  ];
+  const indexed = searchLogbookArtifacts(db, { limit: 50 });
+  if (indexed.total !== expectedOrder.length) return indexed.artifacts.map(({ kind }) => kind);
+  const indexedById = new Map(indexed.artifacts.map((artifact) => [artifact.artifactId, artifact]));
+  return expectedOrder.map((artifactId) => indexedById.get(artifactId)?.kind ?? "missing");
+}
+
+function allDossiersPreserveCanonicalShape(
+  db: MastheadDatabase,
+  receipt: WorkbenchAuthoringReceiptV3,
+  originals: Map<string, NonNullable<ReturnType<typeof getSessionDossier>>>
+): boolean {
+  return receipt.dossierArtifactIds.every((artifactId) => {
+    const detail = getLogbookArtifactDetail(db, artifactId);
+    const sessionId = detail?.provenanceSessionIds[0];
+    const original = sessionId ? originals.get(sessionId) : undefined;
+    if (!detail || !sessionId || !original) return false;
+    const current = getSessionDossier(db, sessionId);
+    if (!current) return false;
+    const { artifacts: _currentArtifacts, ...currentBody } = current;
+    const { capturedAt: _capturedAt, snapshotVersion: _snapshotVersion, ...publishedBody } = detail.body as Record<string, unknown>;
+    const originalSectionKeys = Object.keys(original).filter((key) => key !== "artifacts");
+    const normalizedCurrent = neutralizePublicationState(JSON.parse(JSON.stringify(currentBody)) as Record<string, unknown>);
+    const normalizedPublished = neutralizePublicationState(structuredClone(publishedBody));
+    const mismatched = originalSectionKeys.filter((key) =>
+      !Object.hasOwn(normalizedPublished, key) || !isDeepStrictEqual(normalizedPublished[key], normalizedCurrent[key])
+    );
+    if (mismatched.length > 0) throw new Error(`dossier_shape_mismatch:${sessionId}:${mismatched.join(",")}`);
+    return true;
+  });
+}
+
+function neutralizePublicationState(body: Record<string, unknown>): Record<string, unknown> {
+  const reuse = body.reuse as Record<string, unknown> | undefined;
+  if (!reuse) return body;
+  delete reuse.mcpIncluded;
+  if (typeof reuse.copyableContext === "string") {
+    reuse.copyableContext = reuse.copyableContext.replace(
+      /\nAgent retrieval: (?:included|excluded)$/u,
+      "\nAgent retrieval: publication-state"
+    );
+  }
+  return body;
 }
 
 function allDossiersHaveCurrentEnrichment(db: MastheadDatabase, artifactIds: string[]): boolean {
@@ -148,4 +242,18 @@ function callMcp(db: MastheadDatabase, tool: string, args: Record<string, unknow
   const response = JSON.parse(output ?? "{}") as { result?: Record<string, any> };
   if (!response.result) throw new Error(`mcp_call_failed:${tool}`);
   return response.result;
+}
+
+async function authoringRoute(
+  db: MastheadDatabase,
+  method: string,
+  path: string,
+  body?: unknown
+) {
+  const response = await routeWorkbenchAuthoringRequest(
+    { authoringCommand: "/opt/masthead/bin/mastheadctl", db },
+    { body, method, url: new URL(path, "http://127.0.0.1") }
+  );
+  if (!response) throw new Error(`authoring_route_missing:${path}`);
+  return response;
 }
