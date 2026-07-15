@@ -1,4 +1,5 @@
 import type { SessionTranscriptItem } from "./sessionTranscript.ts";
+import type { DurableSessionEnrichment } from "./sessionEnrichment.ts";
 
 export type WorkbenchAutomaticArtifactKind = "runbook" | "adr" | "incident_timeline";
 export type WorkbenchAuthoredArtifactKind = "session_dossier" | WorkbenchAutomaticArtifactKind;
@@ -26,7 +27,8 @@ export type WorkbenchClaimSupport = {
 
 export type WorkbenchAuthoringContractVersion =
   | "workbench-authoring-v1"
-  | "workbench-authoring-v2";
+  | "workbench-authoring-v2"
+  | "workbench-authoring-v3";
 
 type WorkbenchAuthoringCapabilitiesBase = {
   capability: "artifact_authoring";
@@ -37,21 +39,36 @@ type WorkbenchAuthoringCapabilitiesBase = {
 };
 
 export type WorkbenchAuthoringCapabilitiesDto = WorkbenchAuthoringCapabilitiesBase & ({
-  operations: ["candidates", "open", "status", "evidence", "submit", "finish"];
-  bundleVersion: "workbench-authoring-v2";
-  evidencePolicy: "candidate_scoped_canonical_evidence";
-  evidenceRequirements: {
-    runbook: ["problem", "change", "verification"];
-    adr: ["context", "decision", "alternatives"];
-    incident_timeline: ["symptom", "ordered_events", "remediation"];
-  };
+  operations: ["suggestions", "open", "status", "evidence", "context", "submit", "finish"];
+  bundleVersion: "workbench-authoring-v3";
+  evidencePolicy: "selected_session_canonical_evidence";
+  maxSessionsPerRun: 12;
+  suggestionsAreBinding: false;
 } | {
   operations: ["open", "status", "evidence", "submit", "finish"];
   bundleVersion: "workbench-authoring-v1";
   evidencePolicy: "all_canonical_redacted_evidence";
 });
 
-export const WORKBENCH_AUTHORING_OPERATIONS = ["candidates", "open", "status", "evidence", "submit", "finish"] as const;
+export const WORKBENCH_AUTHORING_OPERATIONS = [
+  "suggestions",
+  "open",
+  "status",
+  "evidence",
+  "context",
+  "submit",
+  "finish"
+] as const;
+
+export type WorkbenchArtifactSuggestionDto = {
+  suggestionId: string;
+  kind: WorkbenchAutomaticArtifactKind;
+  summary: string;
+  provenanceSessionIds: string[];
+  evidenceRefs: string[];
+  signatureKey?: string;
+  advisory: true;
+};
 
 export type WorkbenchArtifactCandidateStatus = "pending" | "claimed" | "published" | "dismissed" | "superseded";
 
@@ -89,9 +106,10 @@ export function isWorkbenchAuthoringCapabilitiesDto(
     capabilities.capability === "artifact_authoring" &&
     capabilities.protocol === "masthead.workbench.authoring/v1" &&
     capabilities.transport === "daemon_http" &&
-    capabilities.bundleVersion === "workbench-authoring-v2" &&
-    capabilities.evidencePolicy === "candidate_scoped_canonical_evidence" &&
-    hasExactEvidenceRequirements(capabilities.evidenceRequirements) &&
+    capabilities.bundleVersion === "workbench-authoring-v3" &&
+    capabilities.evidencePolicy === "selected_session_canonical_evidence" &&
+    capabilities.maxSessionsPerRun === 12 &&
+    capabilities.suggestionsAreBinding === false &&
     typeof capabilities.databaseId === "string" &&
     Boolean(capabilities.databaseId.trim()) &&
     capabilities.databaseId === capabilities.databaseId.trim() &&
@@ -100,20 +118,6 @@ export function isWorkbenchAuthoringCapabilitiesDto(
     (!options.expectedCommand || command === options.expectedCommand) &&
     hasExactAuthoringOperations(capabilities.operations)
   );
-}
-
-function hasExactEvidenceRequirements(value: unknown): boolean {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const requirements = value as Record<string, unknown>;
-  return (
-    hasExactStrings(requirements.runbook, ["problem", "change", "verification"]) &&
-    hasExactStrings(requirements.adr, ["context", "decision", "alternatives"]) &&
-    hasExactStrings(requirements.incident_timeline, ["symptom", "ordered_events", "remediation"])
-  );
-}
-
-function hasExactStrings(value: unknown, expected: readonly string[]): boolean {
-  return Array.isArray(value) && value.length === expected.length && expected.every((item, index) => value[index] === item);
 }
 
 export function isAbsoluteAuthoringCommand(command: string | undefined): boolean {
@@ -203,7 +207,23 @@ export type WorkbenchAuthoringBundleV2 = {
   artifact: WorkbenchArtifactDraft;
 };
 
-export type WorkbenchStoredAuthoringBundle = WorkbenchAuthoringBundle | WorkbenchAuthoringBundleV2;
+export type WorkbenchSessionEnrichmentDraft = {
+  sessionId: string;
+  enrichment: DurableSessionEnrichment;
+};
+
+export type WorkbenchAuthoringBundleV3 = {
+  bundleVersion: "workbench-authoring-v3";
+  runId: string;
+  evidenceRevision: string;
+  sessionEnrichments: WorkbenchSessionEnrichmentDraft[];
+  artifacts: WorkbenchArtifactDraft[];
+};
+
+export type WorkbenchStoredAuthoringBundle =
+  | WorkbenchAuthoringBundle
+  | WorkbenchAuthoringBundleV2
+  | WorkbenchAuthoringBundleV3;
 
 export type WorkbenchAuthoringFinding = {
   code: string;
@@ -235,7 +255,20 @@ export type WorkbenchAuthoringReceiptV2 = WorkbenchAuthoringReceiptBase & {
   provenanceSessionIds: string[];
 };
 
-export type WorkbenchAuthoringReceipt = WorkbenchAuthoringReceiptV1 | WorkbenchAuthoringReceiptV2;
+export type WorkbenchAuthoringReceiptV3 = WorkbenchAuthoringReceiptBase & {
+  contractVersion: "workbench-authoring-v3";
+  dossierArtifactIds: string[];
+  optionalArtifacts: Array<{
+    artifactId: string;
+    kind: WorkbenchAutomaticArtifactKind;
+    provenanceSessionIds: string[];
+  }>;
+};
+
+export type WorkbenchAuthoringReceipt =
+  | WorkbenchAuthoringReceiptV1
+  | WorkbenchAuthoringReceiptV2
+  | WorkbenchAuthoringReceiptV3;
 
 export type WorkbenchAuthoringRunDto = {
   runId: string;

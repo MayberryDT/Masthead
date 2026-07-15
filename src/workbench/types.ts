@@ -4,7 +4,8 @@ import type {
   WorkbenchAuthoringBundle,
   WorkbenchAuthoringFinding,
   WorkbenchClaimEvidence,
-  WorkbenchClaimSupport
+  WorkbenchClaimSupport,
+  WorkbenchStoredAuthoringBundle
 } from "../shared/workbenchAuthoring.ts";
 
 export type WorkbenchOutputKind =
@@ -61,8 +62,10 @@ export type WorkbenchValidationEvidence = {
   lowValue: boolean;
 };
 
-export type WorkbenchAuthoringValidationInput = {
-  bundle: WorkbenchAuthoringBundle;
+export type WorkbenchAuthoringValidationInput<
+  TBundle extends WorkbenchStoredAuthoringBundle = WorkbenchAuthoringBundle
+> = {
+  bundle: TBundle;
   selectedSessionIds: string[];
   evidenceByRef: Map<string, WorkbenchValidationEvidence>;
   coverageWarningsBySession: Map<string, string[]>;

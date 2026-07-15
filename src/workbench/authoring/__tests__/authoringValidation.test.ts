@@ -4,6 +4,10 @@ import type {
   WorkbenchAuthoringBundle,
   WorkbenchAuthoringBundleV2
 } from "../../../shared/workbenchAuthoring.ts";
+import {
+  isWorkbenchAuthoringCapabilitiesDto,
+  WORKBENCH_AUTHORING_OPERATIONS
+} from "../../../shared/workbenchAuthoring.ts";
 import { getWorkbenchSchema } from "../../schemas.ts";
 import type { WorkbenchAuthoringValidationInput, WorkbenchValidationEvidence } from "../../types.ts";
 import {
@@ -13,6 +17,30 @@ import {
   parseAuthoringBundleV2
 } from "../authoringSchemas.ts";
 import { validateAuthoringBundle, validateAuthoringBundleV2 } from "../authoringValidation.ts";
+
+describe("Workbench authoring V3 capabilities", () => {
+  test("advertises selection-scoped authoring while preserving the transport protocol", () => {
+    const capabilities = {
+      bundleVersion: "workbench-authoring-v3",
+      capability: "artifact_authoring",
+      command: "/opt/masthead/mastheadctl",
+      databaseId: "database:test",
+      evidencePolicy: "selected_session_canonical_evidence",
+      maxSessionsPerRun: 12,
+      operations: ["suggestions", "open", "status", "evidence", "context", "submit", "finish"],
+      protocol: "masthead.workbench.authoring/v1",
+      suggestionsAreBinding: false,
+      transport: "daemon_http"
+    };
+
+    expect(WORKBENCH_AUTHORING_OPERATIONS).toEqual(capabilities.operations);
+    expect(isWorkbenchAuthoringCapabilitiesDto(capabilities)).toBe(true);
+    expect(isWorkbenchAuthoringCapabilitiesDto({
+      ...capabilities,
+      bundleVersion: "workbench-authoring-v2"
+    })).toBe(false);
+  });
+});
 
 describe("Workbench authoring V2 schemas", () => {
   test("accepts exactly one candidate-scoped optional artifact", () => {
