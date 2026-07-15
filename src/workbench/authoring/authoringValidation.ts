@@ -1,6 +1,7 @@
 import type {
   WorkbenchAutomaticArtifactKind,
   WorkbenchAuthoringBundleV2,
+  WorkbenchAuthoringBundleV3,
   WorkbenchClaimEvidence,
   WorkbenchClaimSupport
 } from "../../shared/workbenchAuthoring.ts";
@@ -9,6 +10,7 @@ import { normalizeSessionArtifactSignatureKey } from "../../daemon/db/sessionArt
 import {
   getAuthoringBundleSchema,
   getAuthoringBundleV2Schema,
+  getAuthoringBundleV3Schema,
   getWorkbenchAuthoringOutputSchema,
   getWorkbenchAuthoringOutputV2Schema
 } from "./authoringSchemas.ts";
@@ -132,6 +134,203 @@ export function validateAuthoringBundleV2(input: {
   return result(findings);
 }
 
+export function validateAuthoringBundleV3(input: {
+  bundle: WorkbenchAuthoringBundleV3;
+  selectedSessionIds: string[];
+  evidenceByRef: WorkbenchAuthoringValidationInput["evidenceByRef"];
+  coverageWarningsBySession: WorkbenchAuthoringValidationInput["coverageWarningsBySession"];
+  publishedArtifacts: WorkbenchAuthoringValidationInput["publishedArtifacts"];
+}): WorkbenchAuthoringValidationResult {
+  const findings: WorkbenchAuthoringFindingV2[] = [];
+  validateSchemaValue(input.bundle, getAuthoringBundleV3Schema(), "", findings);
+  const selectedSessionIds = [...new Set(input.selectedSessionIds)];
+  const selectedSessions = new Set(selectedSessionIds);
+  const enrichments = unknownArray(input.bundle.sessionEnrichments);
+  const artifacts = unknownArray(input.bundle.artifacts);
+
+  validateSessionEnrichmentsV3(
+    enrichments,
+    selectedSessionIds,
+    selectedSessions,
+    input,
+    findings
+  );
+  artifacts.forEach((artifact, index) => {
+    if (isRecord(artifact)) {
+      validateArtifact(artifact, index, selectedSessions, input, findings, {
+        contractVersion: "workbench-authoring-v3"
+      });
+    }
+  });
+  validateArtifactSignatures(artifacts, findings);
+
+  const qualityOutputs = artifacts.flatMap((artifact, index): ArtifactQualityOutput[] => {
+    if (!isRecord(artifact) || !isRecord(artifact.output)) return [];
+    const kind = automaticKind(artifact.kind);
+    const provenanceSessionIds = stringArray(artifact.provenanceSessionIds);
+    if (!kind || !provenanceSessionIds) return [];
+    return [{
+      candidateId: `artifact:${index}`,
+      kind,
+      output: artifact.output,
+      provenanceSessionIds
+    }];
+  });
+  for (const finding of findDuplicateHumanContent(qualityOutputs, input.publishedArtifacts)) {
+    const artifactIndex = Number(finding.candidateId?.replace("artifact:", ""));
+    if (!Number.isInteger(artifactIndex)) continue;
+    const artifact = artifacts[artifactIndex];
+    if (!isRecord(artifact)) continue;
+    addFinding(findings, {
+      artifactKind: automaticKind(artifact.kind),
+      code: finding.code,
+      message: finding.message,
+      path: `artifacts[${artifactIndex}].output`,
+      sessionId: stringValue(artifact.seedSessionId)
+    });
+  }
+
+  return result(findings);
+}
+
+function validateSessionEnrichmentsV3(
+  enrichments: unknown[],
+  selectedSessionIds: string[],
+  selectedSessions: Set<string>,
+  input: WorkbenchAuthoringValidationContext,
+  findings: WorkbenchAuthoringFindingV2[]
+): void {
+  for (const sessionId of selectedSessionIds) {
+    const matchingIndexes = enrichments.flatMap((entry, index) =>
+      isRecord(entry) && entry.sessionId === sessionId ? [index] : []
+    );
+    if (matchingIndexes.length === 0) {
+      addFinding(findings, {
+        code: "missing_session_enrichment",
+        message: `Selected session requires exactly one durable enrichment: ${sessionId}`,
+        path: "sessionEnrichments",
+        sessionId
+      });
+    } else if (matchingIndexes.length > 1) {
+      addFinding(findings, {
+        code: "duplicate_session_enrichment",
+        message: `Selected session has more than one durable enrichment: ${sessionId}`,
+        path: `sessionEnrichments[${matchingIndexes[1]}].sessionId`,
+        sessionId
+      });
+    }
+  }
+
+  enrichments.forEach((entry, index) => {
+    if (!isRecord(entry)) return;
+    const sessionId = stringValue(entry.sessionId);
+    if (!sessionId || !isRecord(entry.enrichment)) return;
+    const basePath = `sessionEnrichments[${index}]`;
+    if (!selectedSessions.has(sessionId)) {
+      addFinding(findings, {
+        code: "unexpected_session_enrichment",
+        message: `Session enrichment is not part of the selected authoring set: ${sessionId}`,
+        path: `${basePath}.sessionId`,
+        sessionId
+      });
+      return;
+    }
+
+    validateDurableEnrichment(entry.enrichment, `${basePath}.enrichment`, sessionId, input, findings);
+    const coverageWarnings = input.coverageWarningsBySession.get(sessionId) ?? [];
+    if (coverageWarnings.length > 0) {
+      addFinding(findings, {
+        code: "sparse_evidence_coverage",
+        message: `Canonical evidence coverage is sparse: ${coverageWarnings.join(" ")}`,
+        path: basePath,
+        sessionId,
+        severity: "warning"
+      });
+    }
+  });
+}
+
+function validateDurableEnrichment(
+  enrichment: Record<string, unknown>,
+  basePath: string,
+  sessionId: string,
+  input: WorkbenchAuthoringValidationContext,
+  findings: WorkbenchAuthoringFindingV2[]
+): void {
+  const title = isRecord(enrichment.sessionTitle) ? enrichment.sessionTitle : undefined;
+  const summary = isRecord(enrichment.sessionSummary) ? enrichment.sessionSummary : undefined;
+  const dossier = isRecord(enrichment.sessionDossier) ? enrichment.sessionDossier : undefined;
+  validateRequiredText(findings, title?.text, `${basePath}.sessionTitle.text`, MIN_TITLE_LENGTH, "session_enrichment", sessionId);
+  validateRequiredText(findings, summary?.text, `${basePath}.sessionSummary.text`, MIN_SUMMARY_LENGTH, "session_enrichment", sessionId);
+  if (typeof title?.text === "string" && GENERIC_TITLES.has(title.text.trim().toLowerCase())) {
+    addFinding(findings, {
+      artifactKind: "session_enrichment",
+      code: "generic_title",
+      message: `Title is too generic: ${title.text}`,
+      path: `${basePath}.sessionTitle.text`,
+      sessionId
+    });
+  }
+  if (
+    typeof title?.text === "string" &&
+    typeof summary?.text === "string" &&
+    title.text.trim().toLowerCase() === summary.text.trim().toLowerCase()
+  ) {
+    addFinding(findings, {
+      artifactKind: "session_enrichment",
+      code: "duplicate_title_summary",
+      message: "Session summary must add detail beyond the title.",
+      path: `${basePath}.sessionSummary.text`,
+      sessionId
+    });
+  }
+
+  const evidenceGroups = [
+    { path: `${basePath}.sessionTitle.evidenceRefs`, refs: evidenceRefIds(title?.evidenceRefs), required: true },
+    { path: `${basePath}.sessionSummary.evidenceRefs`, refs: evidenceRefIds(summary?.evidenceRefs), required: true },
+    { path: `${basePath}.sessionDossier.evidenceRefs`, refs: evidenceRefIds(dossier?.evidenceRefs), required: true },
+    {
+      path: `${basePath}.sessionDossier.verification.evidenceRefs`,
+      refs: evidenceRefIds(isRecord(dossier?.verification) ? dossier.verification.evidenceRefs : undefined),
+      required: false
+    }
+  ];
+  for (const group of evidenceGroups) {
+    if (group.required && group.refs.length === 0) {
+      addFinding(findings, {
+        artifactKind: "session_enrichment",
+        code: "missing_claim_evidence",
+        message: "Durable enrichment fields must cite canonical evidence.",
+        path: group.path,
+        sessionId
+      });
+    }
+    validateEvidenceRefs(
+      group.refs,
+      group.path,
+      new Set([sessionId]),
+      input,
+      findings,
+      "session_enrichment",
+      sessionId
+    );
+  }
+  if (containsUnredactedSecret(enrichment)) {
+    addFinding(findings, {
+      artifactKind: "session_enrichment",
+      code: "secret_detected",
+      message: "Enrichment contains secret-looking values.",
+      path: basePath,
+      sessionId
+    });
+  }
+}
+
+function evidenceRefIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => isRecord(entry) && typeof entry.id === "string" ? [entry.id] : []);
+}
+
 function validateSessionPackages(
   packages: unknown[],
   selectedSessionIds: string[],
@@ -217,7 +416,7 @@ function validateArtifact(
   findings: WorkbenchAuthoringFindingV2[],
   options: {
     basePath?: string;
-    contractVersion?: "workbench-authoring-v1" | "workbench-authoring-v2";
+    contractVersion?: "workbench-authoring-v1" | "workbench-authoring-v2" | "workbench-authoring-v3";
   } = {}
 ): void {
   const kind = automaticKind(artifact.kind);
@@ -315,11 +514,11 @@ function validateGroundedOutput(
   findings: WorkbenchAuthoringFindingV2[],
   requireSparseEvidenceNote: boolean,
   explicitSessionId?: string,
-  contractVersion: "workbench-authoring-v1" | "workbench-authoring-v2" = "workbench-authoring-v1"
+  contractVersion: "workbench-authoring-v1" | "workbench-authoring-v2" | "workbench-authoring-v3" = "workbench-authoring-v1"
 ): void {
   const artifactKind = kind;
   const sessionId = explicitSessionId ?? [...provenance][0];
-  const schema = contractVersion === "workbench-authoring-v2"
+  const schema = contractVersion !== "workbench-authoring-v1"
     ? getWorkbenchAuthoringOutputV2Schema(kind)
     : getWorkbenchAuthoringOutputSchema(kind);
   validateRequiredStrings(output, schema, basePath, findings, artifactKind, sessionId);
@@ -411,8 +610,8 @@ function validateGroundedOutput(
   }
 
   const claimEntries = claimEvidenceEntries(output.claimEvidence);
-  const v2ArtifactKind = contractVersion === "workbench-authoring-v2" ? automaticKind(kind) : undefined;
-  if (v2ArtifactKind) {
+  const supportedArtifactKind = contractVersion !== "workbench-authoring-v1" ? automaticKind(kind) : undefined;
+  if (supportedArtifactKind) {
     const supports = claimSupportEntries(output.claimSupport);
     for (const support of supports) {
       if (!evidenceRefs.includes(support.evidenceRef)) {
@@ -436,9 +635,12 @@ function validateGroundedOutput(
     }
     for (const finding of validateArtifactQuality({
       evidenceByRef: input.evidenceByRef,
-      kind: v2ArtifactKind,
+      kind: supportedArtifactKind,
       output,
       provenanceSessionIds: [...provenance],
+      protocolLeakageFindingCode: contractVersion === "workbench-authoring-v3"
+        ? "authoring_protocol_leakage"
+        : undefined,
       supports
     })) {
       addFinding(findings, {

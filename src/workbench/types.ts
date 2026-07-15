@@ -116,6 +116,10 @@ export type WorkbenchAuthoringFindingCode =
   | "invalid_timeline_order"
   | "invalid_timeline_support"
   | "duplicate_human_content"
+  | "duplicate_session_enrichment"
+  | "missing_session_enrichment"
+  | "unexpected_session_enrichment"
+  | "authoring_protocol_leakage"
   | "unresolved_automatic_kind"
   | "weak_join"
   | "weak_not_applicable_reason";

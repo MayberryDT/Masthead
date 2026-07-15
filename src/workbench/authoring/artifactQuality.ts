@@ -92,6 +92,7 @@ export type ArtifactQualityFinding = {
     | "missing_required_support_kind"
     | "missing_root_cause_support"
     | "unsupported_authoring_protocol_language"
+    | "authoring_protocol_leakage"
     | "unsupported_claim_excerpt";
   message: string;
   path?: string;
@@ -135,7 +136,9 @@ export function validateClaimSupport(
 export function findUnsupportedProtocolLanguage(
   output: Record<string, unknown>,
   supports: WorkbenchClaimSupport[],
-  evidenceByRef: Map<string, WorkbenchValidationEvidence>
+  evidenceByRef: Map<string, WorkbenchValidationEvidence>,
+  findingCode: "unsupported_authoring_protocol_language" | "authoring_protocol_leakage" =
+    "unsupported_authoring_protocol_language"
 ): ArtifactQualityFinding[] {
   const findings: ArtifactQualityFinding[] = [];
   for (const field of humanFacingStrings(output)) {
@@ -153,7 +156,7 @@ export function findUnsupportedProtocolLanguage(
     });
     if (selfProcessLeak && !directlySupportedSelfProcess) {
       findings.push({
-        code: "unsupported_authoring_protocol_language",
+        code: findingCode,
         message: `Human-facing artifact text contains unsupported authoring self-process language: ${selfProcessLeak.label}.`,
         path: field.path
       });
@@ -173,7 +176,7 @@ export function findUnsupportedProtocolLanguage(
       });
       if (!directlySupported) {
         findings.push({
-          code: "unsupported_authoring_protocol_language",
+          code: findingCode,
           message: `Human-facing artifact text contains unsupported authoring-protocol language: ${phrase}.`,
           path: field.path
         });
@@ -189,10 +192,16 @@ export function validateArtifactQuality(input: {
   supports: WorkbenchClaimSupport[];
   evidenceByRef: Map<string, WorkbenchValidationEvidence>;
   provenanceSessionIds: string[];
+  protocolLeakageFindingCode?: "unsupported_authoring_protocol_language" | "authoring_protocol_leakage";
 }): ArtifactQualityFinding[] {
   const findings = [
     ...validateClaimSupport(input.output, input.supports, input.evidenceByRef),
-    ...findUnsupportedProtocolLanguage(input.output, input.supports, input.evidenceByRef)
+    ...findUnsupportedProtocolLanguage(
+      input.output,
+      input.supports,
+      input.evidenceByRef,
+      input.protocolLeakageFindingCode
+    )
   ];
   const validSupports = input.supports.filter(
     (support) => !validateClaimSupport(input.output, [support], input.evidenceByRef).length

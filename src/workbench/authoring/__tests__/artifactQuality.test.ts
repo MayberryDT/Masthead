@@ -78,6 +78,17 @@ describe("artifact claim support", () => {
     );
   });
 
+  test("uses the V3 protocol-leakage finding code when requested", () => {
+    expect(findUnsupportedProtocolLanguage(
+      { approach: ["Read all canonical evidence through pagination."] },
+      [],
+      fixtureEvidence(),
+      "authoring_protocol_leakage"
+    )).toContainEqual(
+      expect.objectContaining({ code: "authoring_protocol_leakage", path: "approach[0]" })
+    );
+  });
+
   test("permits authoring self-process language when the exact field is directly supported", () => {
     const evidence = fixtureEvidence();
     const evidenceRef = "message:session:a:self-process";

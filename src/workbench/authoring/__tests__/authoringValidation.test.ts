@@ -2,8 +2,11 @@ import { describe, expect, test } from "vitest";
 import type { SessionArtifactRecord } from "../../../daemon/db/sessionArtifactRepository.ts";
 import type {
   WorkbenchAuthoringBundle,
-  WorkbenchAuthoringBundleV2
+  WorkbenchAuthoringBundleV2,
+  WorkbenchAuthoringBundleV3,
+  WorkbenchClaimSupport
 } from "../../../shared/workbenchAuthoring.ts";
+import type { DurableSessionEnrichment } from "../../../shared/sessionEnrichment.ts";
 import {
   isWorkbenchAuthoringCapabilitiesDto,
   WORKBENCH_AUTHORING_OPERATIONS
@@ -16,7 +19,11 @@ import {
   getWorkbenchAuthoringOutputSchema,
   parseAuthoringBundleV2
 } from "../authoringSchemas.ts";
-import { validateAuthoringBundle, validateAuthoringBundleV2 } from "../authoringValidation.ts";
+import {
+  validateAuthoringBundle,
+  validateAuthoringBundleV2,
+  validateAuthoringBundleV3
+} from "../authoringValidation.ts";
 
 describe("Workbench authoring V3 capabilities", () => {
   test("advertises selection-scoped authoring while preserving the transport protocol", () => {
@@ -703,6 +710,68 @@ describe("validateAuthoringBundle", () => {
   });
 });
 
+describe("validateAuthoringBundleV3", () => {
+  test("accepts one grounded enrichment per selected session with no optional artifacts", () => {
+    expect(validateV3(validEnrichmentOnlyBundle())).toEqual({ findings: [], ok: true });
+  });
+
+  test("requires exactly one enrichment per selected session and none outside the run", () => {
+    const missing = validEnrichmentOnlyBundle();
+    missing.sessionEnrichments = [];
+    expect(codes(validateV3(missing))).toContain("missing_session_enrichment");
+
+    const duplicate = validEnrichmentOnlyBundle();
+    duplicate.sessionEnrichments.push(structuredClone(duplicate.sessionEnrichments[0]!));
+    expect(codes(validateV3(duplicate))).toContain("duplicate_session_enrichment");
+
+    const unexpected = validEnrichmentOnlyBundle();
+    unexpected.sessionEnrichments.push({
+      enrichment: durableEnrichment("session:b"),
+      sessionId: "session:b"
+    });
+    expect(codes(validateV3(unexpected))).toContain("unexpected_session_enrichment");
+  });
+
+  test("rejects enrichment evidence that is unknown or belongs to another session", () => {
+    const unknown = validEnrichmentOnlyBundle();
+    unknown.sessionEnrichments[0]!.enrichment.sessionSummary.evidenceRefs[0]!.id = "missing:evidence";
+    expect(codes(validateV3(unknown))).toContain("unknown_evidence_ref");
+
+    const outside = validEnrichmentOnlyBundle();
+    outside.sessionEnrichments[0]!.enrichment.sessionDossier.evidenceRefs[0]!.id = "message:b:1";
+    expect(codes(validateV3(outside, ["session:a"], true))).toContain("evidence_outside_provenance");
+  });
+
+  test("accepts an agent-selected optional artifact without a suggestion or candidate ID", () => {
+    const bundle = validEnrichmentOnlyBundle();
+    bundle.artifacts = [validV2Bundle().artifact];
+    bundle.artifacts[0]!.output.preconditions = ["A failing validation fixture exists."];
+
+    expect(validateV3(bundle)).toEqual({ findings: [], ok: true });
+  });
+
+  test("retains claim support, join, and protocol leakage quality gates", () => {
+    const unsupported = validEnrichmentOnlyBundle();
+    unsupported.artifacts = [validV2Bundle().artifact];
+    const supports = unsupported.artifacts[0]!.output.claimSupport as WorkbenchClaimSupport[];
+    supports[0]!.excerpt = "This excerpt is not present in canonical evidence.";
+    expect(codes(validateV3(unsupported))).toContain("unsupported_claim_excerpt");
+
+    const weakJoin = validEnrichmentOnlyBundle(["session:a", "session:b"]);
+    const joined = validV2Bundle().artifact;
+    joined.provenanceSessionIds = ["session:a", "session:b"];
+    joined.output.provenanceSessionIds = ["session:a", "session:b"];
+    joined.output.joinRationale = "same project";
+    weakJoin.artifacts = [joined];
+    expect(codes(validateV3(weakJoin, ["session:a", "session:b"]))).toContain("weak_join");
+
+    const leakage = validEnrichmentOnlyBundle();
+    leakage.artifacts = [validV2Bundle().artifact];
+    leakage.artifacts[0]!.output.fixSteps = ["Read every canonical evidence item through cursor pagination."];
+    expect(codes(validateV3(leakage))).toContain("authoring_protocol_leakage");
+  });
+});
+
 function validAuthoringBundle(sessionIds: string[] = ["session:a"]): WorkbenchAuthoringBundle {
   return {
     artifacts: [],
@@ -880,6 +949,90 @@ function validationEvidence(
       : "Changed validation behavior. Canonical evidence supports the authored Workbench claim in this fixture.",
     ...overrides
   };
+}
+
+function validEnrichmentOnlyBundle(
+  sessionIds: string[] = ["session:a"]
+): WorkbenchAuthoringBundleV3 {
+  return {
+    artifacts: [],
+    bundleVersion: "workbench-authoring-v3",
+    evidenceRevision: "sha256:evidence",
+    runId: "authoring:v3",
+    sessionEnrichments: sessionIds.map((sessionId) => ({
+      enrichment: durableEnrichment(sessionId),
+      sessionId
+    }))
+  };
+}
+
+function durableEnrichment(sessionId: string): DurableSessionEnrichment {
+  const message = evidenceRef(messageRef(sessionId), "event");
+  const verification = evidenceRef(toolRef(sessionId), "command");
+  return {
+    sessionDossier: {
+      blockers: [],
+      continuation: { constraints: [], openQuestions: [] },
+      decisions: ["Use selection-scoped authoring without candidate gates."],
+      evidenceRefs: [message],
+      keyWork: ["Validated the enrichment-first V3 authoring contract."],
+      outcome: "The V3 authoring bundle passed focused validation.",
+      verification: {
+        commands: ["npx vitest run"],
+        evidenceRefs: [verification],
+        failures: [],
+        status: "passed",
+        summary: "Focused authoring validation tests passed."
+      },
+      warnings: []
+    },
+    sessionSummary: {
+      confidence: "high",
+      evidenceRefs: [message, verification],
+      state: "completed",
+      text: "Validated grounded durable enrichment and optional artifacts for the selected session."
+    },
+    sessionTitle: {
+      basis: "dominant_work",
+      confidence: "high",
+      evidenceRefs: [message],
+      text: "Validate enrichment-first authoring"
+    },
+    version: "session-capsule-v4"
+  };
+}
+
+function evidenceRef(id: string, kind: "event" | "command") {
+  return {
+    id,
+    kind,
+    observedAt: "2026-07-10T12:00:00.000Z",
+    source: "canonical"
+  } as const;
+}
+
+function validateV3(
+  bundle: WorkbenchAuthoringBundleV3,
+  sessionIds: string[] = ["session:a"],
+  includeSessionB = false
+) {
+  const evidenceSessionIds = includeSessionB ? [...sessionIds, "session:b"] : sessionIds;
+  return validateAuthoringBundleV3({
+    bundle,
+    coverageWarningsBySession: new Map(),
+    evidenceByRef: new Map<string, WorkbenchValidationEvidence>(
+      evidenceSessionIds.flatMap((sessionId) => [
+        [messageRef(sessionId), validationEvidence(sessionId, "message")],
+        [toolRef(sessionId), validationEvidence(sessionId, "tool_result", { exitCode: 0, status: "completed" })]
+      ])
+    ),
+    publishedArtifacts: [],
+    selectedSessionIds: sessionIds
+  });
+}
+
+function codes(result: ReturnType<typeof validateAuthoringBundleV3>): string[] {
+  return result.findings.map((finding) => finding.code);
 }
 
 function notApplicable(
