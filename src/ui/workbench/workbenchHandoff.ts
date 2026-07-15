@@ -1,4 +1,4 @@
-import type { WorkbenchArtifactCandidateDto } from "../../shared/workbenchAuthoring";
+import type { WorkbenchQueueSessionDto } from "../../shared/workbench";
 
 const FORBIDDEN_HANDOFF_SUBSTRINGS = [
   ["mast", "head", "ctl"].join(""),
@@ -21,40 +21,46 @@ function escapeRegExp(value: string): string {
 
 export function buildWorkbenchHandoff(input: {
   authoringCommand: string;
-  candidate: WorkbenchArtifactCandidateDto;
   databaseId: string;
+  sessionIds: string[];
+  sessions: WorkbenchQueueSessionDto[];
 }): string {
-  const candidate = input.candidate;
-  const provenanceCount = candidate.provenanceSessionIds.length;
+  const sessionIds = [...new Set(input.sessionIds)];
   const machineRequest = {
     protocol: "masthead.workbench.authoring/v1",
-    bundleVersion: "workbench-authoring-v2",
+    bundleVersion: "workbench-authoring-v3",
     capability: "artifact_authoring",
     databaseId: input.databaseId,
-    evidencePolicy: "candidate_scoped_canonical_evidence",
     transport: "daemon_http",
-    candidateId: candidate.candidateId,
-    kind: candidate.kind,
-    evidenceRevision: candidate.evidenceRevision,
-    provenanceSessionIds: candidate.provenanceSessionIds,
+    sessionIds,
+    maxSessionsPerRun: 12,
     authoringTool: {
       command: input.authoringCommand,
       kind: "cli"
     }
   };
 
+  const metadataById = new Map(input.sessions.map((session) => [session.sessionId, session]));
+  const rows = sessionIds.flatMap((sessionId) => {
+    const session = metadataById.get(sessionId);
+    if (!session) return [];
+    return [`- ${sanitizeWorkbenchVisibleText(session.title)} (${sanitizeWorkbenchVisibleText(sessionId)})`];
+  });
+  const partitionInstruction = sessionIds.length > 12
+    ? "More than 12 sessions are selected; partition them into bounded runs of at most 12 sessions while preserving related-session groups and completing every selected session exactly once."
+    : "Keep this request within one bounded run of at most 12 sessions.";
+
   return [
-    `Author one reusable ${formatKind(candidate.kind)} from this nominated Masthead candidate.`,
-    `Candidate: ${sanitizeWorkbenchVisibleText(candidate.candidateId)} · ${provenanceCount} provenance ${provenanceCount === 1 ? "session" : "sessions"}.`,
-    `Positive signals: ${sanitizeWorkbenchVisibleText(candidate.signalSummary)}`,
-    "Ground every substantive claim in the candidate's canonical redacted evidence. Every claim must include its evidence reference and a verbatim claim excerpt from that evidence.",
-    "Revise deterministic validation findings until the artifact is accepted, then finish publication and report the completed artifact.",
+    "Complete this Masthead Workbench request for every selected session.",
+    "Enrich each session before publishing its dossier. Preserve Masthead's canonical dossier structure; improve the underlying title, summary, outcome, decisions, verification, reuse guidance, and other supported enrichment from evidence.",
+    "Create only the runbooks, ADRs, or incident timelines that your judgment finds genuinely reusable. Masthead may provide nonbinding suggestions; verify them against the complete canonical evidence, ignore weak suggestions, and create a different supported kind when warranted.",
+    "Revise deterministic validation findings until accepted, finish publication, and report the published artifacts.",
+    partitionInstruction,
     "",
     "Machine request:",
-    JSON.stringify(machineRequest)
+    JSON.stringify(machineRequest),
+    "",
+    "Selected session metadata (machine request sessionIds are authoritative):",
+    ...rows
   ].join("\n");
-}
-
-function formatKind(kind: WorkbenchArtifactCandidateDto["kind"]): string {
-  return kind.replaceAll("_", " ");
 }

@@ -1,102 +1,70 @@
 import { expect, test } from "vitest";
-import type { WorkbenchArtifactCandidateDto } from "../../../shared/workbenchAuthoring";
 import { buildWorkbenchHandoff } from "../workbenchHandoff";
 
-test("handoff asks for one reusable candidate artifact and never asks for dossier prose", () => {
+test("builds a V3 selection-scoped disposable handoff", () => {
+  const sessions = Array.from({ length: 13 }, (_, index) => ({
+    bugFixTraceStatus: "unknown" as const,
+    lastActivityAt: "2026-07-14T12:00:00.000Z",
+    lifecycle: "ended" as const,
+    nextAction: "enrich" as const,
+    publicationStatus: "publish_path" as const,
+    qualityStatus: "passed" as const,
+    runtime: "codex",
+    sessionDossierStatus: "missing" as const,
+    sessionEnrichmentStatus: "missing" as const,
+    sessionId: `session:${index + 1}`,
+    title: `Compile ready ${index + 1}`,
+    transcriptStatus: "imported" as const
+  }));
+  const sessionIds = sessions.map((session) => session.sessionId);
   const text = buildWorkbenchHandoff({
     authoringCommand: "/home/test/.local/bin/mastheadctl",
-    candidate: candidate(),
-    databaseId: "database:test"
-  });
-
-  expect(text).toContain("candidate:runbook:oauth");
-  expect(text).toContain("Author one reusable runbook");
-  expect(text).toContain("Repeated OAuth refresh failures were fixed and verified");
-  expect(text).toContain("2 provenance sessions");
-  expect(text).toContain("verbatim claim excerpt");
-  expect(text).not.toContain("read every item named by every session evidence manifest");
-  expect(text).not.toMatch(/session dossier/i);
-  expect(text).not.toContain("otherwise resolve them as N/A");
-});
-
-test("keeps candidate protocol mechanics in one exact machine request", () => {
-  const text = buildWorkbenchHandoff({
-    authoringCommand: "/home/test/.local/bin/mastheadctl",
-    candidate: candidate(),
-    databaseId: "database:test"
+    databaseId: "database:test",
+    sessionIds,
+    sessions
   });
   const machineLine = text.split("\n").find((line) => line.startsWith("{"));
   const request = JSON.parse(machineLine ?? "{}") as Record<string, unknown>;
 
-  expect(request).toEqual({
+  expect(text).toContain("Complete this Masthead Workbench request for every selected session.");
+  expect(text).toContain("Enrich each session before publishing its dossier.");
+  expect(text).toContain("Create only the runbooks, ADRs, or incident timelines");
+  expect(text).toContain("partition them into bounded runs");
+  expect(text).toContain("completing every selected session exactly once");
+  expect(request).toMatchObject({
     protocol: "masthead.workbench.authoring/v1",
-    bundleVersion: "workbench-authoring-v2",
-    capability: "artifact_authoring",
+    bundleVersion: "workbench-authoring-v3",
     databaseId: "database:test",
-    evidencePolicy: "candidate_scoped_canonical_evidence",
-    transport: "daemon_http",
-    candidateId: "candidate:runbook:oauth",
-    kind: "runbook",
-    evidenceRevision: "revision:oauth",
-    provenanceSessionIds: ["session:oauth-a", "session:oauth-b"],
-    authoringTool: {
-      command: "/home/test/.local/bin/mastheadctl",
-      kind: "cli"
-    }
+    sessionIds,
+    maxSessionsPerRun: 12,
+    authoringTool: { command: "/home/test/.local/bin/mastheadctl" }
   });
-  const visible = text.slice(0, text.indexOf("Machine request:"));
-  expect(visible).not.toContain("/home/test/.local/bin");
-  expect(visible).not.toContain("protocol");
-  expect(visible).not.toContain("bundleVersion");
 });
 
-test("formats each candidate kind as one requested reusable artifact", () => {
-  for (const [kind, label] of [
-    ["runbook", "runbook"],
-    ["adr", "adr"],
-    ["incident_timeline", "incident timeline"]
-  ] as const) {
-    const text = buildWorkbenchHandoff({
-      authoringCommand: "/home/test/.local/bin/mastheadctl",
-      candidate: candidate({ kind }),
-      databaseId: "database:test"
-    });
-    expect(text).toContain(`Author one reusable ${label}`);
-  }
-});
-
-test("sanitizes untrusted candidate text in the visible request while preserving the exact machine identity", () => {
+test("sanitizes visible metadata without changing authoritative session IDs", () => {
   const text = buildWorkbenchHandoff({
     authoringCommand: "/home/test/.local/bin/mastheadctl",
-    candidate: candidate({
-      candidateId: "candidate:npm run",
-      signalSummary: "Use schema.json then apply.sh"
-    }),
-    databaseId: "database:test"
+    databaseId: "database:test",
+    sessionIds: ["session:npm run"],
+    sessions: [{
+      bugFixTraceStatus: "unknown",
+      lastActivityAt: "2026-07-14T12:00:00.000Z",
+      lifecycle: "ended",
+      nextAction: "enrich",
+      publicationStatus: "publish_path",
+      qualityStatus: "passed",
+      runtime: "codex",
+      sessionDossierStatus: "missing",
+      sessionEnrichmentStatus: "missing",
+      sessionId: "session:npm run",
+      title: "Use schema.json then apply.sh",
+      transcriptStatus: "imported"
+    }]
   });
-  const visible = text.slice(0, text.indexOf("Machine request:"));
-  const machine = text.slice(text.indexOf("Machine request:"));
+  const visible = text.slice(0, text.indexOf("Machine request:")) + text.slice(text.indexOf("Selected session metadata"));
 
   expect(visible).not.toContain("npm run");
   expect(visible).not.toContain("schema.json");
   expect(visible).not.toContain("apply.sh");
-  expect(machine).toContain('"candidateId":"candidate:npm run"');
+  expect(text).toContain('"sessionIds":["session:npm run"]');
 });
-
-function candidate(overrides: Partial<WorkbenchArtifactCandidateDto> = {}): WorkbenchArtifactCandidateDto {
-  return {
-    candidateId: "candidate:runbook:oauth",
-    createdAt: "2026-07-12T12:00:00.000Z",
-    evidenceRevision: "revision:oauth",
-    kind: "runbook",
-    origin: "automatic",
-    provenanceSessionIds: ["session:oauth-a", "session:oauth-b"],
-    seedSessionId: "session:oauth-a",
-    signalEvidenceRefs: ["evidence:problem", "evidence:change", "evidence:verification"],
-    signalSummary: "Repeated OAuth refresh failures were fixed and verified",
-    signatureKey: "oauth-refresh-failure",
-    status: "pending",
-    updatedAt: "2026-07-12T12:00:00.000Z",
-    ...overrides
-  };
-}

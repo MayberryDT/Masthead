@@ -36,7 +36,6 @@ const daemonClientMocks = vi.hoisted(() => ({
   postWorkbenchClaim: vi.fn(),
   postWorkbenchEnrollMissing: vi.fn(),
   postWorkbenchImportTranscript: vi.fn(),
-  postWorkbenchPublishCanonicalDossiers: vi.fn(),
   postWorkbenchPublish: vi.fn(),
   postWorkbenchQuality: vi.fn(),
   postWorkbenchReleaseClaim: vi.fn()
@@ -73,15 +72,12 @@ const ALL_ACTIONS: WorkbenchActionKind[] = [
   "quality_fail",
   "quality_precheck",
   "publish",
-  "publish_canonical_dossiers",
   "claim",
   "release",
-  "author_candidate"
+  "copy_agent_prompt"
 ];
 
-const SELECTION_ACTIONS: WorkbenchActionKind[] = ALL_ACTIONS.filter(
-  (kind) => kind !== "enroll_missing" && kind !== "author_candidate"
-);
+const SELECTION_ACTIONS: WorkbenchActionKind[] = ALL_ACTIONS.filter((kind) => kind !== "enroll_missing");
 
 afterEach(async () => {
   latestResult = undefined;
@@ -93,195 +89,48 @@ afterEach(async () => {
 });
 
 describe("useWorkbenchController", () => {
-  test("loads every bounded pending and claimed candidate page without scanning published history", async () => {
-    mockWorkbenchResponse([session("session:abc", "Workbench import review")]);
-    daemonClientMocks.getWorkbenchArtifactCandidates.mockImplementation(async (_base: string, options: Record<string, unknown>) => {
-      if (options.status === "pending" && options.cursor === undefined) {
-        return { candidates: [artifactCandidate({ candidateId: "candidate:pending:1" })], nextCursor: "pending:2" };
-      }
-      if (options.status === "pending" && options.cursor === "pending:2") {
-        return { candidates: [artifactCandidate({ candidateId: "candidate:pending:2" })] };
-      }
-      if (options.status === "claimed" && options.cursor === undefined) {
-        return {
-          candidates: [artifactCandidate({ candidateId: "candidate:claimed:1", status: "claimed" })],
-          nextCursor: "claimed:2"
-        };
-      }
-      if (options.status === "claimed" && options.cursor === "claimed:2") {
-        return { candidates: [artifactCandidate({ candidateId: "candidate:claimed:2", status: "claimed" })] };
-      }
-      throw new Error(`unexpected candidate query ${JSON.stringify(options)}`);
-    });
-
-    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
-    await waitFor(() => latest().candidates.length === 4);
-
-    expect(latest().candidates.map((candidate) => candidate.candidateId)).toEqual([
-      "candidate:pending:1",
-      "candidate:pending:2",
-      "candidate:claimed:1",
-      "candidate:claimed:2"
+  test("requires V3 capabilities and a compile-ready selection for Copy Agent Prompt", async () => {
+    mockWorkbenchResponse([
+      session("session:ready", "Ready", { nextAction: "enrich", qualityStatus: "passed", transcriptStatus: "imported" }),
+      session("session:available", "Available", { qualityStatus: "passed", transcriptStatus: "available" }),
+      session("session:not-ready", "Not ready", { qualityStatus: "unchecked", transcriptStatus: "unchecked" })
     ]);
-    expect(daemonClientMocks.getWorkbenchArtifactCandidates).toHaveBeenCalledTimes(4);
-    expect(daemonClientMocks.getWorkbenchArtifactCandidates.mock.calls.every(([, options]) =>
-      options.status === "pending" || options.status === "claimed"
-    )).toBe(true);
-  });
-
-  test("fails visibly when the final permitted actionable page still has a next cursor", async () => {
-    mockWorkbenchResponse([session("session:abc", "Workbench import review")]);
-    daemonClientMocks.getWorkbenchArtifactCandidates.mockImplementation(async (_base: string, options: Record<string, unknown>) => ({
-      candidates: [artifactCandidate({
-        candidateId: `candidate:${String(options.status)}:${String(options.cursor ?? "first")}`,
-        status: options.status as "pending" | "claimed"
-      })],
-      nextCursor: `${String(options.status)}:${String(options.cursor ?? "first")}:next`
-    }));
 
     await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
-    await waitFor(() => Boolean(latest().candidateError));
+    await waitFor(() => latest().sessions.length === 3);
 
-    expect(daemonClientMocks.getWorkbenchArtifactCandidates).toHaveBeenCalledTimes(10);
-    expect(latest().candidateError).toContain("Artifact candidate safety limit reached");
-    expect(latest().candidates).toEqual([]);
+    expect(latest().canRun("copy_agent_prompt")).toBe(false);
+    await select("session:not-ready");
+    expect(latest().canRun("copy_agent_prompt")).toBe(false);
+    await select("session:ready");
+    expect(latest().canRun("copy_agent_prompt")).toBe(true);
+    expect(latest().handoffText).toContain('"bundleVersion":"workbench-authoring-v3"');
+    expect(latest().handoffText).toContain('"sessionIds":["session:ready"]');
+    expect(daemonClientMocks.getWorkbenchArtifactCandidates).not.toHaveBeenCalled();
+    await select("session:available");
+    expect(latest().canRun("copy_agent_prompt")).toBe(true);
   });
 
-  test("keeps sessions usable when candidate loading fails and retries candidates independently", async () => {
-    mockWorkbenchResponse([session("session:abc", "Workbench import review")]);
-    daemonClientMocks.getWorkbenchArtifactCandidates.mockRejectedValue(new Error("candidate API unavailable"));
+  test("keeps Copy Agent Prompt disabled for legacy authoring capabilities", async () => {
+    mockWorkbenchResponse([session("session:ready", "Ready")]);
+    vi.mocked(getWorkbenchAuthoringCapabilities).mockResolvedValue({
+      bundleVersion: "workbench-authoring-v1",
+      capability: "artifact_authoring",
+      command: "/home/test/.local/bin/mastheadctl",
+      databaseId: "database:test",
+      evidencePolicy: "all_canonical_redacted_evidence",
+      operations: ["open", "status", "evidence", "submit", "finish"],
+      protocol: "masthead.workbench.authoring/v1",
+      transport: "daemon_http"
+    });
 
     await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
-    await waitFor(() => latest().candidateError === "candidate API unavailable");
+    await waitFor(() => latest().sessions.length === 1);
+    await select("session:ready");
 
-    expect(latest().sessions).toHaveLength(1);
-    expect(latest().error).toBeUndefined();
-    expect(latest().candidates).toEqual([]);
+    expect(latest().canRun("copy_agent_prompt")).toBe(false);
     expect(latest().handoffText).toBe("");
-    expect(latest().canRun("author_candidate")).toBe(false);
-
-    daemonClientMocks.getWorkbenchArtifactCandidates.mockResolvedValue({ candidates: [artifactCandidate()] });
-    await act(async () => latest().retryCandidates());
-    await waitFor(() => latest().candidateError === undefined && latest().candidates.length === 1);
-
-    expect(latest().selectedCandidateId).toBe("candidate:runbook:oauth");
-    expect(latest().canRun("author_candidate")).toBe(true);
-    expect(getWorkbenchSessions).toHaveBeenCalledTimes(1);
-  });
-
-  test("keeps the current actionable candidates visible when a retry fails", async () => {
-    mockWorkbenchResponse([session("session:abc", "Workbench import review")]);
-    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
-    await waitFor(() => latest().candidates.length === 1);
-
-    daemonClientMocks.getWorkbenchArtifactCandidates.mockRejectedValue(new Error("temporary candidate outage"));
-    await act(async () => latest().retryCandidates());
-    await waitFor(() => latest().candidateError === "temporary candidate outage");
-
-    expect(latest().candidates.map((candidate) => candidate.candidateId)).toEqual(["candidate:runbook:oauth"]);
-    expect(latest().selectedCandidateId).toBe("candidate:runbook:oauth");
-    expect(latest().canRun("author_candidate")).toBe(true);
-  });
-
-  test("replaces a stale candidate selection after a paged refresh", async () => {
-    mockWorkbenchResponse([session("session:abc", "Workbench import review")]);
-    daemonClientMocks.getWorkbenchArtifactCandidates
-      .mockResolvedValueOnce({ candidates: [artifactCandidate({ candidateId: "candidate:first" }), artifactCandidate({ candidateId: "candidate:stale" })] })
-      .mockResolvedValueOnce({ candidates: [] })
-      .mockResolvedValueOnce({ candidates: [artifactCandidate({ candidateId: "candidate:replacement" })] })
-      .mockResolvedValueOnce({ candidates: [] });
-
-    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
-    await waitFor(() => latest().candidates.length === 2);
-    await act(async () => latest().selectCandidate("candidate:stale"));
-    expect(latest().selectedCandidateId).toBe("candidate:stale");
-
-    await rerenderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 2 });
-    await waitFor(() => latest().selectedCandidateId === "candidate:replacement");
-
-    expect(latest().candidates.map((candidate) => candidate.candidateId)).toEqual(["candidate:replacement"]);
-    expect(machineRequest().candidateId).toBe("candidate:replacement");
-  });
-
-  test("loads artifact candidates and authors exactly the selected candidate", async () => {
-    mockWorkbenchResponse([session("session:abc", "Workbench import review")]);
-    daemonClientMocks.getWorkbenchArtifactCandidates.mockResolvedValue({
-      candidates: [artifactCandidate()]
-    });
-
-    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
-    await waitFor(() => ((latest() as unknown as { candidates?: unknown[] }).candidates?.length ?? 0) === 1);
-
-    const candidateState = latest() as unknown as {
-      selectedCandidate?: { candidateId: string };
-      handoffText: string;
-      canRun: (kind: string) => boolean;
-      runAction: (kind: string) => Promise<void>;
-    };
-    expect(candidateState.selectedCandidate?.candidateId).toBe("candidate:runbook:oauth");
-    expect(candidateState.handoffText).toContain('"candidateId":"candidate:runbook:oauth"');
-    expect(candidateState.canRun("author_candidate")).toBe(true);
-
-    const loadsBefore = vi.mocked(getWorkbenchSessions).mock.calls.length;
-    await act(async () => candidateState.runAction("author_candidate"));
-    expect(latest().lastActionSummary).toBe("Candidate prompt ready to copy");
-    expect(vi.mocked(getWorkbenchSessions)).toHaveBeenCalledTimes(loadsBefore);
-  });
-
-  test("switches the handoff atomically with the selected candidate", async () => {
-    mockWorkbenchResponse([session("session:abc", "Workbench import review")]);
-    const adrCandidate = artifactCandidate({
-      candidateId: "candidate:adr:storage",
-      kind: "adr",
-      provenanceSessionIds: ["session:adr"],
-      signalSummary: "A durable storage tradeoff was decided",
-      status: "claimed"
-    });
-    daemonClientMocks.getWorkbenchArtifactCandidates.mockResolvedValue({
-      candidates: [adrCandidate, artifactCandidate()]
-    });
-
-    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
-    await waitFor(() => latest().selectedCandidateId === "candidate:runbook:oauth");
-    expect(machineRequest().candidateId).toBe("candidate:runbook:oauth");
-
-    await act(async () => {
-      latest().selectCandidate("candidate:adr:storage");
-      await Promise.resolve();
-    });
-
-    expect(latest().selectedCandidate?.candidateId).toBe("candidate:adr:storage");
-    expect(machineRequest().candidateId).toBe("candidate:adr:storage");
-    expect(latest().handoffText).toContain("Author one reusable adr");
-    expect(latest().canRun("author_candidate")).toBe(true);
-  });
-
-  test("publishes canonical dossiers through the daemon without creating a candidate handoff", async () => {
-    mockWorkbenchResponse([session("session:abc", "Canonical dossier")]);
-    daemonClientMocks.getWorkbenchArtifactCandidates.mockResolvedValue({ candidates: [] });
-    daemonClientMocks.postWorkbenchPublishCanonicalDossiers.mockResolvedValue({
-      ok: true,
-      receipt: { artifactIds: ["artifact:dossier:abc"], sessionIds: ["session:abc"] }
-    });
-    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
-    await waitFor(() => (latest()?.sessions.length ?? 0) === 1);
-    await select("session:abc");
-
-    const controller = latest() as unknown as {
-      handoffText: string;
-      canRun: (kind: string) => boolean;
-      runAction: (kind: string) => Promise<void>;
-    };
-    expect(controller.handoffText).toBe("");
-    expect(controller.canRun("publish_canonical_dossiers")).toBe(true);
-    await act(async () => controller.runAction("publish_canonical_dossiers"));
-
-    expect(daemonClientMocks.postWorkbenchPublishCanonicalDossiers).toHaveBeenCalledWith(baseUrl, {
-      actorId: "workbench_ui",
-      sessionIds: ["session:abc"]
-    });
-    expect(latest().lastActionSummary).toBe("Published 1 canonical dossier");
-    expect(controller.handoffText).toBe("");
+    expect(daemonClientMocks.getWorkbenchArtifactCandidates).not.toHaveBeenCalled();
   });
   test("loads missing sessions only when Workbench is active and live", async () => {
     mockWorkbenchResponse([session("session:abc", "Workbench import review")]);
@@ -335,7 +184,7 @@ describe("useWorkbenchController", () => {
     expect(Array.from(latest().selectedSessionIds)).toEqual(["session:def"]);
   });
 
-  test("session selection never broadens or rewrites the candidate-sized handoff", async () => {
+  test("supports toggle, select all visible, and clear selection while keeping selected metadata sanitized", async () => {
     mockWorkbenchResponse([
       session("session:abc", "npm run import review"),
       session("session:def", "Second session", { project: "schema.json cleanup", runtime: "mastheadctl runner" })
@@ -350,12 +199,11 @@ describe("useWorkbenchController", () => {
     });
 
     expect(Array.from(latest().selectedSessionIds)).toEqual(["session:abc"]);
-    expect(latest().handoffText).toContain("candidate:runbook:oauth");
-    expect(latest().handoffText).not.toContain("session:abc");
+    expect(latest().handoffText).toContain("session:abc");
     expect(latest().handoffText).not.toContain("session:def");
     expect(latest().handoffText).not.toContain("Second session");
     expect(latest().handoffText).toContain("masthead.workbench.authoring/v1");
-    expect(latest().handoffText).toContain('"bundleVersion":"workbench-authoring-v2"');
+    expect(latest().handoffText).toContain("runbook");
     expect(latest().handoffText).toContain('"command":"/home/test/.local/bin/mastheadctl"');
     expect(latest().handoffText).not.toContain("npm run import review");
 
@@ -366,7 +214,6 @@ describe("useWorkbenchController", () => {
 
     expect(Array.from(latest().selectedSessionIds).sort()).toEqual(["session:abc", "session:def"]);
     expect(latest().handoffText).not.toContain("schema.json cleanup");
-    expect(machineRequest().candidateId).toBe("candidate:runbook:oauth");
 
     await act(async () => {
       latest().clearSelection();
@@ -376,7 +223,7 @@ describe("useWorkbenchController", () => {
     expect(Array.from(latest().selectedSessionIds)).toEqual([]);
   });
 
-  test("keeps the authoritative candidate provenance across rapid session selection changes", async () => {
+  test("updates authoritative handoff IDs immediately across rapid selection changes", async () => {
     mockWorkbenchResponse([
       session("session:a", "First session"),
       session("session:b", "Second session")
@@ -388,7 +235,7 @@ describe("useWorkbenchController", () => {
       latest().toggleSession("session:a");
       await Promise.resolve();
     });
-    expect(machineRequest().provenanceSessionIds).toEqual(["session:oauth-a", "session:oauth-b"]);
+    expect(machineRequest().sessionIds).toEqual(["session:a"]);
 
     await act(async () => {
       latest().toggleSession("session:a");
@@ -396,22 +243,30 @@ describe("useWorkbenchController", () => {
       await Promise.resolve();
     });
 
-    expect(machineRequest().provenanceSessionIds).toEqual(["session:oauth-a", "session:oauth-b"]);
-    expect(latest().canRun("author_candidate")).toBe(true);
+    expect(machineRequest().sessionIds).toEqual(["session:b"]);
+    expect(latest().canRun("copy_agent_prompt")).toBe(true);
   });
 
-  test("selectAll includes off-page dossier sessions without broadening candidate provenance", async () => {
+  test("selectAll includes off-page session IDs in the authoritative handoff", async () => {
     vi.mocked(getWorkbenchAuthoringCapabilities).mockResolvedValue(
       authoringCapabilities("database:test", "/home/test/.local/bin/mastheadctl")
     );
     vi.mocked(getWorkbenchActivity).mockResolvedValue(activityResponse());
     vi.mocked(getWorkbenchNotAddedSummary).mockResolvedValue(notAddedSummary());
-    daemonClientMocks.getWorkbenchArtifactCandidates.mockResolvedValue({ candidates: [artifactCandidate()] });
     vi.mocked(getWorkbenchSessions).mockImplementation(async (_base, options = {}) => {
       if (options.limit === 500) {
-        return { ...response([session("session:a", "First page"), session("session:b", "Second page")]), limit: 500 };
+        return {
+          ...response([
+            session("session:a", "First page", { qualityStatus: "unchecked", transcriptStatus: "unchecked" }),
+            session("session:b", "Second page")
+          ]),
+          limit: 500
+        };
       }
-      return { ...response([session("session:a", "First page")]), total: 2 };
+      return {
+        ...response([session("session:a", "First page", { qualityStatus: "unchecked", transcriptStatus: "unchecked" })]),
+        total: 2
+      };
     });
 
     await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
@@ -421,9 +276,8 @@ describe("useWorkbenchController", () => {
     });
 
     expect(Array.from(latest().selectedSessionIds).sort()).toEqual(["session:a", "session:b"]);
-    expect(machineRequest().provenanceSessionIds).toEqual(["session:oauth-a", "session:oauth-b"]);
-    expect(latest().canRun("author_candidate")).toBe(true);
-    expect(latest().canRun("publish_canonical_dossiers")).toBe(true);
+    expect(machineRequest().sessionIds).toEqual(["session:a", "session:b"]);
+    expect(latest().canRun("copy_agent_prompt")).toBe(true);
   });
 
   test("retries after a failed load", async () => {
@@ -514,7 +368,6 @@ describe("useWorkbenchController", () => {
     await waitFor(() => (latest()?.sessions.length ?? 0) === 6);
 
     expect(latest().canRun("enroll_missing")).toBe(true);
-    expect(latest().canRun("author_candidate")).toBe(true);
     for (const kind of SELECTION_ACTIONS) {
       expect(latest().canRun(kind)).toBe(false);
     }
@@ -527,7 +380,7 @@ describe("useWorkbenchController", () => {
     expect(latest().canRun("publish")).toBe(false);
     expect(latest().canRun("claim")).toBe(true);
     expect(latest().canRun("release")).toBe(false);
-    expect(latest().canRun("author_candidate")).toBe(true);
+    expect(latest().canRun("copy_agent_prompt")).toBe(false);
 
     await select("session:import");
     expect(latest().canRun("import_transcript")).toBe(true);
@@ -548,7 +401,7 @@ describe("useWorkbenchController", () => {
     expect(latest().canRun("claim")).toBe(false);
     expect(latest().canRun("release")).toBe(true);
     expect(latest().canRun("publish")).toBe(false);
-    expect(latest().canRun("author_candidate")).toBe(true);
+    expect(latest().canRun("copy_agent_prompt")).toBe(true);
 
     await select("session:enrich");
     expect(latest().canRun("check_transcript")).toBe(false);
@@ -556,14 +409,13 @@ describe("useWorkbenchController", () => {
     expect(latest().canRun("quality_pass")).toBe(false);
     expect(latest().canRun("publish")).toBe(false);
     expect(latest().canRun("claim")).toBe(true);
-    expect(latest().canRun("author_candidate")).toBe(true);
+    expect(latest().canRun("copy_agent_prompt")).toBe(true);
 
     await act(async () => {
       latest().clearSelection();
       await Promise.resolve();
     });
-    expect(latest().canRun("author_candidate")).toBe(true);
-    expect(latest().canRun("publish_canonical_dossiers")).toBe(false);
+    expect(latest().canRun("copy_agent_prompt")).toBe(false);
     expect(latest().canRun("enroll_missing")).toBe(true);
   });
 
@@ -576,7 +428,7 @@ describe("useWorkbenchController", () => {
     await select("session:abc");
 
     expect(latest().handoffText).toBe("");
-    expect(latest().canRun("author_candidate")).toBe(false);
+    expect(latest().canRun("copy_agent_prompt")).toBe(false);
   });
 
   test("rebinds copied handoff after capabilities change without retaining the old database", async () => {
@@ -752,7 +604,7 @@ describe("useWorkbenchController", () => {
     });
   });
 
-  test("author_candidate only sets summary without posting", async () => {
+  test("copy_agent_prompt only sets summary without posting", async () => {
     mockWorkbenchResponse([session("session:abc", "Copy session")]);
 
     await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
@@ -761,10 +613,10 @@ describe("useWorkbenchController", () => {
 
     const loadsBefore = vi.mocked(getWorkbenchSessions).mock.calls.length;
     await act(async () => {
-      await latest().runAction("author_candidate");
+      await latest().runAction("copy_agent_prompt");
     });
 
-    expect(latest().lastActionSummary).toBe("Candidate prompt ready to copy");
+    expect(latest().lastActionSummary).toBe("Agent prompt copied for 1 sessions");
     expect(postWorkbenchCheckTranscript).not.toHaveBeenCalled();
     expect(getWorkbenchSessions).toHaveBeenCalledTimes(loadsBefore);
   });
@@ -833,7 +685,7 @@ describe("useWorkbenchController", () => {
 
     await waitFor(() => latest()?.actionBusy === true);
     expect(latest().canRun("check_transcript")).toBe(false);
-    expect(latest().canRun("author_candidate")).toBe(false);
+    expect(latest().canRun("copy_agent_prompt")).toBe(false);
     expect(latest().canRun("claim")).toBe(false);
     expect(latest().canRun("enroll_missing")).toBe(false);
 
@@ -951,6 +803,9 @@ function latest(): UseWorkbenchControllerResult {
 async function select(sessionId: string): Promise<void> {
   await act(async () => {
     latest().clearSelection();
+    await Promise.resolve();
+  });
+  await act(async () => {
     latest().toggleSession(sessionId);
     await Promise.resolve();
   });
@@ -962,10 +817,10 @@ function session(sessionId: string, title: string, overrides: Partial<WorkbenchQ
     latestActivity: undefined,
     nextAction: "check_transcript",
     publicationStatus: "publish_path",
-    qualityStatus: "unchecked",
+    qualityStatus: "passed",
     sessionDossierStatus: "missing",
     sessionEnrichmentStatus: "missing",
-    transcriptStatus: "unchecked",
+    transcriptStatus: "imported",
     lastActivityAt: "2026-07-07T12:00:00.000Z",
     lifecycle: "ended",
     project: "Masthead",
@@ -1003,50 +858,27 @@ function mockWorkbenchResponse(sessions: WorkbenchQueueSessionDto[]): void {
   vi.mocked(getWorkbenchSessions).mockResolvedValue(response(sessions));
   vi.mocked(getWorkbenchActivity).mockResolvedValue(activityResponse());
   vi.mocked(getWorkbenchNotAddedSummary).mockResolvedValue(notAddedSummary());
-  daemonClientMocks.getWorkbenchArtifactCandidates.mockResolvedValue({ candidates: [artifactCandidate()] });
 }
 
 function authoringCapabilities(databaseId: string, command: string): WorkbenchAuthoringCapabilitiesDto {
   return {
-    bundleVersion: "workbench-authoring-v2" as const,
-    capability: "artifact_authoring" as const,
+    bundleVersion: "workbench-authoring-v3",
+    capability: "artifact_authoring",
     command,
     databaseId,
-    evidencePolicy: "candidate_scoped_canonical_evidence" as const,
-    evidenceRequirements: {
-      adr: ["context", "decision", "alternatives"],
-      incident_timeline: ["symptom", "ordered_events", "remediation"],
-      runbook: ["problem", "change", "verification"]
-    },
-    operations: ["candidates", "open", "status", "evidence", "submit", "finish"],
-    protocol: "masthead.workbench.authoring/v1" as const,
-    transport: "daemon_http" as const
+    evidencePolicy: "selected_session_canonical_evidence",
+    maxSessionsPerRun: 12,
+    operations: ["suggestions", "open", "status", "evidence", "context", "submit", "finish"],
+    protocol: "masthead.workbench.authoring/v1",
+    suggestionsAreBinding: false,
+    transport: "daemon_http"
   };
 }
 
-function machineRequest(): { candidateId: string; provenanceSessionIds: string[] } {
+function machineRequest(): { sessionIds: string[] } {
   const line = latest().handoffText.split("\n").find((value) => value.startsWith('{"protocol"'));
   expect(line).toBeDefined();
-  return JSON.parse(line ?? "{}") as { candidateId: string; provenanceSessionIds: string[] };
-}
-
-function artifactCandidate(
-  overrides: Partial<import("../../../shared/workbenchAuthoring").WorkbenchArtifactCandidateDto> = {}
-): import("../../../shared/workbenchAuthoring").WorkbenchArtifactCandidateDto {
-  return {
-    candidateId: "candidate:runbook:oauth",
-    createdAt: "2026-07-12T12:00:00.000Z",
-    evidenceRevision: "revision:oauth",
-    kind: "runbook",
-    origin: "automatic",
-    provenanceSessionIds: ["session:oauth-a", "session:oauth-b"],
-    seedSessionId: "session:oauth-a",
-    signalEvidenceRefs: ["evidence:problem", "evidence:change", "evidence:verification"],
-    signalSummary: "Repeated OAuth refresh failures were fixed and verified",
-    status: "pending",
-    updatedAt: "2026-07-12T12:00:00.000Z",
-    ...overrides
-  };
+  return JSON.parse(line ?? "{}") as { sessionIds: string[] };
 }
 
 async function waitFor(condition: () => boolean, timeoutMs = 1000): Promise<void> {

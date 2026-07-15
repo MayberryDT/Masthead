@@ -7,7 +7,6 @@ import type {
   WorkbenchNotAddedSessionDto,
   WorkbenchQueueSessionDto
 } from "../../../shared/workbench";
-import type { WorkbenchArtifactCandidateDto } from "../../../shared/workbenchAuthoring";
 import { formatWorkbenchActivityTime } from "../workbenchActivity";
 import { WorkbenchPanel } from "../WorkbenchPanel";
 
@@ -35,8 +34,7 @@ const heroCopyFragments = [
 ] as const;
 
 const PRIMARY_BUTTON_LABELS = [
-  "Author candidate",
-  "Publish canonical dossiers",
+  "Copy Agent Prompt",
   "Select all",
   "Clear",
   "Pipeline"
@@ -49,6 +47,7 @@ const PIPELINE_LABELS = [
   "Precheck",
   "Accept Quality",
   "Fail Quality",
+  "Publish package",
   "Claim",
   "Release"
 ] as const;
@@ -75,52 +74,14 @@ describe("WorkbenchPanel", () => {
       /\.workbench-toolbar\.observability-toolbar \.workbench-toolbar-actions\s*\{[^}]*width:\s*100%;[^}]*flex-wrap:\s*wrap;/s
     );
   });
+  test("renders only the disposable agent handoff control", () => {
+    const html = renderToStaticMarkup(<WorkbenchPanel />);
 
-  test("shows a retryable candidate error instead of claiming the actionable queue is empty", () => {
-    const html = renderToStaticMarkup(
-      <WorkbenchPanel
-        candidateError="candidate API unavailable"
-        candidateLoading={false}
-        retryCandidates={async () => undefined}
-      />
-    );
-
-    expect(html).toContain("Artifact candidates unavailable");
-    expect(html).toContain("candidate API unavailable");
-    expect(html).toContain("Retry candidates");
-    expect(html).not.toContain("No positive-evidence artifact candidates are ready to author");
-  });
-
-  test("shows candidate loading without rendering a false empty state", () => {
-    const html = renderToStaticMarkup(<WorkbenchPanel candidateLoading />);
-
-    expect(html).toContain("Loading artifact candidates");
-    expect(html).not.toContain("No positive-evidence artifact candidates are ready to author");
-  });
-  test("shows one selected candidate and keeps dossier publication separate from authoring", () => {
-    const selectedCandidate = candidate();
-    const html = renderToStaticMarkup(
-      <WorkbenchPanel
-        candidates={[selectedCandidate]}
-        selectedCandidate={selectedCandidate}
-        selectedCandidateId={selectedCandidate.candidateId}
-        selectCandidate={() => undefined}
-        sessions={[session({ sessionDossierStatus: "missing" })]}
-        selectedSessionIds={new Set(["session:abc"])}
-        canRun={allow("author_candidate" as WorkbenchActionKind, "publish_canonical_dossiers" as WorkbenchActionKind)}
-        handoffText="Author one reusable runbook"
-        runAction={async () => undefined}
-      />
-    );
-
-    expect(html).toContain("Author candidate");
-    expect(html).toContain("Publish canonical dossiers");
-    expect(html).toContain("runbook");
-    expect(html).toContain("2 sessions");
-    expect(html).toContain("Repeated OAuth refresh failures were fixed and verified");
-    expect(html).toContain("pending");
-    expect(html).not.toContain("Publish package");
-    expect(html).not.toContain("Copy Agent Prompt");
+    expect(html).toContain("Copy Agent Prompt");
+    expect(html).not.toContain("Author candidate");
+    expect(html).not.toContain("Publish canonical dossiers");
+    expect(html).not.toContain("Artifact candidate");
+    expect(html).not.toContain("<select");
   });
   test("keeps a known package-path total visible during refresh", () => {
     const html = renderToStaticMarkup(<WorkbenchPanel loading total={144} />);
@@ -160,7 +121,7 @@ describe("WorkbenchPanel", () => {
         sessions={[publishReady]}
         selectedSessionIds={new Set([publishReady.sessionId])}
         handoffText="Process these sessions"
-        canRun={allow("publish_canonical_dossiers", "claim")}
+        canRun={allow("publish", "copy_agent_prompt", "claim")}
         runAction={async () => undefined}
         loading={false}
         onClearSelection={() => undefined}
@@ -186,7 +147,7 @@ describe("WorkbenchPanel", () => {
     expect(html).toContain(">adr</th>");
     expect(html).toContain(">timeline</th>");
     expect(html).toContain(">resolution</th>");
-    expect(html).not.toContain("Publish package");
+    expect(html).toContain("Publish package");
     expect(html).toContain("Workbench Activity");
     expect(html).toContain("observability-toolbar");
     expect(html).toContain("metal-toolbar");
@@ -219,7 +180,7 @@ describe("WorkbenchPanel", () => {
         sessions={[enrichSession]}
         selectedSessionIds={new Set([enrichSession.sessionId])}
         handoffText="Agent handoff for enrichment"
-        canRun={allow("claim")}
+        canRun={allow("copy_agent_prompt", "claim")}
         runAction={async () => undefined}
         loading={false}
         onClearSelection={() => undefined}
@@ -229,9 +190,9 @@ describe("WorkbenchPanel", () => {
       />
     );
 
-    expect(html).toContain("Author candidate");
+    expect(html).toContain("Copy Agent Prompt");
     expect(html).toContain("app-button-primary");
-    expect(html).toContain("workbench-author-candidate");
+    expect(html).toContain("workbench-copy-agent");
     expect(html).not.toContain("Enrichment and dossier work is agent-only");
     expect(html).not.toContain("workbench-agent-hint");
     expect(html).toContain("Needs enrichment");
@@ -265,7 +226,7 @@ describe("WorkbenchPanel", () => {
         ]}
         selectedSessionIds={new Set(["session:abc"])}
         handoffText={"Masthead is running locally.\n- Raw session needing enrichment (session:abc)"}
-        canRun={allow("check_transcript", "claim")}
+        canRun={allow("copy_agent_prompt", "check_transcript", "claim")}
         loading={false}
         onClearSelection={() => undefined}
         onRetry={() => undefined}
@@ -284,8 +245,7 @@ describe("WorkbenchPanel", () => {
     expect(html).toContain("Masthead");
     expect(html).toContain("codex");
     expect(html).toContain("ended");
-    expect(html).toContain("Author candidate");
-    expect(html).toContain("Publish canonical dossiers");
+    expect(html).toContain("Copy Agent Prompt");
     expect(html).toContain("Select all");
     expect(html).toContain("Clear");
     expect(html).toContain("workbench-pipeline-actions");
@@ -334,7 +294,7 @@ describe("WorkbenchPanel", () => {
     expect(html).toContain(">12</");
     expect(html).not.toContain("hook_only");
     expect(html).toContain("Enroll missing");
-    expect(html).toContain("Author candidate");
+    expect(html).toContain("Copy Agent Prompt");
     expect(html).toContain("Pipeline");
     expect(html).toContain("workbench-pipeline-rail");
     expect(html).not.toContain("workbench-pipeline-rail is-expanded");
@@ -376,7 +336,7 @@ describe("WorkbenchPanel", () => {
     const html = renderToStaticMarkup(
       <WorkbenchPanel
         sessions={[session()]}
-        canRun={allow("enroll_missing")}
+        canRun={allow("enroll_missing", "copy_agent_prompt")}
         runAction={async () => undefined}
         loading={false}
         onClearSelection={() => undefined}
@@ -386,11 +346,11 @@ describe("WorkbenchPanel", () => {
       />
     );
 
-    expect(html).toContain("Author candidate");
-    expect(html).toContain("workbench-author-candidate");
+    expect(html).toContain("Copy Agent Prompt");
+    expect(html).toContain("workbench-copy-agent");
     expect(html).toContain("Pipeline");
     expect(html).toContain("Select all");
-    expect(html).toMatch(/Author candidate[\s\S]*Select all/);
+    expect(html).toMatch(/Copy Agent Prompt[\s\S]*Select all/);
     for (let index = 0; index < forbiddenTokenParts.length; index += 1) {
       expect(html).not.toContain(forbiddenToken(index));
     }
@@ -543,7 +503,7 @@ describe("WorkbenchPanel", () => {
         ]}
         selectedSessionIds={new Set([`session:${forbiddenToken(4)}`])}
         handoffText={`Selected ${forbiddenToken(0)} ${forbiddenToken(1)} ${forbiddenToken(2)} ${forbiddenToken(3)} ${forbiddenToken(4)}`}
-        canRun={allow()}
+        canRun={allow("copy_agent_prompt")}
         loading={false}
         onClearSelection={() => undefined}
         onRetry={() => undefined}
@@ -565,7 +525,7 @@ describe("WorkbenchPanel", () => {
         sessions={[session({ nextAction: "check_transcript" })]}
         selectedSessionIds={new Set(["session:abc"])}
         handoffText="Agent prompt body"
-        canRun={allow("check_transcript")}
+        canRun={allow("check_transcript", "copy_agent_prompt")}
         runAction={runAction}
         loading={false}
         onClearSelection={() => undefined}
@@ -600,23 +560,6 @@ function session(overrides: Partial<WorkbenchQueueSessionDto> = {}): WorkbenchQu
     sessionPackageStatus: "missing",
     title: "Workbench session",
     transcriptStatus: "unchecked",
-    ...overrides
-  };
-}
-
-function candidate(overrides: Partial<WorkbenchArtifactCandidateDto> = {}): WorkbenchArtifactCandidateDto {
-  return {
-    candidateId: "candidate:runbook:oauth",
-    createdAt: "2026-07-12T12:00:00.000Z",
-    evidenceRevision: "revision:oauth",
-    kind: "runbook",
-    origin: "automatic",
-    provenanceSessionIds: ["session:oauth-a", "session:oauth-b"],
-    seedSessionId: "session:oauth-a",
-    signalEvidenceRefs: ["evidence:problem", "evidence:change", "evidence:verification"],
-    signalSummary: "Repeated OAuth refresh failures were fixed and verified",
-    status: "pending",
-    updatedAt: "2026-07-12T12:00:00.000Z",
     ...overrides
   };
 }

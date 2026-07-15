@@ -11,9 +11,6 @@ type WorkbenchPanelProps = Partial<
     | "actionBusy"
     | "actionError"
     | "activity"
-    | "candidateError"
-    | "candidateLoading"
-    | "candidates"
     | "canRun"
     | "clearActionFeedback"
     | "error"
@@ -26,11 +23,7 @@ type WorkbenchPanelProps = Partial<
     | "page"
     | "pageSize"
     | "runAction"
-    | "retryCandidates"
     | "selectedSessionIds"
-    | "selectedCandidate"
-    | "selectedCandidateId"
-    | "selectCandidate"
     | "sessions"
     | "setNotAddedOpen"
     | "setPage"
@@ -48,14 +41,12 @@ const EMPTY_SELECTION = new Set<string>();
 const EMPTY_SESSIONS: UseWorkbenchControllerResult["sessions"] = [];
 const EMPTY_NOT_ADDED: UseWorkbenchControllerResult["notAddedSessions"] = [];
 const EMPTY_ACTIVITY: UseWorkbenchControllerResult["activity"] = [];
-const EMPTY_CANDIDATES: UseWorkbenchControllerResult["candidates"] = [];
 
 const defaultCanRun: UseWorkbenchControllerResult["canRun"] = () => false;
 
 const TOOLTIPS = {
-  authorCandidate: "Copy a plain-language request for your coding agent to author the selected reusable artifact candidate.",
-  publishCanonicalDossiers:
-    "Publish daemon-built canonical dossier snapshots for the selected sessions. This does not create an agent handoff.",
+  copyAgentPrompt:
+    "Copy a plain-language request for your coding agent to enrich the selected sessions and publish only justified artifacts.",
   selectAll: "Select every package-path session across all pages (not just this page).",
   clear: "Clear the current selection.",
   pipeline:
@@ -66,6 +57,7 @@ const TOOLTIPS = {
   precheck: "Run the cheap capture quality precheck and apply pass/fail automatically.",
   acceptQuality: "Mark quality as passed so selected sessions can move toward enrichment.",
   failQuality: "Fail quality and remove sessions from the publish path (Not Added).",
+  publish: "Publish the selected session package when its gates are satisfied.",
   claim: "Place a short-lived claim so agents avoid duplicate work on selected sessions.",
   release: "Release active claims on selected sessions.",
   pagePrevious: "Show the previous page of package-path sessions.",
@@ -88,6 +80,7 @@ const PIPELINE_ITEMS: PipelineItem[] = [
   { kind: "quality_precheck", label: "Precheck", tooltip: TOOLTIPS.precheck },
   { kind: "quality_pass", label: "Accept Quality", tooltip: TOOLTIPS.acceptQuality },
   { kind: "quality_fail", label: "Fail Quality", tooltip: TOOLTIPS.failQuality, quiet: true },
+  { kind: "publish", label: "Publish package", tooltip: TOOLTIPS.publish },
   { kind: "claim", label: "Claim", tooltip: TOOLTIPS.claim },
   { kind: "release", label: "Release", tooltip: TOOLTIPS.release }
 ];
@@ -96,9 +89,6 @@ export function WorkbenchPanel({
   actionBusy = false,
   actionError,
   activity = EMPTY_ACTIVITY,
-  candidateError,
-  candidateLoading = false,
-  candidates = EMPTY_CANDIDATES,
   canRun = defaultCanRun,
   clearActionFeedback,
   error,
@@ -116,10 +106,6 @@ export function WorkbenchPanel({
   page = 0,
   pageSize = 100,
   runAction,
-  retryCandidates,
-  selectCandidate,
-  selectedCandidate,
-  selectedCandidateId,
   selectedSessionIds = EMPTY_SELECTION,
   sessions = EMPTY_SESSIONS,
   setNotAddedOpen,
@@ -201,12 +187,13 @@ export function WorkbenchPanel({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [pipelineExpanded, pipelineClosing]);
 
-  const run = (kind: WorkbenchActionKind) => {
+  const run = async (kind: WorkbenchActionKind) => {
     if (!canRun(kind) || actionBusy) return;
-    if (kind === "author_candidate") {
-      void copyTextToClipboard(handoffText);
+    if (kind === "copy_agent_prompt") {
+      const copied = await copyTextToClipboard(handoffText);
+      if (!copied) return;
     }
-    void runAction?.(kind);
+    await runAction?.(kind);
   };
 
   const toggleNotAdded = () => {
@@ -234,20 +221,13 @@ export function WorkbenchPanel({
       <div className="workbench-toolbar observability-toolbar metal-toolbar" role="toolbar" aria-label="Workbench actions">
         <div className="workbench-toolbar-actions toolbar-select-row" aria-label="Workbench ops actions">
           <AppButton
-            className="workbench-author-candidate"
+            className="workbench-copy-agent"
             variant="primary"
-            onClick={() => run("author_candidate")}
-            disabled={!canRun("author_candidate")}
-            title={TOOLTIPS.authorCandidate}
+            onClick={() => void run("copy_agent_prompt")}
+            disabled={!canRun("copy_agent_prompt")}
+            title={TOOLTIPS.copyAgentPrompt}
           >
-            Author candidate
-          </AppButton>
-          <AppButton
-            onClick={() => run("publish_canonical_dossiers")}
-            disabled={!canRun("publish_canonical_dossiers")}
-            title={TOOLTIPS.publishCanonicalDossiers}
-          >
-            Publish canonical dossiers
+            Copy Agent Prompt
           </AppButton>
 
           <span className="workbench-toolbar-divider" aria-hidden="true" />
@@ -300,7 +280,7 @@ export function WorkbenchPanel({
                   disabled={!canRun(item.kind) || actionBusy || !pipelineExpanded || pipelineClosing}
                   title={item.tooltip}
                   tabIndex={pipelineExpanded && !pipelineClosing ? 0 : -1}
-                  onClick={() => run(item.kind)}
+                  onClick={() => void run(item.kind)}
                 >
                   {item.label}
                 </AppButton>
@@ -337,64 +317,6 @@ export function WorkbenchPanel({
           ) : null}
         </dl>
       </div>
-
-      <section className="workbench-candidate-band" aria-label="Artifact candidate">
-        <label className="workbench-candidate-picker">
-          <span>Candidate</span>
-          <select
-            value={selectedCandidateId ?? ""}
-            disabled={candidates.length === 0 || actionBusy || candidateLoading}
-            onChange={(event) => selectCandidate?.(event.target.value)}
-          >
-            {candidates.length === 0 ? <option value="">No artifact candidates</option> : null}
-            {candidates.map((candidate) => (
-              <option key={candidate.candidateId} value={candidate.candidateId}>
-                {formatStatus(candidate.kind, candidate.kind)} · {sanitizeWorkbenchVisibleText(candidate.signalSummary)}
-              </option>
-            ))}
-          </select>
-        </label>
-        {selectedCandidate ? (
-          <>
-            <dl className="workbench-candidate-facts">
-              <div>
-                <dt>Kind</dt>
-                <dd>{formatStatus(selectedCandidate.kind, selectedCandidate.kind)}</dd>
-              </div>
-              <div>
-                <dt>Provenance</dt>
-                <dd>
-                  {selectedCandidate.provenanceSessionIds.length}{" "}
-                  {selectedCandidate.provenanceSessionIds.length === 1 ? "session" : "sessions"}
-                </dd>
-              </div>
-              <div>
-                <dt>Status</dt>
-                <dd><StatusToken value={selectedCandidate.status} /></dd>
-              </div>
-            </dl>
-            <p className="workbench-candidate-signal">
-              <span>Signal</span>
-              {sanitizeWorkbenchVisibleText(selectedCandidate.signalSummary)}
-            </p>
-          </>
-        ) : candidateLoading ? (
-          <p className="workbench-candidate-empty">Loading artifact candidates…</p>
-        ) : candidateError ? null : (
-          <p className="workbench-candidate-empty">No positive-evidence artifact candidates are ready to author.</p>
-        )}
-        {candidateError ? (
-          <div className="workbench-candidate-error" role="alert">
-            <div>
-              <p className="mono-label">Artifact candidates unavailable</p>
-              <p>{sanitizeWorkbenchVisibleText(candidateError)}</p>
-            </div>
-            <AppButton onClick={() => void retryCandidates?.()} disabled={candidateLoading}>
-              Retry candidates
-            </AppButton>
-          </div>
-        ) : null}
-      </section>
 
       {toastMessage ? (
         <div className={`workbench-toast is-${toastTone}`} role="status" aria-live="polite" aria-atomic="true">
@@ -705,11 +627,11 @@ function formatStatus(value: string, fallback: string): string {
   return fallback.replace(/_/g, " ");
 }
 
-async function copyTextToClipboard(text: string): Promise<void> {
+async function copyTextToClipboard(text: string): Promise<boolean> {
   if (navigator.clipboard?.writeText) {
     try {
       await navigator.clipboard.writeText(text);
-      return;
+      return true;
     } catch {
       // Fall back for desktop shells that do not expose async clipboard writes.
     }
@@ -723,6 +645,7 @@ async function copyTextToClipboard(text: string): Promise<void> {
   textarea.style.left = "-9999px";
   document.body.append(textarea);
   textarea.select();
-  document.execCommand("copy");
+  const copied = document.execCommand("copy");
   textarea.remove();
+  return copied;
 }
