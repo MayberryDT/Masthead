@@ -16,6 +16,16 @@ export function buildPublishedDossierSnapshot(
   };
 }
 
+export function buildPublishedEnrichedDossierSnapshot(
+  dossier: SessionDossierDto,
+  capturedAt = new Date().toISOString()
+): PublishedSessionDossierV1 {
+  if (dossier.enrichment.status !== "current" || !dossier.durableEnrichment) {
+    throw new Error("session_dossier_requires_current_enrichment");
+  }
+  return buildPublishedDossierSnapshot(dossier, capturedAt);
+}
+
 export function dossierSnapshotFingerprint(snapshot: PublishedSessionDossierV1): string {
   const { capturedAt: _capturedAt, ...fingerprinted } = snapshot;
   return createHash("sha256").update(stableStringify(fingerprinted)).digest("hex");

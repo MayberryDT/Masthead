@@ -5,30 +5,16 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import type {
   WorkbenchAuthoringBundle,
   WorkbenchAuthoringBundleV2,
-  WorkbenchAuthoringReceipt,
-  WorkbenchAuthoringReceiptV2,
+  WorkbenchAuthoringBundleV3,
   WorkbenchClaimSupport
 } from "../../../shared/workbenchAuthoring.ts";
 import { seedSession } from "../../../daemon/db/__tests__/sessionTestHelpers.ts";
-import { getLogbookArtifactDetail } from "../../../daemon/db/logbookArtifactRepository.ts";
-import { getSessionDossier } from "../../../daemon/db/sessionDossierRepository.ts";
-import {
-  applySessionArtifact,
-  getSessionArtifact,
-  listSessionArtifacts,
-  publishSessionArtifact,
-  searchPublishedArtifactCapsules
-} from "../../../daemon/db/sessionArtifactRepository.ts";
-import {
-  getWorkbenchArtifactCandidate,
-  type StoredWorkbenchArtifactCandidate
-} from "../../../daemon/db/workbenchArtifactCandidateRepository.ts";
+import { getSessionArtifact } from "../../../daemon/db/sessionArtifactRepository.ts";
+import type { StoredWorkbenchArtifactCandidate } from "../../../daemon/db/workbenchArtifactCandidateRepository.ts";
 import {
   claimWorkbenchSessions,
-  markContributionSatisfactionForProvenance,
   markWorkbenchNotAdded,
-  readWorkbenchSessionState,
-  setWorkbenchArtifactApplicability
+  readWorkbenchSessionState
 } from "../../../daemon/db/workbenchPipelineRepository.ts";
 import { completeWorkbenchAuthoringRun } from "../../../daemon/db/workbenchAuthoringRepository.ts";
 import { getOrCreateDatabaseIdentity, migrateDatabase } from "../../../daemon/db/schema.ts";
@@ -38,12 +24,11 @@ import {
   getAuthoringRunEvidence,
   getAuthoringRunStatus,
   openCandidateAuthoringRun,
+  openAgentLedAuthoringRun,
   openAuthoringRun,
-  publishCanonicalDossiers,
   submitAuthoringBundle
 } from "../authoringService.ts";
 import { discoverArtifactCandidates } from "../artifactCandidates.ts";
-import { buildPublishedDossierSnapshot } from "../dossierSnapshot.ts";
 import { seedDurableArtifactCorpus } from "../__fixtures__/durableArtifactCorpus.ts";
 
 const tempDirs: string[] = [];
@@ -55,6 +40,128 @@ afterEach(async () => {
 });
 
 describe("Workbench authoring service", () => {
+  test("publishes enrichment-derived canonical dossiers with zero optional artifacts", async () => {
+    const db = await readyAuthoringDb();
+    const opened = openAgentLedAuthoringRun(db, {
+      actorId: "codex",
+      databaseId: testDatabaseId(db),
+      sessionIds: ["session:a"]
+    });
+    const bundle = validV3Bundle(opened.run.runId, opened.run.evidenceRevision);
+    expect(submitAuthoringBundle(db, { bundle, runId: opened.run.runId }).accepted).toBe(true);
+
+    const receipt = finishAuthoringRun(db, { runId: opened.run.runId });
+    expect(receipt.contractVersion).toBe("workbench-authoring-v3");
+    if (receipt.contractVersion !== "workbench-authoring-v3") throw new Error("expected_v3_receipt");
+    expect(receipt.optionalArtifacts).toEqual([]);
+    const dossier = getSessionArtifact(db, receipt.dossierArtifactIds[0]!)!;
+    expect(dossier.content).toMatchObject({
+      durableEnrichment: { sessionSummary: { text: "Agent-enriched summary grounded in the selected canonical evidence." } },
+      identity: { title: "Agent-enriched title" },
+      snapshotVersion: "canonical-session-dossier-v1"
+    });
+    expect(finishAuthoringRun(db, { runId: opened.run.runId })).toEqual(receipt);
+    db.close();
+  });
+
+  test("publishes an agent-selected optional artifact without a candidate run", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    const candidate = discoverArtifactCandidates(db, ["session:oauth-fixed"]).find((entry) => entry.kind === "runbook")!;
+    const opened = openAgentLedAuthoringRun(db, {
+      actorId: "codex",
+      databaseId: testDatabaseId(db),
+      sessionIds: ["session:oauth-fixed"]
+    });
+    const bundle = validV3Bundle(
+      opened.run.runId,
+      opened.run.evidenceRevision,
+      "session:oauth-fixed",
+      candidate.signalEvidenceRefs.find((ref) => ref.startsWith("tool_result:"))!
+    );
+    bundle.artifacts = [validCandidateBundle(opened.run, candidate).artifact];
+    const submitted = submitAuthoringBundle(db, { bundle, runId: opened.run.runId });
+    expect(submitted.accepted, JSON.stringify(submitted.findings, null, 2)).toBe(true);
+
+    const receipt = finishAuthoringRun(db, { runId: opened.run.runId });
+    if (receipt.contractVersion !== "workbench-authoring-v3") throw new Error("expected_v3_receipt");
+    expect(receipt.optionalArtifacts.map(({ kind }) => kind)).toEqual(["runbook"]);
+    expect(getAuthoringRunStatus(db, opened.run.runId).run).not.toHaveProperty("candidateId");
+    db.close();
+  });
+
+  test("rolls back V3 finish after every mutation boundary", async () => {
+    const boundaries = [
+      "enrichment_applied",
+      "dossiers_created",
+      "optional_artifacts_created",
+      "artifacts_published",
+      "pipeline_updated",
+      "claims_released",
+      "activities_recorded",
+      "receipt_persisted"
+    ] as const;
+    for (const boundary of boundaries) {
+      const { db, runId } = await submittedV3AuthoringDb();
+      const before = v3FinishRows(db);
+      expect(() => finishAuthoringRun(db, {
+        onMutationBoundary: (seen) => {
+          if (seen === boundary) throw new Error(`fail_after:${boundary}`);
+        },
+        runId
+      })).toThrow(`fail_after:${boundary}`);
+      expect(v3FinishRows(db)).toEqual(before);
+      db.close();
+    }
+  });
+
+  test("keeps V1 and V2 runs readable but refuses mutation through audit-only contracts", async () => {
+    const db = await readyAuthoringDb();
+    const legacy = openAuthoringRun(db, {
+      actorId: "codex",
+      databaseId: testDatabaseId(db),
+      sessionIds: ["session:a"]
+    });
+    expect(getAuthoringRunStatus(db, legacy.run.runId).run.contractVersion).toBe("workbench-authoring-v1");
+    expect(() => submitAuthoringBundle(db, {
+      bundle: validBundle(legacy.run.runId, legacy.run.evidenceRevision, "session:a"),
+      runId: legacy.run.runId
+    })).toThrow("authoring_contract_audit_only");
+    expect(() => finishAuthoringRun(db, { runId: legacy.run.runId })).toThrow("authoring_contract_audit_only");
+    db.close();
+
+    const v2Db = await testDb();
+    seedDurableArtifactCorpus(v2Db);
+    const candidate = discoverArtifactCandidates(v2Db, ["session:oauth-fixed"]).find((entry) => entry.kind === "runbook")!;
+    const v2 = openCandidateAuthoringRun(v2Db, {
+      actorId: "codex",
+      candidateId: candidate.candidateId,
+      databaseId: testDatabaseId(v2Db)
+    });
+    expect(getAuthoringRunStatus(v2Db, v2.run.runId).run.contractVersion).toBe("workbench-authoring-v2");
+    expect(() => submitAuthoringBundle(v2Db, {
+      bundle: validCandidateBundle(v2.run, candidate),
+      runId: v2.run.runId
+    })).toThrow("authoring_contract_audit_only");
+    expect(() => finishAuthoringRun(v2Db, { runId: v2.run.runId })).toThrow("authoring_contract_audit_only");
+    v2Db.close();
+  });
+
+  test("bounds V3 selections to 1-12 sessions and reuses only the exact current revision", async () => {
+    const db = await readyAuthoringDb();
+    const input = { actorId: "codex", databaseId: testDatabaseId(db), sessionIds: [" session:a ", "session:a"] };
+    const first = openAgentLedAuthoringRun(db, input);
+    const retry = openAgentLedAuthoringRun(db, input);
+    expect(retry.run.runId).toBe(first.run.runId);
+    expect(first.run.sessionIds).toEqual(["session:a"]);
+    expect(() => openAgentLedAuthoringRun(db, { ...input, sessionIds: [] })).toThrow("authoring_session_count_invalid");
+    const tooMany = Array.from({ length: 13 }, (_, index) => `session:${index}`);
+    expect(() => openAgentLedAuthoringRun(db, { ...input, sessionIds: tooMany })).toThrow(
+      "authoring_session_count_invalid"
+    );
+    db.close();
+  });
+
   test("opens selected sessions without a privacy permission gate", async () => {
     const db = await testDb();
     seedSessionWithRedactedEvidence(db, "session:a");
@@ -92,27 +199,6 @@ describe("Workbench authoring service", () => {
     db.close();
   });
 
-  test("stores findings without applying artifacts", async () => {
-    const db = await readyAuthoringDb();
-    const opened = openAuthoringRun(db, {
-      actorId: "codex",
-      databaseId: testDatabaseId(db),
-      sessionIds: ["session:a"]
-    });
-    const enrichmentCount = db.prepare("SELECT COUNT(*) AS count FROM session_enrichments").get();
-
-    const result = submitAuthoringBundle(db, {
-      bundle: invalidBundle(opened.run.runId, opened.run.evidenceRevision),
-      runId: opened.run.runId
-    });
-
-    expect(result.accepted).toBe(false);
-    expect(result.run.status).toBe("needs_revision");
-    expect(result.findings.length).toBeGreaterThan(0);
-    expect(db.prepare("SELECT COUNT(*) AS count FROM session_artifacts").get()).toEqual({ count: 0 });
-    expect(db.prepare("SELECT COUNT(*) AS count FROM session_enrichments").get()).toEqual(enrichmentCount);
-    db.close();
-  });
 
   test("reuses the same run and claims when open is retried", async () => {
     const db = await readyAuthoringDb();
@@ -175,44 +261,6 @@ describe("Workbench authoring service", () => {
     db.close();
   });
 
-  test("submit reacquires an expired lease and refuses another actor's live claim", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-07-10T12:00:00.000Z"));
-    const db = await readyAuthoringDb();
-    const opened = openAuthoringRun(db, {
-      actorId: "codex",
-      databaseId: testDatabaseId(db),
-      sessionIds: ["session:a"]
-    });
-    expireAuthoringClaims(db, opened.run.runId);
-
-    const renewed = submitAuthoringBundle(db, {
-      bundle: invalidBundle(opened.run.runId, opened.run.evidenceRevision),
-      runId: opened.run.runId
-    });
-    expect(Date.parse(renewed.run.claimsExpireAt)).toBeGreaterThan(Date.now());
-
-    const conflictedDb = await readyAuthoringDb();
-    const conflictedRun = openAuthoringRun(conflictedDb, {
-      actorId: "codex",
-      databaseId: testDatabaseId(conflictedDb),
-      sessionIds: ["session:a"]
-    });
-    expireAuthoringClaims(conflictedDb, conflictedRun.run.runId);
-    claimWorkbenchSessions(conflictedDb, {
-      claimedBy: "other-agent",
-      expiresAt: new Date(Date.now() + 60_000).toISOString(),
-      sessionIds: ["session:a"]
-    });
-    expect(() =>
-      submitAuthoringBundle(conflictedDb, {
-        bundle: invalidBundle(conflictedRun.run.runId, conflictedRun.run.evidenceRevision),
-        runId: conflictedRun.run.runId
-      })
-    ).toThrow("authoring_claim_conflict:session:a");
-    db.close();
-    conflictedDb.close();
-  });
 
   test("reports status and pages evidence without mutating Workbench state", async () => {
     const db = await readyAuthoringDb();
@@ -246,39 +294,6 @@ describe("Workbench authoring service", () => {
     db.close();
   });
 
-  test("requires repeat-open recovery when canonical evidence changes", async () => {
-    const db = await readyAuthoringDb();
-    const input = {
-      actorId: "codex",
-      databaseId: testDatabaseId(db),
-      sessionIds: ["session:a"]
-    };
-    const opened = openAuthoringRun(db, input);
-    submitAuthoringBundle(db, {
-      bundle: invalidBundle(opened.run.runId, opened.run.evidenceRevision),
-      runId: opened.run.runId
-    });
-    insertMessage(db, "session:a", "changed", "New canonical evidence arrived.");
-
-    expect(getAuthoringRunStatus(db, opened.run.runId).evidenceStatus).toBe("changed");
-    expect(() =>
-      getAuthoringRunEvidence(db, {
-        runId: opened.run.runId,
-        sessionId: "session:a"
-      })
-    ).toThrow("evidence_revision_changed");
-
-    const reopened = openAuthoringRun(db, input);
-    expect(reopened.run).toMatchObject({
-      findings: [],
-      runId: opened.run.runId,
-      status: "open"
-    });
-    expect(reopened.run).not.toHaveProperty("bundle");
-    expect(reopened.run.evidenceRevision).not.toBe(opened.run.evidenceRevision);
-    expect(getAuthoringRunEvidence(db, { runId: reopened.run.runId, sessionId: "session:a" }).total).toBeGreaterThan(1);
-    db.close();
-  });
 
   test("keeps sparse non-empty canonical evidence on the automatic path with warnings", async () => {
     const db = await readyAuthoringDb();
@@ -450,795 +465,26 @@ describe("Workbench authoring service", () => {
     db.close();
   });
 
-  test("accepts a grounded bundle while deferring every artifact and enrichment write", async () => {
-    const db = await readyAuthoringDb();
-    const opened = openAuthoringRun(db, {
-      actorId: "codex",
-      databaseId: testDatabaseId(db),
-      sessionIds: ["session:a"]
-    });
-    const before = authoringOutputCounts(db);
 
-    const result = submitAuthoringBundle(db, {
-      bundle: validBundle(opened.run.runId, opened.run.evidenceRevision, "session:a"),
-      runId: opened.run.runId
-    });
 
-    expect(result).toMatchObject({ accepted: true, findings: expect.any(Array), ok: true, run: { status: "ready_to_finish" } });
-    expect(result.findings.every((finding) => finding.severity === "warning")).toBe(true);
-    expect(authoringOutputCounts(db)).toEqual(before);
-    db.close();
-  });
 
-  test("rejects conflicting explicit artifact signatures before finish", async () => {
-    const db = await readyAuthoringDb();
-    seedSessionWithRedactedEvidence(db, "session:b");
-    const opened = openAuthoringRun(db, {
-      actorId: "codex",
-      databaseId: testDatabaseId(db),
-      sessionIds: ["session:a", "session:b"]
-    });
-    const first = validBundle(opened.run.runId, opened.run.evidenceRevision, "session:a");
-    const second = validBundle(opened.run.runId, opened.run.evidenceRevision, "session:b");
-    const firstRunbook = validRunbookDraft("session:a");
-    const secondRunbook = validRunbookDraft("session:b");
-    firstRunbook.output.signatureKey = "signature:oauth-callback";
-    secondRunbook.output.signatureKey = " signature:oauth-callback ";
-    const bundle: WorkbenchAuthoringBundle = {
-      ...first,
-      artifacts: [firstRunbook, secondRunbook],
-      notApplicable: [...first.notApplicable, ...second.notApplicable].filter(
-        (decision) => decision.kind !== "runbook"
-      ),
-      sessionPackages: [...first.sessionPackages, ...second.sessionPackages]
-    };
-    const before = authoringOutputCounts(db);
 
-    const result = submitAuthoringBundle(db, { bundle, runId: opened.run.runId });
 
-    expect(result).toMatchObject({
-      accepted: false,
-      run: { status: "needs_revision" }
-    });
-    expect(result.findings).toContainEqual(
-      expect.objectContaining({
-        code: "duplicate_artifact_signature",
-        path: "artifacts[1].output.signatureKey",
-        sessionId: "session:b"
-      })
-    );
-    expect(authoringOutputCounts(db)).toEqual(before);
-    db.close();
-  });
 
-  test("rejects a blank explicit artifact signature before finish", async () => {
-    const db = await readyAuthoringDb();
-    const opened = openAuthoringRun(db, {
-      actorId: "codex",
-      databaseId: testDatabaseId(db),
-      sessionIds: ["session:a"]
-    });
-    const bundle = validBundle(opened.run.runId, opened.run.evidenceRevision, "session:a");
-    bundle.notApplicable = bundle.notApplicable.filter((decision) => decision.kind !== "runbook");
-    const runbook = validRunbookDraft("session:a");
-    runbook.output.signatureKey = " \n ";
-    bundle.artifacts = [runbook];
 
-    const result = submitAuthoringBundle(db, { bundle, runId: opened.run.runId });
 
-    expect(result).toMatchObject({ accepted: false, run: { status: "needs_revision" } });
-    expect(result.findings).toContainEqual(
-      expect.objectContaining({
-        code: "blank_artifact_signature",
-        path: "artifacts[0].output.signatureKey",
-        sessionId: "session:a"
-      })
-    );
-    expect(authoringOutputCounts(db)).toEqual({ session_artifacts: 0, session_enrichments: 1 });
-    db.close();
-  });
 
-  test("persists the canonical trimmed artifact signature", async () => {
-    const db = await readyAuthoringDb();
-    const opened = openAuthoringRun(db, {
-      actorId: "codex",
-      databaseId: testDatabaseId(db),
-      sessionIds: ["session:a"]
-    });
-    const bundle = validBundle(opened.run.runId, opened.run.evidenceRevision, "session:a");
-    bundle.notApplicable = bundle.notApplicable.filter((decision) => decision.kind !== "runbook");
-    const runbook = validRunbookDraft("session:a");
-    runbook.output.signatureKey = "  signature:atomic-finish  ";
-    bundle.artifacts = [runbook];
-    expect(submitAuthoringBundle(db, { bundle, runId: opened.run.runId }).accepted).toBe(true);
 
-    finishAuthoringRun(db, { runId: opened.run.runId });
 
-    expect(listSessionArtifacts(db, { artifactKind: "runbook", sessionId: "session:a" })[0]?.signatureKey).toBe(
-      "signature:atomic-finish"
-    );
-    db.close();
-  });
 
-  test("rolls back a historical duplicate-signature finish without changing the durable run", async () => {
-    const db = await readyAuthoringDb();
-    seedSessionWithRedactedEvidence(db, "session:b");
-    const opened = openAuthoringRun(db, {
-      actorId: "codex",
-      databaseId: testDatabaseId(db),
-      sessionIds: ["session:a", "session:b"]
-    });
-    const first = validBundle(opened.run.runId, opened.run.evidenceRevision, "session:a");
-    const second = validBundle(opened.run.runId, opened.run.evidenceRevision, "session:b");
-    const firstRunbook = validRunbookDraft("session:a");
-    const secondRunbook = validRunbookDraft("session:b");
-    firstRunbook.output.signatureKey = "signature:historical-ready";
-    secondRunbook.output.signatureKey = "  signature:historical-ready  ";
-    const historicalBundle: WorkbenchAuthoringBundle = {
-      ...first,
-      artifacts: [firstRunbook, secondRunbook],
-      notApplicable: [...first.notApplicable, ...second.notApplicable].filter(
-        (decision) => decision.kind !== "runbook"
-      ),
-      sessionPackages: [...first.sessionPackages, ...second.sessionPackages]
-    };
-    db.prepare(
-      `UPDATE workbench_authoring_runs
-       SET status = 'ready_to_finish', bundle_json = ?, findings_json = '[]'
-       WHERE run_id = ?`
-    ).run(JSON.stringify(historicalBundle), opened.run.runId);
-    expireAuthoringClaims(db, opened.run.runId);
-    const runBeforeFinish = getAuthoringRunStatus(db, opened.run.runId).run;
-    const claimsBeforeFinish = runClaimRows(db, opened.run.runId);
-    const outputsBeforeFinish = authoringOutputCounts(db);
 
-    expect(() => finishAuthoringRun(db, { runId: opened.run.runId })).toThrow(
-      "authoring_run_needs_revision:duplicate_artifact_signature"
-    );
 
-    expect(getAuthoringRunStatus(db, opened.run.runId).run).toEqual(runBeforeFinish);
-    expect(runClaimRows(db, opened.run.runId)).toEqual(claimsBeforeFinish);
-    expect(authoringOutputCounts(db)).toEqual(outputsBeforeFinish);
 
-    secondRunbook.output.signatureKey = "signature:historical-ready-b";
-    expect(
-      submitAuthoringBundle(db, {
-        bundle: { ...historicalBundle, artifacts: [firstRunbook, secondRunbook] },
-        runId: opened.run.runId
-      }).accepted
-    ).toBe(true);
-    db.close();
-  });
 
-  test("finishes once and publishes the complete bundle atomically", async () => {
-    const { db, runId } = await submittedAuthoringDb();
 
-    const first = finishAuthoringRun(db, { runId });
-    const second = finishAuthoringRun(db, { runId });
-    const canonicalAfterFinish = getSessionDossier(db, "session:a")!;
 
-    expect(second).toEqual(first);
-    expect(first.contractVersion).toBe("workbench-authoring-v1");
-    expect(first.publishedArtifactIds).toHaveLength(2);
-    expect(readWorkbenchSessionState(db, "session:a")).toMatchObject({
-      adrStatus: "not_applicable",
-      incidentTimelineStatus: "not_applicable",
-      resolutionStatus: "automatic_resolved",
-      runbookStatus: "published",
-      sessionPackageStatus: "published"
-    });
-    expect(
-      db.prepare(
-        "SELECT COUNT(*) AS count FROM session_artifacts WHERE status = 'current' AND publication_status = 'published'"
-      ).get()
-    ).toEqual({ count: 2 });
-    expect(listSessionArtifacts(db).map((artifact) => artifact.schemaVersion).sort()).toEqual([
-      "canonical-session-dossier-v1",
-      "runbook-v2",
-    ]);
-    const dossier = listSessionArtifacts(db, {
-      artifactKind: "session_dossier",
-      sessionId: "session:a"
-    })[0]!;
-    expect(omitCapturedAt(dossier.content)).toEqual(
-      omitCapturedAt(buildPublishedDossierSnapshot(canonicalAfterFinish))
-    );
-    expect(dossier.createdBy).toBe("workbench_authoring_v2:codex");
-    expect(first.publishedArtifactIds.every((artifactId) => getLogbookArtifactDetail(db, artifactId))).toBe(true);
-    expect(
-      db
-        .prepare(
-          `SELECT artifact_id AS artifactId
-           FROM session_artifact_search
-           ORDER BY artifact_id`
-        )
-        .all()
-    ).toEqual(first.publishedArtifactIds.slice().sort().map((artifactId) => ({ artifactId })));
-    expect(
-      db.prepare("SELECT COUNT(*) AS count FROM workbench_claims WHERE released_at IS NULL").get()
-    ).toEqual({ count: 0 });
-    expect(
-      db.prepare("SELECT COUNT(*) AS count FROM workbench_activity WHERE event_type = 'authoring_finished'").get()
-    ).toEqual({ count: 1 });
-    expect(
-      db.prepare(
-        `SELECT event_type AS eventType
-         FROM workbench_activity
-         WHERE session_id = 'session:a' AND event_type IN ('runbook_published', 'published')
-         ORDER BY rowid`
-      ).all()
-    ).toEqual([{ eventType: "published" }, { eventType: "runbook_published" }]);
-    expect(db.prepare("SELECT COUNT(*) AS count FROM sessions").get()).toEqual({ count: 1 });
-    db.close();
-  });
 
-  test("finishes one accepted candidate with one optional artifact and canonical dossiers", async () => {
-    const { candidate, db, runId } = await submittedCandidateAuthoringDb();
 
-    const first = requireV2Receipt(finishAuthoringRun(db, { runId }));
-    const second = requireV2Receipt(finishAuthoringRun(db, { runId }));
-
-    expect(second).toEqual(first);
-    expect(first).toMatchObject({
-      candidateId: candidate.candidateId,
-      contractVersion: "workbench-authoring-v2",
-      contributions: [],
-      dossierArtifactIds: expect.any(Array),
-      optionalArtifact: { kind: candidate.kind },
-      provenanceSessionIds: candidate.provenanceSessionIds,
-      resolvedSessionIds: candidate.provenanceSessionIds,
-      runId
-    });
-    expect(first).not.toHaveProperty("notApplicable");
-    expect(first.dossierArtifactIds).toHaveLength(candidate.provenanceSessionIds.length);
-    expect(first.publishedArtifactIds).toEqual([
-      ...first.dossierArtifactIds!,
-      first.optionalArtifact!.artifactId
-    ]);
-    expect(getWorkbenchArtifactCandidate(db, candidate.candidateId)?.status).toBe("published");
-    expect(getLogbookArtifactDetail(db, first.optionalArtifact!.artifactId)).toMatchObject({
-      capsule: { kind: candidate.kind },
-      provenanceSessionIds: candidate.provenanceSessionIds,
-      publicationStatus: "published",
-      status: "current"
-    });
-    for (const sessionId of candidate.provenanceSessionIds) {
-      expect(listSessionArtifacts(db, { artifactKind: "session_dossier", sessionId })).toEqual([
-        expect.objectContaining({ publicationStatus: "published", status: "current" })
-      ]);
-      expect(readWorkbenchSessionState(db, sessionId)).toMatchObject({
-        adrStatus: "unknown",
-        incidentTimelineStatus: "unknown",
-        publicationStatus: "published",
-        runbookStatus: sessionId === candidate.seedSessionId ? "published" : "contributed",
-        sessionDossierStatus: "satisfied",
-        sessionPackageStatus: "published"
-      });
-    }
-    expect(
-      db.prepare(
-        `SELECT COUNT(*) AS count
-         FROM workbench_activity
-         WHERE event_type LIKE '%_not_applicable'`
-      ).get()
-    ).toEqual({ count: 0 });
-    db.close();
-  });
-
-  test("refuses to finish a positive candidate without its accepted artifact", async () => {
-    const { db, runId } = await submittedCandidateAuthoringDb();
-    const stored = getAuthoringRunStatus(db, runId).run.bundle as WorkbenchAuthoringBundleV2;
-    const { artifact: _artifact, ...withoutArtifact } = stored;
-    db.prepare("UPDATE workbench_authoring_runs SET bundle_json = ? WHERE run_id = ?").run(
-      JSON.stringify(withoutArtifact),
-      runId
-    );
-
-    expect(() => finishAuthoringRun(db, { runId })).toThrow("candidate_artifact_required");
-    expect(getAuthoringRunStatus(db, runId).run.status).toBe("ready_to_finish");
-    expect(listSessionArtifacts(db)).toEqual([]);
-    db.close();
-  });
-
-  test("does not let an unsigned candidate invent lineage or supersede a signed artifact", async () => {
-    const db = await testDb();
-    seedDurableArtifactCorpus(db);
-    const unrelated = applySessionArtifact(db, {
-      artifactKind: "runbook",
-      content: { title: "Unrelated signed runbook" },
-      contentFingerprint: "unrelated-signed-runbook",
-      createdBy: "test",
-      evidenceRefs: ["message:dossier-question:1"],
-      provenanceSessionIds: ["session:dossier-question"],
-      schemaVersion: "runbook-v2",
-      sessionId: "session:dossier-question",
-      signatureKey: "signature:unrelated",
-      title: "Unrelated signed runbook",
-      validation: { ok: true }
-    });
-    publishSessionArtifact(db, unrelated.artifactId);
-    const candidate = discoverArtifactCandidates(db, ["session:oauth-fixed"]).find(
-      (entry) => entry.kind === "runbook"
-    )!;
-    expect(candidate.signatureKey).toBeUndefined();
-    const opened = openCandidateAuthoringRun(db, {
-      actorId: "codex",
-      candidateId: candidate.candidateId,
-      databaseId: testDatabaseId(db)
-    });
-    const bundle = validCandidateBundle(opened.run, candidate);
-    bundle.artifact.output.signatureKey = "signature:unrelated";
-
-    expect(() => submitAuthoringBundle(db, { bundle, runId: opened.run.runId })).toThrow(
-      "authoring_candidate_signature_mismatch"
-    );
-    expect(getWorkbenchArtifactCandidate(db, candidate.candidateId)?.status).toBe("claimed");
-    expect(listSessionArtifacts(db).find(({ artifactId }) => artifactId === unrelated.artifactId)).toMatchObject({
-      publicationStatus: "published",
-      status: "current"
-    });
-    db.close();
-  });
-
-  test("reauthoring a changed candidate revision supersedes the old signature and search hit", async () => {
-    const db = await testDb();
-    seedDurableArtifactCorpus(db);
-    const candidate = discoverArtifactCandidates(db, ["session:repeated-error:1", "session:repeated-error:2"]).find(
-      (entry) => entry.kind === "runbook" && entry.provenanceSessionIds.length === 2
-    )!;
-    expect(candidate.signatureKey).toBeTruthy();
-    const opened = openCandidateAuthoringRun(db, {
-      actorId: "codex",
-      candidateId: candidate.candidateId,
-      databaseId: testDatabaseId(db)
-    });
-    const firstSubmitted = submitAuthoringBundle(db, {
-      bundle: validCandidateBundle(opened.run, candidate),
-      runId: opened.run.runId
-    });
-    expect(firstSubmitted.accepted, JSON.stringify(firstSubmitted.findings, null, 2)).toBe(true);
-    const firstOutput = (firstSubmitted.run.bundle as WorkbenchAuthoringBundleV2).artifact.output;
-    const first = requireV2Receipt(finishAuthoringRun(db, { runId: opened.run.runId }));
-    const firstOptionalId = first.optionalArtifact!.artifactId;
-
-    insertMessage(
-      db,
-      candidate.seedSessionId,
-      "candidate-revision",
-      "Additional canonical context was captured after the first artifact publication."
-    );
-    const revisedCandidate = discoverArtifactCandidates(db, candidate.provenanceSessionIds).find(
-      (entry) => entry.kind === candidate.kind && entry.status === "pending"
-    )!;
-    expect(revisedCandidate).toBeDefined();
-    expect(revisedCandidate.candidateId).not.toBe(candidate.candidateId);
-    const revised = openCandidateAuthoringRun(db, {
-      actorId: "codex",
-      candidateId: revisedCandidate.candidateId,
-      databaseId: testDatabaseId(db)
-    });
-    const revisedBundle = validCandidateBundle(revised.run, revisedCandidate);
-    expect(revisedBundle.artifact.output).toEqual(firstOutput);
-    const revisedSubmitted = submitAuthoringBundle(db, { bundle: revisedBundle, runId: revised.run.runId });
-    expect(revisedSubmitted.accepted, JSON.stringify(revisedSubmitted.findings, null, 2)).toBe(true);
-
-    const second = requireV2Receipt(finishAuthoringRun(db, { runId: revised.run.runId }));
-
-    expect(listSessionArtifacts(db).find(({ artifactId }) => artifactId === firstOptionalId)?.status).toBe(
-      "superseded"
-    );
-    expect(second.optionalArtifact!.artifactId).not.toBe(firstOptionalId);
-    expect(getSessionArtifact(db, second.optionalArtifact.artifactId)?.validation).toMatchObject({
-      candidateId: revisedCandidate.candidateId,
-      evidenceRevision: revisedCandidate.evidenceRevision
-    });
-    expect(
-      searchPublishedArtifactCapsules(db, { q: "command not found", kind: "runbook" }).artifacts.map(
-        ({ artifactId }) => artifactId
-      )
-    ).toEqual([second.optionalArtifact!.artifactId]);
-    expect(
-      db.prepare("SELECT artifact_id AS artifactId FROM session_artifact_search WHERE artifact_id = ?").all(firstOptionalId)
-    ).toEqual([]);
-    db.close();
-  });
-
-  test("rolls back candidate finish after every mutation boundary", async () => {
-    const boundaries = [
-      "canonical_dossiers_published",
-      "optional_artifact_applied",
-      "optional_artifact_published",
-      "pipeline_updated",
-      "search_indexed",
-      "candidate_published",
-      "claims_released",
-      "activities_recorded",
-      "receipt_persisted"
-    ];
-
-    for (const target of boundaries) {
-      const { db, runId } = await submittedCandidateAuthoringDb();
-      const before = candidateFinishRows(db);
-
-      expect(() =>
-        finishAuthoringRun(db, {
-          onMutationBoundary: (boundary: string) => {
-            if (boundary === target) throw new Error(`injected_finish_failure:${target}`);
-          },
-          runId
-        })
-      ).toThrow(`injected_finish_failure:${target}`);
-
-      expect(candidateFinishRows(db)).toEqual(before);
-      expect(getAuthoringRunStatus(db, runId).run.status).toBe("ready_to_finish");
-      db.close();
-    }
-  });
-
-  test("publishes canonical dossiers in one bounded atomic idempotent batch", async () => {
-    const db = await testDb();
-    seedSessionWithRedactedEvidence(db, "session:a");
-    seedSessionWithRedactedEvidence(db, "session:b");
-    vi.useFakeTimers();
-    vi.setSystemTime("2026-07-12T18:00:00.000Z");
-
-    const first = publishCanonicalDossiers(db, {
-      actorId: "recovery",
-      sessionIds: ["session:a", "session:b"]
-    });
-    const artifactsAfterFirst = listSessionArtifacts(db);
-    const activitiesAfterFirst = db
-      .prepare("SELECT * FROM workbench_activity ORDER BY activity_id")
-      .all();
-    vi.setSystemTime("2026-07-12T19:00:00.000Z");
-    const second = publishCanonicalDossiers(db, {
-      actorId: "recovery",
-      sessionIds: ["session:a", "session:b"]
-    });
-
-    expect(second).toEqual(first);
-    expect(first.sessionIds).toEqual(["session:a", "session:b"]);
-    expect(first.artifactIds).toHaveLength(2);
-    expect(listSessionArtifacts(db, { publicationStatus: "published" })).toHaveLength(2);
-    for (const sessionId of first.sessionIds) {
-      expect(readWorkbenchSessionState(db, sessionId)).toMatchObject({
-        nextAction: "none",
-        publicationStatus: "published",
-        resolutionStatus: "automatic_resolved",
-        sessionPackageStatus: "published"
-      });
-    }
-    expect(listSessionArtifacts(db)).toEqual(artifactsAfterFirst);
-    expect(db.prepare("SELECT * FROM workbench_activity ORDER BY activity_id").all()).toEqual(
-      activitiesAfterFirst
-    );
-
-    const beforeFailure = listSessionArtifacts(db);
-    const stateBeforeFailure = [
-      readWorkbenchSessionState(db, "session:a"),
-      readWorkbenchSessionState(db, "session:b")
-    ];
-    const activityBeforeFailure = db
-      .prepare("SELECT * FROM workbench_activity ORDER BY activity_id")
-      .all();
-    expect(() =>
-      publishCanonicalDossiers(db, {
-        actorId: "recovery",
-        sessionIds: ["session:a", "session:missing"]
-      })
-    ).toThrow("session_not_found:session:missing");
-    expect(listSessionArtifacts(db)).toEqual(beforeFailure);
-    expect([
-      readWorkbenchSessionState(db, "session:a"),
-      readWorkbenchSessionState(db, "session:b")
-    ]).toEqual(stateBeforeFailure);
-    expect(db.prepare("SELECT * FROM workbench_activity ORDER BY activity_id").all()).toEqual(
-      activityBeforeFailure
-    );
-    expect(() =>
-      publishCanonicalDossiers(db, {
-        actorId: "recovery",
-        sessionIds: Array.from({ length: 101 }, (_, index) => `session:${index}`)
-      })
-    ).toThrow("canonical_dossier_batch_too_large");
-    db.close();
-  });
-
-  test("supersedes the published dossier when canonical evidence changes", async () => {
-    const db = await testDb();
-    seedSessionWithRedactedEvidence(db, "session:a");
-
-    const first = publishCanonicalDossiers(db, {
-      actorId: "recovery",
-      sessionIds: ["session:a"]
-    });
-    insertMessage(db, "session:a", "later-evidence", "A later canonical message materially changed the session record.");
-    const second = publishCanonicalDossiers(db, {
-      actorId: "recovery",
-      sessionIds: ["session:a"]
-    });
-
-    expect(second.artifactIds[0]).not.toBe(first.artifactIds[0]);
-    expect(listSessionArtifacts(db, { artifactKind: "session_dossier", sessionId: "session:a" })).toEqual([
-      expect.objectContaining({ artifactId: second.artifactIds[0], publicationStatus: "published", status: "current" }),
-      expect.objectContaining({ artifactId: first.artifactIds[0], publicationStatus: "published", status: "superseded" })
-    ]);
-    db.close();
-  });
-
-  test("rolls back every write when visibility verification fails and can retry", async () => {
-    const { db, runId } = await submittedAuthoringDb();
-    const before = authoringOutputCounts(db);
-
-    let indexedBeforeFailure = 0;
-    expect(() =>
-      finishAuthoringRun(db, {
-        runId,
-        verifyPublished: () => {
-          indexedBeforeFailure = (
-            db.prepare("SELECT COUNT(*) AS count FROM session_artifact_search").get() as { count: number }
-          ).count;
-          return false;
-        }
-      })
-    ).toThrow("authoring_finish_visibility_failed");
-
-    expect(indexedBeforeFailure).toBe(2);
-    expect(authoringOutputCounts(db)).toEqual(before);
-    expect(db.prepare("SELECT COUNT(*) AS count FROM session_artifact_search").get()).toEqual({ count: 0 });
-    expect(getAuthoringRunStatus(db, runId).run.status).toBe("ready_to_finish");
-
-    const retried = finishAuthoringRun(db, { runId });
-    expect(retried.publishedArtifactIds).toHaveLength(2);
-    expect(getAuthoringRunStatus(db, runId).run.status).toBe("completed");
-    db.close();
-  });
-
-  test("marks multi-session artifact seeds published and other provenance contributed", async () => {
-    const { db, runId } = await submittedMultiSessionAuthoringDb();
-
-    const receipt = finishAuthoringRun(db, { runId });
-    const runbookId = receipt.publishedArtifactIds.find(
-      (artifactId) => getLogbookArtifactDetail(db, artifactId)?.capsule.kind === "runbook"
-    );
-
-    expect(runbookId).toBeTruthy();
-    expect(getLogbookArtifactDetail(db, runbookId!)?.provenanceSessionIds).toEqual(["session:a", "session:b"]);
-    expect(readWorkbenchSessionState(db, "session:a")).toMatchObject({
-      resolutionStatus: "automatic_resolved",
-      runbookStatus: "published"
-    });
-    expect(readWorkbenchSessionState(db, "session:b")).toMatchObject({
-      resolutionStatus: "automatic_resolved",
-      runbookStatus: "contributed"
-    });
-    expect(receipt.contributions).toContainEqual({
-      artifactId: runbookId,
-      kind: "runbook",
-      sessionId: "session:b"
-    });
-    db.close();
-  });
-
-  test("reopens an old session when a later session supersedes its only published signature", async () => {
-    const db = await readyAuthoringDb();
-    const firstOpened = openAuthoringRun(db, {
-      actorId: "codex",
-      databaseId: testDatabaseId(db),
-      sessionIds: ["session:a"]
-    });
-    const firstBundle = validBundle(firstOpened.run.runId, firstOpened.run.evidenceRevision, "session:a");
-    firstBundle.notApplicable = firstBundle.notApplicable.filter((decision) => decision.kind !== "runbook");
-    const firstRunbook = validRunbookDraft("session:a");
-    firstRunbook.output.signatureKey = "signature:shared-runtime-failure";
-    firstBundle.artifacts = [firstRunbook];
-    expect(submitAuthoringBundle(db, { bundle: firstBundle, runId: firstOpened.run.runId }).accepted).toBe(true);
-    const firstReceipt = finishAuthoringRun(db, { runId: firstOpened.run.runId });
-    const oldRunbookId = firstReceipt.publishedArtifactIds.find(
-      (artifactId) => getLogbookArtifactDetail(db, artifactId)?.capsule.kind === "runbook"
-    )!;
-
-    seedSessionWithRedactedEvidence(db, "session:b");
-    const secondOpened = openAuthoringRun(db, {
-      actorId: "codex",
-      databaseId: testDatabaseId(db),
-      sessionIds: ["session:b"]
-    });
-    const secondBundle = validBundle(secondOpened.run.runId, secondOpened.run.evidenceRevision, "session:b");
-    secondBundle.notApplicable = secondBundle.notApplicable.filter((decision) => decision.kind !== "runbook");
-    const replacementRunbook = validRunbookDraft("session:b");
-    replacementRunbook.output.signatureKey = "signature:shared-runtime-failure";
-    secondBundle.artifacts = [replacementRunbook];
-    expect(submitAuthoringBundle(db, { bundle: secondBundle, runId: secondOpened.run.runId }).accepted).toBe(true);
-
-    finishAuthoringRun(db, { runId: secondOpened.run.runId });
-
-    expect(listSessionArtifacts(db).find((artifact) => artifact.artifactId === oldRunbookId)?.status).toBe("superseded");
-    expect(readWorkbenchSessionState(db, "session:a")).toMatchObject({
-      adrStatus: "not_applicable",
-      incidentTimelineStatus: "not_applicable",
-      nextAction: "none",
-      publicationStatus: "published",
-      resolutionStatus: "automatic_resolved",
-      runbookStatus: "applied",
-      sessionPackageStatus: "published"
-    });
-    expect(readWorkbenchSessionState(db, "session:b")).toMatchObject({
-      resolutionStatus: "automatic_resolved",
-      runbookStatus: "published"
-    });
-    db.close();
-  });
-
-  test("preserves an old session's legitimate contribution when another current artifact still satisfies the kind", async () => {
-    const db = await readyAuthoringDb();
-    const firstOpened = openAuthoringRun(db, {
-      actorId: "codex",
-      databaseId: testDatabaseId(db),
-      sessionIds: ["session:a"]
-    });
-    const firstBundle = validBundle(firstOpened.run.runId, firstOpened.run.evidenceRevision, "session:a");
-    firstBundle.notApplicable = firstBundle.notApplicable.filter((decision) => decision.kind !== "runbook");
-    const firstRunbook = validRunbookDraft("session:a");
-    firstRunbook.output.signatureKey = "signature:shared-runtime-failure";
-    firstBundle.artifacts = [firstRunbook];
-    expect(submitAuthoringBundle(db, { bundle: firstBundle, runId: firstOpened.run.runId }).accepted).toBe(true);
-    const firstReceipt = finishAuthoringRun(db, { runId: firstOpened.run.runId });
-    const supersededRunbookId = firstReceipt.publishedArtifactIds.find(
-      (artifactId) => getLogbookArtifactDetail(db, artifactId)?.capsule.kind === "runbook"
-    )!;
-
-    seedSessionWithRedactedEvidence(db, "session:b");
-    const supportingRunbook = applySessionArtifact(db, {
-      artifactKind: "runbook",
-      content: { title: "A separate current runbook still includes session A" },
-      contentFingerprint: "supporting-current-runbook",
-      createdBy: "test",
-      evidenceRefs: ["message:session:a:message"],
-      joinRationale: "Both sessions exhibit the same separately retained setup requirement.",
-      provenanceSessionIds: ["session:b", "session:a"],
-      schemaVersion: "runbook-v2",
-      sessionId: "session:b",
-      signatureKey: "signature:separate-current-satisfaction",
-      title: "A separate current runbook still includes session A",
-      validation: { ok: true }
-    });
-    publishSessionArtifact(db, supportingRunbook.artifactId);
-    markContributionSatisfactionForProvenance(db, {
-      actor: { id: "test", kind: "agent" },
-      artifactKind: "runbook",
-      provenanceSessionIds: ["session:b", "session:a"],
-      publishedArtifactId: supportingRunbook.artifactId,
-      seedSessionId: "session:b"
-    });
-
-    const secondOpened = openAuthoringRun(db, {
-      actorId: "codex",
-      databaseId: testDatabaseId(db),
-      sessionIds: ["session:b"]
-    });
-    const secondBundle = validBundle(secondOpened.run.runId, secondOpened.run.evidenceRevision, "session:b");
-    secondBundle.notApplicable = secondBundle.notApplicable.filter((decision) => decision.kind !== "runbook");
-    const replacementRunbook = validRunbookDraft("session:b");
-    replacementRunbook.output.signatureKey = "signature:shared-runtime-failure";
-    secondBundle.artifacts = [replacementRunbook];
-    expect(submitAuthoringBundle(db, { bundle: secondBundle, runId: secondOpened.run.runId }).accepted).toBe(true);
-
-    finishAuthoringRun(db, { runId: secondOpened.run.runId });
-
-    expect(listSessionArtifacts(db).find((artifact) => artifact.artifactId === supersededRunbookId)?.status).toBe(
-      "superseded"
-    );
-    expect(readWorkbenchSessionState(db, "session:a")).toMatchObject({
-      adrStatus: "not_applicable",
-      incidentTimelineStatus: "not_applicable",
-      nextAction: "none",
-      resolutionStatus: "automatic_resolved",
-      runbookStatus: "contributed"
-    });
-    db.close();
-  });
-
-  test("resolves an explicit existing published contribution without republishing it", async () => {
-    const db = await readyAuthoringDb();
-    const existing = applySessionArtifact(db, {
-      artifactKind: "runbook",
-      content: { title: "Reuse the published OAuth callback runbook" },
-      contentFingerprint: "existing-runbook",
-      createdBy: "test",
-      evidenceRefs: ["message:session:a:message"],
-      provenanceSessionIds: ["session:a"],
-      schemaVersion: "runbook-v1",
-      sessionId: "session:a",
-      title: "Reuse the published OAuth callback runbook",
-      validation: { ok: true }
-    });
-    publishSessionArtifact(db, existing.artifactId);
-    const opened = openAuthoringRun(db, {
-      actorId: "codex",
-      databaseId: testDatabaseId(db),
-      sessionIds: ["session:a"]
-    });
-    const bundle = validBundle(opened.run.runId, opened.run.evidenceRevision, "session:a");
-    bundle.notApplicable = bundle.notApplicable.filter((decision) => decision.kind !== "runbook");
-    bundle.contributions = [
-      { kind: "runbook", publishedArtifactId: existing.artifactId, sessionId: "session:a" }
-    ];
-    expect(submitAuthoringBundle(db, { bundle, runId: opened.run.runId }).accepted).toBe(true);
-
-    const receipt = finishAuthoringRun(db, { runId: opened.run.runId });
-
-    expect(receipt.publishedArtifactIds).toHaveLength(1);
-    expect(receipt.contributions).toEqual([
-      { artifactId: existing.artifactId, kind: "runbook", sessionId: "session:a" }
-    ]);
-    expect(readWorkbenchSessionState(db, "session:a")).toMatchObject({
-      resolutionStatus: "automatic_resolved",
-      runbookStatus: "contributed"
-    });
-    expect(getLogbookArtifactDetail(db, existing.artifactId)).toBeTruthy();
-    db.close();
-  });
-
-  test("rejects changed evidence at finish without applying outputs", async () => {
-    const { db, runId } = await submittedAuthoringDb();
-    const before = authoringOutputCounts(db);
-    insertMessage(db, "session:a", "changed-after-submit", "Canonical evidence changed after submission.");
-
-    expect(() => finishAuthoringRun(db, { runId })).toThrow("evidence_revision_changed");
-
-    expect(authoringOutputCounts(db)).toEqual(before);
-    expect(getAuthoringRunStatus(db, runId).run.status).toBe("ready_to_finish");
-    db.close();
-  });
-
-  test("rolls back finish claim reacquisition when another actor owns a selected session", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-07-10T12:00:00.000Z"));
-    const { db, runId } = await submittedAuthoringDb();
-    expireAuthoringClaims(db, runId);
-    claimWorkbenchSessions(db, {
-      claimedBy: "other-agent",
-      expiresAt: new Date(Date.now() + 60_000).toISOString(),
-      sessionIds: ["session:a"]
-    });
-    const beforeClaims = runClaimRows(db, runId);
-
-    expect(() => finishAuthoringRun(db, { runId })).toThrow("authoring_claim_conflict:session:a");
-
-    expect(runClaimRows(db, runId)).toEqual(beforeClaims);
-    expect(authoringOutputCounts(db)).toEqual({ session_artifacts: 0, session_enrichments: 1 });
-    expect(getAuthoringRunStatus(db, runId).run.status).toBe("ready_to_finish");
-    db.close();
-  });
-
-  test("rolls back partial claim reacquisition when any run session conflicts", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-07-10T12:00:00.000Z"));
-    const db = await readyAuthoringDb();
-    seedSessionWithRedactedEvidence(db, "session:b");
-    const opened = openAuthoringRun(db, {
-      actorId: "codex",
-      databaseId: testDatabaseId(db),
-      sessionIds: ["session:a", "session:b"]
-    });
-    expireAuthoringClaims(db, opened.run.runId);
-    claimWorkbenchSessions(db, {
-      claimedBy: "other-agent",
-      expiresAt: new Date(Date.now() + 60_000).toISOString(),
-      sessionIds: ["session:b"]
-    });
-    const claimsBeforeSubmit = runClaimRows(db, opened.run.runId);
-
-    expect(() =>
-      submitAuthoringBundle(db, {
-        bundle: invalidBundle(opened.run.runId, opened.run.evidenceRevision),
-        runId: opened.run.runId
-      })
-    ).toThrow("authoring_claim_conflict:session:b");
-    expect(runClaimRows(db, opened.run.runId)).toEqual(claimsBeforeSubmit);
-    db.close();
-  });
 
   test("returns a completed exact-set run unchanged", async () => {
     const db = await readyAuthoringDb();
@@ -1362,71 +608,23 @@ async function readyAuthoringDb(): Promise<MastheadDatabase> {
   return db;
 }
 
-async function submittedAuthoringDb(): Promise<{ db: MastheadDatabase; runId: string }> {
+
+async function submittedV3AuthoringDb(): Promise<{ db: MastheadDatabase; runId: string }> {
   const db = await readyAuthoringDb();
-  const opened = openAuthoringRun(db, {
+  const opened = openAgentLedAuthoringRun(db, {
     actorId: "codex",
     databaseId: testDatabaseId(db),
     sessionIds: ["session:a"]
   });
-  const bundle = validBundle(opened.run.runId, opened.run.evidenceRevision, "session:a");
-  bundle.notApplicable = bundle.notApplicable.filter((decision) => decision.kind !== "runbook");
-  bundle.artifacts = [validRunbookDraft("session:a")];
-  const submitted = submitAuthoringBundle(db, { bundle, runId: opened.run.runId });
-  expect(submitted.accepted).toBe(true);
-  return { db, runId: opened.run.runId };
-}
-
-async function submittedMultiSessionAuthoringDb(): Promise<{ db: MastheadDatabase; runId: string }> {
-  const db = await readyAuthoringDb();
-  seedSessionWithRedactedEvidence(db, "session:b");
-  setWorkbenchArtifactApplicability(db, {
-    actor: { kind: "agent", id: "earlier-run" },
-    artifactKind: "runbook",
-    reason: "Earlier evidence did not support a shared runbook.",
-    sessionId: "session:b",
-    status: "not_applicable"
+  const submitted = submitAuthoringBundle(db, {
+    bundle: validV3Bundle(opened.run.runId, opened.run.evidenceRevision),
+    runId: opened.run.runId
   });
-  const opened = openAuthoringRun(db, {
-    actorId: "codex",
-    databaseId: testDatabaseId(db),
-    sessionIds: ["session:a", "session:b"]
-  });
-  const first = validBundle(opened.run.runId, opened.run.evidenceRevision, "session:a");
-  const second = validBundle(opened.run.runId, opened.run.evidenceRevision, "session:b");
-  const bundle: WorkbenchAuthoringBundle = {
-    ...first,
-    artifacts: [validRunbookDraft("session:a", ["session:a", "session:b"])],
-    notApplicable: [...first.notApplicable, ...second.notApplicable].filter(
-      (decision) => decision.kind !== "runbook"
-    ),
-    sessionPackages: [...first.sessionPackages, ...second.sessionPackages]
-  };
-  const submitted = submitAuthoringBundle(db, { bundle, runId: opened.run.runId });
-  expect(submitted.accepted).toBe(true);
-  return { db, runId: opened.run.runId };
-}
-
-async function submittedCandidateAuthoringDb(): Promise<{
-  candidate: StoredWorkbenchArtifactCandidate;
-  db: MastheadDatabase;
-  runId: string;
-}> {
-  const db = await testDb();
-  seedDurableArtifactCorpus(db);
-  const candidate = discoverArtifactCandidates(db, ["session:oauth-fixed"]).find(
-    (entry) => entry.kind === "runbook"
-  )!;
-  const opened = openCandidateAuthoringRun(db, {
-    actorId: "codex",
-    candidateId: candidate.candidateId,
-    databaseId: testDatabaseId(db)
-  });
-  const bundle = validCandidateBundle(opened.run, candidate);
-  const submitted = submitAuthoringBundle(db, { bundle, runId: opened.run.runId });
   expect(submitted.accepted, JSON.stringify(submitted.findings, null, 2)).toBe(true);
-  return { candidate, db, runId: opened.run.runId };
+  return { db, runId: opened.run.runId };
 }
+
+
 
 function seedSessionWithRedactedEvidence(db: MastheadDatabase, sessionId: string): void {
   seedSession(db, {
@@ -1442,20 +640,59 @@ function testDatabaseId(db: MastheadDatabase): string {
   return getOrCreateDatabaseIdentity(db);
 }
 
-function omitCapturedAt(value: unknown): unknown {
-  const { capturedAt: _capturedAt, ...rest } = value as Record<string, unknown>;
-  return rest;
-}
 
-function invalidBundle(runId: string, evidenceRevision: string): WorkbenchAuthoringBundle {
+
+function validV3Bundle(
+  runId: string,
+  evidenceRevision: string,
+  sessionId = "session:a",
+  evidenceId = `message:${sessionId}:message`
+): WorkbenchAuthoringBundleV3 {
+  const evidenceRef = {
+    id: evidenceId,
+    kind: "event" as const,
+    observedAt: "2026-07-10T12:00:00.000Z",
+    source: "canonical"
+  };
   return {
     artifacts: [],
-    bundleVersion: "workbench-authoring-v1",
-    contributions: [],
+    bundleVersion: "workbench-authoring-v3",
     evidenceRevision,
-    notApplicable: [],
     runId,
-    sessionPackages: []
+    sessionEnrichments: [{
+      enrichment: {
+        sessionDossier: {
+          blockers: [],
+          continuation: { constraints: [], openQuestions: [] },
+          decisions: ["Publish only after enrichment is current."],
+          evidenceRefs: [evidenceRef],
+          keyWork: ["Applied grounded durable enrichment before dossier rendering."],
+          outcome: "Published an enriched canonical dossier atomically.",
+          verification: {
+            commands: [],
+            evidenceRefs: [evidenceRef],
+            failures: [],
+            status: "unknown",
+            summary: "Canonical message evidence supports the enrichment."
+          },
+          warnings: []
+        },
+        sessionSummary: {
+          confidence: "low",
+          evidenceRefs: [evidenceRef],
+          state: "completed",
+          text: "Agent-enriched summary grounded in the selected canonical evidence."
+        },
+        sessionTitle: {
+          basis: "dominant_work",
+          confidence: "low",
+          evidenceRefs: [evidenceRef],
+          text: "Agent-enriched title"
+        },
+        version: "session-capsule-v4"
+      },
+      sessionId
+    }]
   };
 }
 
@@ -1514,49 +751,6 @@ function validBundle(runId: string, evidenceRevision: string, sessionId: string)
   };
 }
 
-function validRunbookDraft(
-  sessionId: string,
-  provenanceSessionIds: string[] = [sessionId]
-): WorkbenchAuthoringBundle["artifacts"][number] {
-  const messageRef = `message:${sessionId}:message`;
-  const toolResultRef = `tool_result:${sessionId}:tool-result`;
-  return {
-    kind: "runbook",
-    output: {
-      changedFiles: ["src/workbench/authoring/authoringService.ts"],
-      claimEvidence: [
-        { evidenceRefs: [messageRef], path: "fixSteps[0]" },
-        { evidenceRefs: [messageRef], path: "rootCause" },
-        { evidenceRefs: [toolResultRef], path: "validationChecks[0]" }
-      ],
-      commands: ["npm test"],
-      confidence: "low",
-      deadEnds: [],
-      environmentRequirements: ["Node.js"],
-      evidenceRefs: [messageRef, toolResultRef],
-      fixSteps: ["Finish the accepted bundle inside one database transaction."],
-      ...(provenanceSessionIds.length > 1
-        ? { joinRationale: "Both sessions share the same OAuth callback failure and atomic finish revision." }
-        : {}),
-      missingEvidence: ["Only sparse canonical evidence is available for this session."],
-      preconditions: ["A ready-to-finish authoring run exists."],
-      preventionNotes: ["Keep atomic finish covered by a rollback regression test."],
-      problemSignature: {
-        affectedScope: "Workbench authoring finish",
-        errorStrings: ["authoring_finish_visibility_failed"],
-        symptoms: ["Partial authoring writes could survive a failed finish"]
-      },
-      provenanceSessionIds,
-      reproSteps: ["Fail published-artifact visibility verification during finish."],
-      risksOrGaps: [],
-      rootCause: "Finish did not yet own every publication write in one transaction.",
-      title: "Finish authoring bundles atomically",
-      validationChecks: ["Focused authoring service tests pass."]
-    },
-    provenanceSessionIds,
-    seedSessionId: sessionId
-  };
-}
 
 function validCandidateBundle(
   run: { evidenceRevision: string; runId: string },
@@ -1748,44 +942,17 @@ function authoringRowCounts(db: MastheadDatabase): Record<string, number> {
   );
 }
 
-function authoringOutputCounts(db: MastheadDatabase): Record<string, number> {
-  return Object.fromEntries(
-    ["session_artifacts", "session_enrichments"].map((table) => [
-      table,
-      (db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count
-    ])
-  );
-}
 
-function candidateFinishRows(db: MastheadDatabase): Record<string, unknown[]> {
-  const tables = [
+
+function v3FinishRows(db: MastheadDatabase): Record<string, unknown[]> {
+  return Object.fromEntries([
     "session_artifacts",
     "session_artifact_provenance",
     "session_artifact_search",
-    "workbench_artifact_candidates",
+    "session_enrichments",
     "workbench_session_state",
     "workbench_claims",
     "workbench_activity",
     "workbench_authoring_runs"
-  ];
-  return Object.fromEntries(tables.map((table) => [table, db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]));
-}
-
-function requireV2Receipt(receipt: WorkbenchAuthoringReceipt): WorkbenchAuthoringReceiptV2 {
-  if (receipt.contractVersion !== "workbench-authoring-v2") {
-    throw new Error(`expected_v2_receipt:${receipt.contractVersion}`);
-  }
-  return receipt;
-}
-
-function runClaimRows(db: MastheadDatabase, runId: string): Array<{ claimId: string; expiresAt: string; releasedAt: string | null }> {
-  return db
-    .prepare(
-      `SELECT claims.claim_id AS claimId, claims.expires_at AS expiresAt, claims.released_at AS releasedAt
-       FROM workbench_authoring_run_sessions AS run_sessions
-       JOIN workbench_claims AS claims ON claims.claim_id = run_sessions.claim_id
-       WHERE run_sessions.run_id = ?
-       ORDER BY run_sessions.ordinal`
-    )
-    .all(runId) as Array<{ claimId: string; expiresAt: string; releasedAt: string | null }>;
+  ].map((table) => [table, db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]));
 }

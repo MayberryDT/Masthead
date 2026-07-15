@@ -5,12 +5,23 @@ import type {
   SessionDossierDto
 } from "../../../shared/sessionDossier.ts";
 import {
+  buildPublishedEnrichedDossierSnapshot,
   buildPublishedDossierSnapshot,
   dossierEvidenceRefs,
   dossierSnapshotFingerprint
 } from "../dossierSnapshot.ts";
 
 describe("published session dossier snapshot", () => {
+  test("refuses to snapshot a dossier without current durable enrichment", () => {
+    const dossier = fixtureSessionDossier();
+    dossier.durableEnrichment = undefined;
+    dossier.enrichment.status = "not_enriched";
+
+    expect(() => buildPublishedEnrichedDossierSnapshot(dossier)).toThrow(
+      "session_dossier_requires_current_enrichment"
+    );
+  });
+
   test("preserves every original human-facing section without recursive artifacts", () => {
     const canonical = fixtureSessionDossier();
 

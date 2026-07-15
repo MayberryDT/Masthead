@@ -1,6 +1,7 @@
 import type {
   WorkbenchAuthoringBundle,
   WorkbenchAuthoringBundleV2,
+  WorkbenchAuthoringBundleV3,
   WorkbenchAuthoringContractVersion,
   WorkbenchAuthoringFinding,
   WorkbenchAuthoringReceipt,
@@ -146,6 +147,9 @@ export function createWorkbenchAuthoringRunInTransaction(
   }
   if (contractVersion === "workbench-authoring-v1" && candidateId) {
     throw new Error("authoring_v1_candidate_not_supported");
+  }
+  if (contractVersion === "workbench-authoring-v3" && candidateId) {
+    throw new Error("authoring_v3_candidate_not_supported");
   }
   const now = new Date().toISOString();
   db.prepare(
@@ -294,7 +298,7 @@ export function resetWorkbenchAuthoringRunEvidence(
 export function saveWorkbenchAuthoringSubmission(
   db: MastheadDatabase,
   input: {
-    bundle: WorkbenchAuthoringBundle | WorkbenchAuthoringBundleV2;
+    bundle: WorkbenchAuthoringBundle | WorkbenchAuthoringBundleV2 | WorkbenchAuthoringBundleV3;
     evidenceRevision: string;
     findings: WorkbenchAuthoringFinding[];
     runId: string;
@@ -399,6 +403,9 @@ function isValidWorkbenchAuthoringReceipt(
     !Array.isArray(receipt.contributions)
   ) return false;
   if (contractVersion === "workbench-authoring-v1") return Array.isArray(receipt.notApplicable);
+  if (contractVersion === "workbench-authoring-v3") {
+    return Array.isArray(receipt.dossierArtifactIds) && Array.isArray(receipt.optionalArtifacts);
+  }
   const optionalArtifact = receipt.optionalArtifact;
   return (
     typeof receipt.candidateId === "string" &&
