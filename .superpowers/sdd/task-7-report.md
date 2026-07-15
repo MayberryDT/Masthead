@@ -97,3 +97,42 @@ Result: passed (`tsc --noEmit`).
 - Live session materialization now delegates to `reconcileImportedTranscript` with `finalizeNoise: false` and a `live_ingest` actor, sharing the evidence-revision and manual-stickiness semantics used by transcript reconciliation.
 - Migration 027 classifies the former automatic precheck reason union as automatic even when the historical activity actor was the user-facing Workbench API. `low_evidence` is retained as insufficient evidence; confirmed legacy noise codes use confirmed noise. Other user-authored exclusions remain manual.
 - Review dispositions again emit the pre-existing capture-quality warning in authoring evidence; no authoring output behavior was changed by Task 7.
+
+## Historical suppression migration follow-up
+
+Migration 027 was tightened after a final review finding: historical broad automatic decisions must be reopened immediately, rather than waiting for a later evidence-revision comparison.
+
+### RED
+
+Command:
+
+```text
+npx vitest --run src/daemon/db/__tests__/schema.test.ts
+```
+
+Result: 1 failed, 13 passed. Historical `duplicate_noise`, `low_evidence`, `metadata_only`, `missing_identity`, and `no_messages` rows all remained `not_added_to_logbook / failed / none` instead of reopening for review.
+
+### GREEN
+
+Command:
+
+```text
+npx vitest --run src/daemon/db/__tests__/schema.test.ts src/daemon/db/__tests__/workbenchPipelineRepository.test.ts src/workbench/__tests__/transcriptQualityReconciler.test.ts
+```
+
+Result: 3 files passed, 45 tests passed.
+
+Command:
+
+```text
+npm run typecheck
+```
+
+Result: passed (`tsc --noEmit`).
+
+### Resolution
+
+- Migration 027 keeps only stored `hook_only`, `empty`, `diagnostic_only`, and `exact_duplicate` automatic reasons suppressed as confirmed noise.
+- Every other historical automatic Not Added row reopens to `publish_path`, `review_quality`, and `quality_status = 'unchecked'` with `insufficient_evidence` provenance.
+- The original non-publication reason and activity audit are preserved.
+- Explicit or activity-proven manual exclusions remain `not_added_to_logbook` with sticky user/manual provenance.

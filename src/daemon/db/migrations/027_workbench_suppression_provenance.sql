@@ -7,19 +7,11 @@ ALTER TABLE workbench_session_state ADD COLUMN quality_decision_source TEXT NOT 
 ALTER TABLE workbench_session_state ADD COLUMN quality_evidence_revision TEXT;
 
 UPDATE workbench_session_state
-SET suppression_category = CASE
-      WHEN non_publication_reason = 'low_evidence' THEN 'insufficient_evidence'
-      ELSE 'confirmed_noise'
-    END,
+SET suppression_category = 'confirmed_noise',
     quality_decision_source = 'automatic'
 WHERE publication_status = 'not_added_to_logbook'
   AND non_publication_reason IN (
-    'no_messages',
     'hook_only',
-    'metadata_only',
-    'duplicate_noise',
-    'low_evidence',
-    'missing_identity',
     'empty',
     'diagnostic_only',
     'exact_duplicate'
@@ -28,7 +20,7 @@ WHERE publication_status = 'not_added_to_logbook'
 UPDATE workbench_session_state
 SET suppression_category = 'manual_exclusion', quality_decision_source = 'user'
 WHERE publication_status = 'not_added_to_logbook'
-  AND non_publication_reason NOT IN (
+  AND COALESCE(non_publication_reason, '') NOT IN (
     'no_messages',
     'hook_only',
     'metadata_only',
@@ -48,4 +40,19 @@ WHERE publication_status = 'not_added_to_logbook'
         AND workbench_activity.actor_kind = 'user'
         AND workbench_activity.event_type IN ('quality_failed', 'not_added_to_logbook')
     )
+  );
+
+UPDATE workbench_session_state
+SET publication_status = 'publish_path',
+    next_action = 'review_quality',
+    quality_status = 'unchecked',
+    suppression_category = 'insufficient_evidence',
+    quality_decision_source = 'automatic'
+WHERE publication_status = 'not_added_to_logbook'
+  AND quality_decision_source = 'automatic'
+  AND COALESCE(non_publication_reason, '') NOT IN (
+    'hook_only',
+    'empty',
+    'diagnostic_only',
+    'exact_duplicate'
   );

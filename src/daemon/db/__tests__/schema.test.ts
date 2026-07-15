@@ -33,9 +33,11 @@ describe("daemon database schema", () => {
 
     for (const [sessionId, reason] of [
       ["session:auto-duplicate", "duplicate_noise"],
+      ["session:auto-exact", "exact_duplicate"],
       ["session:auto-hook", "hook_only"],
       ["session:auto-low", "low_evidence"],
       ["session:auto-metadata", "metadata_only"],
+      ["session:auto-missing", "missing_identity"],
       ["session:auto-no-messages", "no_messages"],
       ["session:manual-exclusion", "operator_excluded"]
     ] as const) {
@@ -58,42 +60,88 @@ describe("daemon database schema", () => {
 
     expect(
       db.prepare(
-        `SELECT session_id AS sessionId, suppression_category AS suppressionCategory,
+        `SELECT session_id AS sessionId, publication_status AS publicationStatus,
+          next_action AS nextAction, quality_status AS qualityStatus,
+          non_publication_reason AS nonPublicationReason,
+          suppression_category AS suppressionCategory,
           quality_decision_source AS qualityDecisionSource
          FROM workbench_session_state ORDER BY session_id`
       ).all()
     ).toEqual([
       {
+        nextAction: "review_quality",
+        nonPublicationReason: "duplicate_noise",
+        publicationStatus: "publish_path",
         qualityDecisionSource: "automatic",
+        qualityStatus: "unchecked",
         sessionId: "session:auto-duplicate",
+        suppressionCategory: "insufficient_evidence"
+      },
+      {
+        nextAction: "none",
+        nonPublicationReason: "exact_duplicate",
+        publicationStatus: "not_added_to_logbook",
+        qualityDecisionSource: "automatic",
+        qualityStatus: "failed",
+        sessionId: "session:auto-exact",
         suppressionCategory: "confirmed_noise"
       },
       {
+        nextAction: "none",
+        nonPublicationReason: "hook_only",
+        publicationStatus: "not_added_to_logbook",
         qualityDecisionSource: "automatic",
+        qualityStatus: "failed",
         sessionId: "session:auto-hook",
         suppressionCategory: "confirmed_noise"
       },
       {
+        nextAction: "review_quality",
+        nonPublicationReason: "low_evidence",
+        publicationStatus: "publish_path",
         qualityDecisionSource: "automatic",
+        qualityStatus: "unchecked",
         sessionId: "session:auto-low",
         suppressionCategory: "insufficient_evidence"
       },
       {
+        nextAction: "review_quality",
+        nonPublicationReason: "metadata_only",
+        publicationStatus: "publish_path",
         qualityDecisionSource: "automatic",
+        qualityStatus: "unchecked",
         sessionId: "session:auto-metadata",
-        suppressionCategory: "confirmed_noise"
+        suppressionCategory: "insufficient_evidence"
       },
       {
+        nextAction: "review_quality",
+        nonPublicationReason: "missing_identity",
+        publicationStatus: "publish_path",
         qualityDecisionSource: "automatic",
-        sessionId: "session:auto-no-messages",
-        suppressionCategory: "confirmed_noise"
+        qualityStatus: "unchecked",
+        sessionId: "session:auto-missing",
+        suppressionCategory: "insufficient_evidence"
       },
       {
+        nextAction: "review_quality",
+        nonPublicationReason: "no_messages",
+        publicationStatus: "publish_path",
+        qualityDecisionSource: "automatic",
+        qualityStatus: "unchecked",
+        sessionId: "session:auto-no-messages",
+        suppressionCategory: "insufficient_evidence"
+      },
+      {
+        nextAction: "none",
+        nonPublicationReason: "operator_excluded",
+        publicationStatus: "not_added_to_logbook",
         qualityDecisionSource: "user",
+        qualityStatus: "failed",
         sessionId: "session:manual-exclusion",
         suppressionCategory: "manual_exclusion"
       }
     ]);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM workbench_activity").get()).toEqual({ count: 8 });
     db.close();
   });
 
