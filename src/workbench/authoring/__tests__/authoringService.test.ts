@@ -21,6 +21,7 @@ import { getOrCreateDatabaseIdentity, migrateDatabase } from "../../../daemon/db
 import { openMastheadDatabase, type MastheadDatabase } from "../../../daemon/db/sqlite.ts";
 import {
   finishAuthoringRun,
+  getAuthoringRunContext,
   getAuthoringRunEvidence,
   getAuthoringRunStatus,
   openCandidateAuthoringRun,
@@ -159,6 +160,28 @@ describe("Workbench authoring service", () => {
     expect(() => openAgentLedAuthoringRun(db, { ...input, sessionIds: tooMany })).toThrow(
       "authoring_session_count_invalid"
     );
+    db.close();
+  });
+
+  test("returns original canonical dossiers and nonbinding suggestions without mutating the run", async () => {
+    const db = await readyAuthoringDb();
+    const opened = openAgentLedAuthoringRun(db, {
+      actorId: "codex",
+      databaseId: testDatabaseId(db),
+      sessionIds: ["session:a"]
+    });
+    const rowsBefore = authoringRowCounts(db);
+    const context = getAuthoringRunContext(db, opened.run.runId);
+
+    expect(context).toMatchObject({
+      evidenceRevision: opened.run.evidenceRevision,
+      ok: true,
+      runId: opened.run.runId,
+      sessions: [{ dossier: { identity: { title: "Authoring session:a" } }, sessionId: "session:a" }]
+    });
+    expect(context.suggestions.every(({ advisory }) => advisory)).toBe(true);
+    expect(authoringRowCounts(db)).toEqual(rowsBefore);
+    expect(getAuthoringRunStatus(db, opened.run.runId).run).toEqual(opened.run);
     db.close();
   });
 

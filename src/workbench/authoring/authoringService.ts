@@ -4,6 +4,7 @@ import type {
   WorkbenchAuthoringBundle,
   WorkbenchAuthoringBundleV2,
   WorkbenchAuthoringBundleV3,
+  WorkbenchArtifactSuggestionDto,
   WorkbenchAuthoringEvidenceManifest,
   WorkbenchAuthoringEvidencePage,
   WorkbenchAuthoringFinding,
@@ -13,7 +14,7 @@ import type {
   WorkbenchAuthoringReceiptV3,
   WorkbenchAuthoringRunDto
 } from "../../shared/workbenchAuthoring.ts";
-import type { PublishedSessionDossierV1 } from "../../shared/sessionDossier.ts";
+import type { PublishedSessionDossierV1, SessionDossierDto } from "../../shared/sessionDossier.ts";
 import type { DurableSessionEnrichment } from "../../shared/sessionEnrichment.ts";
 import type { CanonicalDossierPublicationReceipt } from "../../shared/workbench.ts";
 import { hasSemanticRedactedText } from "../../core/redaction.ts";
@@ -80,6 +81,7 @@ import {
 import { findArtifactSignatureFindings, validateAuthoringBundle, validateAuthoringBundleV2, validateAuthoringBundleV3 } from "./authoringValidation.ts";
 import type { ArtifactQualityOutput } from "./artifactQuality.ts";
 import { isArtifactCandidateEvidenceCurrent } from "./artifactCandidates.ts";
+import { getArtifactSuggestions } from "./advisorySuggestions.ts";
 import {
   buildPublishedEnrichedDossierSnapshot,
   dossierEvidenceRefs,
@@ -127,6 +129,14 @@ export type WorkbenchAuthoringRunStatusResult = {
   ok: true;
   run: WorkbenchAuthoringRunDto;
   evidenceStatus: "current" | "changed";
+};
+
+export type WorkbenchAuthoringRunContextResult = {
+  ok: true;
+  runId: string;
+  evidenceRevision: string;
+  sessions: Array<{ sessionId: string; dossier: SessionDossierDto }>;
+  suggestions: WorkbenchArtifactSuggestionDto[];
 };
 
 export type OpenAgentLedAuthoringRunResult = {
@@ -410,6 +420,25 @@ export function getAuthoringRunStatus(db: MastheadDatabase, runId: string): Work
     evidenceStatus: authoringEvidenceRevision(db, run.sessionIds) === run.evidenceRevision ? "current" : "changed",
     ok: true,
     run
+  };
+}
+
+export function getAuthoringRunContext(
+  db: MastheadDatabase,
+  runId: string
+): WorkbenchAuthoringRunContextResult {
+  const run = requireAuthoringRun(db, runId);
+  const sessions = run.sessionIds.map((sessionId) => {
+    const dossier = getSessionDossier(db, sessionId);
+    if (!dossier) throw new Error(`canonical_dossier_missing:${sessionId}`);
+    return { dossier, sessionId };
+  });
+  return {
+    evidenceRevision: run.evidenceRevision,
+    ok: true,
+    runId: run.runId,
+    sessions,
+    suggestions: getArtifactSuggestions(db, run.sessionIds)
   };
 }
 
