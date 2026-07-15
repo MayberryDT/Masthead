@@ -20,7 +20,6 @@ import {
   postWorkbenchClaim,
   postWorkbenchEnrollMissing,
   postWorkbenchImportTranscript,
-  postWorkbenchPublish,
   postWorkbenchQuality,
   postWorkbenchReleaseClaim
 } from "../../daemonClient";
@@ -36,7 +35,6 @@ const daemonClientMocks = vi.hoisted(() => ({
   postWorkbenchClaim: vi.fn(),
   postWorkbenchEnrollMissing: vi.fn(),
   postWorkbenchImportTranscript: vi.fn(),
-  postWorkbenchPublish: vi.fn(),
   postWorkbenchQuality: vi.fn(),
   postWorkbenchReleaseClaim: vi.fn()
 }));
@@ -71,7 +69,6 @@ const ALL_ACTIONS: WorkbenchActionKind[] = [
   "quality_pass",
   "quality_fail",
   "quality_precheck",
-  "publish",
   "claim",
   "release",
   "copy_agent_prompt"
@@ -89,6 +86,40 @@ afterEach(async () => {
 });
 
 describe("useWorkbenchController", () => {
+  test("preserves selections across pages in one authoritative handoff", async () => {
+    vi.mocked(getWorkbenchAuthoringCapabilities).mockResolvedValue(
+      authoringCapabilities("database:test", "/home/test/.local/bin/mastheadctl")
+    );
+    vi.mocked(getWorkbenchActivity).mockResolvedValue(activityResponse());
+    vi.mocked(getWorkbenchNotAddedSummary).mockResolvedValue(notAddedSummary());
+    vi.mocked(getWorkbenchSessions).mockImplementation(async (_base, options = {}) => {
+      const pageSessions = options.offset === 100
+        ? [session("session:page-2", "Second page")]
+        : [session("session:page-1", "First page")];
+      return { ...response(pageSessions), offset: options.offset ?? 0, total: 101 };
+    });
+
+    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
+    await waitFor(() => latest().sessions[0]?.sessionId === "session:page-1");
+    await act(async () => {
+      latest().selectPage();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      latest().setPage(1);
+      await Promise.resolve();
+    });
+    await waitFor(() => latest().sessions[0]?.sessionId === "session:page-2");
+    await act(async () => {
+      latest().selectPage();
+      await Promise.resolve();
+    });
+
+    expect(Array.from(latest().selectedSessionIds)).toEqual(["session:page-1", "session:page-2"]);
+    expect(machineRequest().sessionIds).toEqual(["session:page-1", "session:page-2"]);
+    expect(latest().canRun("copy_agent_prompt")).toBe(true);
+  });
   test("requires V3 capabilities and a compile-ready selection for Copy Agent Prompt", async () => {
     mockWorkbenchResponse([
       session("session:ready", "Ready", { nextAction: "enrich", qualityStatus: "passed", transcriptStatus: "imported" }),
@@ -160,7 +191,7 @@ describe("useWorkbenchController", () => {
     expect(latest().sessions).toEqual([]);
   });
 
-  test("prunes selected ids when refresh drops sessions", async () => {
+  test("preserves selected ids when a refresh page does not contain them", async () => {
     vi.mocked(getWorkbenchSessions)
       .mockResolvedValueOnce(response([session("session:abc", "First session"), session("session:def", "Second session")]))
       .mockResolvedValueOnce(response([session("session:def", "Second session")]));
@@ -181,7 +212,7 @@ describe("useWorkbenchController", () => {
     await waitFor(() => (latest()?.sessions.length ?? 0) === 1);
 
     expect(latest().sessions.map((item) => item.sessionId)).toEqual(["session:def"]);
-    expect(Array.from(latest().selectedSessionIds)).toEqual(["session:def"]);
+    expect(Array.from(latest().selectedSessionIds).sort()).toEqual(["session:abc", "session:def"]);
   });
 
   test("supports toggle, select all visible, and clear selection while keeping selected metadata sanitized", async () => {
@@ -342,11 +373,6 @@ describe("useWorkbenchController", () => {
         transcriptStatus: "imported",
         qualityStatus: "unchecked"
       }),
-      session("session:publish", "Publish me", {
-        nextAction: "publish",
-        transcriptStatus: "imported",
-        qualityStatus: "passed"
-      }),
       session("session:claimed", "Claimed me", {
         nextAction: "enrich",
         transcriptStatus: "imported",
@@ -365,7 +391,7 @@ describe("useWorkbenchController", () => {
     ]);
 
     await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
-    await waitFor(() => (latest()?.sessions.length ?? 0) === 6);
+    await waitFor(() => (latest()?.sessions.length ?? 0) === 5);
 
     expect(latest().canRun("enroll_missing")).toBe(true);
     for (const kind of SELECTION_ACTIONS) {
@@ -377,7 +403,6 @@ describe("useWorkbenchController", () => {
     expect(latest().canRun("check_transcript")).toBe(true);
     expect(latest().canRun("import_transcript")).toBe(false);
     expect(latest().canRun("quality_pass")).toBe(false);
-    expect(latest().canRun("publish")).toBe(false);
     expect(latest().canRun("claim")).toBe(true);
     expect(latest().canRun("release")).toBe(false);
     expect(latest().canRun("copy_agent_prompt")).toBe(false);
@@ -385,29 +410,21 @@ describe("useWorkbenchController", () => {
     await select("session:import");
     expect(latest().canRun("import_transcript")).toBe(true);
     expect(latest().canRun("check_transcript")).toBe(true);
-    expect(latest().canRun("publish")).toBe(false);
 
     await select("session:quality");
     expect(latest().canRun("quality_pass")).toBe(true);
     expect(latest().canRun("quality_fail")).toBe(true);
     expect(latest().canRun("quality_precheck")).toBe(true);
 
-    await select("session:publish");
-    expect(latest().canRun("publish")).toBe(true);
-    expect(latest().canRun("claim")).toBe(true);
-    expect(latest().canRun("release")).toBe(false);
-
     await select("session:claimed");
     expect(latest().canRun("claim")).toBe(false);
     expect(latest().canRun("release")).toBe(true);
-    expect(latest().canRun("publish")).toBe(false);
     expect(latest().canRun("copy_agent_prompt")).toBe(true);
 
     await select("session:enrich");
     expect(latest().canRun("check_transcript")).toBe(false);
     expect(latest().canRun("import_transcript")).toBe(false);
     expect(latest().canRun("quality_pass")).toBe(false);
-    expect(latest().canRun("publish")).toBe(false);
     expect(latest().canRun("claim")).toBe(true);
     expect(latest().canRun("copy_agent_prompt")).toBe(true);
 
@@ -523,16 +540,11 @@ describe("useWorkbenchController", () => {
     expect(latest().actionBusy).toBe(false);
   });
 
-  test("runs quality, publish, claim, and release against selected sessions", async () => {
+  test("runs quality, claim, and release against selected sessions", async () => {
     mockWorkbenchResponse([
       session("session:quality", "Quality", {
         nextAction: "review_quality",
         qualityStatus: "unchecked",
-        transcriptStatus: "imported"
-      }),
-      session("session:publish", "Publish", {
-        nextAction: "publish",
-        qualityStatus: "passed",
         transcriptStatus: "imported"
       }),
       session("session:open", "Open claim", {
@@ -552,12 +564,11 @@ describe("useWorkbenchController", () => {
       })
     ]);
     vi.mocked(postWorkbenchQuality).mockResolvedValue({ ok: true });
-    vi.mocked(postWorkbenchPublish).mockResolvedValue({ ok: true });
     vi.mocked(postWorkbenchClaim).mockResolvedValue({ ok: true });
     vi.mocked(postWorkbenchReleaseClaim).mockResolvedValue({ ok: true });
 
     await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
-    await waitFor(() => (latest()?.sessions.length ?? 0) === 4);
+    await waitFor(() => (latest()?.sessions.length ?? 0) === 3);
 
     await select("session:quality");
     await act(async () => {
@@ -579,12 +590,6 @@ describe("useWorkbenchController", () => {
       await latest().runAction("quality_precheck");
     });
     expect(postWorkbenchQuality).toHaveBeenCalledWith(baseUrl, "session:quality", { mode: "precheck" });
-
-    await select("session:publish");
-    await act(async () => {
-      await latest().runAction("publish");
-    });
-    expect(postWorkbenchPublish).toHaveBeenCalledWith(baseUrl, "session:publish");
 
     await select("session:open");
     await act(async () => {

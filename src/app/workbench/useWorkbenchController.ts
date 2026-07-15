@@ -9,7 +9,6 @@ import {
   postWorkbenchClaim,
   postWorkbenchEnrollMissing,
   postWorkbenchImportTranscript,
-  postWorkbenchPublish,
   postWorkbenchQuality,
   postWorkbenchReleaseClaim
 } from "../daemonClient";
@@ -43,7 +42,6 @@ export type WorkbenchActionKind =
   | "quality_pass"
   | "quality_fail"
   | "quality_precheck"
-  | "publish"
   | "claim"
   | "release"
   | "copy_agent_prompt";
@@ -128,14 +126,6 @@ export function useWorkbenchController({
       setActivity(activityResponse.activity);
       setNotAddedSummary(notAdded);
       setAuthoringCapabilities(capabilities);
-      setSelectedSessionIds((current) => {
-        const visibleIds = new Set(response.sessions.map((session) => session.sessionId));
-        return new Set(Array.from(current).filter((sessionId) => visibleIds.has(sessionId)));
-      });
-      setSelectedCompileReadySessionIds((current) => {
-        const compileReadyIds = new Set(response.sessions.filter(isCompileReadySession).map((session) => session.sessionId));
-        return new Set(Array.from(current).filter((sessionId) => compileReadyIds.has(sessionId)));
-      });
     } catch (loadError) {
       if (!options.signal?.aborted && requestId === loadRequestId.current) {
         setError(loadError instanceof Error ? loadError.message : String(loadError));
@@ -149,8 +139,6 @@ export function useWorkbenchController({
     (nextPage: number) => {
       const safe = Math.max(0, Math.trunc(nextPage));
       setPageState(safe);
-      setSelectedSessionIds(new Set());
-      setSelectedCompileReadySessionIds(new Set());
       void load({ page: safe });
     },
     [load]
@@ -247,8 +235,6 @@ export function useWorkbenchController({
           return selectedSessions.some(
             (session) => session.qualityStatus === "unchecked" || session.nextAction === "review_quality"
           );
-        case "publish":
-          return selectedSessions.some((session) => session.nextAction === "publish");
         case "claim":
           return selectedSessions.some((session) => !session.activeClaim);
         case "release":
@@ -321,12 +307,6 @@ export function useWorkbenchController({
             acted += 1;
           }
           setLastActionSummary(`Prechecked quality for ${acted} session${acted === 1 ? "" : "s"}`);
-        } else if (kind === "publish") {
-          for (const sessionId of ids) {
-            await postWorkbenchPublish(activeProjectionUrl, sessionId);
-            acted += 1;
-          }
-          setLastActionSummary(`Published ${acted} session${acted === 1 ? "" : "s"}`);
         } else if (kind === "claim") {
           for (const sessionId of ids) {
             await postWorkbenchClaim(activeProjectionUrl, sessionId, {
@@ -383,8 +363,11 @@ export function useWorkbenchController({
   }, [selectedSessionIds, sessions]);
 
   const selectPage = useCallback(() => {
-    setSelectedSessionIds(new Set(sessions.map((session) => session.sessionId)));
-    setSelectedCompileReadySessionIds(new Set(sessions.filter(isCompileReadySession).map((session) => session.sessionId)));
+    setSelectedSessionIds((current) => new Set([...current, ...sessions.map((session) => session.sessionId)]));
+    setSelectedCompileReadySessionIds((current) => new Set([
+      ...current,
+      ...sessions.filter(isCompileReadySession).map((session) => session.sessionId)
+    ]));
   }, [sessions]);
 
   const selectAll = useCallback(async () => {

@@ -47,7 +47,6 @@ const PIPELINE_LABELS = [
   "Precheck",
   "Accept Quality",
   "Fail Quality",
-  "Publish package",
   "Claim",
   "Release"
 ] as const;
@@ -121,7 +120,7 @@ describe("WorkbenchPanel", () => {
         sessions={[publishReady]}
         selectedSessionIds={new Set([publishReady.sessionId])}
         handoffText="Process these sessions"
-        canRun={allow("publish", "copy_agent_prompt", "claim")}
+        canRun={allow("copy_agent_prompt", "claim")}
         runAction={async () => undefined}
         loading={false}
         onClearSelection={() => undefined}
@@ -147,7 +146,7 @@ describe("WorkbenchPanel", () => {
     expect(html).toContain(">adr</th>");
     expect(html).toContain(">timeline</th>");
     expect(html).toContain(">resolution</th>");
-    expect(html).toContain("Publish package");
+    expect(html).not.toContain("Publish package");
     expect(html).toContain("Workbench Activity");
     expect(html).toContain("observability-toolbar");
     expect(html).toContain("metal-toolbar");

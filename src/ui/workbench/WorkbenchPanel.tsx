@@ -57,7 +57,6 @@ const TOOLTIPS = {
   precheck: "Run the cheap capture quality precheck and apply pass/fail automatically.",
   acceptQuality: "Mark quality as passed so selected sessions can move toward enrichment.",
   failQuality: "Fail quality and remove sessions from the publish path (Not Added).",
-  publish: "Publish the selected session package when its gates are satisfied.",
   claim: "Place a short-lived claim so agents avoid duplicate work on selected sessions.",
   release: "Release active claims on selected sessions.",
   pagePrevious: "Show the previous page of package-path sessions.",
@@ -80,7 +79,6 @@ const PIPELINE_ITEMS: PipelineItem[] = [
   { kind: "quality_precheck", label: "Precheck", tooltip: TOOLTIPS.precheck },
   { kind: "quality_pass", label: "Accept Quality", tooltip: TOOLTIPS.acceptQuality },
   { kind: "quality_fail", label: "Fail Quality", tooltip: TOOLTIPS.failQuality, quiet: true },
-  { kind: "publish", label: "Publish package", tooltip: TOOLTIPS.publish },
   { kind: "claim", label: "Claim", tooltip: TOOLTIPS.claim },
   { kind: "release", label: "Release", tooltip: TOOLTIPS.release }
 ];
