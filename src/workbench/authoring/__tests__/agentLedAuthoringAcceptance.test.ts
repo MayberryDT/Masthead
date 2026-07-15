@@ -121,12 +121,19 @@ describe("focused agent-led authoring acceptance", () => {
       expect(search.artifacts).toEqual(expect.arrayContaining([
         expect.objectContaining({ artifactId })
       ]));
-      expect(callMcp(db, "get_artifact", { artifactId })).toMatchObject({
+      const mcpDetail = callMcp(db, "get_artifact", { artifactId });
+      expect(mcpDetail).toMatchObject({
         artifact: {
           capsule: { artifactId },
           provenanceSessionIds: detail.provenanceSessionIds
         }
       });
+      const optional = receipt.optionalArtifacts.find((item) => item.artifactId === artifactId);
+      if (optional) {
+        const submittedDraft = bundle.artifacts.find((artifact) => artifact.kind === optional.kind);
+        expect(submittedDraft).toBeDefined();
+        expect(mcpDetail.artifact.body.claimSupport).toEqual(submittedDraft?.output.claimSupport);
+      }
     }
     db.close();
   });
