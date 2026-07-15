@@ -142,23 +142,21 @@ describe("Hermes adapter", () => {
     const sqlitePath = join(tempDir, "state.db");
     const sqlite = new DatabaseSync(sqlitePath);
     sqlite.exec(
-      "CREATE TABLE messages (session_id TEXT, role TEXT, content TEXT, record TEXT, tool_call_id TEXT, timestamp REAL);"
+      "CREATE TABLE messages (session_id TEXT, role TEXT, content TEXT, tool_calls TEXT, tool_call_id TEXT, timestamp REAL);"
     );
     sqlite
-      .prepare("INSERT INTO messages (session_id, role, record, tool_call_id, timestamp) VALUES (?, ?, ?, ?, ?)")
+      .prepare("INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, timestamp) VALUES (?, ?, ?, ?, ?, ?)")
       .run(
         "20260710_100000_fixture",
         "assistant",
-        JSON.stringify({
-          content: "I will inspect the adapter.",
-          tool_calls: [
-            {
-              function: { arguments: JSON.stringify({ path: "src/adapters/hermes/adapter.ts" }), name: "read_file" },
-              id: "tool_sqlite_001",
-              type: "function"
-            }
-          ]
-        }),
+        "I will inspect the adapter.",
+        JSON.stringify([
+          {
+            function: { arguments: JSON.stringify({ path: "src/adapters/hermes/adapter.ts" }), name: "read_file" },
+            id: "tool_sqlite_001",
+            type: "function"
+          }
+        ]),
         null,
         1_783_677_603
       );
@@ -224,6 +222,34 @@ describe("Hermes adapter", () => {
         timestampBasis: "semantic"
       })
     );
+  });
+
+  test("ignores unrelated large SQLite routing tables without affecting completeness", async () => {
+    const tempDir = await makeTempDir();
+    const sqlitePath = join(tempDir, "state.db");
+    const sqlite = new DatabaseSync(sqlitePath);
+    sqlite.exec("CREATE TABLE messages (session_id TEXT, role TEXT, content TEXT, timestamp REAL);");
+    sqlite.exec("CREATE TABLE routing_state (session_id TEXT, role TEXT, content TEXT, timestamp REAL);");
+    sqlite
+      .prepare("INSERT INTO messages (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)")
+      .run("20260710_100000_fixture", "user", "Real transcript message", 1_783_677_600);
+    const insertRouting = sqlite.prepare(
+      "INSERT INTO routing_state (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)"
+    );
+    sqlite.exec("BEGIN");
+    for (let index = 0; index < 5_001; index += 1) {
+      insertRouting.run("routing-only", "user", `Routing state ${index}`, 1_783_677_600 + index);
+    }
+    sqlite.exec("COMMIT");
+    sqlite.close();
+
+    const candidate = sqliteSource(sqlitePath);
+    const [unit] = await hermesAdapter.planTranscriptUnits(candidate);
+    const parsed = await hermesAdapter.parseTranscriptUnit(unit);
+
+    expect(parsed.completeness).toBe("complete");
+    expect(parsed.diagnostics).toEqual([]);
+    expect(parsed.records.map(normalizedValue)).toEqual([expect.objectContaining({ text: "Real transcript message" })]);
   });
 
   test("discovers Hermes session files without crawling request dumps or logs", async () => {

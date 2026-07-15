@@ -9,6 +9,7 @@ import { parsedTranscriptUnit } from "../transcriptUnits.ts";
 import type { AdapterDiagnostic, AdapterRecord, DiscoveredSource, IngestCursor } from "../types.ts";
 
 const SQLITE_PAGE_SIZE = 1_000;
+const HERMES_SQLITE_TABLES = ["sessions", "messages"] as const;
 
 type HermesRow = {
   cursorAfter?: AdapterRecord["cursorAfter"];
@@ -128,7 +129,9 @@ async function readSqliteRows(path: string): Promise<HermesRows> {
     const rows: HermesRow[] = [];
     let lastUpdated: string | undefined;
     let startedAt: string | undefined;
-    for (const table of sqliteTables(db)) {
+    const availableTables = new Set(sqliteTables(db));
+    for (const table of HERMES_SQLITE_TABLES) {
+      if (!availableTables.has(table)) continue;
       let offset = 0;
       while (true) {
         let values: Array<Record<string, unknown>>;
@@ -249,8 +252,9 @@ function recordFromRow(source: DiscoveredSource, unitSessionId: string | undefin
         text
       }));
     }
-    if (role === "assistant" && Array.isArray(row.tool_calls)) {
-      for (const [index, value] of row.tool_calls.entries()) {
+    const toolCalls = toolCallsValue(row.tool_calls);
+    if (role === "assistant" && toolCalls) {
+      for (const [index, value] of toolCalls.entries()) {
         if (!isRecord(value)) continue;
         const fn = isRecord(value.function) ? value.function : undefined;
         const toolName = readString(value, ["name"]) ?? readString(fn, ["name"]);
@@ -376,6 +380,17 @@ function toolArguments(value: unknown): Record<string, unknown> {
     return isRecord(parsed) ? parsed : { raw: value };
   } catch {
     return { raw: value };
+  }
+}
+
+function toolCallsValue(value: unknown): unknown[] | undefined {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== "string") return undefined;
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
   }
 }
 
