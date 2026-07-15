@@ -28,9 +28,13 @@ export function buildImportCompletionReport(
   const transcriptReady = countTranscriptReadySessions(db, input.runtime);
   const enriched = countEnrichedSessions(db, input.runtime);
   const mcpVisible = countMcpVisibleSessions(db, input.runtime);
+  const importHealth = summarizeSessionImportHealth(db, input.importJobId);
+  const status = input.status === "succeeded" && importHealth.repairRequired > 0
+    ? "succeeded_with_issues"
+    : input.status;
   const nextActions: ImportCompletionReportDto["nextActions"] = [];
   if (input.failedUnits > 0) nextActions.push("retry_failed_units");
-  if (input.status === "succeeded" || input.status === "succeeded_with_issues") {
+  if (status === "succeeded" || status === "succeeded_with_issues") {
     nextActions.push("open_logbook", "import_full_archive");
   }
   if (enriched < runtimeSessionStats) nextActions.push("run_enrichment");
@@ -53,7 +57,7 @@ export function buildImportCompletionReport(
     failedUnits: input.failedUnits,
     generatedAt: input.generatedAt,
     importJobId: input.importJobId,
-    importHealth: summarizeSessionImportHealth(db, input.importJobId),
+    importHealth,
     logbookSearchableSessions: logbookSearchable,
     mcpVisibleSessions: mcpVisible,
     nextActions: [...new Set(nextActions)],
@@ -71,7 +75,7 @@ export function buildImportCompletionReport(
     sourceUnitsFailed,
     sourceUnitsHydrated,
     sourceUnitsRemaining,
-    status: input.status,
+    status,
     transcriptsImported: impact.transcriptSessions
   };
 }

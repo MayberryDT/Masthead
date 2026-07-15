@@ -191,6 +191,87 @@ describe("import work unit runner", () => {
     ).toEqual({ reason: "partial_parse", status: "repair_required" });
   });
 
+  test("a later complete unit does not overwrite or reconcile an earlier partial unit", async () => {
+    const partial = await runParsedMessageUnit({ completeness: "partial", sourceSessionId: "order-partial-first" });
+    const complete = await runParsedMessageUnit({ completeness: "complete", sourceSessionId: "order-complete-second" });
+
+    expect(importHealthForSession(db, partial.sessionIds[0])).toMatchObject({
+      reason: "partial_parse",
+      status: "repair_required"
+    });
+    expect(readWorkbenchSessionState(db, partial.sessionIds[0])).toBeUndefined();
+    expect(importHealthForSession(db, complete.sessionIds[0])).toMatchObject({ status: "complete" });
+    expect(readWorkbenchSessionState(db, complete.sessionIds[0])).toBeDefined();
+  });
+
+  test("a later partial unit does not overwrite an earlier complete unit", async () => {
+    const complete = await runParsedMessageUnit({ completeness: "complete", sourceSessionId: "order-complete-first" });
+    const partial = await runParsedMessageUnit({ completeness: "partial", sourceSessionId: "order-partial-second" });
+
+    expect(importHealthForSession(db, complete.sessionIds[0])).toMatchObject({ status: "complete" });
+    expect(importHealthForSession(db, partial.sessionIds[0])).toMatchObject({
+      reason: "partial_parse",
+      status: "repair_required"
+    });
+    expect(readWorkbenchSessionState(db, partial.sessionIds[0])).toBeUndefined();
+  });
+
+  test.each([
+    { completeness: "partial" as const, expectedReason: "missing_identity", sourceSessionIds: [] },
+    { completeness: "partial" as const, expectedReason: "ambiguous_identity", sourceSessionIds: ["identity-a", "identity-b"] },
+    { completeness: "unrecognized" as const, expectedReason: "unrecognized_schema", sourceSessionIds: ["identity-unrecognized"] }
+  ])("uses $expectedReason precedence for parsed unit health", async ({ completeness, expectedReason, sourceSessionIds }) => {
+    const result = await runParsedMessageUnit({
+      completeness,
+      parsedSourceSessionIds: sourceSessionIds,
+      sourceSessionId: `precedence-${expectedReason}`
+    });
+
+    expect(importHealthForWorkUnit(db, result.workUnitId)).toMatchObject({
+      reason: expectedReason,
+      status: "repair_required"
+    });
+    expect(readWorkbenchSessionState(db, result.sessionIds[0])).toBeUndefined();
+  });
+
+  test("records empty unidentified units as repair-visible import health", async () => {
+    const sourcePath = join(tempDir, "empty-unrecognized.jsonl");
+    const unitId = seedWorkUnit(db, sourcePath);
+
+    await runImportWorkUnit({
+      db,
+      hostId: "host:test",
+      hostname: "test",
+      now: () => "2026-07-01T00:00:05.000Z",
+      parseTranscriptUnit: async (unit) => ({
+        completeness: "unrecognized",
+        diagnostics: [{
+          code: "schema_unrecognized",
+          message: "No transcript records were recognized.",
+          observedAt: "2026-07-01T00:00:00.000Z",
+          severity: "error"
+        }],
+        records: [],
+        sourceSessionIds: [],
+        unit
+      }),
+      runtimeKind: "opencode",
+      workUnitId: unitId
+    });
+
+    expect(importHealthForWorkUnit(db, unitId)).toMatchObject({
+      reason: "missing_identity",
+      sessionId: null,
+      status: "repair_required"
+    });
+    expect(JSON.parse(String(importHealthForWorkUnit(db, unitId)?.diagnosticsJson))).toEqual([
+      expect.objectContaining({ code: "schema_unrecognized" })
+    ]);
+    expect(listImportWorkUnits(db, { importJobId: "import-1" }).find((unit) => unit.workUnitId === unitId)).toMatchObject({
+      status: "succeeded_with_issues"
+    });
+  });
+
   test("skips records whose project metadata is excluded", async () => {
     const sourcePath = join(tempDir, "thread.jsonl");
     const unitId = seedWorkUnit(db, sourcePath);
@@ -543,7 +624,69 @@ describe("import work unit runner", () => {
       statusReason: "transcript_permission_required"
     });
   });
+
+  async function runParsedMessageUnit(input: {
+    completeness: "complete" | "partial" | "unrecognized";
+    parsedSourceSessionIds?: string[];
+    sourceSessionId: string;
+  }) {
+    const sourcePath = join(tempDir, `${input.sourceSessionId}.jsonl`);
+    const unitId = seedWorkUnit(db, sourcePath);
+    const record: AdapterRecord = {
+      diagnostics: [],
+      normalized: {
+        confidence: "authoritative",
+        kind: "message",
+        sourceRef: { sourceKind: "jsonl", sourcePath },
+        value: {
+          observedAt: "2026-07-01T00:00:00.000Z",
+          role: "user",
+          sessionId: input.sourceSessionId,
+          text: "Short request"
+        }
+      },
+      observedAt: "2026-07-01T00:00:00.000Z",
+      payload: { role: "user", text: "Short request" },
+      payloadHash: `hash-${input.sourceSessionId}`,
+      source: sourceForPath(sourcePath),
+      sourceRecordKey: `${sourcePath}:1`
+    };
+    const result = await runImportWorkUnit({
+      db,
+      hostId: "host:test",
+      hostname: "test",
+      now: () => "2026-07-01T00:00:05.000Z",
+      onSessionHydrated: (sessionId) => reconcileImportedTranscript(db, sessionId),
+      parseTranscriptUnit: async (unit) => ({
+        completeness: input.completeness,
+        diagnostics: input.completeness === "complete" ? [] : [{
+          code: `${input.completeness}_parse`,
+          message: `${input.completeness} transcript unit.`,
+          observedAt: "2026-07-01T00:00:00.000Z",
+          severity: input.completeness === "unrecognized" ? "error" : "warning"
+        }],
+        records: [record],
+        sourceSessionIds: input.parsedSourceSessionIds ?? [input.sourceSessionId],
+        unit
+      }),
+      runtimeKind: "opencode",
+      workUnitId: unitId
+    });
+    return { ...result, workUnitId: unitId };
+  }
 });
+
+function importHealthForSession(db: MastheadDatabase, sessionId: string | undefined): Record<string, unknown> | undefined {
+  if (!sessionId) return undefined;
+  return db.prepare("SELECT * FROM session_import_health WHERE session_id = ?").get(sessionId) as Record<string, unknown> | undefined;
+}
+
+function importHealthForWorkUnit(db: MastheadDatabase, workUnitId: string): Record<string, unknown> | undefined {
+  return db.prepare(
+    `SELECT session_id AS sessionId, status, reason, diagnostics_json AS diagnosticsJson
+     FROM session_import_health WHERE work_unit_id = ?`
+  ).get(workUnitId) as Record<string, unknown> | undefined;
+}
 
 function seedSourceAndImportJob(db: MastheadDatabase, sourcePath: string): void {
   db.prepare(

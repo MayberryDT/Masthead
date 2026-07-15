@@ -4,7 +4,7 @@ import type { ParsedTranscriptUnit, TranscriptUnitPlan } from "../../adapters/tr
 import { upsertCursor } from "../db/cursorRepository.ts";
 import { indexCanonicalSessionSearch } from "../db/searchRepository.ts";
 import { getImportWorkUnit, recordImportFailureGroup, updateImportWorkUnit } from "../db/importLedgerRepository.ts";
-import { listImportImpactSessionIds, recordImportSessionImpact } from "../db/importSessionImpactRepository.ts";
+import { recordImportSessionImpact } from "../db/importSessionImpactRepository.ts";
 import { ingestAdapterRecord } from "../db/sessionRepository.ts";
 import { recordSessionImportHealth } from "../db/sessionImportHealthRepository.ts";
 import { sourceRecordIsExcluded } from "../db/sourceRepository.ts";
@@ -213,16 +213,18 @@ export async function runImportWorkUnit(input: {
       recordsSinceYield = await yieldToRequestHandling(recordsSinceYield);
     }
     await flushCheckpoint(true);
-    for (const sessionId of listImportImpactSessionIds(input.db, unit.importJobId, unit.sourceId)) sessionIds.add(sessionId);
+    const healthSessionId = parsedUnit
+      ? sessionIdForParsedUnit(input.db, parsedUnit, unit.runtime, input.hostId, sessionIds)
+      : undefined;
+    const health = unit.unitKind === "transcript_file" && parsedUnit
+      ? recordHealthForParsedUnit(input.db, parsedUnit, healthSessionId, unit, now())
+      : undefined;
     for (const sessionId of sessionIds) {
       if (input.indexSession) {
         input.indexSession(sessionId);
       } else {
         indexCanonicalSessionSearch(input.db, sessionId);
       }
-      const health = unit.unitKind === "transcript_file" && parsedUnit
-        ? recordHealthForParsedUnit(input.db, parsedUnit, sessionId, unit, now())
-        : undefined;
       if (!health || health.status === "complete") input.onSessionHydrated?.(sessionId);
     }
 
@@ -232,7 +234,11 @@ export async function runImportWorkUnit(input: {
       heartbeatAt: now(),
       importedRecords: imported,
       processedRecords: processed,
-      status: failed > 0 ? (imported > 0 ? "succeeded_with_issues" : "failed") : "succeeded"
+      status: health?.status === "repair_required"
+        ? "succeeded_with_issues"
+        : failed > 0
+          ? (imported > 0 ? "succeeded_with_issues" : "failed")
+          : "succeeded"
     });
     return { failed, imported, processed, sessionIds: [...sessionIds] };
   } catch (error) {
@@ -268,16 +274,17 @@ async function* recordsFromParsedUnit(unit: ParsedTranscriptUnit): AsyncIterable
 function recordHealthForParsedUnit(
   db: MastheadDatabase,
   parsedUnit: ParsedTranscriptUnit,
-  sessionId: string,
+  sessionId: string | undefined,
   unit: NonNullable<ReturnType<typeof getImportWorkUnit>>,
   updatedAt: string
 ) {
   const reason = importHealthReason(parsedUnit);
   return recordSessionImportHealth(db, {
+    diagnostics: parsedUnit.diagnostics.map(({ code, message, severity }) => ({ code, message, severity })),
     evidenceRevision: importEvidenceRevision(parsedUnit),
     importJobId: unit.importJobId,
     ...(reason ? { reason } : {}),
-    sessionId,
+    ...(sessionId ? { sessionId } : {}),
     status: reason ? "repair_required" : "complete",
     updatedAt,
     workUnitId: unit.workUnitId
@@ -285,11 +292,32 @@ function recordHealthForParsedUnit(
 }
 
 function importHealthReason(unit: ParsedTranscriptUnit): string | undefined {
-  if (unit.completeness === "partial") return "partial_parse";
-  if (unit.completeness === "unrecognized") return "unrecognized_schema";
   if (unit.sourceSessionIds.length === 0) return "missing_identity";
   if (unit.sourceSessionIds.length > 1) return "ambiguous_identity";
+  if (unit.completeness === "partial") return "partial_parse";
+  if (unit.completeness === "unrecognized") return "unrecognized_schema";
   return undefined;
+}
+
+function sessionIdForParsedUnit(
+  db: MastheadDatabase,
+  unit: ParsedTranscriptUnit,
+  runtime: RuntimeKind,
+  hostId: string,
+  affectedSessionIds: Set<string>
+): string | undefined {
+  if (unit.sourceSessionIds.length !== 1) return undefined;
+  const rows = db.prepare(
+    `SELECT sessions.session_id AS sessionId
+     FROM sessions
+     JOIN runtimes ON runtimes.runtime_id = sessions.runtime_id
+     WHERE sessions.source_session_id = ?
+       AND runtimes.runtime_kind = ?
+       AND sessions.host_id = ?
+       AND sessions.deleted_at IS NULL`
+  ).all(unit.sourceSessionIds[0], runtime, hostId) as Array<{ sessionId: string }>;
+  for (const row of rows) affectedSessionIds.add(row.sessionId);
+  return rows.length === 1 ? rows[0].sessionId : undefined;
 }
 
 function importEvidenceRevision(unit: ParsedTranscriptUnit): string {

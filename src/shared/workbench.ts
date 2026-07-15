@@ -12,12 +12,19 @@ export type WorkbenchPublicationStatus = "publish_path" | "published" | "not_add
 
 export type SessionImportHealthStatus = "complete" | "partial" | "repair_required";
 
+export type SessionImportHealthDiagnosticDto = {
+  code: string;
+  message: string;
+  severity: "info" | "warning" | "error";
+};
+
 export type SessionImportHealthSummaryDto = {
   total: number;
   complete: number;
   partial: number;
   repairRequired: number;
   reasons: Array<{ reason: string; count: number }>;
+  diagnostics: Array<SessionImportHealthDiagnosticDto & { count: number }>;
 };
 
 export type WorkbenchNextAction =

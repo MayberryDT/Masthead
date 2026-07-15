@@ -31,6 +31,11 @@ describe("import completion report", () => {
     });
     seedImportWorkUnit(db);
     recordSessionImportHealth(db, {
+      diagnostics: [{
+        code: "recoverable_parse_gap",
+        message: "Some transcript rows were not recognized.",
+        severity: "warning"
+      }],
       evidenceRevision: "sha256:partial",
       importJobId: "import-1",
       reason: "partial_parse",
@@ -69,6 +74,12 @@ describe("import completion report", () => {
       importJobId: "import-1",
       importHealth: {
         complete: 0,
+        diagnostics: [{
+          code: "recoverable_parse_gap",
+          count: 1,
+          message: "Some transcript rows were not recognized.",
+          severity: "warning"
+        }],
         partial: 0,
         reasons: [{ count: 1, reason: "partial_parse" }],
         repairRequired: 1,
@@ -86,6 +97,7 @@ describe("import completion report", () => {
       sessionsHydrated: 1,
       sessionsCreated: 1,
       sessionsUpdated: 0,
+      status: "succeeded_with_issues",
       transcriptsImported: 1
     });
     db.close();

@@ -150,6 +150,14 @@ describe("daemon database schema", () => {
         "idx_session_import_health_status"
       ])
     );
+    const importHealthColumns = db.prepare("PRAGMA table_info(session_import_health)").all() as Array<{
+      name: string;
+      notnull: number;
+      pk: number;
+    }>;
+    expect(importHealthColumns.find((column) => column.name === "session_id")).toMatchObject({ notnull: 0, pk: 0 });
+    expect(importHealthColumns.find((column) => column.name === "work_unit_id")).toMatchObject({ notnull: 1, pk: 1 });
+    expect(importHealthColumns.find((column) => column.name === "diagnostics_json")).toMatchObject({ notnull: 1 });
     const sourceRevisionTriggers = db
       .prepare(
         `SELECT name

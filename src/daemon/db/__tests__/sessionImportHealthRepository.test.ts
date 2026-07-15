@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { migrateDatabase } from "../schema.ts";
 import {
+  readImportWorkUnitHealth,
   readSessionImportHealth,
   recordSessionImportHealth,
   summarizeSessionImportHealth
@@ -45,8 +46,48 @@ describe("session import health repository", () => {
     expect(readSessionImportHealth(db, "session:repair")).toEqual(record);
     expect(summarizeSessionImportHealth(db, "import-health-1")).toEqual({
       complete: 0,
+      diagnostics: [],
       partial: 0,
       reasons: [{ count: 1, reason: "partial_parse" }],
+      repairRequired: 1,
+      total: 1
+    });
+    db.close();
+  });
+
+  test("records repair health for an empty import unit without inventing a session", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-import-health-empty-"));
+    tempDirs.push(tempDir);
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+    migrateDatabase(db);
+    seedImportProvenance(db);
+
+    const record = recordSessionImportHealth(db, {
+      diagnostics: [{
+        code: "schema_unrecognized",
+        message: "No transcript records were recognized.",
+        severity: "error"
+      }],
+      evidenceRevision: "sha256:empty",
+      importJobId: "import-health-1",
+      reason: "missing_identity",
+      status: "repair_required",
+      updatedAt: "2026-07-01T00:00:05.000Z",
+      workUnitId: "unit-health-1"
+    });
+
+    expect(record.sessionId).toBeUndefined();
+    expect(readImportWorkUnitHealth(db, "unit-health-1")).toEqual(record);
+    expect(summarizeSessionImportHealth(db, "import-health-1")).toEqual({
+      complete: 0,
+      diagnostics: [{
+        code: "schema_unrecognized",
+        count: 1,
+        message: "No transcript records were recognized.",
+        severity: "error"
+      }],
+      partial: 0,
+      reasons: [{ count: 1, reason: "missing_identity" }],
       repairRequired: 1,
       total: 1
     });
