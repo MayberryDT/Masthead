@@ -111,17 +111,28 @@
 ## Import trust and repair readiness
 
 - [x] `scripts/replay-import-trust-corpus.js` requires a sanitized corpus and a new database path
-  under `/tmp`; it rejects outside-`/tmp`, existing, and `masthead-production*` database paths.
+  under literal physical `/tmp`, independent of `TMPDIR`, `TMP`, or `TEMP`; it rejects outside-`/tmp`,
+  existing, parent/leaf symlink escapes (including dangling leaf symlinks), and
+  `masthead-production*` database paths.
 - [x] The 2026-07-15 sanitized replay reported `productionAccessed: false`, Grok/Hermes session
   counts `1/1`, zero out-of-range sessions, zero rejected records, zero repair-required sessions,
-  zero anomalies, Workbench package path `2`, and an honest non-applicable repair preview.
-- [x] Repair preview/apply was rehearsed only on a disposable evaluation copy. A plain copy of the
+  zero anomalies, and Workbench package path `2`. The integrated `transcript_recent` ledger admitted
+  the two current semantic units, deferred one old semantic Hermes unit as `outside_recent_range`,
+  and created no canonical session for that old unit. The script serialized the canonical repair
+  preview for both replay jobs, including its real hash, viable source/job plans, actions, and
+  preservation fields.
+- [x] Evaluation-copy **repair safety** was rehearsed only on a disposable copy. A plain copy of the
   active WAL database failed integrity and was abandoned. A new SQLite-consistent read-only backup
-  under `/tmp` passed integrity before and after migration. Preview hash
+  under `/tmp` passed integrity before and after migration. A time-boxed selected-job provenance
+  closure added no further owning import jobs. Both sources were viable. Preview hash
   `2dc291775060045443edcafd96325ae50c9d1dc66fe486541b84ea04ada3cdc2` preserved all 1,550 affected
   sessions: 1,484 had shared ownership and 66 were blocked in indivisible jobs. It exposed zero
   published artifacts as deletable. Apply with that exact hash was an honest no-op: zero removals,
   resets, reopened suppressions, cursor resets, or reimports, with all 1,550 sessions preserved.
+- [ ] Evaluation-copy **cleanup acceptance (Task 11 Steps 4–5)** is not satisfied. The canonical
+  safety plan found zero eligible job plans, removals, reparses, or reimports, so the disposable copy
+  did not reach the requested cleaned state. This remains a non-blocking limitation for the isolated
+  replay code change; it must not be represented as successful cleanup.
 - [x] No active evaluation/production database was passed to repair code; no production build was
   packaged, installed, or restarted. Clean replacement evidence comes from the sanitized replay;
   ambiguous legacy ownership remains preserved rather than silently deleted.

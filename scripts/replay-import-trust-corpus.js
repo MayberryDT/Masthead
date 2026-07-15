@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
-import { access, realpath } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { access, lstat, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { grokAdapter } from "../src/adapters/grok/adapter.ts";
@@ -13,8 +12,8 @@ import { setSourcePolicy } from "../src/daemon/db/sourcePolicyRepository.ts";
 import { openMastheadDatabase } from "../src/daemon/db/sqlite.ts";
 import { buildImportCompletionReport, settleImportSessionClassifications } from "../src/daemon/import/importCompletionReport.ts";
 import { createManifestForJob } from "../src/daemon/import/importManifestService.ts";
+import { previewImportRepair } from "../src/daemon/import/importRepair.ts";
 import { runImportWorkUnit } from "../src/daemon/import/importWorkUnitRunner.ts";
-import { decideImportUnitScope } from "../src/daemon/import/importScope.ts";
 import { reconcileImportedTranscript } from "../src/workbench/transcriptQualityReconciler.ts";
 
 const GENERATED_AT = "2026-07-15T12:00:00.000Z";
@@ -27,19 +26,19 @@ export async function replayImportTrustCorpus(input) {
     {
       adapter: grokAdapter,
       runtime: "grok",
-      source: {
+      sources: [{
         confidence: "authoritative",
         path: join(sourceRoot, "grok", "019f42f6-8ada-7001-afff-c722e75faf45", "chat_history.jsonl"),
         runtime: "grok",
         schemaVersion: "grok-jsonl-tree",
         sourceId: "acceptance:grok",
         sourceKind: "jsonl"
-      }
+      }]
     },
     {
       adapter: hermesAdapter,
       runtime: "hermes",
-      source: {
+      sources: [{
         confidence: "authoritative",
         path: join(sourceRoot, "hermes", "session.jsonl"),
         runtime: "hermes",
@@ -47,7 +46,15 @@ export async function replayImportTrustCorpus(input) {
         sourceId: "acceptance:hermes",
         sourceKind: "jsonl",
         sourceSessionId: "20260710_100000_fixture"
-      }
+      }, {
+        confidence: "authoritative",
+        path: join(sourceRoot, "hermes", "old-session.jsonl"),
+        runtime: "hermes",
+        schemaVersion: "hermes-transcript-jsonl",
+        sourceId: "acceptance:hermes",
+        sourceKind: "jsonl",
+        sourceSessionId: "20260501_100000_old_fixture"
+      }]
     }
   ];
 
@@ -55,39 +62,49 @@ export async function replayImportTrustCorpus(input) {
   try {
     migrateDatabase(db);
     const importReports = [];
+    const importJobIds = [];
     for (const [index, entry] of runtimes.entries()) {
-      await access(entry.source.path);
+      await Promise.all(entry.sources.map((source) => access(source.path)));
       const updatedAt = new Date(Date.parse(GENERATED_AT) + index * 1_000).toISOString();
-      registerSanitizedSource(db, entry.source, updatedAt);
-      const job = createImportJob(db, { importKind: "transcript", sourceId: entry.source.sourceId, updatedAt });
+      const sourceId = entry.sources[0].sourceId;
+      registerSanitizedSource(db, entry.sources[0], updatedAt);
+      const job = createImportJob(db, { importKind: "transcript", sourceId, updatedAt });
+      importJobIds.push(job.importJobId);
       setSourcePolicy(db, {
         decidedAt: updatedAt,
         enabled: true,
         policyKind: "transcript_import",
         reason: "sanitized isolated acceptance replay",
-        sourceId: entry.source.sourceId
+        sourceId
       });
+      const transcriptUnits = (await Promise.all(
+        entry.sources.map((source) => entry.adapter.planTranscriptUnits(source))
+      )).flat();
       const manifest = await createManifestForJob(db, {
         generatedAt: GENERATED_AT,
         importJobId: job.importJobId,
         importKind: "transcript",
         runtime: entry.runtime,
-        scope: { includeChangedSinceCursor: true, mode: "transcript_full" },
-        sourceId: entry.source.sourceId,
-        sources: [entry.source]
+        scope: RECENT_SCOPE,
+        sourceId,
+        sources: entry.sources,
+        transcriptUnits
       });
 
       for (const unit of manifest.units) {
         await runImportWorkUnit({
-          approvedSourceIds: [entry.source.sourceId],
+          approvedSourceIds: [sourceId],
           db,
           hostId: "host:isolated-import-trust-acceptance",
           hostname: "isolated-import-trust-acceptance",
           now: () => GENERATED_AT,
           onSessionHydrated: (sessionId) => reconcileImportedTranscript(db, sessionId, { finalizeNoise: false }),
           parseTranscriptUnit: async (fallbackPlan, cursor) => {
-            const planned = await entry.adapter.planTranscriptUnits(entry.source);
-            return entry.adapter.parseTranscriptUnit(planned[0] ?? fallbackPlan, cursor);
+            const planned = transcriptUnits.find((candidate) =>
+              candidate.source.path === fallbackPlan.source.path ||
+              Boolean(fallbackPlan.sourceSessionId && candidate.sourceSessionId === fallbackPlan.sourceSessionId)
+            );
+            return entry.adapter.parseTranscriptUnit(planned ?? fallbackPlan, cursor);
           },
           runtimeKind: entry.runtime,
           workUnitId: unit.workUnitId
@@ -104,9 +121,15 @@ export async function replayImportTrustCorpus(input) {
       importReports.push(buildImportCompletionReport(db, reportInput));
     }
 
-    const repairJobIds = importReports
-      .filter((report) => report.importHealth.repairRequired > 0 || report.anomalies.some((anomaly) => anomaly.severity === "error"))
-      .map((report) => report.importJobId);
+    const repairPreview = previewImportRepair(db, {
+      importJobIds,
+      sourceMappings: runtimes.map((entry) => ({
+        adapterRuntime: entry.runtime,
+        available: true,
+        correctedSourceId: entry.sources[0].sourceId,
+        sourceId: entry.sources[0].sourceId
+      }))
+    });
     return {
       productionAccessed: false,
       databasePath,
@@ -114,20 +137,8 @@ export async function replayImportTrustCorpus(input) {
       importReports,
       workbenchCounts: workbenchCounts(db),
       anomalies: importReports.flatMap((report) => report.anomalies),
-      repairPreview: repairJobIds.length === 0
-        ? {
-            applyAllowed: false,
-            importJobIds: [],
-            planHash: null,
-            reason: "No repair-required imports in the isolated replay."
-          }
-        : {
-            applyAllowed: false,
-            importJobIds: repairJobIds,
-            planHash: null,
-            reason: "Acceptance replay found repair-required imports; do not apply an unreviewed plan."
-          },
-      scopeEvidence: strictRangeEvidence()
+      repairPreview,
+      scopeEvidence: scopeEvidence(db, importJobIds, importReports)
     };
   } finally {
     db.close();
@@ -189,6 +200,7 @@ function runtimeCounts(db) {
     GROUP BY runtimes.runtime_kind`
   ).all();
   return Object.fromEntries(rows.map((row) => [row.runtime, {
+    evidence: runtimeEvidence(db, row.runtime),
     sessions: Number(row.sessions),
     sourceSessionIds: db.prepare(
       `SELECT source_session_id AS sourceSessionId FROM sessions
@@ -204,6 +216,28 @@ function runtimeCounts(db) {
        WHERE runtimes.runtime_kind = ? AND sessions.source_session_id LIKE 'rs\\_%' ESCAPE '\\'`
     ).get(row.runtime)?.count ?? 0)
   }]));
+}
+
+function runtimeEvidence(db, runtime) {
+  const roleRows = db.prepare(
+    `SELECT messages.role, COUNT(*) AS count FROM messages
+     JOIN sessions ON sessions.session_id = messages.session_id
+     JOIN runtimes ON runtimes.runtime_id = sessions.runtime_id
+     WHERE runtimes.runtime_kind = ? AND sessions.deleted_at IS NULL
+     GROUP BY messages.role ORDER BY messages.role`
+  ).all(runtime);
+  const count = (table, predicate = "1 = 1") => Number(db.prepare(
+    `SELECT COUNT(*) AS count FROM ${table}
+     JOIN sessions ON sessions.session_id = ${table}.session_id
+     JOIN runtimes ON runtimes.runtime_id = sessions.runtime_id
+     WHERE runtimes.runtime_kind = ? AND sessions.deleted_at IS NULL AND ${predicate}`
+  ).get(runtime)?.count ?? 0);
+  return {
+    messagesByRole: Object.fromEntries(roleRows.map((row) => [row.role, Number(row.count)])),
+    reasoningCheckpoints: count("checkpoints", "checkpoints.checkpoint_kind = 'reasoning'"),
+    toolCalls: count("tool_calls"),
+    toolResults: count("tool_results")
+  };
 }
 
 function workbenchCounts(db) {
@@ -228,22 +262,23 @@ function workbenchCounts(db) {
   };
 }
 
-function strictRangeEvidence() {
-  const oldUnit = { modifiedAt: "2026-05-01T00:00:00.000Z", semanticActivityAt: "2026-05-01T00:00:00.000Z" };
-  const cursor = {
-    byteOffset: 1,
-    contentFingerprint: "sanitized-before",
-    cursorId: "cursor:sanitized-old-unit",
-    modifiedAt: "2026-04-30T00:00:00.000Z",
-    sourceId: "acceptance:old-unit",
-    sourcePath: "/tmp/sanitized-old-unit.jsonl"
-  };
-  const fresh = decideImportUnitScope({ generatedAt: GENERATED_AT, scope: RECENT_SCOPE, unit: oldUnit });
-  const incremental = decideImportUnitScope({ cursor, generatedAt: GENERATED_AT, scope: RECENT_SCOPE, unit: oldUnit });
+function scopeEvidence(db, importJobIds, importReports) {
+  const units = importJobIds.flatMap((importJobId) => listAllImportWorkUnits(db, { importJobId }));
+  const oldUnit = units.find((unit) => unit.sourceSessionId === "20260501_100000_old_fixture");
   return {
-    changedOldUnitIncludedOnlyWithCursor: incremental.include && incremental.reason === "changed_since_cursor",
-    freshOldUnitExcluded: !fresh.include && fresh.reason === "outside_recent_range",
-    recentScope: RECENT_SCOPE
+    currentUnitsAdmitted: units.filter((unit) =>
+      unit.scopeReason === "inside_recent_range" && ["succeeded", "succeeded_with_issues"].includes(unit.status)
+    ).length,
+    oldSemanticUnit: {
+      canonicalSessions: Number(db.prepare("SELECT COUNT(*) AS count FROM sessions WHERE source_session_id = ?").get(
+        "20260501_100000_old_fixture"
+      )?.count ?? 0),
+      scopeReason: oldUnit?.scopeReason,
+      status: oldUnit?.status,
+      timestampBasis: oldUnit?.timestampBasis
+    },
+    recentScope: RECENT_SCOPE,
+    reportDeferredUnits: importReports.reduce((total, report) => total + report.sourceUnitsDeferred, 0)
   };
 }
 
@@ -258,7 +293,8 @@ async function validatedCorpusRoot(value) {
     }
     await Promise.all([
       access(join(root, "grok", "019f42f6-8ada-7001-afff-c722e75faf45", "chat_history.jsonl")),
-      access(join(root, "hermes", "session.jsonl"))
+      access(join(root, "hermes", "session.jsonl")),
+      access(join(root, "hermes", "old-session.jsonl"))
     ]);
   } catch (error) {
     if (error instanceof Error && error.message.includes("must not reference production")) throw error;
@@ -270,7 +306,7 @@ async function validatedCorpusRoot(value) {
 export async function validateImportTrustDatabasePath(value) {
   if (typeof value !== "string" || !value.trim()) throw new Error("A safe isolated database path is required via --database.");
   const requestedPath = resolve(value);
-  const temporaryRoot = await realpath(resolve(tmpdir()));
+  const temporaryRoot = await realpath("/tmp");
   let databasePath;
   try {
     databasePath = join(await realpath(dirname(requestedPath)), basename(requestedPath));
@@ -284,11 +320,27 @@ export async function validateImportTrustDatabasePath(value) {
   ) {
     throw new Error("A safe isolated database path must be under /tmp and must not be production-like.");
   }
+  let leaf;
   try {
-    await access(databasePath);
-    throw new Error("A safe isolated database path must not already exist.");
+    leaf = await lstat(requestedPath);
   } catch (error) {
-    if (error instanceof Error && error.message.includes("must not already exist")) throw error;
+    if (!error || typeof error !== "object" || !("code" in error) || error.code !== "ENOENT") {
+      throw new Error("A safe isolated database path could not be inspected.");
+    }
+  }
+  if (leaf?.isSymbolicLink()) {
+    throw new Error("A safe isolated database path must not be a symlink.");
+  }
+  if (leaf) {
+    const existingPath = await realpath(requestedPath);
+    const existingRelative = relative(temporaryRoot, existingPath);
+    if (
+      !existingRelative || existingRelative === ".." || existingRelative.startsWith(`..${sep}`) ||
+      isAbsolute(existingRelative) || productionLike(existingPath)
+    ) {
+      throw new Error("A safe isolated database path must be under /tmp and must not be production-like.");
+    }
+    throw new Error("A safe isolated database path must not already exist.");
   }
   return databasePath;
 }

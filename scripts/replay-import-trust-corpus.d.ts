@@ -1,6 +1,13 @@
 import type { ImportAnomaly, ImportCompletionReportDto, ImportScopeDto } from "../src/shared/sourceImport.ts";
+import type { ImportRepairPreview } from "../src/shared/importRepair.ts";
 
 export type ImportTrustRuntimeReport = {
+  evidence: {
+    messagesByRole: Record<string, number>;
+    reasoningCheckpoints: number;
+    toolCalls: number;
+    toolResults: number;
+  };
   sessions: number;
   sourceSessionIds: string[];
   structuredToolCalls: number;
@@ -21,16 +28,17 @@ export type ImportTrustReplayReport = {
     packagePath: number;
   };
   anomalies: ImportAnomaly[];
-  repairPreview: {
-    applyAllowed: false;
-    importJobIds: string[];
-    planHash: null;
-    reason: string;
-  };
+  repairPreview: ImportRepairPreview;
   scopeEvidence: {
-    changedOldUnitIncludedOnlyWithCursor: boolean;
-    freshOldUnitExcluded: boolean;
+    currentUnitsAdmitted: number;
+    oldSemanticUnit: {
+      canonicalSessions: number;
+      scopeReason?: string;
+      status?: string;
+      timestampBasis?: string;
+    };
     recentScope: ImportScopeDto;
+    reportDeferredUnits: number;
   };
 };
 

@@ -1,6 +1,7 @@
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { DiscoveredSource, IngestCursor, RuntimeKind } from "../../adapters/types.ts";
+import type { TranscriptUnitPlan } from "../../adapters/transcriptUnits.ts";
 import type { ImportJobKind, ImportScopeDto, ImportWorkUnitDto, ImportWorkUnitStatus } from "../../shared/sourceImport.ts";
 import {
   createImportManifest,
@@ -42,8 +43,16 @@ export async function buildImportManifestPlan(input: {
   generatedAt: string;
   sources: DiscoveredSource[];
   cursors?: Map<string, IngestCursor>;
+  transcriptUnits?: TranscriptUnitPlan[];
 }): Promise<ImportManifestPlan> {
-  const candidates = await candidateUnits(input.sources, input.importKind, input.scope, input.generatedAt, input.cursors ?? new Map());
+  const candidates = await candidateUnits(
+    input.sources,
+    input.importKind,
+    input.scope,
+    input.generatedAt,
+    input.cursors ?? new Map(),
+    input.transcriptUnits
+  );
   const totalBytes = candidates.reduce((sum, unit) => sum + (unit.fileSizeBytes ?? 0), 0);
   const includedUnits = candidates.filter((unit) => unit.status !== "skipped").length;
   const cappedUnits = candidates.filter((unit) => unit.scopeReason === "deferred_by_unit_limit").length;
@@ -77,6 +86,7 @@ export async function createManifestForJob(
     generatedAt: string;
     sources: DiscoveredSource[];
     cursors?: Map<string, IngestCursor>;
+    transcriptUnits?: TranscriptUnitPlan[];
   }
 ): Promise<{ summary: ImportManifestPlan["summary"]; units: ImportWorkUnitDto[] }> {
   const plan = await buildImportManifestPlan(input);
@@ -108,9 +118,12 @@ async function candidateUnits(
   importKind: ImportJobKind,
   scope: ImportScopeDto,
   generatedAt: string,
-  cursors: Map<string, IngestCursor>
+  cursors: Map<string, IngestCursor>,
+  transcriptUnits?: TranscriptUnitPlan[]
 ): Promise<PlannedImportWorkUnit[]> {
-  const discovered = (await Promise.all(sources.flatMap((source) => unitsForSource(source, importKind, scope, generatedAt, cursors)))).flat();
+  const discovered = importKind === "transcript" && transcriptUnits !== undefined
+    ? transcriptUnits.map((unit) => plannedTranscriptUnit(unit, scope, generatedAt, cursors))
+    : (await Promise.all(sources.flatMap((source) => unitsForSource(source, importKind, scope, generatedAt, cursors)))).flat();
   const units = Array.from(
     new Map(
       discovered.map((unit) => [
@@ -121,7 +134,7 @@ async function candidateUnits(
   );
   const included = units
     .filter((unit) => unit.status !== "skipped")
-    .toSorted((a, b) => String(b.modifiedAt ?? "").localeCompare(String(a.modifiedAt ?? "")));
+    .toSorted((a, b) => activityAt(b).localeCompare(activityAt(a)));
   const excluded = units.filter((unit) => unit.status === "skipped");
   const appliesBoundedPage = scope.mode === "transcript_recent" && typeof scope.unitLimit === "number" && scope.unitLimit >= 0;
   const limited = appliesBoundedPage ? included.slice(0, scope.unitLimit) : included;
@@ -135,6 +148,39 @@ async function candidateUnits(
       statusReason: "Deferred by the selected recent-history range."
     }));
   return [...limited, ...capped, ...excluded].toSorted((a, b) => String(a.sourcePath ?? a.sourceId).localeCompare(String(b.sourcePath ?? b.sourceId)));
+}
+
+function plannedTranscriptUnit(
+  unit: TranscriptUnitPlan,
+  scope: ImportScopeDto,
+  generatedAt: string,
+  cursors: Map<string, IngestCursor>
+): PlannedImportWorkUnit {
+  const cursor = cursorForSource(cursors, unit.source, unit.source.path);
+  const scopeDecision = decideImportUnitScope({ cursor, generatedAt, scope, unit });
+  return {
+    confidence: unit.source.confidence,
+    cursorBefore: cursor,
+    estimatedRecords: undefined,
+    fileSizeBytes: unit.fileSizeBytes,
+    modifiedAt: unit.modifiedAt,
+    runtime: unit.runtime,
+    schemaVersion: unit.source.schemaVersion,
+    scopeReason: scopeDecision.reason,
+    semanticActivityAt: unit.semanticActivityAt,
+    sourceId: unit.source.sourceId,
+    sourceKind: unit.source.sourceKind,
+    sourcePath: unit.source.path,
+    sourceSessionId: unit.sourceSessionId,
+    status: scopeDecision.include ? "queued" : "skipped",
+    statusReason: scopeDecision.include ? undefined : "Outside selected import age.",
+    timestampBasis: unit.timestampBasis,
+    unitKind: "transcript_file"
+  };
+}
+
+function activityAt(unit: Pick<PlannedImportWorkUnit, "modifiedAt" | "semanticActivityAt">): string {
+  return String(unit.semanticActivityAt ?? unit.modifiedAt ?? "");
 }
 
 async function unitsForSource(

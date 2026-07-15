@@ -28,6 +28,12 @@ describe("isolated import trust corpus replay", () => {
     expect(report.productionAccessed).toBe(false);
     expect(report.perRuntime).toMatchObject({
       grok: {
+        evidence: {
+          messagesByRole: { assistant: 1, system: 1, user: 1 },
+          reasoningCheckpoints: 1,
+          toolCalls: 1,
+          toolResults: 1
+        },
         reasoningFragmentPseudoSessions: 0,
         sessions: 1,
         sourceSessionIds: ["019f42f6-8ada-7001-afff-c722e75faf45"]
@@ -44,19 +50,40 @@ describe("isolated import trust corpus replay", () => {
         sessionsRepairRequired: 0
       });
     }
+    expect(report.importReports.find((item) => item.runtime === "hermes")).toMatchObject({
+      skippedUnits: 1,
+      sourceUnitsDeferred: 1,
+      sourceUnitsDiscovered: 2,
+      sourceUnitsHydrated: 1
+    });
     expect(report.workbenchCounts.notAddedReasons).toEqual([]);
     expect(report.workbenchCounts.importFailuresClassifiedAsNotAdded).toBe(0);
     expect(report.workbenchCounts.packagePath).toBe(2);
     expect(report.anomalies).toEqual([]);
     expect(report.repairPreview).toMatchObject({
-      applyAllowed: false,
-      importJobIds: [],
-      planHash: null,
-      reason: "No repair-required imports in the isolated replay."
+      affectedSessions: expect.any(Array),
+      planHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      sourcePlans: expect.arrayContaining([
+        expect.objectContaining({ available: true, sourceId: "acceptance:grok" }),
+        expect.objectContaining({ available: true, sourceId: "acceptance:hermes" })
+      ])
     });
+    expect(report.repairPreview.affectedSessions).toHaveLength(2);
+    expect(report.repairPreview.importJobIds).toHaveLength(2);
+    expect(new Set(report.repairPreview.importJobIds).size).toBe(2);
+    expect(report.repairPreview.jobPlans).toHaveLength(2);
+    expect(report.repairPreview.jobPlans.every((plan) =>
+      plan.available && plan.repairEligible && plan.scope?.mode === "transcript_recent" && plan.scope.days === 30
+    )).toBe(true);
     expect(report.scopeEvidence).toMatchObject({
-      changedOldUnitIncludedOnlyWithCursor: true,
-      freshOldUnitExcluded: true
+      currentUnitsAdmitted: 2,
+      oldSemanticUnit: {
+        canonicalSessions: 0,
+        scopeReason: "outside_recent_range",
+        status: "skipped",
+        timestampBasis: "semantic"
+      },
+      reportDeferredUnits: 1
     });
   });
 
@@ -85,6 +112,28 @@ describe("isolated import trust corpus replay", () => {
     await symlink(process.cwd(), escape, "dir");
 
     await expect(validateImportTrustDatabasePath(join(escape, "acceptance.sqlite")))
+      .rejects.toThrow(/safe isolated database path/i);
+  });
+
+  test("uses literal /tmp even when TMPDIR points outside it", async () => {
+    const previous = process.env.TMPDIR;
+    process.env.TMPDIR = process.cwd();
+    try {
+      await expect(validateImportTrustDatabasePath(join(process.cwd(), "acceptance.sqlite")))
+        .rejects.toThrow(/safe isolated database path/i);
+    } finally {
+      if (previous === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = previous;
+    }
+  });
+
+  test("rejects a dangling symlink at the database leaf", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-import-trust-"));
+    tempDirs.push(tempDir);
+    const databasePath = join(tempDir, "acceptance.sqlite");
+    await symlink(join(tempDir, "missing.sqlite"), databasePath, "file");
+
+    await expect(validateImportTrustDatabasePath(databasePath))
       .rejects.toThrow(/safe isolated database path/i);
   });
 });

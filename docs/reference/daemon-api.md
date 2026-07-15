@@ -97,7 +97,8 @@ Write endpoints are local daemon operations. They are not exposed through MCP.
 - `POST /imports/repair/apply` accepts `{ "importJobIds": ["..."], "planHash": "<sha256>" }`.
   Apply recomputes the preview under a write transaction and rejects hash drift. It preserves
   unrelated/live/shared/manual/published data and stages only exact eligible replacement jobs.
-  Preview/apply are primary-daemon mutations and are not bridge-safe or MCP operations.
+  Preview is read-only; apply is a primary-daemon mutation. Neither operation is exposed through
+  MCP, and the read-only worktree bridge does not forward repair operations.
 - `PUT /sources/:sourceId/policies` updates source policy state.
 - `POST /sources/exclusions` adds an import exclusion.
 - `POST /review-dispositions` writes local review state.
