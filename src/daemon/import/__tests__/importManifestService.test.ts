@@ -132,6 +132,7 @@ describe("import manifest service", () => {
       includedUnits: 500,
       totalUnits: 800
     });
+    expect(plan.units.filter((unit) => unit.status === "skipped" && unit.scopeReason === "deferred_by_unit_limit")).toHaveLength(300);
   });
 
   test("previews recent and changed transcript files without persisting rows", async () => {

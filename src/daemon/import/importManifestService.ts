@@ -46,7 +46,7 @@ export async function buildImportManifestPlan(input: {
   const candidates = await candidateUnits(input.sources, input.importKind, input.scope, input.generatedAt, input.cursors ?? new Map());
   const totalBytes = candidates.reduce((sum, unit) => sum + (unit.fileSizeBytes ?? 0), 0);
   const includedUnits = candidates.filter((unit) => unit.status !== "skipped").length;
-  const cappedUnits = candidates.filter((unit) => unit.statusReason === "Deferred by the selected recent-history range.").length;
+  const cappedUnits = candidates.filter((unit) => unit.scopeReason === "deferred_by_unit_limit").length;
   return {
     summary: {
       cappedUnits,
@@ -128,7 +128,12 @@ async function candidateUnits(
   const limitedIds = new Set(limited.map((unit) => `${unit.sourceId}\0${unit.sourcePath ?? ""}\0${unit.sourceSessionId ?? ""}`));
   const capped = included
     .filter((unit) => !limitedIds.has(`${unit.sourceId}\0${unit.sourcePath ?? ""}\0${unit.sourceSessionId ?? ""}`))
-    .map((unit) => ({ ...unit, status: "skipped" as const, statusReason: "Deferred by the selected recent-history range." }));
+    .map((unit) => ({
+      ...unit,
+      scopeReason: "deferred_by_unit_limit" as const,
+      status: "skipped" as const,
+      statusReason: "Deferred by the selected recent-history range."
+    }));
   return [...limited, ...capped, ...excluded].toSorted((a, b) => String(a.sourcePath ?? a.sourceId).localeCompare(String(b.sourcePath ?? b.sourceId)));
 }
 

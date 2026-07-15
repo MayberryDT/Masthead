@@ -197,16 +197,20 @@ export async function runImportWorkUnit(input: {
       if (result.sessionId) {
         imported += 1;
         sessionIds.add(result.sessionId);
-        const impactKind = unit.unitKind === "enrichment_session"
-          ? "enriched"
+        const impactKinds = unit.unitKind === "enrichment_session"
+          ? ["enriched" as const]
           : unit.unitKind === "transcript_file"
-            ? "transcript_added"
-            : result.created
-              ? "created"
-              : "updated";
-        const impactKey = `${result.sessionId}\0${impactKind}`;
-        const pending = pendingImpacts.get(impactKey);
-        pendingImpacts.set(impactKey, { impactKind, recordCount: (pending?.recordCount ?? 0) + 1, sessionId: result.sessionId });
+            ? ["transcript_added" as const, ...(result.created ? ["created" as const] : [])]
+            : [result.created ? "created" as const : "updated" as const];
+        for (const impactKind of impactKinds) {
+          const impactKey = `${result.sessionId}\0${impactKind}`;
+          const pending = pendingImpacts.get(impactKey);
+          pendingImpacts.set(impactKey, {
+            impactKind,
+            recordCount: (pending?.recordCount ?? 0) + 1,
+            sessionId: result.sessionId
+          });
+        }
         if (result.recordInserted) input.onSessionImported?.(result.sessionId);
       }
       await flushCheckpoint();

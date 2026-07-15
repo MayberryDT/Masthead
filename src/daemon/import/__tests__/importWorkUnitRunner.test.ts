@@ -9,6 +9,7 @@ import {
   listImportFailureGroups,
   listImportWorkUnits
 } from "../../db/importLedgerRepository.ts";
+import { summarizeImportSessionImpacts } from "../../db/importSessionImpactRepository.ts";
 import { migrateDatabase } from "../../db/schema.ts";
 import { addSourceExclusion } from "../../db/sourceRepository.ts";
 import { readCursor } from "../../db/cursorRepository.ts";
@@ -87,6 +88,10 @@ describe("import work unit runner", () => {
     expect(db.prepare("SELECT COUNT(*) AS count FROM sessions").get()).toEqual({ count: 1 });
     expect(hydratedSessionIds).toHaveLength(1);
     expect(hydratedSessionIds[0]).toMatch(/^session:/);
+    expect(summarizeImportSessionImpacts(db, "import-1")).toMatchObject({
+      sessionsCreated: 1,
+      transcriptSessions: 1
+    });
     expect(
       db.prepare("SELECT status, reason FROM session_import_health WHERE session_id = ?").get(hydratedSessionIds[0])
     ).toEqual({ reason: null, status: "complete" });
@@ -129,9 +134,9 @@ describe("import work unit runner", () => {
 
     expect(result.sessionIds).toHaveLength(1);
     expect(readWorkbenchSessionState(db, result.sessionIds[0])).toMatchObject({
-      nonPublicationReason: "low_evidence",
-      publicationStatus: "not_added_to_logbook",
-      qualityStatus: "failed"
+      nextAction: "review_quality",
+      publicationStatus: "publish_path",
+      qualityStatus: "unchecked"
     });
   });
 

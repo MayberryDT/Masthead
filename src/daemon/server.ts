@@ -1401,6 +1401,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           : "succeeded",
       transcriptsImported: result.importedCount
     });
+    if (report.status === "succeeded_with_issues") result.completionStatus = report.status;
     updateImportJob(database, controls.importJobId, {
       completionReport: report,
       summary: {

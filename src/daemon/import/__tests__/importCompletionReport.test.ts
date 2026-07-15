@@ -71,6 +71,8 @@ describe("import completion report", () => {
     });
 
     expect(report).toMatchObject({
+      anomalies: [],
+      cappedUnits: 2,
       importJobId: "import-1",
       importHealth: {
         complete: 0,
@@ -86,6 +88,9 @@ describe("import completion report", () => {
         total: 1
       },
       nextActions: expect.arrayContaining(["open_logbook", "import_full_archive", "run_enrichment"]),
+      outOfRangeSessions: 0,
+      recordsRecognized: 4,
+      recordsRejected: 0,
       recordsImported: 4,
       recordsSkipped: 1,
       sourceUnitsDeferred: 1,
@@ -96,10 +101,148 @@ describe("import completion report", () => {
       sessionsDiscovered: 1,
       sessionsHydrated: 1,
       sessionsCreated: 1,
+      sessionsFinalized: 1,
+      sessionsOnPackagePath: 0,
+      sessionsRepairRequired: 1,
+      sessionsSuppressed: 0,
       sessionsUpdated: 0,
       status: "succeeded_with_issues",
+      timestampBasis: {
+        file_modified: 0,
+        semantic: 0,
+        source_path: 0,
+        unknown: 1
+      },
       transcriptsImported: 1
     });
+    db.close();
+  });
+
+  test("turns error anomalies into a repair-required receipt", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-import-report-anomaly-"));
+    tempDirs.push(tempDir);
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+    migrateDatabase(db);
+    seedImportSession(db);
+    seedImportWorkUnit(db);
+    recordImportSessionImpact(db, {
+      importJobId: "import-1",
+      impactKind: "transcript_added",
+      observedAt: "2026-07-01T00:02:00.000Z",
+      recordCount: 20,
+      runtime: "opencode",
+      sessionId: "session:1",
+      sourceId: "opencode-sessions"
+    });
+    const insertMessage = db.prepare(
+      "INSERT INTO messages (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    );
+    for (let index = 0; index < 20; index += 1) {
+      insertMessage.run(
+        `message:${index}`,
+        "session:1",
+        "tool",
+        `tool evidence ${index}`,
+        `hash:${index}`,
+        `2026-07-01T00:00:${String(index).padStart(2, "0")}.000Z`,
+        "{}",
+        "authoritative"
+      );
+    }
+
+    const report = buildImportCompletionReport(db, {
+      failedUnits: 0,
+      generatedAt: "2026-07-01T00:03:00.000Z",
+      importJobId: "import-1",
+      recordsFailed: 0,
+      recordsImported: 20,
+      recordsSkipped: 0,
+      runtime: "opencode",
+      skippedUnits: 0,
+      status: "succeeded",
+      transcriptsImported: 20
+    });
+
+    expect(report).toMatchObject({
+      anomalies: [expect.objectContaining({ code: "tool_evidence_not_normalized", severity: "error" })],
+      nextActions: expect.arrayContaining(["repair_import"]),
+      status: "succeeded_with_issues"
+    });
+    db.close();
+  });
+
+  test("detects transcript-created sessions outside a recent scope", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-import-report-range-"));
+    tempDirs.push(tempDir);
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+    migrateDatabase(db);
+    seedImportSession(db);
+    seedImportWorkUnit(db);
+    db.prepare("UPDATE sessions SET last_activity_at = ? WHERE session_id = ?").run("2020-01-01T00:00:00.000Z", "session:1");
+    db.prepare("UPDATE import_manifests SET scope_json = ?, capped_units = 0 WHERE manifest_id = ?").run(
+      JSON.stringify({ days: 30, includeChangedSinceCursor: true, mode: "transcript_recent" }),
+      "manifest:1"
+    );
+    for (const impactKind of ["created", "transcript_added"] as const) {
+      recordImportSessionImpact(db, {
+        importJobId: "import-1",
+        impactKind,
+        observedAt: "2026-07-01T00:02:00.000Z",
+        runtime: "opencode",
+        sessionId: "session:1",
+        sourceId: "opencode-sessions"
+      });
+    }
+
+    const report = buildImportCompletionReport(db, {
+      failedUnits: 0,
+      generatedAt: "2026-07-01T00:03:00.000Z",
+      importJobId: "import-1",
+      recordsFailed: 0,
+      recordsImported: 4,
+      recordsSkipped: 0,
+      runtime: "opencode",
+      skippedUnits: 0,
+      status: "succeeded",
+      transcriptsImported: 4
+    });
+
+    expect(report).toMatchObject({
+      anomalies: [expect.objectContaining({ code: "out_of_range_sessions", severity: "error" })],
+      nextActions: expect.arrayContaining(["repair_import"]),
+      outOfRangeSessions: 1,
+      status: "succeeded_with_issues"
+    });
+    db.close();
+  });
+
+  test("discloses a recent import cap without treating it as a pathological import", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-import-report-cap-"));
+    tempDirs.push(tempDir);
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+    migrateDatabase(db);
+    seedImportSession(db);
+    seedImportWorkUnit(db);
+
+    const report = buildImportCompletionReport(db, {
+      failedUnits: 0,
+      generatedAt: "2026-07-01T00:03:00.000Z",
+      importJobId: "import-1",
+      recordsFailed: 0,
+      recordsImported: 4,
+      recordsSkipped: 2,
+      runtime: "opencode",
+      skippedUnits: 2,
+      status: "succeeded",
+      transcriptsImported: 4
+    });
+
+    expect(report).toMatchObject({
+      anomalies: [],
+      cappedUnits: 2,
+      status: "succeeded"
+    });
+    expect(report.nextActions).not.toContain("repair_import");
     db.close();
   });
 });
@@ -151,11 +294,11 @@ function seedImportWorkUnit(db: MastheadDatabase): void {
       manifest_id, import_job_id, source_id, runtime_kind, import_kind, scope_json,
       generated_at, total_units, included_units, capped_units, excluded_units, total_bytes
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run("manifest:1", "import-1", "opencode-sessions", "opencode", "transcript", "{}", "2026-07-01T00:00:00.000Z", 1, 1, 0, 0, 1);
+  ).run("manifest:1", "import-1", "opencode-sessions", "opencode", "transcript", "{}", "2026-07-01T00:00:00.000Z", 3, 1, 2, 2, 1);
   db.prepare(
     `INSERT INTO import_work_units (
       work_unit_id, manifest_id, import_job_id, source_id, runtime_kind, source_kind,
-      confidence, unit_kind, status, timestamp_basis
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run("unit:1", "manifest:1", "import-1", "opencode-sessions", "opencode", "jsonl", "authoritative", "transcript_file", "succeeded_with_issues", "unknown");
+      confidence, unit_kind, status, timestamp_basis, processed_records, imported_records
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run("unit:1", "manifest:1", "import-1", "opencode-sessions", "opencode", "jsonl", "authoritative", "transcript_file", "succeeded_with_issues", "unknown", 4, 4);
 }

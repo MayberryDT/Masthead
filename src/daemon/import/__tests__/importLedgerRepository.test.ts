@@ -34,6 +34,7 @@ describe("import ledger repository", () => {
 
   test("persists a manifest and child work unit progress", () => {
     const manifest = createImportManifest(db, {
+      cappedUnits: 7,
       excludedUnits: 0,
       generatedAt: "2026-07-01T00:01:00.000Z",
       importJobId: "import-1",
@@ -89,6 +90,7 @@ describe("import ledger repository", () => {
       status: "running"
     });
     expect(getImportManifestSummary(db, manifest.manifestId)).toMatchObject({
+      cappedUnits: 7,
       includedUnits: 1,
       totalUnits: 1
     });

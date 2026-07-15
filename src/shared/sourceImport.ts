@@ -67,7 +67,27 @@ export type ImportManifestSummaryDto = {
 
 export type ImportWorkUnitKind = "metadata_source" | "transcript_file" | "source_session" | "enrichment_session";
 export type ImportTimestampBasis = "semantic" | "source_path" | "file_modified" | "unknown";
-export type ImportUnitScopeReason = "full_archive" | "inside_recent_range" | "changed_since_cursor" | "outside_recent_range";
+export type ImportUnitScopeReason =
+  | "full_archive"
+  | "inside_recent_range"
+  | "changed_since_cursor"
+  | "outside_recent_range"
+  | "deferred_by_unit_limit";
+
+export type ImportAnomalyCode =
+  | "record_id_session_explosion"
+  | "conversation_roles_missing"
+  | "schema_rejection_dominates"
+  | "out_of_range_sessions"
+  | "tool_evidence_not_normalized"
+  | "epoch_timestamp_dominates";
+
+export type ImportAnomaly = {
+  code: ImportAnomalyCode;
+  severity: "warning" | "error";
+  count: number;
+  message: string;
+};
 
 export type ImportWorkUnitDto = {
   workUnitId: string;
@@ -128,6 +148,16 @@ export type ImportCompletionReportDto = {
   recordsImported: number;
   recordsSkipped: number;
   recordsFailed: number;
+  recordsRecognized: number;
+  recordsRejected: number;
+  sessionsFinalized: number;
+  sessionsRepairRequired: number;
+  sessionsSuppressed: number;
+  sessionsOnPackagePath: number;
+  outOfRangeSessions: number;
+  timestampBasis: Record<ImportTimestampBasis, number>;
+  cappedUnits: number;
+  anomalies: ImportAnomaly[];
   logbookSearchableSessions: number;
   dossierReadySessions: number;
   enrichedSessions: number;
@@ -140,7 +170,7 @@ export type ImportCompletionReportDto = {
   sourceUnitsFailed?: number;
   sourceUnitsRemaining?: number;
   importHealth?: SessionImportHealthSummaryDto;
-  nextActions: Array<"retry_failed_units" | "import_full_archive" | "approve_transcripts" | "run_enrichment" | "open_logbook">;
+  nextActions: Array<"retry_failed_units" | "import_full_archive" | "approve_transcripts" | "run_enrichment" | "open_logbook" | "repair_import">;
 };
 
 export function deriveImportVisibilityState(
