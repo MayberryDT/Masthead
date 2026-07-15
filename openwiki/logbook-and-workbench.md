@@ -31,6 +31,24 @@ jobs terminate. A metadata shell is provisional: after transcript hydration, Wor
 quality decision and can return it to the publish path. Tool-only transcripts are usable evidence;
 only complete duplicate or hook-only units are terminal noise.
 
+The adapter owns the **transcript unit** and its stable source-session identity. One Grok conversation
+directory is one unit; reasoning record ids stay evidence inside that conversation and never become
+session ids. Hermes JSON, JSONL, and SQLite evidence merges under the source session id, including
+structured tool calls and results.
+
+A fresh recent-history import admits only units whose declared activity is inside the requested
+range. An older changed unit is an incremental refresh only when Masthead already has a cursor for
+that unit. A requested unit cap is reported as deferred work, not as a completed range. Import
+receipts disclose whether each unit used semantic activity, a source-path timestamp, file modified
+time, or an unknown timestamp basis.
+
+Import health and Workbench quality answer different questions. Partial, unrecognized, or
+identity-ambiguous units need **Import repair** and do not enter Not Added. Complete sessions then
+follow the Workbench quality path: meaningful or ambiguous short conversations stay on the package
+path for review; only empty, hook-only, diagnostic-only, exact-duplicate, or manually excluded
+sessions enter Not Added. An automatic suppression is reversible when its evidence revision changes;
+a manual exclusion remains sticky.
+
 ## Logbook (locked UI)
 
 - **Row** = published artifact only (`session_dossier`, `runbook`, `adr`, `incident_timeline`).

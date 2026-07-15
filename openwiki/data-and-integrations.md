@@ -15,6 +15,17 @@ The main idea is simple:
 
 Live connector events are part of that flow: `src/daemon/server.ts` routes ingest by runtime, and `src/core/liveIdentity.ts` scopes canonical live sessions by host plus runtime so multiple harnesses can share a source session ID without colliding.
 
+Transcript adapters own unit boundaries and source-session identity; the daemon owns manifests,
+scope decisions, import health, canonical persistence, and Workbench reconciliation. Recent imports
+exclude old units on a fresh run, but may include an old changed unit when an existing unit cursor
+proves it is an incremental refresh. Completion reports expose capped/deferred units and the
+timestamp basis used for every planned unit.
+
+Import health is not a quality verdict. Partial parses, unrecognized schemas, and missing or
+ambiguous identity are repair-required import outcomes and never become Workbench Not Added
+reasons. Quality reconciliation starts only after complete import evidence. Automatic suppression
+can reopen when the evidence revision changes; user exclusion remains sticky.
+
 **Published knowledge** lives in artifact tables (`session_artifacts` + provenance), not as “Logbook session rows.” Schema migration `018_artifact_first_logbook` introduces that model. Dogfood may wipe published artifact state and rebuild via Workbench; see `docs/reference/artifact-first-logbook-cutover.md`.
 
 ## Daemon API
@@ -37,6 +48,13 @@ Important contracts:
 - Write endpoints (`/ingest`, Workbench mutations, `/data/delete`, etc.) stay local to the daemon and are not exposed through MCP.
 
 `POST /ingest` uses the runtime query parameter or `x-masthead-runtime` header. Connector tests use a validation-only ingest variant so installer/test flows can verify the hook path without mutating the store when appropriate.
+
+Import repair is provenance-scoped and two-phase. Preview is read-only and reports affected
+sessions, pseudo-sessions, out-of-range sessions, automatic suppressions eligible to reopen,
+preservation reasons, published-artifact blockers, source mappings, and a SHA-256 plan hash. Apply
+requires that exact unchanged hash. It preserves live/shared/manual/published state, refuses an
+unsafe or drifted plan, and stages replacement imports only for eligible source/job plans. Always
+exercise repair against a disposable database copy before authorizing work on an active store.
 
 Workbench enrichment and optional-artifact authoring go through Workbench/CLI paths with receipts. Normal `mastheadctl workbench` authoring commands are thin daemon HTTP calls. A V3 run covers 1–12 selected sessions; the agent enriches every selected session and may submit zero or more grounded optional artifacts. There is **no Logbook bulk-enrich UI or primary bulk-enrich product path**.
 

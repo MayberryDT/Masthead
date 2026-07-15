@@ -44,6 +44,11 @@ Clients should reject a daemon that does not identify `product: "masthead"` with
 - `GET /projects` lists known projects.
 - `GET /imports` lists import jobs.
 - `GET /imports/:importJobId` returns one import job.
+- Import completion reports separate source-unit reconciliation, recognized/rejected records,
+  import-health counts, Workbench package/Not Added counts, deterministic anomalies, and timestamp
+  basis (`semantic`, `source_path`, `file_modified`, `unknown`). For `transcript_recent`, old units
+  are excluded without a cursor; an old changed unit is an incremental refresh only with its
+  existing cursor; unit-limit deferrals are disclosed as capped/deferred work.
 - `GET /data/summary` returns Masthead-owned data counts for a scope.
 - `GET /knowledge-flow/summary` returns `{ ok: true, summary: { capturedSessions, workbenchSessions, publishedArtifacts, automaticallyResolvedSessions } }`. `capturedSessions` counts non-deleted canonical sessions; `workbenchSessions` counts non-deleted sessions currently on the Workbench `publish_path`; `publishedArtifacts` counts published artifacts whose status is `current`; and `automaticallyResolvedSessions` counts non-deleted Workbench sessions whose resolution status is `automatic_resolved`. This endpoint is GET-only, read-only, and safe through a worktree bridge; there is no mutation counterpart.
 - `GET /data/export` exports the local session graph.
@@ -85,6 +90,14 @@ Write endpoints are local daemon operations. They are not exposed through MCP.
 - `POST /workbench/authoring/runs/:runId/finish` is the only normal dossier-publication path. It atomically applies current enrichment before rebuilding and publishing one canonical dossier per selected session, publishes any accepted optional artifacts, updates current-only search and pipeline state, releases claims, records Activity, and stores a V3 completion receipt. Retry returns the same receipt without duplicates. Historical V1/V2 runs are audit-only and cannot submit or finish. Primary daemon only; blocked by the read-only bridge.
 - `POST /imports/:importJobId/cancel` cancels an import job.
 - `POST /imports/:importJobId/retry` queues a retry.
+- `POST /imports/repair/preview` accepts `{ "importJobIds": ["..."] }` and returns a read-only,
+  provenance-scoped repair plan. It identifies removable pseudo-sessions, sessions to reparse,
+  automatic suppressions eligible to reopen, old out-of-range sessions to defer, preserved live or
+  shared sessions, published-artifact blockers, source/job plans, and `planHash`.
+- `POST /imports/repair/apply` accepts `{ "importJobIds": ["..."], "planHash": "<sha256>" }`.
+  Apply recomputes the preview under a write transaction and rejects hash drift. It preserves
+  unrelated/live/shared/manual/published data and stages only exact eligible replacement jobs.
+  Preview/apply are primary-daemon mutations and are not bridge-safe or MCP operations.
 - `PUT /sources/:sourceId/policies` updates source policy state.
 - `POST /sources/exclusions` adds an import exclusion.
 - `POST /review-dispositions` writes local review state.

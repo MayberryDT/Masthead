@@ -20,6 +20,15 @@
 - [x] Transcript import requires exact source-scoped approval and Workbench intent. Evidence: Workbench API/CLI tests cover unrelated approved source rejection; import worker tests cover exact-source policy enforcement.
 - [x] Imported sessions enter canonical storage and Workbench; only their published artifacts appear in Logbook search. Evidence: focused import tests plus artifact-only Logbook contract tests.
 - [x] Unrecognized schemas produce diagnostics and do not create fake transcripts. Evidence: focused import tests cover unrecognized source diagnostics with zero sessions.
+- [x] Fresh recent imports exclude old units without cursors; changed old units require an existing
+  cursor and are reported as incremental refreshes; caps remain explicit deferrals. Evidence:
+  `importManifestService.test.ts` and the isolated import-trust replay passed on 2026-07-15.
+- [x] Transcript-unit ownership preserves canonical identity and structured evidence. Evidence: the
+  sanitized replay produced exactly one Grok conversation (zero `rs_*` pseudo-sessions) and one
+  Hermes session with one structured tool call and one structured tool result.
+- [x] Import repair stays distinct from Not Added. Evidence: the isolated replay reported two
+  package-path sessions, zero repair-required sessions, zero import failures classified as Not
+  Added, and no Not Added reasons; focused partial/unrecognized import tests cover the failure path.
 - [x] Harness catalog exposes only active focused harnesses. Evidence: `RUNTIME_KINDS` and `HARNESS_CATALOG` are the seven-runtime support contract.
 - [ ] Advanced diagnostics reviewed in rendered Sources UI.
 - [ ] `sources-pipeline` doctor check reviewed against current local data.
@@ -98,6 +107,24 @@
 ## Data ownership
 - [x] SQLite is the canonical product store. Evidence: `npm run verify` and SQLite maintenance tests passed on 2026-06-26.
 - [x] Legacy NDJSON is migration/compatibility only and receives no new product writes. Evidence: canonical ownership tests passed through `npm run verify` on 2026-06-26.
+
+## Import trust and repair readiness
+
+- [x] `scripts/replay-import-trust-corpus.js` requires a sanitized corpus and a new database path
+  under `/tmp`; it rejects outside-`/tmp`, existing, and `masthead-production*` database paths.
+- [x] The 2026-07-15 sanitized replay reported `productionAccessed: false`, Grok/Hermes session
+  counts `1/1`, zero out-of-range sessions, zero rejected records, zero repair-required sessions,
+  zero anomalies, Workbench package path `2`, and an honest non-applicable repair preview.
+- [x] Repair preview/apply was rehearsed only on a disposable evaluation copy. A plain copy of the
+  active WAL database failed integrity and was abandoned. A new SQLite-consistent read-only backup
+  under `/tmp` passed integrity before and after migration. Preview hash
+  `2dc291775060045443edcafd96325ae50c9d1dc66fe486541b84ea04ada3cdc2` preserved all 1,550 affected
+  sessions: 1,484 had shared ownership and 66 were blocked in indivisible jobs. It exposed zero
+  published artifacts as deletable. Apply with that exact hash was an honest no-op: zero removals,
+  resets, reopened suppressions, cursor resets, or reimports, with all 1,550 sessions preserved.
+- [x] No active evaluation/production database was passed to repair code; no production build was
+  packaged, installed, or restarted. Clean replacement evidence comes from the sanitized replay;
+  ambiguous legacy ownership remains preserved rather than silently deleted.
 
 ## Durable artifact recovery readiness (Gate C)
 
