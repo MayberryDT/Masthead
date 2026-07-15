@@ -33,6 +33,7 @@ export function reconcileImportedTranscript(
   if (!sessionExists) return { quality };
   if (!state && quality.disposition === "suppress" && !finalizeNoise && !options.holdForRepair) return { quality };
   state ??= ensureWorkbenchSessionState(db, sessionId);
+  if (options.holdForRepair && state.publicationStatus === "published") return { quality, state };
 
   const coverage = getTranscriptCoverage(db, sessionId);
   const totalEvidence =

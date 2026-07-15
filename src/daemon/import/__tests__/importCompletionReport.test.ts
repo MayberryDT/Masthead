@@ -3,10 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { recordImportSessionImpact } from "../../db/importSessionImpactRepository.ts";
+import { getImportJob, updateImportJob } from "../../db/importJobRepository.ts";
 import { recordSessionImportHealth } from "../../db/sessionImportHealthRepository.ts";
 import { migrateDatabase } from "../../db/schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../../db/sqlite.ts";
-import { readWorkbenchSessionState } from "../../db/workbenchPipelineRepository.ts";
+import { markWorkbenchPublished, readWorkbenchSessionState } from "../../db/workbenchPipelineRepository.ts";
 import { reconcileImportedTranscript } from "../../../workbench/transcriptQualityReconciler.ts";
 import { buildImportCompletionReport, settleImportSessionClassifications } from "../importCompletionReport.ts";
 
@@ -192,15 +193,23 @@ describe("import completion report", () => {
 
   test("holds pathological import sessions on the review path instead of automatic Not Added", async () => {
     const { db } = await seededReportDatabase("masthead-import-report-pathological-");
-    removeCanonicalEvidence(db, "session:1");
-    recordImportSessionImpact(db, {
-      importJobId: "import-1",
-      impactKind: "transcript_added",
-      observedAt: "2026-07-01T00:02:00.000Z",
-      runtime: "opencode",
-      sessionId: "session:1",
-      sourceId: "opencode-sessions"
+    cloneImportSession(db, "session:published", "s-published");
+    markWorkbenchPublished(db, {
+      actor: { kind: "system", id: "test" },
+      publishedVia: "test",
+      sessionId: "session:published"
     });
+    removeCanonicalEvidence(db, "session:1");
+    for (const sessionId of ["session:1", "session:published"]) {
+      recordImportSessionImpact(db, {
+        importJobId: "import-1",
+        impactKind: "transcript_added",
+        observedAt: "2026-07-01T00:02:00.000Z",
+        runtime: "opencode",
+        sessionId,
+        sourceId: "opencode-sessions"
+      });
+    }
     db.prepare(
       "UPDATE import_work_units SET processed_records = 200, imported_records = 100, failed_records = 100 WHERE work_unit_id = 'unit:1'"
     ).run();
@@ -217,7 +226,7 @@ describe("import completion report", () => {
 
     expect(report).toMatchObject({
       nextActions: expect.arrayContaining(["repair_import"]),
-      sessionsOnPackagePath: 1,
+      sessionsOnPackagePath: 2,
       sessionsSuppressed: 0,
       status: "succeeded_with_issues"
     });
@@ -226,6 +235,18 @@ describe("import completion report", () => {
       publicationStatus: "publish_path",
       qualityDecisionSource: "automatic",
       qualityStatus: "unchecked"
+    });
+    expect(readWorkbenchSessionState(db, "session:published")).toMatchObject({
+      publicationStatus: "published",
+      sessionPackageStatus: "published"
+    });
+    updateImportJob(db, "import-1", {
+      completionReport: report,
+      updatedAt: "2026-07-01T00:04:00.000Z"
+    });
+    expect(getImportJob(db, "import-1")?.completionReport).toMatchObject({
+      nextActions: expect.arrayContaining(["repair_import"]),
+      status: "succeeded_with_issues"
     });
     db.close();
   });
@@ -406,6 +427,18 @@ function removeCanonicalEvidence(db: MastheadDatabase, sessionId: string): void 
   for (const table of ["messages", "tool_results", "tool_calls", "file_effects", "runtime_signals", "checkpoints"]) {
     db.prepare(`DELETE FROM ${table} WHERE session_id = ?`).run(sessionId);
   }
+}
+
+function cloneImportSession(db: MastheadDatabase, sessionId: string, sourceSessionId: string): void {
+  db.prepare(
+    `INSERT INTO sessions (
+      session_id, host_id, runtime_id, source_session_id, lifecycle, last_activity_at,
+      source_confidence, created_at, updated_at
+    ) SELECT ?, host_id, runtime_id, ?, lifecycle, last_activity_at,
+      source_confidence, created_at, updated_at
+    FROM sessions
+    WHERE session_id = 'session:1'`
+  ).run(sessionId, sourceSessionId);
 }
 
 function reportInput(overrides: { recordsFailed?: number; recordsImported?: number } = {}) {
