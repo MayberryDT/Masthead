@@ -33,14 +33,13 @@ _Avoid_: Published session, automatic work resolved, Logbook-ready session
 
 **Legacy automatic work resolved**:
 Audit-only V1 state that required a session package plus explicit resolution of every optional kind.
-Authoring contract V2 does not target or compute this state. It publishes the canonical dossier
-independently and tracks each positive-evidence candidate group directly.
-_Avoid_: V2 completion criterion, per-session optional-kind checklist, Logbook session row
+V2 also remains audit-only. Authoring contract V3 does not target or compute this state: it enriches
+the selected sessions and publishes their rebuilt dossiers with any useful optional artifacts.
+_Avoid_: V3 completion criterion, per-session optional-kind checklist, Logbook session row
 
 **Publication transition**:
-The explicit Workbench state change that admits one artifact into Logbook after that artifact is
-ready. Applying enrichment or drafting an artifact is not publication by itself. Artifacts publish
-independently; sessions only become ready to contribute provenance and evidence.
+Atomic admission of validated enriched artifacts into Logbook. Applying enrichment or drafting an
+artifact is not publication by itself; nothing enters Logbook until enrichment is current.
 _Avoid_: Auto-publish, enrichment apply, import complete, publish session as Logbook row
 
 **Legacy publication backfill**:
@@ -78,13 +77,13 @@ _Avoid_: Checklist, status label, session-as-Logbook-gate alone
 
 **Publication memory requirement**:
 Per-artifact readiness rules that must be satisfied before publish, such as schema-valid body,
-valid evidence refs, confidence, and candidate-kind evidence requirements. Session readiness is
+valid evidence refs, confidence, and kind-specific evidence requirements. Session readiness is
 upstream of authoring, not a substitute for artifact publish.
 _Avoid_: Optional enrichment, blanket artifact requirement, publish whole session
 
 **Workbench session states (artifact-first)**:
 The session path exposes readiness and canonical dossier publication. Optional knowledge work is
-shown as discovered, claimed, completed, or rejected artifact candidate groups; a session does not
+shown as suggested, authored, or omitted; a session does not
 acquire three empty optional-kind obligations merely by existing.
 _Avoid_: Published session as Logbook eligibility, blanket optional-kind resolution state
 
@@ -192,6 +191,11 @@ change after real use. In V1, it is a regenerated handoff from the current Workb
 not a durable task, proposal, or workflow object.
 _Avoid_: CLI command, script, recipe
 
+**Copy Agent Prompt**:
+Copies a disposable request for the selected sessions. The prompt asks the agent to enrich those
+sessions and choose any useful optional artifacts; it is not a durable task or a detector verdict.
+_Avoid_: Assignment, saved job, required artifact list
+
 **Disposable handoff**:
 A temporary, copyable block of plain-language instructions generated from the current Workbench
 selection for the user to give their coding agent. It is not saved, assigned, scheduled, or tracked
@@ -206,8 +210,9 @@ _Avoid_: User workflow, visible controls
 
 **Authoring module**:
 The daemon-owned Workbench domain module that controls authoring runs, complete canonical redacted
-evidence access, candidate discovery, grounded bundle validation, atomic publication, claims, and
-idempotent completion receipts. It is reached through daemon HTTP; the CLI is only an adapter.
+evidence access, nonbinding suggestion detection, grounded enrichment and artifact validation,
+atomic publication, claims, and idempotent completion receipts. It is reached through daemon HTTP;
+the CLI is only an adapter.
 _Avoid_: CLI implementation, direct database script, MCP writer, native model service
 
 **Canonical dossier snapshot**:
@@ -218,16 +223,26 @@ recursive artifact listing. A dossier artifact is an immutable canonical dossier
 Agents never author a session dossier body; the daemon snapshots canonical session data.
 _Avoid_: Agent-authored dossier, generated session summary, authoring-protocol report
 
-**Artifact candidate**:
-A daemon-discovered opportunity to create one reusable runbook, ADR, or incident timeline from
-positive canonical evidence.
-Optional artifact work begins from a positive-evidence artifact candidate. Missing signals produce
-no candidate and require no generated not-applicable response.
-_Avoid_: Per-session artifact obligation, empty artifact slot, generic topic match
+**Enriched dossier**:
+The original canonical dossier structure rendered after current durable enrichment. The daemon
+rebuilds it from canonical session data; the agent enriches its source memory but never replaces
+the dossier presentation.
+_Avoid_: Agent-authored dossier body, stale canonical snapshot, protocol report
+
+**Artifact suggestion**:
+A nonbinding detector hint supplied privately to the agent. Suggestions may include
+canonical-rendering cues, but suggestions are nonbinding: they neither require nor prohibit an
+artifact kind.
+_Avoid_: Artifact obligation, user-facing verdict, empty artifact slot
+
+**Agent-led authoring**:
+The agent enriches selected sessions and chooses useful artifacts. A V3 run may create zero or more
+optional artifacts alongside the daemon-rebuilt enriched dossiers.
+_Avoid_: Detector-led obligation, daemon-authored enrichment, blanket kind checklist
 
 **Candidate group**:
-One artifact candidate or a small set of candidates joined by the same strong evidence-backed key.
-One authoring contract V2 run owns exactly one candidate group with at most 12 provenance sessions.
+An audit-only V2 grouping of detector outputs joined by the same strong evidence-backed key. It is
+not a V3 authoring unit.
 _Avoid_: Arbitrary session batch, project-wide cluster, weak topic grouping
 
 **Claim support**:
@@ -237,23 +252,29 @@ before publication.
 _Avoid_: Unsupported assertion, evidence id without quoted support, generic citation list
 
 **Authoring contract V2**:
-The candidate-driven daemon contract in which an agent authors one optional artifact for one
-candidate group. A V2 bundle cannot contain a dossier body or blanket per-session N/A resolutions,
+The candidate-driven daemon contract in which an agent authors a single optional artifact for a
+legacy detector group. A V2 bundle cannot contain a dossier body or blanket per-session N/A resolutions,
 and V1 bundles or completed runs are never reusable by V2.
-_Avoid_: Session-batch authoring, agent-authored dossier, V1 run reuse
+V2 runs are audit-only and are never reused by V3.
+_Avoid_: Current authoring contract, session-batch authoring, agent-authored dossier, V1 run reuse
+
+**Authoring contract V3**:
+The selection-scoped `workbench-authoring-v3` contract. The agent enriches every selected session,
+may create zero or more optional artifacts, and finishes through atomic validation and publication
+of enrichment-derived dossiers and optional artifacts. V1 and V2 runs remain audit-only.
+_Avoid_: Candidate-required authoring, stale enrichment, reuse of a legacy run
 
 **Authoring run**:
-One durable daemon-owned attempt by an actor to author one candidate group against an exact database
-identity and evidence revision. It owns the candidate claim, latest bundle, structured findings,
-state, and eventual completion report. Reopening is idempotent only for the same V2 candidate group,
-actor, database identity, and evidence revision.
+One durable daemon-owned attempt by an actor to author from an exact selected session set, database
+identity, and evidence revision. In V3 it owns enrichment, optional outputs, structured findings,
+state, and eventual completion report.
 _Avoid_: Workbench Activity row, agent chat, shell process, disposable handoff
 
 **Artifact bundle**:
-The complete grounded optional-artifact submission for one V2 candidate group. It contains one
-runbook, ADR, or incident timeline plus claim support and provenance. It never contains a session
-dossier body or blanket per-session applicability resolutions. Submit stores and validates the
-bundle without creating output rows; finish applies it atomically.
+The complete grounded V3 submission for the selected sessions. It contains durable enrichment for
+every selected session plus zero or more optional artifacts with claim support and provenance. It
+never contains a session dossier body. Submit stores and validates the bundle without creating
+Logbook rows; finish applies and publishes it atomically.
 _Avoid_: Individual output file, partial draft, command batch, ungrounded JSON
 
 **Authoring finding**:
@@ -270,7 +291,7 @@ _Avoid_: Transcript excerpt, first page, raw harness file, privacy approval prom
 
 **Automatic completion report**:
 The immutable receipt stored when atomic finish succeeds. It records the run, completion time,
-candidate group, published artifact id, provenance sessions, and validation result. A finish retry
+published artifact ids, provenance sessions, and validation result. A finish retry
 returns the same report and creates no duplicate output.
 _Avoid_: Draft summary, Activity-only event, best-effort publish list
 
@@ -290,14 +311,14 @@ _Avoid_: Full Workbench queue, suppressed-session review, Logbook
 **Agent guidance contract**:
 The agent-facing protocol, bundle schema, evidence manifest, validation, and atomic finish behavior that
 together make enrichment and artifact compile repeatable. This contract must be clear enough that a
-coding agent can finish the automatic handoff path without the user knowing CLI details. V1
-compatibility is audit-only. V2 guidance begins from a candidate group and targets exactly one
-supported runbook, ADR, or incident timeline; the canonical dossier is daemon-owned.
+coding agent can finish the automatic handoff path without the user knowing CLI details. V1 and V2
+compatibility is audit-only. V3 guidance begins from selected sessions, requires current enrichment,
+permits zero or more useful optional artifacts, and leaves canonical dossier rendering to the daemon.
 _Avoid_: Prompt hint, UI copy, user handoff, legacy bug_fix_trace as the product name
 
 **Queue reason**:
 The explicit reason a session appears in the Workbench queue, such as missing enrichment, stale
-memory, low confidence, or artifact candidate.
+memory, low confidence, or a detector suggestion.
 _Avoid_: Priority, assignment
 
 **Memory kind**:
@@ -441,16 +462,16 @@ _Avoid_: Implicit relatedness, undocumented cluster, search ranking as proof
 
 **Automatic handoff completion**:
 On the disposable-handoff path, the coding agent is expected to finish the full loop for one
-candidate group: claim, evidence review, apply one capsule and body, validate, and publish the
-supported artifact. The human is not asked to cluster sessions or click publish. Directed-agent
+selected session set: evidence review, durable enrichment, optional artifact judgment, validation,
+and atomic publication. The human is not asked to cluster sessions or click publish. Directed-agent
 work may stop earlier or change scope when the human instructs it to.
 _Avoid_: Human publish click as default, partial handoff that only drafts, silent backend publish without agent tools
 
 **Default automatic kind set**:
-The daemon always publishes the canonical session dossier when its session is ready. It discovers
-runbook, ADR, and incident-timeline candidates only when positive evidence supports them. No
-candidate means no optional authoring work and no generated N/A artifact or paragraph. Environment
-recipes and eval packs are out of the default set until a later phase.
+After the agent enriches every selected session, the daemon always rebuilds its canonical dossier.
+The agent may author zero or more runbooks, ADRs, or incident timelines when selected evidence
+supports them. Detector suggestions remain nonbinding; no optional kind needs an N/A artifact or
+paragraph. Environment recipes and eval packs are out of the default set until a later phase.
 _Avoid_: Attempt every kind per session, mandatory N/A resolution, agent-authored session package
 
 **Runbook**:
@@ -501,14 +522,15 @@ _Avoid_: Implicit attachment, hidden parent session, evidence from outside the p
 
 **Artifact applicability**:
 Legacy V1 audit data recording whether an optional kind was treated as applicable for a seed
-session. V2 replaces this obligation model with positive-evidence candidate discovery; no candidate
-is simply no work and creates no Logbook row or resolution record.
-_Avoid_: V2 candidate state, empty artifact, missing artifact treated as error
+session. V2 replaced this obligation model with detector-led discovery and is now audit-only. In
+V3, the agent judges whether selected evidence supports any optional artifacts; omission is simply
+no optional work and creates no Logbook row or resolution record.
+_Avoid_: V3 obligation state, empty artifact, missing artifact treated as error
 
 **Not applicable (N/A)**:
-Legacy V1 audit state retained to explain historical authoring runs. V2 never asks an agent to
-generate N/A prose or complete an N/A obligation when positive evidence produced no candidate.
-_Avoid_: V2 output, published stub, candidate-discovery result
+Legacy V1 audit state retained to explain historical authoring runs. V3 never asks an agent to
+generate N/A prose or complete an N/A obligation for an optional kind it does not choose.
+_Avoid_: V3 output, published stub, suggestion result
 
 **Satisfied via contribution**:
 Legacy V1 audit state meaning a seed session contributed to a published multi-session artifact.

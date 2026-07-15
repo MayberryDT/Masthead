@@ -1,6 +1,6 @@
 # Logbook and Workbench (artifact-first)
 
-**Decisions:** [ADR 0011](../docs/adr/0011-artifact-first-logbook.md) (Logbook unit), [ADR 0012](../docs/adr/0012-daemon-owned-artifact-authoring.md) (daemon seam), [ADR 0013](../docs/adr/0013-canonical-dossier-and-candidate-authoring.md) (canonical dossier and candidate-driven V2), [ADR 0009](../docs/adr/0009-logbook-only-shows-published-sessions.md) (Workbench pipeline ownership).
+**Decisions:** [ADR 0011](../docs/adr/0011-artifact-first-logbook.md) (Logbook unit), [ADR 0012](../docs/adr/0012-daemon-owned-artifact-authoring.md) (daemon seam), [ADR 0013](../docs/adr/0013-canonical-dossier-and-candidate-authoring.md) (preserved rendering/evidence findings), [ADR 0014](../docs/adr/0014-agent-led-enriched-artifact-authoring.md) (current V3 authoring), [ADR 0009](../docs/adr/0009-logbook-only-shows-published-sessions.md) (Workbench pipeline ownership).
 
 **Language:** `CONTEXT.md`.
 
@@ -49,18 +49,15 @@ only complete duplicate or hook-only units are terminal noise.
 | Store | `src/daemon/db/sessionArtifactRepository.ts`, `logbookArtifactRepository.ts` |
 | HTTP | `GET /logbook/artifacts`, `GET /logbook/artifacts/:artifactId` |
 
-## Workbench (canonical dossier + artifact candidates)
+## Workbench (agent-led enriched artifact authoring)
 
-The dossier and optional-artifact paths are intentionally different:
+One selection-scoped V3 path produces enriched dossiers and any useful optional artifacts:
 
-1. **Session dossier** — the daemon publishes an immutable snapshot of the original canonical
-   dossier. Agents never write or replace its body.
-2. **Runbook**, **ADR**, **incident timeline** — the daemon creates an artifact candidate only when
-   positive canonical evidence supports reusable knowledge. No candidate means no authoring work
-   and no generated N/A prose.
-
-Candidates may form a group only through a strong join key. A V2 authoring run owns one candidate
-group, contains at most 12 provenance sessions, and produces one optional artifact.
+1. **Enriched dossier** — the agent writes current durable enrichment for every selected session;
+   the daemon then renders the original canonical dossier structure.
+2. **Runbook**, **ADR**, **incident timeline** — the agent may create zero or more optional artifacts
+   from selected evidence. An artifact suggestion is a nonbinding detector hint supplied privately
+   to the agent; suggestions are nonbinding and cannot require or prohibit a kind.
 
 ### Daemon-owned automatic authoring
 
@@ -69,21 +66,22 @@ them a CLI recipe. Whether that handoff is copied verbatim or the user directs
 the agent conversationally, one daemon-owned authoring module enforces the same
 quality behavior:
 
-1. discover capabilities, the active database identity, and positive-evidence candidates;
-2. open or reuse one durable V2 run for one candidate group;
-3. read the canonical redacted evidence for that bounded group;
-4. submit one optional artifact whose substantive claims each carry a verbatim supporting excerpt;
+1. accept the selected sessions through **Copy Agent Prompt**, a disposable request;
+2. open a durable `workbench-authoring-v3` run for the exact selection and evidence revision;
+3. read the canonical redacted evidence and enrich every selected session;
+4. choose and submit any useful optional artifacts whose claims carry verbatim supporting excerpts;
 5. reject unsupported claims, protocol leakage, weak joins, or template duplication; and
-6. atomically publish the accepted artifact and complete the candidate group.
+6. atomically publish the enriched dossiers and optional artifacts.
 
 The immutable completion report is the proof of success, and a finish retry returns the same
-report. V1 runs remain audit-only and are never reused by V2.
+report. V1 and V2 runs remain audit-only and are never reused by V3. Nothing enters Logbook until
+enrichment is current.
 
 ### Locked UI vocabulary
 
-- Columns include enrichment, canonical dossier publication, and candidate status by optional kind.
-- Primary dossier control publishes the daemon-built canonical snapshot when gates pass.
-- Handoff names one candidate group and one expected optional artifact. No CLI recipes appear in the handoff body.
+- Columns include enrichment, dossier publication, and optional-artifact state.
+- Copy Agent Prompt is selection-scoped and contains no CLI recipes.
+- The agent enriches selected sessions and exercises optional-artifact judgment; detector hints are private context.
 - Apply ≠ publish.
 
 ### Code map

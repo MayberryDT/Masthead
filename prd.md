@@ -2,8 +2,8 @@
 
 > **Supersession (2026-07):** Logbook’s primary searchable unit is a **published artifact**, not a
 > session row. Workbench still owns the raw→ready session pipeline. The daemon publishes the original
-> canonical dossier as an immutable snapshot; positive-evidence candidates drive runbook, ADR, and
-> incident-timeline authoring under **ADR 0013**. ADR 0011 and `CONTEXT.md` define the artifact-first
+> canonical dossier as an immutable snapshot. **ADR 0014** makes authoring selection-scoped: agents
+> enrich every selected session and choose useful optional artifacts through V3 runs. ADR 0011 and `CONTEXT.md` define the artifact-first
 > boundary. Sections below
 > that say “Logbook of past sessions” or “show imported sessions in Logbook” are historical scope
 > language—do not reintroduce session-library Logbook UX. Prefer OpenWiki + ADR 0011 for current
@@ -49,8 +49,8 @@ The first useful vertical slice should prove one complete Codex loop:
 
 1. Detect existing Codex history.
 2. Import canonical session metadata and transcript records.
-3. Show imported sessions in Workbench and publish canonical dossier artifacts into Logbook.
-4. Discover a positive-evidence optional-artifact candidate and publish it through one V2 run.
+3. Show imported sessions in Workbench and copy one disposable request for the selected sessions.
+4. Enrich every selected session and atomically publish rebuilt dossiers plus useful optional artifacts.
 5. Retrieve the published artifacts through read-only MCP with source evidence.
 6. Continue syncing new Codex activity into Now and Workbench without duplicating canonical sessions.
 
@@ -102,12 +102,15 @@ The first build is done when Masthead can be dogfooded against real local Codex 
   resume work in the originating harness when possible.
 - **Evidence before claims:** Masthead may summarize agent work, but it must show the evidence
   behind attention, conflict, retrieval, and outcome judgments.
-- **One dossier contract:** `SessionDossierDto` and its original renderer are the only user-facing
-  session dossier. Publication stores an immutable `canonical-session-dossier-v1` snapshot; agents
-  cannot author, enrich, or replace its body.
-- **Positive-evidence optional artifacts:** Runbooks, ADRs, and incident timelines begin as explicit
-  candidates. One `workbench-authoring-v2` run owns one candidate and at most 12 provenance sessions;
-  absence of evidence creates no artifact and no per-session N/A obligation.
+- **Enriched dossier:** The original canonical dossier structure remains the only dossier
+  presentation. Under `workbench-authoring-v3`, the agent writes current durable enrichment for
+  every selected session and the daemon rebuilds the dossier from canonical data.
+- **Agent-led optional artifacts:** The agent may create zero or more runbooks, ADRs, and incident
+  timelines from selected evidence. An artifact suggestion is a nonbinding detector hint supplied
+  privately to the agent; suggestions are nonbinding and cannot require or prohibit a kind.
+- **Atomic publication:** Copy Agent Prompt copies a disposable request for the selected sessions.
+  Publication admits validated enriched artifacts into Logbook atomically, and nothing enters
+  Logbook until enrichment is current.
 - **Durable reuse:** Every optional-artifact claim has daemon-verified typed support and a verbatim
   canonical excerpt. Published bodies must contain enough core knowledge for Logbook and read-only MCP
   reuse without reopening a raw transcript.

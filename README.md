@@ -21,9 +21,9 @@ Start with agents: `openwiki/quickstart.md`, `CONTEXT.md`, and
   audit rows (schema 24; full-body artifact search arrived in schema 21).
 - Multi-adapter / multi-harness live connect (Sources V2) and conservative
   history adapters where coverage exists.
-- Workbench package path: transcript checks/import, quality, claims, Activity,
-  positive-evidence artifact candidates, candidate-sized agent handoffs,
-  daemon-owned canonical dossier publication, V2 authoring runs, and atomic publication.
+- Workbench package path: transcript checks/import, quality, claims, Activity, selection-scoped
+  agent handoffs, current durable enrichment, daemon-rebuilt dossiers, optional-artifact judgment,
+  V3 authoring runs, and atomic publication.
 - Logbook artifact book: `GET /logbook/artifacts` + body/provenance inspector;
   full-body search plus kind · project · date filters; no bulk enrich /
   checkboxes / summary strip.
@@ -39,9 +39,9 @@ Start with agents: `openwiki/quickstart.md`, `CONTEXT.md`, and
 - Deeper schema coverage for additional source adapters beyond the initial
   bounded scanners.
 - Transcript import breadth and exclusion policy tuning.
-- Legacy/dev native remote enrichment hooks. Optional-artifact authoring uses
-  user-facing Workbench candidate handoffs plus a thin installed CLI to the
-  daemon-owned V2 authoring module; no native remote model key is required.
+- Legacy/dev native remote enrichment hooks. Agent-led authoring uses a user-facing selection
+  handoff plus a thin installed CLI to the daemon-owned V3 authoring module; no native remote model
+  key is required.
 - Longer packaged desktop release-smoke automation.
 
 ## Install
@@ -76,20 +76,17 @@ MASTHEAD_BRIDGE_PORT=17374 npm run dev
 
 ## Artifact Authoring
 
-There is one session dossier contract. The daemon builds the original
-`SessionDossierDto`, stores an immutable `canonical-session-dossier-v1` snapshot,
-and Logbook renders it with the original dossier presentation. Agents never write
-dossier prose. Workbench’s **Publish canonical dossiers** action calls
-`POST /workbench/dossiers/publish` separately from optional-artifact authoring.
+Workbench’s **Copy Agent Prompt** action copies a disposable request for the selected sessions.
+Under `workbench-authoring-v3`, the agent writes current durable enrichment for each selected
+session and chooses zero or more optional artifacts. Deterministic analysis may supply an artifact
+suggestion privately to the agent, but suggestions are nonbinding.
 
-Runbooks, ADRs, and incident timelines start only from positive canonical
-evidence. Workbench shows the candidate kind, status, summary, and provenance
-count, then copies a plain-language handoff for one selected candidate. One
-`workbench-authoring-v2` run owns exactly one candidate and at most 12 provenance
-sessions. Every substantive claim supplies a typed `claimSupport` entry whose
-at-least-20-character excerpt must occur verbatim in canonical evidence.
-Unsupported authoring-process language, weak joins, and duplicate substantive
-content are rejected before publication.
+The daemon then rebuilds the original canonical dossier structure from current enriched session
+data; agents do not replace its presentation. Every substantive optional-artifact claim supplies a
+typed `claimSupport` entry whose at-least-20-character excerpt occurs verbatim in canonical
+evidence. Unsupported authoring-process language, weak joins, and duplicate substantive content
+are rejected. Publication is atomic admission of validated enriched artifacts into Logbook, and
+nothing enters Logbook until enrichment is current.
 
 The normal installed CLI is a thin daemon HTTP adapter:
 
@@ -102,10 +99,10 @@ mastheadctl workbench submit --run <run-id> --file <bundle.json> --json
 mastheadctl workbench finish --run <run-id> --json
 ```
 
-`submit` stores validation findings without output rows. `finish` atomically
-publishes the optional artifact and canonical dossiers for its provenance,
-updates search and pipeline state, releases claims, and persists one retry-safe
-receipt. See [ADR 0013](docs/adr/0013-canonical-dossier-and-candidate-authoring.md),
+The listed V2 commands remain audit-only during the V3 cutover. V3 submit stores validation
+findings without output rows; finish atomically applies enrichment, publishes the rebuilt dossiers
+and useful optional artifacts, updates search and pipeline state, and persists one retry-safe
+receipt. See [ADR 0014](docs/adr/0014-agent-led-enriched-artifact-authoring.md),
 [ADR 0012](docs/adr/0012-daemon-owned-artifact-authoring.md), and the
 [daemon API reference](docs/reference/daemon-api.md).
 
@@ -128,7 +125,7 @@ dossiers, zero optional artifacts, and 66 completed V1 runs. Prepare acquires th
 daemon-equivalent writer locks, creates a SQLite-consistent backup, verifies its
 database identity and integrity, and retains exactly one backup. Invalidate removes
 only the hash-matched artifacts, search rows, and provenance, resets affected
-sessions for canonical dossier publication and V2 candidate discovery, releases
+sessions for current enrichment and V3 authoring eligibility, releases
 matching claims, and preserves V1 runs and receipts as audit history. Never run
 production invalidation before the fixture gate, temporary-copy rehearsal, and
 separately authorized 25-session human-reviewed canary pass.
@@ -166,13 +163,12 @@ Logbook state, read-only MCP status/tools, and local data summary. `npm run
 verify` runs the product and surface contracts, typecheck, Vitest, build,
 endpoint matrix, and smoke suite.
 
-`npm run dogfood:durable-artifacts` is a fixture-only machine gate. It requires
-perfect dossier fidelity, claim support, labeled candidate precision/recall,
-Logbook/MCP recall@5, and artifact-only reuse; zero leaks, duplicate substantive
-fingerprints, or kind errors; at most 12 provenance sessions; and a 100-session
-discovery page within two seconds. It cannot satisfy the production human gate,
-which requires every canary artifact reviewed, median usefulness at least 4/5,
-and no artifact below 3/5.
+`npm run dogfood:durable-artifacts` remains a fixture-only audit gate for the superseded V2 flow;
+its detector precision/recall and 12-session limit are not V3 product requirements. V3 acceptance
+must cover current enrichment for every selected session, original dossier fidelity, grounded claim
+support, agent judgment over optional kinds, atomic publication, Logbook/MCP recall, and artifact-only
+reuse. A machine gate cannot satisfy the production human gate, which requires every canary artifact
+reviewed, median usefulness at least 4/5, and no artifact below 3/5.
 
 ## Data Path
 
