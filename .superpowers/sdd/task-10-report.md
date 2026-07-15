@@ -65,3 +65,14 @@ Blocked. The required in-app Browser runtime reported no available browser insta
 - GREEN: bridge route-policy set passed: 29 tests (12 socket/integration cases skipped by the focus filter).
 - GREEN: surface contract, typecheck, citation guard, and diff check passed.
 - The full bridge suite's socket proxy case could not bind `127.0.0.1` in the sandbox (`EPERM`); its route-policy regression passed. Browser evidence remains unavailable as noted above.
+
+## Lifecycle Follow-up — Close Invalidates Pending Receipt
+
+- Closing an exact receipt now invalidates the active request generation and consumes the navigation intent immediately.
+- A late resolve or reject cannot restore receipt state or reopen the modal; a later new intent starts a fresh generation and loads normally.
+
+### Lifecycle RED/GREEN
+
+- RED: resolving a deferred exact-report request after Close reopened the modal with the stale receipt.
+- GREEN: the deferred close/late-resolve/new-intent regression passed, and the full `SourcesPanelImports` file passed all 27 tests.
+- GREEN: typecheck, surface contract, citation guard, and diff check passed.

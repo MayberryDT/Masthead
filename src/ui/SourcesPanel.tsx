@@ -95,20 +95,22 @@ export function SourcesPanel(props: Props) {
   const [receiptLoading, setReceiptLoading] = useState(false);
   const [receiptError, setReceiptError] = useState<string>();
   const [receiptJobId, setReceiptJobId] = useState<string>();
+  const receiptRequestGenerationRef = useRef(0);
   const consumeReceiptIntentRef = useRef(props.onImportReceiptIntentConsumed);
   consumeReceiptIntentRef.current = props.onImportReceiptIntentConsumed;
 
   useEffect(() => {
     const importJobId = props.importReceiptIntent?.importJobId;
     if (!importJobId) return;
-    let current = true;
+    const requestGeneration = receiptRequestGenerationRef.current + 1;
+    receiptRequestGenerationRef.current = requestGeneration;
     setReceiptJobId(importJobId);
     setSelectedReceipt(undefined);
     setReceiptError(undefined);
     setReceiptLoading(true);
     void Promise.resolve(props.onLoadImportReport?.(importJobId))
       .then((report) => {
-        if (!current) return;
+        if (receiptRequestGenerationRef.current !== requestGeneration) return;
         if (!report) {
           setReceiptError(`Import receipt ${importJobId} was not found.`);
           return;
@@ -116,24 +118,28 @@ export function SourcesPanel(props: Props) {
         setSelectedReceipt(report);
       })
       .catch((error: unknown) => {
-        if (!current) return;
+        if (receiptRequestGenerationRef.current !== requestGeneration) return;
         setReceiptError(`Import receipt ${importJobId} could not be loaded: ${error instanceof Error ? error.message : String(error)}`);
       })
       .finally(() => {
-        if (!current) return;
+        if (receiptRequestGenerationRef.current !== requestGeneration) return;
         setReceiptLoading(false);
         consumeReceiptIntentRef.current?.();
       });
     return () => {
-      current = false;
+      if (receiptRequestGenerationRef.current === requestGeneration) {
+        receiptRequestGenerationRef.current += 1;
+      }
     };
   }, [props.importReceiptIntent?.importJobId, props.onLoadImportReport]);
 
   const closeReceipt = () => {
+    receiptRequestGenerationRef.current += 1;
     setSelectedReceipt(undefined);
     setReceiptError(undefined);
     setReceiptJobId(undefined);
     setReceiptLoading(false);
+    consumeReceiptIntentRef.current?.();
   };
 
   return (

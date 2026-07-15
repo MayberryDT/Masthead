@@ -15,6 +15,44 @@ import type { ImportCompletionReportDto } from "../../../shared/sourceImport";
 const noop = () => undefined;
 
 describe("SourcesPanel import controls", () => {
+  test("closing a pending exact receipt invalidates its request while a later intent still loads", async () => {
+    document.documentElement.style.setProperty("--modal-close-dur", "1ms");
+    const firstLoad = deferred<ImportCompletionReportDto | undefined>();
+    const onLoadImportReport = vi.fn((importJobId: string) =>
+      importJobId === "job-first"
+        ? firstLoad.promise
+        : Promise.resolve(completionReport("job-later", "cursor", 2))
+    );
+    const onConsumed = vi.fn();
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<AsyncReceiptHarness onConsumed={onConsumed} onLoadImportReport={onLoadImportReport} />);
+    });
+    expect(container.textContent).toContain("Loading import receipt job-first");
+
+    await act(async () => {
+      buttonByText(container, "Close").click();
+      await new Promise((resolve) => window.setTimeout(resolve, 60));
+    });
+    expect(onConsumed).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      firstLoad.resolve(completionReport("job-first", "opencode", 9));
+      await firstLoad.promise;
+    });
+
+    expect(container.querySelector('[aria-label="Import receipt"]')).toBeNull();
+    expect(container.textContent).not.toContain("9 sessions need import repair");
+
+    await act(async () => buttonByText(container, "Open later receipt").click());
+    expect(container.querySelector('[aria-label="cursor import report"]')).not.toBeNull();
+    expect(container.textContent).toContain("2 sessions need import repair");
+
+    document.documentElement.style.removeProperty("--modal-close-dur");
+    await act(async () => root.unmount());
+  });
+
   test("keeps an exact receipt load error visible before consuming the intent", async () => {
     const onConsumed = vi.fn();
     const container = document.createElement("div");
@@ -1005,6 +1043,42 @@ function ReceiptNavigationHarness({ importJobIds, onLoadImportReport, onPreviewI
       sources={[]}
     />
   );
+}
+
+function AsyncReceiptHarness({ onConsumed, onLoadImportReport }: {
+  onConsumed: () => void;
+  onLoadImportReport: (importJobId: string) => Promise<ImportCompletionReportDto | undefined>;
+}) {
+  const [receiptIntent, setReceiptIntent] = useState<{ importJobId: string } | undefined>({ importJobId: "job-first" });
+  return (
+    <>
+      <button type="button" onClick={() => setReceiptIntent({ importJobId: "job-later" })}>Open later receipt</button>
+      <SourcesPanel
+        adapters={[]}
+        busy={false}
+        importReceiptIntent={receiptIntent}
+        imports={[]}
+        onExcludePath={noop}
+        onImportReceiptIntentConsumed={() => {
+          onConsumed();
+          setReceiptIntent(undefined);
+        }}
+        onLoadImportReport={onLoadImportReport}
+        onRefresh={noop}
+        sources={[]}
+      />
+    </>
+  );
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, reject, resolve };
 }
 
 function completionReport(importJobId: string, runtime: ImportCompletionReportDto["runtime"], repair: number): ImportCompletionReportDto {
