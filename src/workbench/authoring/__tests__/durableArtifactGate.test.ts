@@ -3,8 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import type {
-  WorkbenchAuthoringReceipt,
-  WorkbenchAuthoringReceiptV2
+  WorkbenchAuthoringReceiptV3
 } from "../../../shared/workbenchAuthoring.ts";
 import { getLogbookArtifactDetail } from "../../../daemon/db/logbookArtifactRepository.ts";
 import {
@@ -16,12 +15,12 @@ import { getOrCreateDatabaseIdentity, migrateDatabase } from "../../../daemon/db
 import { openMastheadDatabase, type MastheadDatabase } from "../../../daemon/db/sqlite.ts";
 import {
   finishAuthoringRun,
-  openCandidateAuthoringRun,
+  openAgentLedAuthoringRun,
   submitAuthoringBundle
 } from "../authoringService.ts";
 import { discoverArtifactCandidates } from "../artifactCandidates.ts";
 import {
-  buildDurableArtifactFixtureBundle,
+  buildDurableArtifactFixtureBundleV3,
   corpusSessionIds,
   seedDurableArtifactCorpus
 } from "../__fixtures__/durableArtifactCorpus.ts";
@@ -46,41 +45,39 @@ describe("Gate B durable optional artifact slice", () => {
       requireCandidate(candidates, "adr", "session:decision-local-first"),
       requireCandidate(candidates, "incident_timeline", "session:incident-root-cause")
     ];
-    const receipts: WorkbenchAuthoringReceiptV2[] = [];
+    const receipts: WorkbenchAuthoringReceiptV3[] = [];
 
     for (const candidate of selected) {
-      const opened = openCandidateAuthoringRun(db, {
+      const opened = openAgentLedAuthoringRun(db, {
         actorId: "gate-b",
-        candidateId: candidate.candidateId,
-        databaseId: getOrCreateDatabaseIdentity(db)
+        databaseId: getOrCreateDatabaseIdentity(db),
+        sessionIds: candidate.provenanceSessionIds
       });
       expect(opened.run).toMatchObject({
-        candidateId: candidate.candidateId,
-        contractVersion: "workbench-authoring-v2",
+        contractVersion: "workbench-authoring-v3",
         sessionIds: candidate.provenanceSessionIds
       });
 
-      const bundle = buildDurableArtifactFixtureBundle(opened.run, candidate);
-      expect(JSON.stringify(bundle.artifact.output).toLowerCase()).not.toMatch(
+      const bundle = buildDurableArtifactFixtureBundleV3(opened.run, candidate);
+      expect(JSON.stringify(bundle.artifacts[0]!.output).toLowerCase()).not.toMatch(
         /cursor pagination|canonical evidence|evidence manifest|authoring run|single provenance|weak multi-session join|published artifact/
       );
       const submitted = submitAuthoringBundle(db, { bundle, runId: opened.run.runId });
       expect(submitted.accepted, JSON.stringify(submitted.findings, null, 2)).toBe(true);
 
-      const receipt = requireV2Receipt(finishAuthoringRun(db, { runId: opened.run.runId }));
+      const receipt = finishAuthoringRun(db, { runId: opened.run.runId });
+      if (receipt.contractVersion !== "workbench-authoring-v3") throw new Error("gate_v3_receipt_required");
       receipts.push(receipt);
       expect(receipt).toMatchObject({
-        candidateId: candidate.candidateId,
         dossierArtifactIds: expect.any(Array),
-        optionalArtifact: { kind: candidate.kind },
-        provenanceSessionIds: candidate.provenanceSessionIds
+        optionalArtifacts: [{ kind: candidate.kind, provenanceSessionIds: candidate.provenanceSessionIds }]
       });
       expect(receipt.dossierArtifactIds).toHaveLength(candidate.provenanceSessionIds.length);
       expect(receipt.publishedArtifactIds).toEqual([
         ...receipt.dossierArtifactIds,
-        receipt.optionalArtifact.artifactId
+        receipt.optionalArtifacts[0]!.artifactId
       ]);
-      expect(getWorkbenchArtifactCandidate(db, candidate.candidateId)?.status).toBe("published");
+      expect(getWorkbenchArtifactCandidate(db, candidate.candidateId)?.status).toBe("pending");
       expect(
         db.prepare(
           `SELECT COUNT(*) AS count
@@ -91,7 +88,7 @@ describe("Gate B durable optional artifact slice", () => {
           .get(opened.run.runId)
       ).toEqual({ count: 0 });
 
-      const optionalId = receipt.optionalArtifact.artifactId;
+      const optionalId = receipt.optionalArtifacts[0]!.artifactId;
       expect(getLogbookArtifactDetail(db, optionalId)).toMatchObject({
         capsule: { kind: candidate.kind },
         provenanceSessionIds: candidate.provenanceSessionIds,
@@ -115,7 +112,7 @@ describe("Gate B durable optional artifact slice", () => {
       expect(new Set(search.artifacts.map(({ artifactId }) => artifactId)).size).toBe(search.artifacts.length);
     }
 
-    expect(receipts.map((receipt) => receipt.optionalArtifact.kind).sort()).toEqual([
+    expect(receipts.flatMap((receipt) => receipt.optionalArtifacts.map(({ kind }) => kind)).sort()).toEqual([
       "adr",
       "incident_timeline",
       "runbook"
@@ -159,11 +156,6 @@ function requireCandidate(candidates: Candidate[], kind: Candidate["kind"], seed
   const candidate = candidates.find((entry) => entry.kind === kind && entry.seedSessionId === seedSessionId);
   if (!candidate) throw new Error(`gate_candidate_missing:${kind}:${seedSessionId}`);
   return candidate;
-}
-
-function requireV2Receipt(receipt: WorkbenchAuthoringReceipt): WorkbenchAuthoringReceiptV2 {
-  if (receipt.contractVersion !== "workbench-authoring-v2") throw new Error("gate_v2_receipt_required");
-  return receipt;
 }
 
 function countKinds(candidates: Candidate[]): Record<string, number> {

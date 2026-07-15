@@ -11,8 +11,7 @@ import { openMastheadDatabase, type MastheadDatabase } from "../../daemon/db/sql
 import { iterateSessionTranscriptItems } from "../../daemon/db/sessionTranscriptRepository.ts";
 import { handleMcpLine } from "../../mcp/protocol.ts";
 import type {
-  WorkbenchAuthoringReceipt,
-  WorkbenchAuthoringReceiptV2,
+  WorkbenchAuthoringReceiptV3,
   WorkbenchAutomaticArtifactKind,
   WorkbenchClaimSupport
 } from "../../shared/workbenchAuthoring.ts";
@@ -25,11 +24,11 @@ import {
 } from "./artifactCandidates.ts";
 import {
   finishAuthoringRun,
-  openCandidateAuthoringRun,
+  openAgentLedAuthoringRun,
   submitAuthoringBundle
 } from "./authoringService.ts";
 import {
-  buildDurableArtifactFixtureBundle,
+  buildDurableArtifactFixtureBundleV3,
   corpusSessionIds,
   seedDurableArtifactCorpus,
   seedToolHeavyPerformanceSessions
@@ -230,26 +229,27 @@ export async function runDurableArtifactCorpus(): Promise<DurableArtifactCorpusR
       requireCandidate(candidates, "adr", "session:decision-local-first"),
       requireCandidate(candidates, "incident_timeline", "session:incident-root-cause")
     ];
-    const receipts: WorkbenchAuthoringReceiptV2[] = [];
+    const receipts: WorkbenchAuthoringReceiptV3[] = [];
     const submittedOutputByArtifactId = new Map<string, Record<string, unknown>>();
 
     for (const candidate of selected) {
-      const opened = openCandidateAuthoringRun(db, {
+      const opened = openAgentLedAuthoringRun(db, {
         actorId: "durable-artifact-gate",
-        candidateId: candidate.candidateId,
-        databaseId: getOrCreateDatabaseIdentity(db)
+        databaseId: getOrCreateDatabaseIdentity(db),
+        sessionIds: candidate.provenanceSessionIds
       });
-      const bundle = buildDurableArtifactFixtureBundle(opened.run, candidate);
+      const bundle = buildDurableArtifactFixtureBundleV3(opened.run, candidate);
       const submitted = submitAuthoringBundle(db, { bundle, runId: opened.run.runId });
       if (!submitted.accepted) throw new Error(`fixture_bundle_rejected:${JSON.stringify(submitted.findings)}`);
-      const receipt = requireV2Receipt(finishAuthoringRun(db, { runId: opened.run.runId }));
+      const receipt = finishAuthoringRun(db, { runId: opened.run.runId });
+      if (receipt.contractVersion !== "workbench-authoring-v3") throw new Error("fixture_v3_receipt_required");
       receipts.push(receipt);
-      for (const sessionId of receipt.provenanceSessionIds) {
+      for (const sessionId of candidate.provenanceSessionIds) {
         const canonical = getSessionDossier(db, sessionId);
         if (!canonical) throw new Error(`fixture_dossier_missing:${sessionId}`);
         postPublicationCanonicalDossiers.set(sessionId, structuredClone(canonical));
       }
-      submittedOutputByArtifactId.set(receipt.optionalArtifact.artifactId, structuredClone(bundle.artifact.output));
+      submittedOutputByArtifactId.set(receipt.optionalArtifacts[0]!.artifactId, structuredClone(bundle.artifacts[0]!.output));
     }
 
     const expectedLabels = EXPECTED_CANDIDATE_LABELS;
@@ -263,7 +263,7 @@ export async function runDurableArtifactCorpus(): Promise<DurableArtifactCorpusR
     const publishedKindDifference = compareKindMix(EXPECTED_PUBLISHED_KINDS, actualPublishedKinds);
 
     const dossierFidelityChecks = receipts.flatMap((receipt) => receipt.dossierArtifactIds.map((artifactId, index) => {
-      const sessionId = receipt.provenanceSessionIds[index]!;
+      const sessionId = selected[receipts.indexOf(receipt)]!.provenanceSessionIds[index]!;
       const detail = requireArtifact(db!, artifactId);
       const comparison = comparePublishedDossierToCanonical(
         detail.body,
@@ -277,7 +277,7 @@ export async function runDurableArtifactCorpus(): Promise<DurableArtifactCorpusR
       };
     }));
 
-    const optionalArtifacts = receipts.map((receipt) => requireArtifact(db!, receipt.optionalArtifact.artifactId));
+    const optionalArtifacts = receipts.map((receipt) => requireArtifact(db!, receipt.optionalArtifacts[0]!.artifactId));
     const persistedArtifactEqualityChecks = optionalArtifacts.map((artifact) => ({
       artifactId: artifact.capsule.artifactId,
       matched: persistedArtifactEqualsSubmission(
@@ -286,14 +286,14 @@ export async function runDurableArtifactCorpus(): Promise<DurableArtifactCorpusR
       )
     }));
     const claimSupportEvaluations = receipts.map((receipt) => {
-      const artifactId = receipt.optionalArtifact.artifactId;
+      const artifactId = receipt.optionalArtifacts[0]!.artifactId;
       const persisted = requireArtifact(db!, artifactId);
       return {
         artifactId,
         evaluation: evaluatePersistedClaimSupport(
-          receipt.optionalArtifact.kind,
+          receipt.optionalArtifacts[0]!.kind,
           persisted.body,
-          evidenceTextByRef(db!, receipt.provenanceSessionIds)
+          evidenceTextByRef(db!, receipt.optionalArtifacts[0]!.provenanceSessionIds)
         )
       };
     });
@@ -317,9 +317,9 @@ export async function runDurableArtifactCorpus(): Promise<DurableArtifactCorpusR
 
     const dossierBySession = new Map<string, string>();
     for (const receipt of receipts) {
-      receipt.provenanceSessionIds.forEach((sessionId, index) => dossierBySession.set(sessionId, receipt.dossierArtifactIds[index]!));
+      selected[receipts.indexOf(receipt)]!.provenanceSessionIds.forEach((sessionId, index) => dossierBySession.set(sessionId, receipt.dossierArtifactIds[index]!));
     }
-    const optionalByKind = new Map(receipts.map((receipt) => [receipt.optionalArtifact.kind, receipt.optionalArtifact.artifactId]));
+    const optionalByKind = new Map(receipts.map((receipt) => [receipt.optionalArtifacts[0]!.kind, receipt.optionalArtifacts[0]!.artifactId]));
     const retrievalCases = [
       { artifactId: optionalByKind.get("runbook")!, kind: "runbook" as const, query: "invalid state nonce" },
       { artifactId: optionalByKind.get("adr")!, kind: "adr" as const, query: "hosted database" },
@@ -350,7 +350,7 @@ export async function runDurableArtifactCorpus(): Promise<DurableArtifactCorpusR
 
     const canaryArtifacts = receipts.flatMap((receipt) => [
       ...receipt.dossierArtifactIds.map((artifactId) => requireArtifact(db!, artifactId)),
-      requireArtifact(db!, receipt.optionalArtifact.artifactId)
+      requireArtifact(db!, receipt.optionalArtifacts[0]!.artifactId)
     ]);
     const reportWithoutFailures = {
       reportVersion: "durable-artifact-gate-v1" as const,
@@ -459,12 +459,12 @@ export function comparePublishedDossierToCanonical(
 ): { matched: boolean; missingRequiredSections: string[] } {
   const canonicalClone = jsonClone(canonical) as Record<string, unknown>;
   delete canonicalClone.artifacts;
-  const expected = {
+  const expected = neutralizeDossierPublicationState({
     ...canonicalClone,
     capturedAt: "normalized-captured-at",
     snapshotVersion: "canonical-session-dossier-v1"
-  };
-  const actual = isRecord(published) ? jsonClone(published) : {};
+  });
+  const actual = neutralizeDossierPublicationState(isRecord(published) ? jsonClone(published) : {});
   const capturedAtPresent = typeof actual.capturedAt === "string" && actual.capturedAt.length > 0;
   if (capturedAtPresent) actual.capturedAt = "normalized-captured-at";
   const missingRequiredSections = CANONICAL_DOSSIER_REQUIRED_SECTIONS.filter(
@@ -474,6 +474,19 @@ export function comparePublishedDossierToCanonical(
     matched: capturedAtPresent && missingRequiredSections.length === 0 && isDeepStrictEqual(actual, expected),
     missingRequiredSections: [...missingRequiredSections]
   };
+}
+
+function neutralizeDossierPublicationState(body: Record<string, unknown>): Record<string, unknown> {
+  const reuse = isRecord(body.reuse) ? body.reuse : undefined;
+  if (!reuse) return body;
+  delete reuse.mcpIncluded;
+  if (typeof reuse.copyableContext === "string") {
+    reuse.copyableContext = reuse.copyableContext.replace(
+      /\nAgent retrieval: (?:included|excluded)$/u,
+      "\nAgent retrieval: publication-state"
+    );
+  }
+  return body;
 }
 
 export function evaluatePersistedClaimSupport(
@@ -714,11 +727,6 @@ function requireCandidate(
   return candidate;
 }
 
-function requireV2Receipt(receipt: WorkbenchAuthoringReceipt): WorkbenchAuthoringReceiptV2 {
-  if (receipt.contractVersion !== "workbench-authoring-v2") throw new Error("fixture_v2_receipt_required");
-  return receipt;
-}
-
 function requireArtifact(db: MastheadDatabase, artifactId: string) {
   const artifact = getLogbookArtifactDetail(db, artifactId);
   if (!artifact) throw new Error(`fixture_artifact_missing:${artifactId}`);
@@ -740,9 +748,9 @@ function countCandidateKinds(candidates: WorkbenchArtifactCandidate[]): KindMix 
   }, emptyKindMix());
 }
 
-function countPublishedKinds(receipts: WorkbenchAuthoringReceiptV2[]): KindMix {
+function countPublishedKinds(receipts: WorkbenchAuthoringReceiptV3[]): KindMix {
   return receipts.reduce((mix, receipt) => {
-    mix[receipt.optionalArtifact.kind] += 1;
+    for (const artifact of receipt.optionalArtifacts) mix[artifact.kind] += 1;
     return mix;
   }, emptyKindMix());
 }

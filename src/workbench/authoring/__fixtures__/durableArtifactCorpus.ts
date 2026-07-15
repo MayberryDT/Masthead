@@ -1,6 +1,5 @@
 import { withImmediateTransaction, type MastheadDatabase } from "../../../daemon/db/sqlite.ts";
 import type {
-  WorkbenchAuthoringBundleV2,
   WorkbenchAuthoringBundleV3,
   WorkbenchAuthoringRunDto,
   WorkbenchAutomaticArtifactKind,
@@ -754,26 +753,36 @@ function requireFocusedEvidence(session: DurableArtifactCorpusSession, evidenceI
   return evidence;
 }
 
-export function buildDurableArtifactFixtureBundle(
-  run: { runId: string; evidenceRevision: string },
+function durableArtifactFixtureDraft(
   candidate: WorkbenchArtifactCandidate
-): WorkbenchAuthoringBundleV2 {
+): WorkbenchAuthoringBundleV3["artifacts"][number] {
   const output = candidate.kind === "runbook"
     ? durableRunbookOutput(candidate)
     : candidate.kind === "adr"
       ? durableAdrOutput(candidate)
       : durableIncidentOutput(candidate);
   return {
-    artifact: {
-      kind: candidate.kind,
-      output,
-      provenanceSessionIds: candidate.provenanceSessionIds,
-      seedSessionId: candidate.seedSessionId
-    },
-    bundleVersion: "workbench-authoring-v2",
-    candidateId: candidate.candidateId,
+    kind: candidate.kind,
+    output,
+    provenanceSessionIds: candidate.provenanceSessionIds,
+    seedSessionId: candidate.seedSessionId
+  };
+}
+
+export function buildDurableArtifactFixtureBundleV3(
+  run: { runId: string; evidenceRevision: string },
+  candidate: WorkbenchArtifactCandidate
+): WorkbenchAuthoringBundleV3 {
+  return {
+    artifacts: [durableArtifactFixtureDraft(candidate)],
+    bundleVersion: "workbench-authoring-v3",
     evidenceRevision: run.evidenceRevision,
-    runId: run.runId
+    runId: run.runId,
+    sessionEnrichments: candidate.provenanceSessionIds.map((sessionId) => {
+      const session = durableArtifactCorpus.find(({ id }) => id === sessionId);
+      if (!session) throw new Error(`durable_corpus_session_missing:${sessionId}`);
+      return focusedSessionEnrichment(session);
+    })
   };
 }
 
