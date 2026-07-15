@@ -716,11 +716,6 @@ function finishAgentLedInsideTransaction(
   }
   onMutationBoundary?.("enrichment_applied");
 
-  const dossierArtifacts = run.sessionIds.map((sessionId) =>
-    applyCanonicalDossierSnapshotInTransaction(db, sessionId, run.actorId)
-  );
-  onMutationBoundary?.("dossiers_created");
-
   const optionalArtifacts = run.bundle.artifacts.map((draft) => applyAgentLedArtifactInTransaction(db, {
     actorId: run.actorId,
     kind: draft.kind,
@@ -730,15 +725,14 @@ function finishAgentLedInsideTransaction(
   }));
   onMutationBoundary?.("optional_artifacts_created");
 
-  const publishedArtifacts = [...dossierArtifacts, ...optionalArtifacts].map((artifact) => {
+  const publishedOptionalArtifacts = optionalArtifacts.map((artifact) => {
     const published = publishSessionArtifactInTransaction(db, artifact.artifactId);
     if (!published) throw new Error(`authoring_finish_artifact_missing:${artifact.artifactId}`);
     return published;
   });
-  onMutationBoundary?.("artifacts_published");
 
-  for (const dossier of dossierArtifacts) {
-    markWorkbenchArtifactAppliedInTransaction(db, { actor, artifactKind: "session_dossier", sessionId: dossier.sessionId });
+  for (const sessionId of run.sessionIds) {
+    markWorkbenchArtifactAppliedInTransaction(db, { actor, artifactKind: "session_dossier", sessionId });
   }
   const contributions: WorkbenchAuthoringReceiptV3["contributions"] = [];
   optionalArtifacts.forEach((artifact, index) => {
@@ -766,6 +760,21 @@ function finishAgentLedInsideTransaction(
     if (!result.ok) throw new Error(`authoring_finish_package_gate_failed:${sessionId}:${result.missing.join(",")}`);
   }
   onMutationBoundary?.("pipeline_updated");
+
+  // Session publication determines canonical reuse fields such as MCP
+  // inclusion. Render the immutable dossier only after that state is final,
+  // while remaining inside the same atomic finish transaction.
+  const dossierArtifacts = run.sessionIds.map((sessionId) =>
+    applyCanonicalDossierSnapshotInTransaction(db, sessionId, run.actorId)
+  );
+  onMutationBoundary?.("dossiers_created");
+  const publishedDossierArtifacts = dossierArtifacts.map((artifact) => {
+    const published = publishSessionArtifactInTransaction(db, artifact.artifactId);
+    if (!published) throw new Error(`authoring_finish_artifact_missing:${artifact.artifactId}`);
+    return published;
+  });
+  const publishedArtifacts = [...publishedDossierArtifacts, ...publishedOptionalArtifacts];
+  onMutationBoundary?.("artifacts_published");
 
   for (const published of publishedArtifacts) {
     indexSessionArtifactSearch(db, published.artifactId);

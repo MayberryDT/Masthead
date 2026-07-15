@@ -79,6 +79,17 @@ describe("durable artifact acceptance corpus", () => {
       matched: true,
       missingRequiredSections: []
     });
+    const staleReuse = structuredClone(published);
+    const staleReuseFields = staleReuse.reuse as { copyableContext: string; mcpIncluded: boolean };
+    staleReuseFields.mcpIncluded = false;
+    staleReuseFields.copyableContext = staleReuseFields.copyableContext.replace(
+      "Agent retrieval: included",
+      "Agent retrieval: excluded"
+    );
+    expect(comparePublishedDossierToCanonical(staleReuse, canonical)).toMatchObject({
+      matched: false,
+      missingRequiredSections: []
+    });
     delete published.narrative;
     expect(comparePublishedDossierToCanonical(published, canonical)).toMatchObject({
       matched: false,

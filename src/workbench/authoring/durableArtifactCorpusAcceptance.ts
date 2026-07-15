@@ -459,12 +459,12 @@ export function comparePublishedDossierToCanonical(
 ): { matched: boolean; missingRequiredSections: string[] } {
   const canonicalClone = jsonClone(canonical) as Record<string, unknown>;
   delete canonicalClone.artifacts;
-  const expected = neutralizeDossierPublicationState({
+  const expected = {
     ...canonicalClone,
     capturedAt: "normalized-captured-at",
     snapshotVersion: "canonical-session-dossier-v1"
-  });
-  const actual = neutralizeDossierPublicationState(isRecord(published) ? jsonClone(published) : {});
+  };
+  const actual = isRecord(published) ? jsonClone(published) : {};
   const capturedAtPresent = typeof actual.capturedAt === "string" && actual.capturedAt.length > 0;
   if (capturedAtPresent) actual.capturedAt = "normalized-captured-at";
   const missingRequiredSections = CANONICAL_DOSSIER_REQUIRED_SECTIONS.filter(
@@ -474,19 +474,6 @@ export function comparePublishedDossierToCanonical(
     matched: capturedAtPresent && missingRequiredSections.length === 0 && isDeepStrictEqual(actual, expected),
     missingRequiredSections: [...missingRequiredSections]
   };
-}
-
-function neutralizeDossierPublicationState(body: Record<string, unknown>): Record<string, unknown> {
-  const reuse = isRecord(body.reuse) ? body.reuse : undefined;
-  if (!reuse) return body;
-  delete reuse.mcpIncluded;
-  if (typeof reuse.copyableContext === "string") {
-    reuse.copyableContext = reuse.copyableContext.replace(
-      /\nAgent retrieval: (?:included|excluded)$/u,
-      "\nAgent retrieval: publication-state"
-    );
-  }
-  return body;
 }
 
 export function evaluatePersistedClaimSupport(

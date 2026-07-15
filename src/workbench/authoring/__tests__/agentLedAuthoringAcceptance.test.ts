@@ -199,27 +199,18 @@ function allDossiersPreserveCanonicalShape(
     const { artifacts: _currentArtifacts, ...currentBody } = current;
     const { capturedAt: _capturedAt, snapshotVersion: _snapshotVersion, ...publishedBody } = detail.body as Record<string, unknown>;
     const originalSectionKeys = Object.keys(original).filter((key) => key !== "artifacts");
-    const normalizedCurrent = neutralizePublicationState(JSON.parse(JSON.stringify(currentBody)) as Record<string, unknown>);
-    const normalizedPublished = neutralizePublicationState(structuredClone(publishedBody));
+    const comparableCurrent = JSON.parse(JSON.stringify(currentBody)) as Record<string, unknown>;
+    const comparablePublished = structuredClone(publishedBody);
+    if (!isDeepStrictEqual(comparablePublished.reuse, comparableCurrent.reuse)) {
+      throw new Error(`dossier_reuse_mismatch:${sessionId}`);
+    }
     const mismatched = originalSectionKeys.filter((key) =>
-      !Object.hasOwn(normalizedPublished, key) || !isDeepStrictEqual(normalizedPublished[key], normalizedCurrent[key])
+      !Object.hasOwn(comparablePublished, key)
+      || !isDeepStrictEqual(comparablePublished[key], comparableCurrent[key])
     );
     if (mismatched.length > 0) throw new Error(`dossier_shape_mismatch:${sessionId}:${mismatched.join(",")}`);
     return true;
   });
-}
-
-function neutralizePublicationState(body: Record<string, unknown>): Record<string, unknown> {
-  const reuse = body.reuse as Record<string, unknown> | undefined;
-  if (!reuse) return body;
-  delete reuse.mcpIncluded;
-  if (typeof reuse.copyableContext === "string") {
-    reuse.copyableContext = reuse.copyableContext.replace(
-      /\nAgent retrieval: (?:included|excluded)$/u,
-      "\nAgent retrieval: publication-state"
-    );
-  }
-  return body;
 }
 
 function allDossiersHaveCurrentEnrichment(db: MastheadDatabase, artifactIds: string[]): boolean {
