@@ -42,6 +42,7 @@ import {
   type DeleteMastheadDataScope
 } from "./db/dataLifecycleRepository.ts";
 import {
+  createImportJob,
   getImportJob,
   listImportJobPage,
   listImportJobs,
@@ -128,6 +129,7 @@ import { buildSourcesSetupState, scanResultToOnboardingScan } from "./sources/so
 import { clearConnectorActivation, setConnectorActivation } from "./sources/connectorActivationStore.ts";
 import { discoverHarnessConnectors, listHarnessConnectors, withHistoryDiscovery } from "./sources/harnessConnectorService.ts";
 import type { ImportScopeDto, ImportWorkUnitStatus } from "../shared/sourceImport.ts";
+import type { ImportRepairSourceMapping } from "../shared/importRepair.ts";
 import type { SessionDossierDto, SessionDossierManualEnrichmentJob } from "../shared/sessionDossier.ts";
 import type {
   WorkbenchActivityDto,
@@ -1085,6 +1087,34 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     const scanned = latestScan?.adapters.flatMap((adapter) => adapter.sources).find((source) => source.sourceId === sourceId);
     if (scanned) return scanned;
     return (await discoverAllSourcesAndPersist()).find((source) => source.sourceId === sourceId);
+  }
+
+  async function repairSourceMappings(importJobIds: string[]): Promise<{
+    mappings: ImportRepairSourceMapping[];
+    discoveredBySourceId: Map<string, DiscoveredSource>;
+  }> {
+    const jobIds = [...new Set(importJobIds)].sort();
+    const jobs = jobIds.map((importJobId) => getImportJob(database, importJobId)).filter((job): job is ImportJobDto => Boolean(job));
+    const sourceIds = [...new Set(jobs.map((job) => job.sourceId))].sort();
+    const snapshot = await discoverSourceSnapshot({ homeDir: config.codexHomeDir, now: new Date().toISOString(), exclusions: [] });
+    const discoveredBySourceId = new Map<string, DiscoveredSource>();
+    const mappings = sourceIds.map((sourceId): ImportRepairSourceMapping => {
+      const stored = database.prepare("SELECT adapter, source_path AS sourcePath FROM ingest_sources WHERE source_id = ?")
+        .get(sourceId) as { adapter: RuntimeKind; sourcePath: string | null } | undefined;
+      const discovered = snapshot.sources.find((source) => source.sourceId === sourceId);
+      if (!discovered) return { available: false, reason: "source_not_discovered", sourceId };
+      const adapter = adapterForRuntime(discovered.runtime);
+      if (!adapter) return { available: false, reason: "adapter_unavailable", sourceId };
+      if (stored && discovered.runtime !== stored.adapter) return { available: false, reason: "runtime_mismatch", sourceId };
+      discoveredBySourceId.set(sourceId, discovered);
+      return {
+        adapterRuntime: adapter.runtime,
+        available: true,
+        correctedSourceId: discovered.sourceId,
+        sourceId
+      };
+    });
+    return { discoveredBySourceId, mappings };
   }
 
   async function importMetadataSources(sources: DiscoveredSource[], controls?: ImportJobControls): Promise<ImportWorkResult> {
@@ -3038,24 +3068,42 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         if (!Array.isArray(body.importJobIds) || !body.importJobIds.every((value) => typeof value === "string")) {
           throw new Error("importJobIds must be an array of strings");
         }
+        const viability = await repairSourceMappings(body.importJobIds);
         if (url.pathname.endsWith("/preview")) {
-          const preview = previewImportRepair(database, { importJobIds: body.importJobIds });
+          const preview = previewImportRepair(database, { importJobIds: body.importJobIds, sourceMappings: viability.mappings });
           sendJson(request, response, config.allowedOrigins, 200, { ok: true, preview });
           return;
         }
         if (typeof body.planHash !== "string" || !/^[a-f0-9]{64}$/.test(body.planHash)) throw new Error("valid planHash is required");
-        const jobsToReimport = body.importJobIds.map((importJobId) => getImportJob(database, importJobId));
-        const receipt = applyImportRepair(database, { importJobIds: body.importJobIds, planHash: body.planHash });
+        const jobsToReimport = [...new Set(body.importJobIds)].sort()
+          .map((importJobId) => getImportJob(database, importJobId))
+          .filter((job): job is ImportJobDto => Boolean(job && viability.discoveredBySourceId.has(job.sourceId)));
+        const staged = new Map<string, { existing: ImportJobDto; source: DiscoveredSource }>();
+        const receipt = applyImportRepair(database, {
+          importJobIds: body.importJobIds,
+          planHash: body.planHash,
+          sourceMappings: viability.mappings,
+          stageReimports: () => jobsToReimport.map((existing, index) => {
+            const source = viability.discoveredBySourceId.get(existing.sourceId)!;
+            const updatedAt = new Date(Date.now() + index).toISOString();
+            const job = createImportJob(database, { importKind: existing.importKind, sourceId: source.sourceId, updatedAt });
+            staged.set(job.importJobId, { existing, source });
+            return job.importJobId;
+          })
+        });
         const jobs: ImportJobDto[] = [];
-        for (const existing of jobsToReimport) {
-          if (!existing) continue;
-          const source = await sourceById(existing.sourceId);
-          if (!source) continue;
-          jobs.push(queueImportJob(database, { importKind: existing.importKind, sourceId: source.sourceId }, (controls) =>
-            runImportWorkerForSource(existing.importKind, source, controls, existing.scope ?? defaultTranscriptImportScope())
+        for (const importJobId of receipt.reimportJobIds) {
+          const spec = staged.get(importJobId)!;
+          jobs.push(resumeImportJob(database, importJobId, (controls) =>
+            runImportWorkerForSource(spec.existing.importKind, spec.source, controls, spec.existing.scope ?? defaultTranscriptImportScope())
           ));
         }
-        sendJson(request, response, config.allowedOrigins, 202, { jobs, ok: true, receipt });
+        sendJson(request, response, config.allowedOrigins, 202, {
+          jobs,
+          ok: true,
+          receipt,
+          reimportJobIds: receipt.reimportJobIds
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         const conflict = message.includes("repair plan changed") || message.includes("published artifacts block repair");

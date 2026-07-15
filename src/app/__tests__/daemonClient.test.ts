@@ -15,9 +15,11 @@ import {
   getSourcesAdvanced,
   getSourcesSetup,
   getImportReport,
+  applyImportRepair,
   installRuntimeHooks,
   listImports,
   listImportWorkUnits,
+  previewImportRepair,
   listReviewDispositions,
   postWorkbenchCheckTranscript,
   postWorkbenchClaim,
@@ -557,6 +559,31 @@ describe("daemon client review dispositions", () => {
       "http://127.0.0.1:17373/imports?limit=25&offset=50&adapterId=opencode&sourceId=opencode-sessions&status=active",
       { headers: { accept: "application/json" }, signal: undefined }
     );
+  });
+
+  test("previews and applies import repair through daemon-owned routes", async () => {
+    const planHash = "a".repeat(64);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn()
+        .mockResolvedValueOnce(response({ ok: true, preview: { importJobIds: ["job-1"], planHash } }))
+        .mockResolvedValueOnce(response({
+          jobs: [{ importJobId: "job-new" }],
+          ok: true,
+          receipt: { importJobIds: ["job-1"], planHash },
+          reimportJobIds: ["job-new"]
+        }))
+    );
+
+    await expect(previewImportRepair(["job-1"], "http://127.0.0.1:17373/projection")).resolves.toMatchObject({ planHash });
+    await expect(applyImportRepair({ importJobIds: ["job-1"], planHash }, "http://127.0.0.1:17373/projection"))
+      .resolves.toMatchObject({ reimportJobIds: ["job-new"] });
+    expect(fetch).toHaveBeenNthCalledWith(1, "http://127.0.0.1:17373/imports/repair/preview", expect.objectContaining({
+      body: JSON.stringify({ importJobIds: ["job-1"] }), method: "POST"
+    }));
+    expect(fetch).toHaveBeenNthCalledWith(2, "http://127.0.0.1:17373/imports/repair/apply", expect.objectContaining({
+      body: JSON.stringify({ importJobIds: ["job-1"], planHash }), method: "POST"
+    }));
   });
 
   test("previews a harness-first sources import", async () => {

@@ -6,6 +6,12 @@ import { migrateDatabase } from "../../db/schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../../db/sqlite.ts";
 import { applyImportRepair, previewImportRepair } from "../importRepair.ts";
 
+const availableSources = [
+  { adapterRuntime: "grok" as const, available: true, correctedSourceId: "source:grok", sourceId: "source:grok" },
+  { adapterRuntime: "hermes" as const, available: true, correctedSourceId: "source:hermes", sourceId: "source:hermes" },
+  { adapterRuntime: "grok" as const, available: true, correctedSourceId: "source:published", sourceId: "source:published" }
+];
+
 const tempDirs: string[] = [];
 
 afterEach(async () => {
@@ -17,17 +23,21 @@ describe("import repair", () => {
     const db = await repairDatabase();
     const before = databaseChanges(db);
 
-    const preview = previewImportRepair(db, { importJobIds: ["job:hermes", "job:grok", "job:grok"] });
+    const preview = previewImportRepair(db, { importJobIds: ["job:hermes", "job:grok", "job:grok"], sourceMappings: availableSources });
 
     expect(preview).toMatchObject({
       importJobIds: ["job:grok", "job:hermes"],
-      affectedSessions: ["session:grok-fragment", "session:hermes-old"],
+      affectedSessions: ["session:grok-fragment", "session:hermes-old", "session:manual"],
       pseudoSessionsToRemove: ["session:grok-fragment"],
       sessionsToReparse: ["session:hermes-old"],
       automaticSuppressionsToReopen: ["session:hermes-old"],
       preservedSessions: expect.arrayContaining(["session:live-codex", "session:manual", "session:unrelated"]),
       blockedPublishedSessions: [],
       reimportSources: ["source:grok", "source:hermes"],
+      sourcePlans: [
+        expect.objectContaining({ available: true, correctedSourceId: "source:grok", sourceId: "source:grok" }),
+        expect.objectContaining({ available: true, correctedSourceId: "source:hermes", sourceId: "source:hermes" })
+      ],
       applyAllowed: true
     });
     expect(preview.planHash).toMatch(/^[a-f0-9]{64}$/);
@@ -36,7 +46,7 @@ describe("import repair", () => {
 
   test("apply fails closed when the preview hash is wrong or its provenance drifts", async () => {
     const db = await repairDatabase();
-    const input = { importJobIds: ["job:grok", "job:hermes"] };
+    const input = { importJobIds: ["job:grok", "job:hermes"], sourceMappings: availableSources };
     expect(() => applyImportRepair(db, { ...input, planHash: "wrong" })).toThrow("repair plan changed");
 
     const preview = previewImportRepair(db, input);
@@ -45,16 +55,29 @@ describe("import repair", () => {
     expect(readSession(db, "session:grok-fragment")).toBeDefined();
   });
 
+  test("replacement-job staging failure rolls back cleanup", async () => {
+    const db = await repairDatabase();
+    const preview = previewImportRepair(db, { importJobIds: ["job:grok"], sourceMappings: availableSources });
+
+    expect(() => applyImportRepair(db, {
+      importJobIds: ["job:grok"],
+      planHash: preview.planHash,
+      sourceMappings: availableSources,
+      stageReimports: () => { throw new Error("stage failed"); }
+    })).toThrow("stage failed");
+    expect(readSession(db, "session:grok-fragment")).toBeDefined();
+  });
+
   test("published provenance blocks apply and remains untouched", async () => {
     const db = await repairDatabase();
     seedImpact(db, "job:published", "source:published", "session:published", "created");
 
-    const preview = previewImportRepair(db, { importJobIds: ["job:published"] });
+    const preview = previewImportRepair(db, { importJobIds: ["job:published"], sourceMappings: availableSources });
 
     expect(preview.applyAllowed).toBe(false);
     expect(preview.blockedPublishedSessions).toEqual(["session:published"]);
     expect(preview.affectedArtifacts).toEqual(["artifact:published"]);
-    expect(() => applyImportRepair(db, { importJobIds: ["job:published"], planHash: preview.planHash })).toThrow(
+    expect(() => applyImportRepair(db, { importJobIds: ["job:published"], planHash: preview.planHash, sourceMappings: availableSources })).toThrow(
       "published artifacts block repair"
     );
     expect(readSession(db, "session:published")).toBeDefined();
@@ -63,11 +86,12 @@ describe("import repair", () => {
 
   test("apply removes only exclusively owned pseudo-sessions and preserves live, manual, and unrelated data", async () => {
     const db = await repairDatabase();
-    const preview = previewImportRepair(db, { importJobIds: ["job:grok", "job:hermes"] });
+    const preview = previewImportRepair(db, { importJobIds: ["job:grok", "job:hermes"], sourceMappings: availableSources });
 
     const receipt = applyImportRepair(db, {
       importJobIds: preview.importJobIds,
-      planHash: preview.planHash
+      planHash: preview.planHash,
+      sourceMappings: availableSources
     });
 
     expect(receipt).toMatchObject({
@@ -86,6 +110,76 @@ describe("import repair", () => {
       .toEqual({ publication_status: "publish_path", suppression_category: null });
     expect(db.prepare("SELECT publication_status, suppression_category FROM workbench_session_state WHERE session_id = ?").get("session:manual"))
       .toEqual({ publication_status: "not_added_to_logbook", suppression_category: "manual_exclusion" });
+  });
+
+  test("unavailable corrected sources preserve their sessions while available sources remain repairable", async () => {
+    const db = await repairDatabase();
+    const sourceMappings = [
+      availableSources[0],
+      { available: false as const, reason: "source_not_discovered" as const, sourceId: "source:hermes" }
+    ];
+
+    const preview = previewImportRepair(db, { importJobIds: ["job:grok", "job:hermes"], sourceMappings });
+
+    expect(preview.pseudoSessionsToRemove).toEqual(["session:grok-fragment"]);
+    expect(preview.sessionsToReparse).toEqual([]);
+    expect(preview.reimportSources).toEqual(["source:grok"]);
+    expect(preview.unavailableSources).toEqual(["source:hermes"]);
+    expect(preview.preservationReasons).toContainEqual({ reason: "source_unavailable", sessionId: "session:hermes-old" });
+    const driftedMappings = [...sourceMappings.slice(0, 1), availableSources[1]];
+    expect(() => applyImportRepair(db, {
+      importJobIds: preview.importJobIds,
+      planHash: preview.planHash,
+      sourceMappings: driftedMappings
+    })).toThrow("repair plan changed");
+  });
+
+  test("source-linked-only sessions are included in planning and explicitly preserved", async () => {
+    const db = await repairDatabase();
+    seedSession(db, "session:source-only", "grok", "source-only");
+    db.prepare("INSERT INTO session_sources(session_id, source_id, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?)")
+      .run("session:source-only", "source:grok", "2026-07-15T12:00:00.000Z", "2026-07-15T12:00:00.000Z");
+
+    const preview = previewImportRepair(db, { importJobIds: ["job:grok"], sourceMappings: availableSources });
+
+    expect(preview.affectedSessions).toContain("session:source-only");
+    expect(preview.pseudoSessionsToRemove).not.toContain("session:source-only");
+    expect(preview.sessionsToReparse).not.toContain("session:source-only");
+    expect(preview.preservedSessions).toContain("session:source-only");
+    expect(preview.preservationReasons).toContainEqual({ reason: "source_linked_only", sessionId: "session:source-only" });
+  });
+
+  test("affected manual decisions are explicitly preserved and never reopened or deleted", async () => {
+    const db = await repairDatabase();
+    seedImpact(db, "job:hermes", "source:hermes", "session:manual", "created");
+
+    const preview = previewImportRepair(db, { importJobIds: ["job:hermes"], sourceMappings: availableSources });
+
+    expect(preview.sessionsToReparse).not.toContain("session:manual");
+    expect(preview.pseudoSessionsToRemove).not.toContain("session:manual");
+    expect(preview.automaticSuppressionsToReopen).not.toContain("session:manual");
+    expect(preview.preservationReasons).toContainEqual({ reason: "manual_decision", sessionId: "session:manual" });
+  });
+
+  test("deferred sessions keep automatic suppression and selected jobs remain immutable audit records", async () => {
+    const db = await repairDatabase();
+    seedImportUnit(db, "job:hermes", "source:hermes");
+    db.prepare("UPDATE sessions SET last_activity_at = '2020-01-01T00:00:00.000Z' WHERE session_id = 'session:hermes-old'").run();
+    db.prepare("UPDATE import_manifests SET scope_json = ? WHERE import_job_id = 'job:hermes'")
+      .run(JSON.stringify({ days: 30, mode: "transcript_recent" }));
+
+    const preview = previewImportRepair(db, { importJobIds: ["job:hermes"], sourceMappings: availableSources });
+    expect(preview.outOfRangeSessionsToDefer).toEqual([]);
+    seedImpact(db, "job:hermes", "source:hermes", "session:hermes-old", "created");
+    const deferred = previewImportRepair(db, { importJobIds: ["job:hermes"], sourceMappings: availableSources });
+    expect(deferred.outOfRangeSessionsToDefer).toEqual(["session:hermes-old"]);
+    expect(deferred.automaticSuppressionsToReopen).not.toContain("session:hermes-old");
+
+    applyImportRepair(db, { importJobIds: ["job:hermes"], planHash: deferred.planHash, sourceMappings: availableSources });
+    expect(db.prepare("SELECT status, status_reason FROM import_work_units WHERE import_job_id = 'job:hermes'").get())
+      .toEqual({ status: "succeeded", status_reason: null });
+    expect(db.prepare("SELECT publication_status, suppression_category FROM workbench_session_state WHERE session_id = 'session:hermes-old'").get())
+      .toEqual({ publication_status: "not_added_to_logbook", suppression_category: "insufficient_evidence" });
   });
 });
 
@@ -149,4 +243,14 @@ function readSession(db: MastheadDatabase, sessionId: string): unknown {
 
 function databaseChanges(db: MastheadDatabase): number {
   return (db.prepare("SELECT total_changes() AS changes").get() as { changes: number }).changes;
+}
+
+function seedImportUnit(db: MastheadDatabase, jobId: string, sourceId: string): void {
+  db.prepare(`INSERT INTO import_manifests(manifest_id, import_job_id, source_id, runtime_kind, import_kind, scope_json, generated_at)
+    VALUES (?, ?, ?, 'hermes', 'transcript', ?, '2026-07-15T12:00:00.000Z')`)
+    .run(`manifest:${jobId}`, jobId, sourceId, JSON.stringify({ mode: "transcript_all" }));
+  db.prepare(`INSERT INTO import_work_units(work_unit_id, manifest_id, import_job_id, source_id, runtime_kind, source_kind,
+      confidence, unit_kind, status, source_path)
+    VALUES (?, ?, ?, ?, 'hermes', 'jsonl', 'authoritative', 'transcript_file', 'succeeded', '/tmp/hermes.jsonl')`)
+    .run(`unit:${jobId}`, `manifest:${jobId}`, jobId, sourceId);
 }

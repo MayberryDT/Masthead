@@ -1,71 +1,51 @@
 import { createHash } from "node:crypto";
+import type {
+  ImportRepairPreservationReason,
+  ImportRepairPreview,
+  ImportRepairReceipt,
+  ImportRepairSourceMapping,
+  ImportRepairSourcePlan
+} from "../../shared/importRepair.ts";
 import type { MastheadDatabase } from "../db/sqlite.ts";
 import { withImmediateTransaction } from "../db/sqlite.ts";
-
-export type ImportRepairPreview = {
-  importJobIds: string[];
-  affectedSessions: string[];
-  pseudoSessionsToRemove: string[];
-  sessionsToReparse: string[];
-  automaticSuppressionsToReopen: string[];
-  outOfRangeSessionsToDefer: string[];
-  preservedSessions: string[];
-  blockedPublishedSessions: string[];
-  affectedArtifacts: string[];
-  reimportSources: string[];
-  applyAllowed: boolean;
-  planHash: string;
-};
-
-export type ImportRepairReceipt = {
-  importJobIds: string[];
-  planHash: string;
-  removedSessions: string[];
-  resetSessions: string[];
-  reopenedSuppressions: string[];
-  preservedSessions: string[];
-  blockedPublishedSessions: string[];
-  reimportSources: string[];
-};
+export type { ImportRepairPreview, ImportRepairReceipt } from "../../shared/importRepair.ts";
 
 type IdRow = { id: string };
 
 export function previewImportRepair(
   db: MastheadDatabase,
-  input: { importJobIds: string[] }
+  input: { importJobIds: string[]; sourceMappings: ImportRepairSourceMapping[] }
 ): ImportRepairPreview {
   const importJobIds = normalizeIds(input.importJobIds);
   if (importJobIds.length === 0) throw new Error("at least one import job is required");
   requireImportJobs(db, importJobIds);
   const selected = placeholders(importJobIds);
-  const affectedSessions = ids(
+  const sourcePlans = buildSourcePlans(db, importJobIds, input.sourceMappings);
+  const impactedSessions = ids(
     db.prepare(`SELECT DISTINCT session_id AS id FROM import_session_impacts WHERE import_job_id IN (${selected}) ORDER BY session_id`)
       .all(...importJobIds) as IdRow[]
   );
-  const reimportSources = ids(
-    db.prepare(`SELECT DISTINCT source_id AS id FROM import_jobs WHERE import_job_id IN (${selected}) ORDER BY source_id`)
-      .all(...importJobIds) as IdRow[]
+  const selectedSourceIds = sourcePlans.map((source) => source.sourceId);
+  const sourceLinkedSessions = selectedSourceIds.length === 0 ? [] : ids(
+    db.prepare(`SELECT DISTINCT session_id AS id FROM session_sources WHERE source_id IN (${placeholders(selectedSourceIds)}) ORDER BY session_id`)
+      .all(...selectedSourceIds) as IdRow[]
   );
+  const affectedSessions = [...new Set([...impactedSessions, ...sourceLinkedSessions])].sort();
+  const sourceLinkedOnly = new Set(sourceLinkedSessions.filter((sessionId) => !impactedSessions.includes(sessionId)));
+  const reimportSources = sourcePlans.filter((source) => source.available).map((source) => source.correctedSourceId!);
+  const unavailableSources = sourcePlans.filter((source) => !source.available).map((source) => source.sourceId);
   const affectedArtifacts = affectedSessions.length === 0 ? [] : ids(
     db.prepare(`SELECT artifact_id AS id FROM session_artifact_provenance WHERE session_id IN (${placeholders(affectedSessions)})
       UNION SELECT artifact_id AS id FROM session_artifacts WHERE session_id IN (${placeholders(affectedSessions)}) ORDER BY id`)
       .all(...affectedSessions, ...affectedSessions) as IdRow[]
   );
-  const blockedPublishedSessions = affectedSessions.length === 0 ? [] : ids(
+  const blockedPublishedSessions = impactedSessions.length === 0 ? [] : ids(
     db.prepare(`SELECT provenance.session_id AS id FROM session_artifact_provenance provenance
       JOIN session_artifacts artifacts ON artifacts.artifact_id = provenance.artifact_id
-      WHERE provenance.session_id IN (${placeholders(affectedSessions)}) AND artifacts.publication_status = 'published'
+      WHERE provenance.session_id IN (${placeholders(impactedSessions)}) AND artifacts.publication_status = 'published'
       UNION SELECT session_id AS id FROM session_artifacts
-      WHERE session_id IN (${placeholders(affectedSessions)}) AND publication_status = 'published'
-      ORDER BY id`).all(...affectedSessions, ...affectedSessions) as IdRow[]
-  );
-  const automaticSuppressionsToReopen = affectedSessions.length === 0 ? [] : ids(
-    db.prepare(`SELECT session_id AS id FROM workbench_session_state
-      WHERE session_id IN (${placeholders(affectedSessions)})
-        AND publication_status = 'not_added_to_logbook'
-        AND quality_decision_source = 'automatic'
-        AND suppression_category IN ('confirmed_noise', 'insufficient_evidence')
-      ORDER BY session_id`).all(...affectedSessions) as IdRow[]
+      WHERE session_id IN (${placeholders(impactedSessions)}) AND publication_status = 'published'
+      ORDER BY id`).all(...impactedSessions, ...impactedSessions) as IdRow[]
   );
   const outOfRangeSessionsToDefer = outOfRangeSessions(db, importJobIds);
   const createdSessions = new Set(affectedSessions.length === 0 ? [] : ids(
@@ -74,11 +54,36 @@ export function previewImportRepair(
   ));
   const blocked = new Set(blockedPublishedSessions);
   const deferred = new Set(outOfRangeSessionsToDefer);
+  const manual = new Set(manualDecisionSessions(db, affectedSessions));
+  const unavailable = new Set(sessionsWithUnavailableSources(db, importJobIds, sourcePlans));
+  const preservationReasons: ImportRepairPreservationReason[] = [];
   const pseudoSessionsToRemove = affectedSessions.filter((sessionId) =>
-    createdSessions.has(sessionId) && !blocked.has(sessionId) && !deferred.has(sessionId) && exclusivelyOwned(db, sessionId, importJobIds, reimportSources)
+    createdSessions.has(sessionId) && !blocked.has(sessionId) && !deferred.has(sessionId) && !manual.has(sessionId) && !unavailable.has(sessionId) &&
+      exclusivelyOwned(db, sessionId, importJobIds, sourcePlans.map((source) => source.sourceId)).owned
   );
   const removed = new Set(pseudoSessionsToRemove);
-  const sessionsToReparse = affectedSessions.filter((sessionId) => !removed.has(sessionId) && !blocked.has(sessionId) && !deferred.has(sessionId));
+  const sessionsToReparse = affectedSessions.filter((sessionId) =>
+    !sourceLinkedOnly.has(sessionId) && !removed.has(sessionId) && !blocked.has(sessionId) && !deferred.has(sessionId) &&
+      !manual.has(sessionId) && !unavailable.has(sessionId)
+  );
+  for (const sessionId of affectedSessions) {
+    const ownership = exclusivelyOwned(db, sessionId, importJobIds, sourcePlans.map((source) => source.sourceId));
+    const reason = blocked.has(sessionId) ? "published_artifact"
+      : manual.has(sessionId) ? "manual_decision"
+        : unavailable.has(sessionId) ? "source_unavailable"
+          : deferred.has(sessionId) ? "out_of_range"
+            : sourceLinkedOnly.has(sessionId) ? "source_linked_only"
+              : ownership.reason;
+    if (!removed.has(sessionId) && !sessionsToReparse.includes(sessionId) && reason) preservationReasons.push({ reason, sessionId });
+  }
+  const automaticSuppressionsToReopen = sessionsToReparse.length === 0 ? [] : ids(
+    db.prepare(`SELECT session_id AS id FROM workbench_session_state
+      WHERE session_id IN (${placeholders(sessionsToReparse)})
+        AND publication_status = 'not_added_to_logbook'
+        AND quality_decision_source = 'automatic'
+        AND suppression_category IN ('confirmed_noise', 'insufficient_evidence')
+      ORDER BY session_id`).all(...sessionsToReparse) as IdRow[]
+  );
   const allSessions = ids(db.prepare("SELECT session_id AS id FROM sessions ORDER BY session_id").all() as IdRow[]);
   const preservedSessions = allSessions.filter((sessionId) => !removed.has(sessionId) && !sessionsToReparse.includes(sessionId));
   const plan = {
@@ -89,24 +94,32 @@ export function previewImportRepair(
     blockedPublishedSessions,
     importJobIds,
     outOfRangeSessionsToDefer,
+    preservationReasons,
     preservedSessions,
     pseudoSessionsToRemove,
     reimportSources,
-    sessionsToReparse
+    sessionsToReparse,
+    sourcePlans,
+    unavailableSources
   };
   return { ...plan, planHash: hashPlan(plan) };
 }
 
 export function applyImportRepair(
   db: MastheadDatabase,
-  input: { importJobIds: string[]; planHash: string }
+  input: {
+    importJobIds: string[];
+    planHash: string;
+    sourceMappings: ImportRepairSourceMapping[];
+    stageReimports?: () => string[];
+  }
 ): ImportRepairReceipt {
-  const preview = previewImportRepair(db, { importJobIds: input.importJobIds });
+  const preview = previewImportRepair(db, { importJobIds: input.importJobIds, sourceMappings: input.sourceMappings });
   if (preview.planHash !== input.planHash) throw new Error("repair plan changed");
   if (!preview.applyAllowed) throw new Error("published artifacts block repair");
 
   return withImmediateTransaction(db, () => {
-    const lockedPreview = previewImportRepair(db, { importJobIds: input.importJobIds });
+    const lockedPreview = previewImportRepair(db, { importJobIds: input.importJobIds, sourceMappings: input.sourceMappings });
     if (lockedPreview.planHash !== input.planHash) throw new Error("repair plan changed");
     for (const sessionId of lockedPreview.automaticSuppressionsToReopen) {
       db.prepare(`UPDATE workbench_session_state SET publication_status = 'publish_path', next_action = 'review_quality',
@@ -117,21 +130,18 @@ export function applyImportRepair(
       db.prepare("DELETE FROM session_search WHERE session_id = ?").run(sessionId);
       db.prepare("DELETE FROM sessions WHERE session_id = ?").run(sessionId);
     }
-    const jobs = placeholders(lockedPreview.importJobIds);
-    db.prepare(`UPDATE import_work_units SET status = 'queued', status_reason = 'import_repair', cursor_after_json = NULL,
-      processed_records = 0, imported_records = 0, skipped_records = 0, failed_records = 0,
-      heartbeat_at = NULL, started_at = NULL, finished_at = NULL, failure_group_id = NULL, summary_json = NULL
-      WHERE import_job_id IN (${jobs})`).run(...lockedPreview.importJobIds);
     if (lockedPreview.reimportSources.length > 0) {
       db.prepare(`DELETE FROM ingest_cursors WHERE source_id IN (${placeholders(lockedPreview.reimportSources)})`)
         .run(...lockedPreview.reimportSources);
     }
+    const reimportJobIds = input.stageReimports?.() ?? [];
     return {
       blockedPublishedSessions: [],
       importJobIds: lockedPreview.importJobIds,
       planHash: lockedPreview.planHash,
       preservedSessions: lockedPreview.preservedSessions,
       reimportSources: lockedPreview.reimportSources,
+      reimportJobIds,
       removedSessions: lockedPreview.pseudoSessionsToRemove,
       reopenedSuppressions: lockedPreview.automaticSuppressionsToReopen,
       resetSessions: lockedPreview.sessionsToReparse
@@ -139,18 +149,60 @@ export function applyImportRepair(
   });
 }
 
-function exclusivelyOwned(db: MastheadDatabase, sessionId: string, jobIds: string[], sourceIds: string[]): boolean {
+function exclusivelyOwned(
+  db: MastheadDatabase,
+  sessionId: string,
+  jobIds: string[],
+  sourceIds: string[]
+): { owned: boolean; reason?: ImportRepairPreservationReason["reason"] } {
   const unselectedImpact = db.prepare(`SELECT 1 FROM import_session_impacts
     WHERE session_id = ? AND import_job_id NOT IN (${placeholders(jobIds)}) LIMIT 1`).get(sessionId, ...jobIds);
-  if (unselectedImpact) return false;
+  if (unselectedImpact) return { owned: false, reason: "shared_ownership" };
   const foreignSource = sourceIds.length === 0 ? true : db.prepare(`SELECT 1 FROM session_sources
     WHERE session_id = ? AND source_id NOT IN (${placeholders(sourceIds)}) LIMIT 1`).get(sessionId, ...sourceIds);
-  if (foreignSource) return false;
+  if (foreignSource) return { owned: false, reason: "shared_ownership" };
   const artifact = db.prepare(`SELECT 1 FROM session_artifact_provenance WHERE session_id = ?
     UNION SELECT 1 FROM session_artifacts WHERE session_id = ? LIMIT 1`).get(sessionId, sessionId);
-  if (artifact) return false;
+  if (artifact) return { owned: false, reason: "artifact_preserved" };
   const live = db.prepare("SELECT 1 FROM live_state_reports WHERE canonical_session_id = ? LIMIT 1").get(sessionId);
-  return !live;
+  return live ? { owned: false, reason: "live_state" } : { owned: true };
+}
+
+function buildSourcePlans(db: MastheadDatabase, jobIds: string[], mappings: ImportRepairSourceMapping[]): ImportRepairSourcePlan[] {
+  const rows = db.prepare(`SELECT import_job_id AS importJobId, source_id AS sourceId FROM import_jobs
+    WHERE import_job_id IN (${placeholders(jobIds)}) ORDER BY source_id, import_job_id`)
+    .all(...jobIds) as Array<{ importJobId: string; sourceId: string }>;
+  const mappingBySource = new Map(mappings.map((mapping) => [mapping.sourceId, mapping]));
+  const sourceIds = [...new Set(rows.map((row) => row.sourceId))].sort();
+  return sourceIds.map((sourceId) => {
+    const mapping = mappingBySource.get(sourceId);
+    const viable = Boolean(mapping?.available && mapping.correctedSourceId && mapping.adapterRuntime);
+    return {
+      adapterRuntime: viable ? mapping!.adapterRuntime : undefined,
+      available: viable,
+      correctedSourceId: viable ? mapping!.correctedSourceId : undefined,
+      importJobIds: rows.filter((row) => row.sourceId === sourceId).map((row) => row.importJobId),
+      reason: viable ? undefined : mapping?.reason ?? "source_not_discovered",
+      sourceId
+    };
+  });
+}
+
+function sessionsWithUnavailableSources(db: MastheadDatabase, jobIds: string[], plans: ImportRepairSourcePlan[]): string[] {
+  const unavailable = new Set(plans.filter((plan) => !plan.available).map((plan) => plan.sourceId));
+  if (unavailable.size === 0) return [];
+  const rows = db.prepare(`SELECT DISTINCT impacts.session_id AS id, COALESCE(impacts.source_id, jobs.source_id) AS sourceId
+    FROM import_session_impacts impacts JOIN import_jobs jobs ON jobs.import_job_id = impacts.import_job_id
+    WHERE impacts.import_job_id IN (${placeholders(jobIds)})`).all(...jobIds) as Array<IdRow & { sourceId: string }>;
+  return [...new Set(rows.filter((row) => unavailable.has(row.sourceId)).map((row) => row.id))].sort();
+}
+
+function manualDecisionSessions(db: MastheadDatabase, sessionIds: string[]): string[] {
+  if (sessionIds.length === 0) return [];
+  return ids(db.prepare(`SELECT session_id AS id FROM workbench_session_state
+    WHERE session_id IN (${placeholders(sessionIds)})
+      AND (quality_decision_source = 'user' OR suppression_category = 'manual_exclusion') ORDER BY session_id`)
+    .all(...sessionIds) as IdRow[]);
 }
 
 function outOfRangeSessions(db: MastheadDatabase, jobIds: string[]): string[] {

@@ -7,6 +7,7 @@ import type { SessionSummaryEnrichment, SessionTitleEnrichment } from "../shared
 import type { SessionTranscriptCoverage, SessionTranscriptItem, SessionTranscriptResult } from "../shared/sessionTranscript";
 import type { SourcesAdvancedDto, SourcesOnboardingScanDto, SourcesSetupDto, SourcesSetupRunRequest } from "../shared/sourcesSetup";
 import type { ImportCompletionReportDto, ImportJobStatus, ImportManifestSummaryDto, ImportScopeDto, ImportStage, ImportWorkUnitDto, ImportWorkUnitStatus } from "../shared/sourceImport";
+import type { ImportRepairPreview, ImportRepairReceipt } from "../shared/importRepair";
 import type {
   ConnectorActionRequired,
   ConnectorActivation,
@@ -30,6 +31,7 @@ import {
 
 export type { SessionTranscriptCoverage, SessionTranscriptItem, SessionTranscriptResult };
 export type { SourcesAdvancedDto, SourcesOnboardingScanDto, SourcesSetupDto, SourcesSetupRunRequest };
+export type { ImportRepairPreview, ImportRepairReceipt };
 export type {
   ConnectorActionRequired,
   ConnectorActivation,
@@ -794,32 +796,6 @@ export async function startImport(
   return body.job;
 }
 
-export type ImportRepairPreview = {
-  importJobIds: string[];
-  affectedSessions: string[];
-  pseudoSessionsToRemove: string[];
-  sessionsToReparse: string[];
-  automaticSuppressionsToReopen: string[];
-  outOfRangeSessionsToDefer: string[];
-  preservedSessions: string[];
-  blockedPublishedSessions: string[];
-  affectedArtifacts: string[];
-  reimportSources: string[];
-  applyAllowed: boolean;
-  planHash: string;
-};
-
-export type ImportRepairReceipt = {
-  importJobIds: string[];
-  planHash: string;
-  removedSessions: string[];
-  resetSessions: string[];
-  reopenedSuppressions: string[];
-  preservedSessions: string[];
-  blockedPublishedSessions: string[];
-  reimportSources: string[];
-};
-
 export async function previewImportRepair(importJobIds: string[], baseUrl = defaultLiveProjectionUrl()): Promise<ImportRepairPreview> {
   const body = await postJson<{ ok: true; preview: ImportRepairPreview }>(baseUrl, "/imports/repair/preview", {
     body: { importJobIds }, label: "import repair preview"
@@ -830,11 +806,11 @@ export async function previewImportRepair(importJobIds: string[], baseUrl = defa
 export async function applyImportRepair(
   input: { importJobIds: string[]; planHash: string },
   baseUrl = defaultLiveProjectionUrl()
-): Promise<{ jobs: ImportJob[]; receipt: ImportRepairReceipt }> {
-  const body = await postJson<{ ok: true; jobs: ImportJob[]; receipt: ImportRepairReceipt }>(baseUrl, "/imports/repair/apply", {
+): Promise<{ jobs: ImportJob[]; receipt: ImportRepairReceipt; reimportJobIds: string[] }> {
+  const body = await postJson<{ ok: true; jobs: ImportJob[]; receipt: ImportRepairReceipt; reimportJobIds: string[] }>(baseUrl, "/imports/repair/apply", {
     body: input, label: "import repair apply"
   });
-  return { jobs: body.jobs, receipt: body.receipt };
+  return { jobs: body.jobs, receipt: body.receipt, reimportJobIds: body.reimportJobIds };
 }
 
 export async function listImports(
