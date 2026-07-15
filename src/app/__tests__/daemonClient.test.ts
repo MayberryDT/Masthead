@@ -4,7 +4,6 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   getWorkbenchMissingSessions,
   getWorkbenchAuthoringCapabilities,
-  getWorkbenchArtifactCandidates,
   getWorkbenchActivity,
   getWorkbenchNotAddedSessions,
   getWorkbenchNotAddedSummary,
@@ -25,7 +24,6 @@ import {
   postWorkbenchEnrollMissing,
   postWorkbenchImportTranscript,
   postWorkbenchImportTranscriptPreview,
-  postWorkbenchPublish,
   postWorkbenchQuality,
   postWorkbenchReleaseClaim,
   previewSourcesImport,
@@ -401,23 +399,6 @@ describe("daemon client review dispositions", () => {
     );
   });
 
-  test("loads a bounded artifact candidate page from the active connector", async () => {
-    const page = { candidates: [], nextCursor: "cursor:next" };
-    vi.stubGlobal("fetch", vi.fn(async () => response(page)));
-
-    await expect(
-      getWorkbenchArtifactCandidates("http://127.0.0.1:17374/projection?stale=true", {
-        kind: "runbook",
-        limit: 25,
-        status: "pending"
-      })
-    ).resolves.toEqual(page);
-    expect(fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:17374/workbench/authoring/candidates?kind=runbook&limit=25&status=pending",
-      expect.objectContaining({ headers: { accept: "application/json" } })
-    );
-  });
-
   test("rejects authoring capabilities that do not identify an absolute installed command", async () => {
     vi.stubGlobal(
       "fetch",
@@ -483,7 +464,6 @@ describe("daemon client review dispositions", () => {
     await postWorkbenchCheckTranscript(base, "session:1");
     await postWorkbenchImportTranscriptPreview(base, "session:1", { sourceId: "source:allowed" });
     await postWorkbenchImportTranscript(base, "session:1", { sourceId: "source:allowed" });
-    await postWorkbenchPublish(base, "session:1");
     await postWorkbenchClaim(base, "session:1", { claimedBy: "ui-user", ttlSeconds: 300 });
     await postWorkbenchReleaseClaim(base, "claim:abc", { reason: "done" });
     await postWorkbenchQuality(base, "session:1", { status: "passed" });
@@ -513,36 +493,31 @@ describe("daemon client review dispositions", () => {
       method: "POST",
       signal: undefined
     });
-    expect(fetch).toHaveBeenNthCalledWith(5, "http://127.0.0.1:17373/workbench/sessions/session%3A1/publish", {
-      headers: { accept: "application/json" },
-      method: "POST",
-      signal: undefined
-    });
-    expect(fetch).toHaveBeenNthCalledWith(6, "http://127.0.0.1:17373/workbench/sessions/session%3A1/claim", {
+    expect(fetch).toHaveBeenNthCalledWith(5, "http://127.0.0.1:17373/workbench/sessions/session%3A1/claim", {
       body: JSON.stringify({ claimedBy: "ui-user", ttlSeconds: 300 }),
       headers: { accept: "application/json", "content-type": "application/json" },
       method: "POST",
       signal: undefined
     });
-    expect(fetch).toHaveBeenNthCalledWith(7, "http://127.0.0.1:17373/workbench/claims/claim%3Aabc/release", {
+    expect(fetch).toHaveBeenNthCalledWith(6, "http://127.0.0.1:17373/workbench/claims/claim%3Aabc/release", {
       body: JSON.stringify({ reason: "done" }),
       headers: { accept: "application/json", "content-type": "application/json" },
       method: "POST",
       signal: undefined
     });
-    expect(fetch).toHaveBeenNthCalledWith(8, "http://127.0.0.1:17373/workbench/sessions/session%3A1/quality", {
+    expect(fetch).toHaveBeenNthCalledWith(7, "http://127.0.0.1:17373/workbench/sessions/session%3A1/quality", {
       body: JSON.stringify({ status: "passed" }),
       headers: { accept: "application/json", "content-type": "application/json" },
       method: "POST",
       signal: undefined
     });
-    expect(fetch).toHaveBeenNthCalledWith(9, "http://127.0.0.1:17373/workbench/sessions/session%3A1/quality", {
+    expect(fetch).toHaveBeenNthCalledWith(8, "http://127.0.0.1:17373/workbench/sessions/session%3A1/quality", {
       body: JSON.stringify({ status: "failed", reason: "hook_only_noise" }),
       headers: { accept: "application/json", "content-type": "application/json" },
       method: "POST",
       signal: undefined
     });
-    expect(fetch).toHaveBeenNthCalledWith(10, "http://127.0.0.1:17373/workbench/sessions/session%3A1/quality", {
+    expect(fetch).toHaveBeenNthCalledWith(9, "http://127.0.0.1:17373/workbench/sessions/session%3A1/quality", {
       body: JSON.stringify({ mode: "precheck" }),
       headers: { accept: "application/json", "content-type": "application/json" },
       method: "POST",

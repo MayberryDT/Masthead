@@ -191,7 +191,9 @@ export function useWorkbenchController({
 
   const handoffText = useMemo(
     () =>
-      authoringCapabilities?.bundleVersion === "workbench-authoring-v3"
+      authoringCapabilities?.bundleVersion === "workbench-authoring-v3" &&
+      selectedSessionIds.size > 0 &&
+      selectedCompileReadySessionIds.size === selectedSessionIds.size
         ? buildWorkbenchHandoff({
             authoringCommand: authoringCapabilities.command,
             databaseId: authoringCapabilities.databaseId,
@@ -208,7 +210,8 @@ export function useWorkbenchController({
       if (kind === "enroll_missing") return true;
       if (kind === "copy_agent_prompt") {
         return authoringCapabilities?.bundleVersion === "workbench-authoring-v3" &&
-          selectedCompileReadySessionIds.size > 0;
+          selectedSessionIds.size > 0 &&
+          selectedCompileReadySessionIds.size === selectedSessionIds.size;
       }
       if (selectedSessions.length === 0) return false;
 
@@ -243,7 +246,7 @@ export function useWorkbenchController({
           return false;
       }
     },
-    [actionBusy, authoringCapabilities, isLive, selectedCompileReadySessionIds, selectedSessions]
+    [actionBusy, authoringCapabilities, isLive, selectedCompileReadySessionIds, selectedSessionIds, selectedSessions]
   );
 
   const runAction = useCallback(

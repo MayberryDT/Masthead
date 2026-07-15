@@ -25,9 +25,6 @@ import type {
 } from "../shared/workbench";
 import {
   isWorkbenchAuthoringCapabilitiesDto,
-  type WorkbenchArtifactCandidatePageDto,
-  type WorkbenchArtifactCandidateStatus,
-  type WorkbenchAutomaticArtifactKind,
   type WorkbenchAuthoringCapabilitiesDto
 } from "../shared/workbenchAuthoring";
 
@@ -1304,28 +1301,6 @@ export async function getWorkbenchAuthoringCapabilities(
   return capabilities;
 }
 
-export async function getWorkbenchArtifactCandidates(
-  activeProjectionUrl: string,
-  options: {
-    cursor?: string;
-    kind?: WorkbenchAutomaticArtifactKind;
-    limit?: number;
-    signal?: AbortSignal;
-    status?: WorkbenchArtifactCandidateStatus;
-  } = {}
-): Promise<WorkbenchArtifactCandidatePageDto> {
-  return getJson<WorkbenchArtifactCandidatePageDto>(activeProjectionUrl, "/workbench/authoring/candidates", {
-    label: "workbench artifact candidates",
-    query: {
-      cursor: options.cursor,
-      kind: options.kind,
-      limit: options.limit,
-      status: options.status
-    },
-    signal: options.signal
-  });
-}
-
 export async function getWorkbenchActivity(
   baseUrl = defaultLiveProjectionUrl(),
   options: { limit?: number; sessionId?: string; signal?: AbortSignal } = {}
@@ -1403,17 +1378,6 @@ export async function postWorkbenchImportTranscript(
   return postJson(baseUrl, `/workbench/sessions/${encodeURIComponent(sessionId)}/import-transcript`, {
     body,
     label: "workbench import transcript",
-    signal: options.signal
-  });
-}
-
-export async function postWorkbenchPublish(
-  baseUrl: string,
-  sessionId: string,
-  options: { signal?: AbortSignal } = {}
-): Promise<unknown> {
-  return postJson(baseUrl, `/workbench/sessions/${encodeURIComponent(sessionId)}/publish`, {
-    label: "workbench publish",
     signal: options.signal
   });
 }

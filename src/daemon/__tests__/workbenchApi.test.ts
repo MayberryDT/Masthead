@@ -12,8 +12,6 @@ import {
   claimWorkbenchSessions,
   ensureWorkbenchSessionState,
   markWorkbenchNotAdded,
-  markWorkbenchArtifactSatisfied,
-  markWorkbenchSessionEnrichmentSatisfied,
   readWorkbenchSessionState,
   recordWorkbenchActivity
 } from "../db/workbenchPipelineRepository.ts";
@@ -32,9 +30,10 @@ afterEach(async () => {
 });
 
 describe("workbench API", () => {
-  test("does not expose a standalone canonical dossier publication route", async () => {
+  test("does not expose standalone session or canonical dossier publication routes", async () => {
     const serverSource = await readFile(resolve("src/daemon/server.ts"), "utf8");
     expect(serverSource).not.toContain('url.pathname === "/workbench/dossiers/publish"');
+    expect(serverSource).not.toContain("workbenchPublishMatch");
 
     const { baseUrl, daemon } = await startTestDaemon();
     seedSession(daemon.database, {
@@ -51,6 +50,7 @@ describe("workbench API", () => {
       { actorId: "recovery", sessionIds: ["session:raw-no-publication-route"] },
       404
     );
+    await postJson(baseUrl, "/workbench/sessions/session%3Araw-no-publication-route/publish", {}, 404);
     const logbook = await getJson(baseUrl, "/logbook/artifacts?q=Raw%20session%20must%20remain%20unpublished");
     expect(logbook.artifacts).toHaveLength(0);
   });
@@ -173,47 +173,6 @@ describe("workbench API", () => {
       ok: true,
       total: 1,
       sessions: [expect.objectContaining({ reason: "metadata_only", sessionId: "session:not-added" })]
-    });
-  });
-
-  test("publishes sessions only after readiness gates pass", async () => {
-    const { baseUrl, daemon } = await startTestDaemon();
-    seedSession(daemon.database, {
-      lifecycle: "ended",
-      model: "gpt-5",
-      project: "Masthead",
-      sessionId: "session:publish",
-      title: "Publish candidate"
-    });
-
-    const blocked = await postJson(baseUrl, "/workbench/sessions/session%3Apublish/publish", {}, 409);
-    expect(blocked).toMatchObject({
-      ok: false,
-      code: "publication_gate_failed",
-      missing: ["transcript", "quality", "session_enrichment", "session_dossier"]
-    });
-
-    ensureWorkbenchSessionState(daemon.database, "session:publish");
-    daemon.database
-      .prepare("UPDATE workbench_session_state SET transcript_status = 'imported', quality_status = 'passed' WHERE session_id = ?")
-      .run("session:publish");
-    markWorkbenchSessionEnrichmentSatisfied(daemon.database, { actor: { kind: "agent", id: "codex" }, sessionId: "session:publish" });
-    markWorkbenchArtifactSatisfied(daemon.database, {
-      actor: { kind: "agent", id: "codex" },
-      artifactKind: "session_dossier",
-      sessionId: "session:publish"
-    });
-    markWorkbenchArtifactSatisfied(daemon.database, {
-      actor: { kind: "agent", id: "codex" },
-      artifactKind: "runbook",
-      sessionId: "session:publish"
-    });
-
-    const published = await postJson(baseUrl, "/workbench/sessions/session%3Apublish/publish");
-    expect(published).toMatchObject({
-      ok: true,
-      activity: { eventType: "published" },
-      state: { publicationStatus: "published", sessionId: "session:publish" }
     });
   });
 
@@ -481,8 +440,7 @@ describe("workbench API", () => {
          WHERE session_id = ?`
       )
       .run("session:published-quality");
-    const published = await postJson(baseUrl, "/workbench/sessions/session%3Apublished-quality/publish");
-    expect(published).toMatchObject({ ok: true, state: { publicationStatus: "published" } });
+    publishSessionToLogbook(daemon.database, "session:published-quality");
 
     const blockedFail = await postJson(
       baseUrl,

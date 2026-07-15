@@ -25,7 +25,6 @@ import {
 } from "../../daemonClient";
 
 const daemonClientMocks = vi.hoisted(() => ({
-  getWorkbenchArtifactCandidates: vi.fn(),
   getWorkbenchAuthoringCapabilities: vi.fn(),
   getWorkbenchActivity: vi.fn(),
   getWorkbenchNotAddedSessions: vi.fn(),
@@ -133,13 +132,26 @@ describe("useWorkbenchController", () => {
     expect(latest().canRun("copy_agent_prompt")).toBe(false);
     await select("session:not-ready");
     expect(latest().canRun("copy_agent_prompt")).toBe(false);
-    await select("session:ready");
+    expect(latest().handoffText).toBe("");
+    await act(async () => {
+      latest().toggleSession("session:ready");
+      await Promise.resolve();
+    });
+    expect(latest().canRun("copy_agent_prompt")).toBe(false);
+    expect(latest().handoffText).toBe("");
+    await act(async () => {
+      latest().toggleSession("session:not-ready");
+      await Promise.resolve();
+    });
     expect(latest().canRun("copy_agent_prompt")).toBe(true);
     expect(latest().handoffText).toContain('"bundleVersion":"workbench-authoring-v3"');
     expect(latest().handoffText).toContain('"sessionIds":["session:ready"]');
-    expect(daemonClientMocks.getWorkbenchArtifactCandidates).not.toHaveBeenCalled();
-    await select("session:available");
+    await act(async () => {
+      latest().toggleSession("session:available");
+      await Promise.resolve();
+    });
     expect(latest().canRun("copy_agent_prompt")).toBe(true);
+    expect(machineRequest().sessionIds).toEqual(["session:ready", "session:available"]);
   });
 
   test("keeps Copy Agent Prompt disabled for legacy authoring capabilities", async () => {
@@ -161,7 +173,6 @@ describe("useWorkbenchController", () => {
 
     expect(latest().canRun("copy_agent_prompt")).toBe(false);
     expect(latest().handoffText).toBe("");
-    expect(daemonClientMocks.getWorkbenchArtifactCandidates).not.toHaveBeenCalled();
   });
   test("loads missing sessions only when Workbench is active and live", async () => {
     mockWorkbenchResponse([session("session:abc", "Workbench import review")]);
@@ -278,7 +289,7 @@ describe("useWorkbenchController", () => {
     expect(latest().canRun("copy_agent_prompt")).toBe(true);
   });
 
-  test("selectAll includes off-page session IDs in the authoritative handoff", async () => {
+  test("selectAll rejects an off-page mixed-readiness selection from the authoritative handoff", async () => {
     vi.mocked(getWorkbenchAuthoringCapabilities).mockResolvedValue(
       authoringCapabilities("database:test", "/home/test/.local/bin/mastheadctl")
     );
@@ -307,8 +318,8 @@ describe("useWorkbenchController", () => {
     });
 
     expect(Array.from(latest().selectedSessionIds).sort()).toEqual(["session:a", "session:b"]);
-    expect(machineRequest().sessionIds).toEqual(["session:a", "session:b"]);
-    expect(latest().canRun("copy_agent_prompt")).toBe(true);
+    expect(latest().handoffText).toBe("");
+    expect(latest().canRun("copy_agent_prompt")).toBe(false);
   });
 
   test("retries after a failed load", async () => {

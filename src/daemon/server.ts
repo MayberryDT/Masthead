@@ -67,7 +67,6 @@ import {
   listWorkbenchActivity,
   listWorkbenchQueue,
   markWorkbenchQuality,
-  publishWorkbenchSession,
   recordWorkbenchActivity,
   releaseWorkbenchClaim,
   type WorkbenchActivityRecord,
@@ -2605,17 +2604,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         generatedAt: new Date().toISOString()
       };
       sendJson(request, response, config.allowedOrigins, 200, responseBody);
-      return;
-    }
-
-    const workbenchPublishMatch = url.pathname.match(/^\/workbench\/sessions\/([^/]+)\/publish$/);
-    if (request.method === "POST" && workbenchPublishMatch?.[1]) {
-      request.resume();
-      const result = publishWorkbenchSession(database, {
-        actor: { kind: "agent", id: "workbench_api" },
-        sessionId: decodeURIComponent(workbenchPublishMatch[1])
-      });
-      sendJson(request, response, config.allowedOrigins, result.ok ? 200 : 409, result);
       return;
     }
 
