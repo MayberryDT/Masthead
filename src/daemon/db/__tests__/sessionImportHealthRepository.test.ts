@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { migrateDatabase } from "../schema.ts";
 import {
+  countRepairRequiredSessions,
   readImportWorkUnitHealth,
   readSessionImportHealth,
   recordSessionImportHealth,
@@ -42,16 +43,28 @@ describe("session import health repository", () => {
       updatedAt: "2026-07-01T00:00:05.000Z",
       workUnitId: "unit-health-1"
     });
+    cloneHealthWorkUnit(db, "unit-health-2");
+    const latestRecord = recordSessionImportHealth(db, {
+      evidenceRevision: "sha256:repair-2",
+      importJobId: "import-health-1",
+      reason: "partial_parse",
+      sessionId: "session:repair",
+      status: "repair_required",
+      updatedAt: "2026-07-01T00:00:06.000Z",
+      workUnitId: "unit-health-2"
+    });
 
-    expect(readSessionImportHealth(db, "session:repair")).toEqual(record);
+    expect(readImportWorkUnitHealth(db, "unit-health-1")).toEqual(record);
+    expect(readSessionImportHealth(db, "session:repair")).toEqual(latestRecord);
     expect(summarizeSessionImportHealth(db, "import-health-1")).toEqual({
       complete: 0,
       diagnostics: [],
       partial: 0,
-      reasons: [{ count: 1, reason: "partial_parse" }],
-      repairRequired: 1,
-      total: 1
+      reasons: [{ count: 2, reason: "partial_parse" }],
+      repairRequired: 2,
+      total: 2
     });
+    expect(countRepairRequiredSessions(db, "import-health-1")).toBe(1);
     db.close();
   });
 
@@ -91,6 +104,7 @@ describe("session import health repository", () => {
       repairRequired: 1,
       total: 1
     });
+    expect(countRepairRequiredSessions(db, "import-health-1")).toBe(0);
     db.close();
   });
 });
@@ -117,4 +131,16 @@ function seedImportProvenance(db: Awaited<ReturnType<typeof openMastheadDatabase
       confidence, unit_kind, status, timestamp_basis
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run("unit-health-1", "manifest-health-1", "import-health-1", "source:health", "opencode", "jsonl", "authoritative", "transcript_file", "running", "unknown");
+}
+
+function cloneHealthWorkUnit(db: Awaited<ReturnType<typeof openMastheadDatabase>>, workUnitId: string): void {
+  db.prepare(
+    `INSERT INTO import_work_units (
+      work_unit_id, manifest_id, import_job_id, source_id, runtime_kind, source_kind,
+      confidence, unit_kind, source_path, status, timestamp_basis
+    ) SELECT ?, manifest_id, import_job_id, source_id, runtime_kind, source_kind,
+      confidence, unit_kind, ?, status, timestamp_basis
+    FROM import_work_units
+    WHERE work_unit_id = 'unit-health-1'`
+  ).run(workUnitId, `/tmp/${workUnitId}.jsonl`);
 }

@@ -51,7 +51,6 @@ import {
   type ImportJobListStatus
 } from "./db/importJobRepository.ts";
 import { getImportManifestSummary, getImportWorkUnit, listAllImportWorkUnits, listImportFailureGroups, listImportWorkUnits } from "./db/importLedgerRepository.ts";
-import { listImportImpactSessionIds } from "./db/importSessionImpactRepository.ts";
 import { listMcpAuditRows } from "./db/mcpQueryRepository.ts";
 import { liveProjectionEnrichments } from "./db/enrichmentViewRepository.ts";
 import { liveProjectionTranscriptFacts } from "./db/liveTranscriptFactsRepository.ts";
@@ -114,7 +113,7 @@ import {
   type ImportJobControls,
   type ImportWorkResult
 } from "./import/importCoordinator.ts";
-import { buildImportCompletionReport } from "./import/importCompletionReport.ts";
+import { buildImportCompletionReport, settleImportSessionClassifications } from "./import/importCompletionReport.ts";
 import { buildImportManifestPlan, createManifestForJob } from "./import/importManifestService.ts";
 import { countImportedRecord, emptyImportResult } from "./import/importWorker.ts";
 import { runImportWorkUnit } from "./import/importWorkUnitRunner.ts";
@@ -1325,7 +1324,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           totalWorkUnits: manifest.units.length
         }),
         onSessionImported: undefined,
-        onSessionHydrated: (sessionId) => reconcileImportedTranscript(database, sessionId),
+        onSessionHydrated: (sessionId) => reconcileImportedTranscript(database, sessionId, { finalizeNoise: false }),
         parseTranscriptUnit: async (fallbackPlan, cursor) => {
           const plannedUnits = await adapter.planTranscriptUnits(fallbackPlan.source);
           const plannedUnit = plannedUnits.find((candidate) =>
@@ -1374,16 +1373,10 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     const failedUnits = finalUnits.filter((unit) => unit.status === "failed").length;
     const skippedUnits = finalUnits.filter((unit) => unit.status === "skipped").length;
     const remainingUnits = finalUnits.filter((unit) => ["queued", "running"].includes(unit.status)).length;
-    if (failedUnits === 0 && remainingUnits === 0) {
-      for (const sessionId of listImportImpactSessionIds(database, controls.importJobId)) {
-        if (sessionImportIsCompleteOrUntracked(sessionId)) {
-          reconcileImportedTranscript(database, sessionId, { finalizeNoise: true });
-        }
-      }
-    }
-    const report = buildImportCompletionReport(database, {
+    const generatedAt = new Date().toISOString();
+    const buildReport = () => buildImportCompletionReport(database, {
       failedUnits,
-      generatedAt: new Date().toISOString(),
+      generatedAt,
       importJobId: controls.importJobId,
       recordsFailed: result.failureCount,
       recordsImported: result.importedCount,
@@ -1401,6 +1394,13 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           : "succeeded",
       transcriptsImported: result.importedCount
     });
+    const preliminaryReport = buildReport();
+    settleImportSessionClassifications(database, {
+      anomalies: preliminaryReport.anomalies,
+      finalizeNoise: failedUnits === 0 && remainingUnits === 0,
+      importJobId: controls.importJobId
+    });
+    const report = buildReport();
     if (report.status === "succeeded_with_issues") result.completionStatus = report.status;
     updateImportJob(database, controls.importJobId, {
       completionReport: report,

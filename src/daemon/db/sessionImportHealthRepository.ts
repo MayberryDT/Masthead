@@ -107,6 +107,17 @@ export function summarizeSessionImportHealth(
   };
 }
 
+export function countRepairRequiredSessions(db: MastheadDatabase, importJobId: string): number {
+  const row = db.prepare(
+    `SELECT COUNT(DISTINCT session_id) AS count
+    FROM session_import_health
+    WHERE import_job_id = ?
+      AND status = 'repair_required'
+      AND session_id IS NOT NULL`
+  ).get(importJobId) as { count: number } | undefined;
+  return row?.count ?? 0;
+}
+
 const HEALTH_SELECT = `SELECT
   work_unit_id AS workUnitId,
   import_job_id AS importJobId,

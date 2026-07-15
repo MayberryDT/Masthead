@@ -21,7 +21,7 @@ export type TranscriptQualityReconciliationResult = {
 export function reconcileImportedTranscript(
   db: MastheadDatabase,
   sessionId: string,
-  options: { actor?: WorkbenchActor; finalizeNoise?: boolean } = {}
+  options: { actor?: WorkbenchActor; finalizeNoise?: boolean; holdForRepair?: boolean } = {}
 ): TranscriptQualityReconciliationResult {
   const actor = options.actor ?? { kind: "system" as const, id: "transcript_import" };
   const finalizeNoise = options.finalizeNoise ?? true;
@@ -31,7 +31,7 @@ export function reconcileImportedTranscript(
     db.prepare("SELECT 1 AS found FROM sessions WHERE session_id = ? AND deleted_at IS NULL").get(sessionId)
   );
   if (!sessionExists) return { quality };
-  if (!state && quality.disposition === "suppress" && !finalizeNoise) return { quality };
+  if (!state && quality.disposition === "suppress" && !finalizeNoise && !options.holdForRepair) return { quality };
   state ??= ensureWorkbenchSessionState(db, sessionId);
 
   const coverage = getTranscriptCoverage(db, sessionId);
@@ -68,6 +68,17 @@ export function reconcileImportedTranscript(
   }
 
   if (state.publicationStatus === "not_added_to_logbook" && state.qualityDecisionSource === "user") {
+    return { quality, state };
+  }
+
+  if (options.holdForRepair) {
+    if (
+      state.publicationStatus !== "publish_path" ||
+      state.nextAction !== "review_quality" ||
+      state.qualityStatus !== "unchecked"
+    ) {
+      state = markWorkbenchQualityForReview(db, { actor, evidenceRevision: currentEvidenceRevision, sessionId }).state;
+    }
     return { quality, state };
   }
 

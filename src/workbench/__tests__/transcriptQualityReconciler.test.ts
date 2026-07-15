@@ -55,7 +55,7 @@ describe("transcript quality reconciliation", () => {
     db.close();
   });
 
-  test("manual exclusion remains sticky when evidence changes", async () => {
+  test("manual exclusion remains sticky during an import repair hold", async () => {
     const db = await testDb();
     const sessionId = "session:manual-exclusion";
     seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId, title: "Manual exclusion" });
@@ -68,7 +68,7 @@ describe("transcript quality reconciliation", () => {
     });
     insertMessage(db, sessionId, 1, "assistant", "Additional evidence arrived.");
 
-    reconcileImportedTranscript(db, sessionId);
+    reconcileImportedTranscript(db, sessionId, { finalizeNoise: false, holdForRepair: true });
 
     expect(readWorkbenchSessionState(db, sessionId)).toMatchObject({
       nonPublicationReason: "user_suppressed",

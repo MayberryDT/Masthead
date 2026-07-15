@@ -1,13 +1,19 @@
 import type { RuntimeKind } from "../../adapters/types.ts";
 import type {
+  ImportAnomaly,
   ImportCompletionReportDto,
   ImportTimestampBasis,
   ImportVisibilityState
 } from "../../shared/sourceImport.ts";
 import { getImportManifestSummary, listAllImportWorkUnits } from "../db/importLedgerRepository.ts";
-import { summarizeImportSessionImpacts } from "../db/importSessionImpactRepository.ts";
-import { summarizeSessionImportHealth } from "../db/sessionImportHealthRepository.ts";
+import { listImportImpactSessionIds, summarizeImportSessionImpacts } from "../db/importSessionImpactRepository.ts";
+import {
+  countRepairRequiredSessions,
+  readSessionImportHealth,
+  summarizeSessionImportHealth
+} from "../db/sessionImportHealthRepository.ts";
 import type { MastheadDatabase } from "../db/sqlite.ts";
+import { reconcileImportedTranscript } from "../../workbench/transcriptQualityReconciler.ts";
 import { detectImportAnomalies } from "./importAnomalyDetector.ts";
 
 export function buildImportCompletionReport(
@@ -99,7 +105,7 @@ export function buildImportCompletionReport(
     sessionsHydrated: impact.transcriptSessions,
     sessionsUpdated: impact.sessionsUpdated,
     sessionsOnPackagePath: evidence.sessionsOnPackagePath,
-    sessionsRepairRequired: importHealth.repairRequired,
+    sessionsRepairRequired: countRepairRequiredSessions(db, input.importJobId),
     sessionsSuppressed: evidence.sessionsSuppressed,
     skippedUnits: input.skippedUnits,
     sourceUnitsDeferred,
@@ -111,6 +117,26 @@ export function buildImportCompletionReport(
     timestampBasis: evidence.timestampBasis,
     transcriptsImported: impact.transcriptSessions
   };
+}
+
+export function settleImportSessionClassifications(
+  db: MastheadDatabase,
+  input: {
+    anomalies: ImportAnomaly[];
+    finalizeNoise: boolean;
+    importJobId: string;
+  }
+): void {
+  const holdForRepair = input.anomalies.some((anomaly) => anomaly.severity === "error");
+  if (!holdForRepair && !input.finalizeNoise) return;
+  for (const sessionId of listImportImpactSessionIds(db, input.importJobId)) {
+    const health = readSessionImportHealth(db, sessionId);
+    if (!holdForRepair && health && health.status !== "complete") continue;
+    reconcileImportedTranscript(db, sessionId, {
+      finalizeNoise: input.finalizeNoise && !holdForRepair,
+      holdForRepair
+    });
+  }
 }
 
 function summarizeImportEvidence(

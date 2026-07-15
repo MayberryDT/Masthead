@@ -268,11 +268,12 @@ describe("import coordinator", () => {
     db.close();
   });
 
-  test("marks a job failed when every processed record failed", async () => {
+  test("keeps a job failed when every record failed even if completion also detected issues", async () => {
     const db = await openTestDatabase();
     seedSource(db);
 
     const job = queueImportJob(db, { importKind: "transcript", sourceId: "opencode-sessions", now: fixedNow }, async () => ({
+      completionStatus: "succeeded_with_issues",
       discoveredCount: 3,
       failureCount: 3,
       importedCount: 0,

@@ -6,7 +6,9 @@ import { recordImportSessionImpact } from "../../db/importSessionImpactRepositor
 import { recordSessionImportHealth } from "../../db/sessionImportHealthRepository.ts";
 import { migrateDatabase } from "../../db/schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../../db/sqlite.ts";
-import { buildImportCompletionReport } from "../importCompletionReport.ts";
+import { readWorkbenchSessionState } from "../../db/workbenchPipelineRepository.ts";
+import { reconcileImportedTranscript } from "../../../workbench/transcriptQualityReconciler.ts";
+import { buildImportCompletionReport, settleImportSessionClassifications } from "../importCompletionReport.ts";
 
 const tempDirs: string[] = [];
 
@@ -168,6 +170,92 @@ describe("import completion report", () => {
       nextActions: expect.arrayContaining(["repair_import"]),
       status: "succeeded_with_issues"
     });
+    const failedReport = buildImportCompletionReport(db, {
+      failedUnits: 1,
+      generatedAt: "2026-07-01T00:03:00.000Z",
+      importJobId: "import-1",
+      recordsFailed: 20,
+      recordsImported: 0,
+      recordsSkipped: 0,
+      runtime: "opencode",
+      skippedUnits: 0,
+      status: "failed",
+      transcriptsImported: 0
+    });
+    expect(failedReport).toMatchObject({
+      anomalies: [expect.objectContaining({ code: "tool_evidence_not_normalized", severity: "error" })],
+      nextActions: expect.arrayContaining(["repair_import"]),
+      status: "failed"
+    });
+    db.close();
+  });
+
+  test("holds pathological import sessions on the review path instead of automatic Not Added", async () => {
+    const { db } = await seededReportDatabase("masthead-import-report-pathological-");
+    removeCanonicalEvidence(db, "session:1");
+    recordImportSessionImpact(db, {
+      importJobId: "import-1",
+      impactKind: "transcript_added",
+      observedAt: "2026-07-01T00:02:00.000Z",
+      runtime: "opencode",
+      sessionId: "session:1",
+      sourceId: "opencode-sessions"
+    });
+    db.prepare(
+      "UPDATE import_work_units SET processed_records = 200, imported_records = 100, failed_records = 100 WHERE work_unit_id = 'unit:1'"
+    ).run();
+    reconcileImportedTranscript(db, "session:1");
+    expect(readWorkbenchSessionState(db, "session:1")?.publicationStatus).toBe("not_added_to_logbook");
+
+    const preliminary = buildImportCompletionReport(db, reportInput({ recordsFailed: 100, recordsImported: 100 }));
+    settleImportSessionClassifications(db, {
+      anomalies: preliminary.anomalies,
+      finalizeNoise: true,
+      importJobId: "import-1"
+    });
+    const report = buildImportCompletionReport(db, reportInput({ recordsFailed: 100, recordsImported: 100 }));
+
+    expect(report).toMatchObject({
+      nextActions: expect.arrayContaining(["repair_import"]),
+      sessionsOnPackagePath: 1,
+      sessionsSuppressed: 0,
+      status: "succeeded_with_issues"
+    });
+    expect(readWorkbenchSessionState(db, "session:1")).toMatchObject({
+      nextAction: "review_quality",
+      publicationStatus: "publish_path",
+      qualityDecisionSource: "automatic",
+      qualityStatus: "unchecked"
+    });
+    db.close();
+  });
+
+  test("finalizes confirmed noise only after a clean aggregate receipt", async () => {
+    const { db } = await seededReportDatabase("masthead-import-report-clean-noise-");
+    removeCanonicalEvidence(db, "session:1");
+    recordImportSessionImpact(db, {
+      importJobId: "import-1",
+      impactKind: "transcript_added",
+      observedAt: "2026-07-01T00:02:00.000Z",
+      runtime: "opencode",
+      sessionId: "session:1",
+      sourceId: "opencode-sessions"
+    });
+
+    const preliminary = buildImportCompletionReport(db, reportInput());
+    expect(preliminary.anomalies).toEqual([]);
+    settleImportSessionClassifications(db, {
+      anomalies: preliminary.anomalies,
+      finalizeNoise: true,
+      importJobId: "import-1"
+    });
+
+    expect(readWorkbenchSessionState(db, "session:1")).toMatchObject({
+      nonPublicationReason: "empty",
+      publicationStatus: "not_added_to_logbook",
+      qualityDecisionSource: "automatic",
+      qualityStatus: "failed"
+    });
     db.close();
   });
 
@@ -301,4 +389,36 @@ function seedImportWorkUnit(db: MastheadDatabase): void {
       confidence, unit_kind, status, timestamp_basis, processed_records, imported_records
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run("unit:1", "manifest:1", "import-1", "opencode-sessions", "opencode", "jsonl", "authoritative", "transcript_file", "succeeded_with_issues", "unknown", 4, 4);
+}
+
+async function seededReportDatabase(prefix: string): Promise<{ db: MastheadDatabase }> {
+  const tempDir = await mkdtemp(join(tmpdir(), prefix));
+  tempDirs.push(tempDir);
+  const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+  migrateDatabase(db);
+  seedImportSession(db);
+  seedImportWorkUnit(db);
+  db.prepare("UPDATE import_manifests SET capped_units = 0, excluded_units = 0 WHERE manifest_id = 'manifest:1'").run();
+  return { db };
+}
+
+function removeCanonicalEvidence(db: MastheadDatabase, sessionId: string): void {
+  for (const table of ["messages", "tool_results", "tool_calls", "file_effects", "runtime_signals", "checkpoints"]) {
+    db.prepare(`DELETE FROM ${table} WHERE session_id = ?`).run(sessionId);
+  }
+}
+
+function reportInput(overrides: { recordsFailed?: number; recordsImported?: number } = {}) {
+  return {
+    failedUnits: 0,
+    generatedAt: "2026-07-01T00:03:00.000Z",
+    importJobId: "import-1",
+    recordsFailed: overrides.recordsFailed ?? 0,
+    recordsImported: overrides.recordsImported ?? 4,
+    recordsSkipped: 0,
+    runtime: "opencode" as const,
+    skippedUnits: 0,
+    status: "succeeded" as const,
+    transcriptsImported: overrides.recordsImported ?? 4
+  };
 }
