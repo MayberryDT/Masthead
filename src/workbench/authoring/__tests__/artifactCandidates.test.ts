@@ -1,3 +1,4 @@
+import { readdirSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,12 +26,14 @@ import {
   isArtifactCandidateEvidenceCurrent,
   proposeArtifactCandidate
 } from "../artifactCandidates.ts";
+import { getArtifactSuggestions } from "../advisorySuggestions.ts";
 import { getAuthoringEvidencePage } from "../evidenceCatalog.ts";
 import {
   corpusSessionIds,
   dossierOnlyQuestion,
   durableArtifactCorpus,
   explicitArchitectureDecision,
+  oauthFailureFixedAndVerified,
   decisionWithRejectedAlternatives,
   repeatedErrorPartOne,
   repeatedErrorPartTwo,
@@ -46,6 +49,32 @@ afterEach(async () => {
 });
 
 describe("artifact candidate discovery", () => {
+  test("keeps the V2 candidate DTO out of V3 Workbench service and UI imports", () => {
+    const repositoryRoot = join(import.meta.dirname, "../../../..");
+    const v3Source = [
+      join(repositoryRoot, "src/workbench/authoring/advisorySuggestions.ts"),
+      ...sourceFiles(join(repositoryRoot, "src/app/workbench")),
+      ...sourceFiles(join(repositoryRoot, "src/ui/workbench"))
+    ];
+
+    expect(v3Source.filter((path) => readFileSync(path, "utf8").includes("WorkbenchArtifactCandidateDto")))
+      .toEqual([]);
+  });
+
+  test("keeps persisted V2 candidates audit-only and outside V3 suggestions", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+
+    const [candidate] = discoverArtifactCandidates(db, [oauthFailureFixedAndVerified.id]);
+    const [suggestion] = getArtifactSuggestions(db, [oauthFailureFixedAndVerified.id]);
+
+    expect(candidate).toMatchObject({ origin: "automatic", status: "pending" });
+    expect(suggestion).toMatchObject({ advisory: true, kind: "runbook" });
+    expect(suggestion).not.toHaveProperty("candidateId");
+    expect(suggestion).not.toHaveProperty("status");
+    db.close();
+  });
+
   test("discovers optional work only from positive kind signals", async () => {
     const db = await testDb();
     seedDurableArtifactCorpus(db);
@@ -1939,6 +1968,14 @@ function countKinds(candidates: ReturnType<typeof discoverArtifactCandidates>): 
     counts[candidate.kind] = (counts[candidate.kind] ?? 0) + 1;
     return counts;
   }, {});
+}
+
+function sourceFiles(path: string): string[] {
+  return readdirSync(path, { withFileTypes: true }).flatMap((entry) => {
+    const entryPath = join(path, entry.name);
+    if (entry.isDirectory()) return sourceFiles(entryPath);
+    return /\.(?:ts|tsx)$/.test(entry.name) ? [entryPath] : [];
+  });
 }
 
 function seedAdditionalStrongSignatureSessions(db: MastheadDatabase, count: number): string[] {

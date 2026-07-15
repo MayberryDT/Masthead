@@ -1,3 +1,10 @@
+/**
+ * Historical V2 candidate reconciliation and recovery.
+ *
+ * V3 authoring must consume advisory suggestions instead of these persisted,
+ * stateful candidate records. Keep this module's mutation paths for audit and
+ * recovery of V2 runs only.
+ */
 import { stableRecordId } from "../../daemon/identity.ts";
 import {
   hasWorkbenchArtifactCandidateScan,
@@ -73,7 +80,7 @@ type SessionSignals = {
   evidenceRefs: Set<string>;
 };
 
-type CandidateSeed = {
+export type ArtifactSuggestionSeed = {
   kind: WorkbenchAutomaticKind;
   origin?: "automatic" | "proposal";
   seedSessionId: string;
@@ -83,6 +90,16 @@ type CandidateSeed = {
   signatureKey?: string;
   evidenceRevision: string;
 };
+
+type CandidateSeed = ArtifactSuggestionSeed;
+
+/** Detects current positive signals without reading or writing candidate state. */
+export function detectArtifactSuggestionSeeds(
+  db: MastheadDatabase,
+  sessionIds: string[]
+): ArtifactSuggestionSeed[] {
+  return detectArtifactSuggestionSeedResult(db, normalizedStrings(sessionIds)).grouped;
+}
 
 export function discoverArtifactCandidates(
   db: MastheadDatabase,
@@ -397,9 +414,10 @@ function reconcileArtifactCandidates(
 
   const requested = normalizedStrings(requestedSessionIds);
   const previousSignatureMembers = listWorkbenchArtifactSignatureMembersForSessions(db, requested);
-  const preliminaryIndividual = individualCandidateSeedsForSessions(db, requested);
+  const preliminaryDetection = detectArtifactSuggestionSeedResult(db, requested);
+  const preliminaryIndividual = preliminaryDetection.individual;
   const preliminarySignatureMembers = signatureMembersFromSeeds(db, preliminaryIndividual);
-  const preliminarySeeds = groupCandidateSeeds(preliminaryIndividual);
+  const preliminarySeeds = preliminaryDetection.grouped;
   const preliminaryIdentities = uniqueSignatureIdentities([
     ...previousSignatureMembers,
     ...preliminarySignatureMembers
@@ -452,8 +470,9 @@ function reconcileArtifactCandidates(
   const acknowledgedSessionIds = requested.filter((sessionId) => !deferred.has(sessionId));
   if (acknowledgedSessionIds.length === 0) return { acknowledgedSessionIds, candidates: [] };
 
-  const activeIndividual = individualCandidateSeedsForSessions(db, acknowledgedSessionIds);
-  const activePreliminary = groupCandidateSeeds(activeIndividual);
+  const activeDetection = detectArtifactSuggestionSeedResult(db, acknowledgedSessionIds);
+  const activeIndividual = activeDetection.individual;
+  const activePreliminary = activeDetection.grouped;
   const affectedSignatureIdentities = uniqueSignatureIdentities([
     ...previousSignatureMembers.filter((member) => acknowledgedSessionIds.includes(member.sessionId)),
     ...signatureMembersFromSeeds(db, activeIndividual)
@@ -586,6 +605,14 @@ function candidateMatchesSeedRevision(candidate: WorkbenchArtifactCandidate, see
 
 function individualCandidateSeedsForSessions(db: MastheadDatabase, sessionIds: string[]): CandidateSeed[] {
   return sessionIds.flatMap((sessionId) => seedsForSignals(db, extractSessionSignals(db, sessionId)));
+}
+
+function detectArtifactSuggestionSeedResult(
+  db: MastheadDatabase,
+  sessionIds: string[]
+): { grouped: CandidateSeed[]; individual: CandidateSeed[] } {
+  const individual = individualCandidateSeedsForSessions(db, sessionIds);
+  return { grouped: groupCandidateSeeds(individual), individual };
 }
 
 function groupCandidateSeeds(ungrouped: CandidateSeed[]): CandidateSeed[] {
