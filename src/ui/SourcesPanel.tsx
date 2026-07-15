@@ -24,6 +24,7 @@ import { SourcesOnboardingModal } from "./sources/SourcesOnboardingModal";
 import type { SourcesImportPreview } from "../app/daemonClient";
 import { SourceDiagnosticPanel } from "./sources/SourceDiagnosticPanel";
 import { AppButton } from "./primitives/AppButton";
+import { latestImportCompletionReportsByRuntime } from "../shared/sourceImport";
 
 type HookAction = "install" | "test" | "uninstall";
 
@@ -415,6 +416,7 @@ function SourcesPanelLegacy(props: Props) {
       <SourcesImportModal
         adapters={visibleAdapterRows}
         busy={busy || readOnly}
+        completionReports={latestImportCompletionReportsByRuntime(diagnosticImports)}
         onClose={() => setImportOpen(false)}
         onPreviewImport={props.onPreviewImport}
         onRunSetup={props.onRunSetup}

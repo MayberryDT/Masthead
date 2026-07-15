@@ -64,6 +64,34 @@ function mediaRule(css: string, query: string): string {
 }
 
 describe("WorkbenchPanel", () => {
+  test("separates import repair from the package path and Not Added", () => {
+    const html = renderToStaticMarkup(
+      <WorkbenchPanel
+        importHealthSummary={{
+          ok: true,
+          importJobIds: ["import-opencode"],
+          reasons: [{ reason: "schema_drift", count: 12 }],
+          repairRequired: 12
+        }}
+        notAddedSummary={{ ok: true, total: 4, reasons: [{ reason: "confirmed_noise", count: 4 }] }}
+        sessions={Array.from({ length: 102 }, (_, index) => session({ sessionId: `session:${index}` }))}
+        selectedSessionIds={new Set()}
+        loading={false}
+        onClearSelection={() => undefined}
+        onRetry={() => undefined}
+        onSelectAll={() => undefined}
+        onToggleSession={() => undefined}
+        total={102}
+      />
+    );
+    const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+
+    expect(text).toContain("Package path 102");
+    expect(text).toContain("Import repair 12");
+    expect(text).toContain("Not Added 4");
+    expect(text).not.toContain("Not Added 16");
+  });
+
   test("keeps the responsive action row from collapsing behind queue facts", () => {
     const css = readFileSync("src/styles/masthead.css", "utf8");
     expect(mediaRule(css, "(max-width: 1120px)")).toMatch(

@@ -153,6 +153,7 @@ describe("Masthead worktree connector planning", () => {
     "/workbench/sessions",
     "/workbench/activity",
     "/workbench/not-added-summary",
+    "/workbench/import-health-summary",
     "/workbench/not-added",
     "/workbench/authoring/capabilities",
     "/workbench/authoring/runs/authoring%3Arun",

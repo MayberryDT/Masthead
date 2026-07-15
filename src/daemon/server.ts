@@ -89,7 +89,7 @@ import {
 import { getSessionDetail, getSessionExcerpts, listProjects, querySessions, type SessionQuery } from "./db/sessionQueryRepository.ts";
 import { getOrCreateDatabaseIdentity, hasPendingMigrations, migrateDatabase } from "./db/schema.ts";
 import { canonicalSessionId, createSessionRepository, ingestAdapterRecord, runtimeIdFor, type SessionRepository } from "./db/sessionRepository.ts";
-import { readSessionImportHealth } from "./db/sessionImportHealthRepository.ts";
+import { readSessionImportHealth, summarizeCurrentSessionImportHealth } from "./db/sessionImportHealthRepository.ts";
 import { saveSourceScanRun, saveSourceSetupState } from "./db/sourceSetupRepository.ts";
 import { getSessionUsageSummaries, getUsageStats, type UsageWindow } from "./db/usageStatsRepository.ts";
 import {
@@ -2650,6 +2650,14 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
     if (request.method === "GET" && url.pathname === "/workbench/not-added-summary") {
       sendJson(request, response, config.allowedOrigins, 200, workbenchNotAddedSummary(database));
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/workbench/import-health-summary") {
+      sendJson(request, response, config.allowedOrigins, 200, {
+        ok: true,
+        ...summarizeCurrentSessionImportHealth(database)
+      });
       return;
     }
 

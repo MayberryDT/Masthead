@@ -38,6 +38,13 @@ export type SessionImportHealthSummaryDto = {
   diagnostics: Array<SessionImportHealthDiagnosticDto & { count: number }>;
 };
 
+export type WorkbenchImportHealthSummaryDto = {
+  ok: true;
+  repairRequired: number;
+  reasons: Array<{ reason: string; count: number }>;
+  importJobIds: string[];
+};
+
 export type WorkbenchNextAction =
   | "check_transcript"
   | "import_transcript"

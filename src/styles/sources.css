@@ -1508,6 +1508,48 @@
   padding-top: 7px;
 }
 
+.import-completion-report.needs-repair {
+  border-color: rgba(247, 201, 72, 0.32);
+}
+
+.import-report-scope-summary,
+.import-report-evidence p {
+  margin: 0;
+  color: var(--body);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.import-report-evidence {
+  display: grid;
+  gap: 4px;
+}
+
+.import-report-grid .is-warning dd {
+  color: var(--yellow);
+}
+
+.import-report-anomalies {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.import-report-anomalies li {
+  border-left: 2px solid var(--yellow);
+  padding-left: 8px;
+  color: var(--mute);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.import-report-anomalies li.is-error {
+  border-left-color: var(--red);
+}
+
 .import-unit-list span,
 .import-failure-list span,
 .import-current-path {

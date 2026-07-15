@@ -183,3 +183,21 @@ export function deriveImportVisibilityState(
   if (!Number.isFinite(heartbeat)) return job.status as ImportVisibilityState;
   return now - heartbeat > stalledAfterMs ? "stalled" : (job.status as ImportVisibilityState);
 }
+
+export function latestImportCompletionReportsByRuntime(
+  jobs: ReadonlyArray<{ completionReport?: ImportCompletionReportDto }>
+): ImportCompletionReportDto[] {
+  const latest = new Map<RuntimeKind, ImportCompletionReportDto>();
+  for (const job of jobs) {
+    const report = job.completionReport;
+    if (!report) continue;
+    const current = latest.get(report.runtime);
+    if (!current || completionReportTime(report) > completionReportTime(current)) latest.set(report.runtime, report);
+  }
+  return [...latest.values()].toSorted((left, right) => completionReportTime(right) - completionReportTime(left));
+}
+
+function completionReportTime(report: ImportCompletionReportDto): number {
+  const time = Date.parse(report.generatedAt);
+  return Number.isFinite(time) ? time : 0;
+}

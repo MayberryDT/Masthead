@@ -740,6 +740,8 @@ export function App() {
           notAddedOpen={workbench.notAddedOpen}
           notAddedSessions={workbench.notAddedSessions}
           notAddedSummary={workbench.notAddedSummary}
+          importHealthSummary={workbench.importHealthSummary}
+          onOpenImportReceipt={() => setActiveSurface("sources")}
           onClearSelection={workbench.clearSelection}
           onRetry={workbench.retry}
           onSelectAll={workbench.selectAll}

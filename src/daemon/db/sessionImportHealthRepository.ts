@@ -118,6 +118,30 @@ export function countRepairRequiredSessions(db: MastheadDatabase, importJobId: s
   return row?.count ?? 0;
 }
 
+export function summarizeCurrentSessionImportHealth(db: MastheadDatabase): {
+  repairRequired: number;
+  reasons: Array<{ reason: string; count: number }>;
+  importJobIds: string[];
+} {
+  const rows = db.prepare(
+    `SELECT import_job_id AS importJobId, reason
+    FROM session_import_health
+    WHERE status = 'repair_required'
+    ORDER BY import_job_id, reason, work_unit_id`
+  ).all() as Array<{ importJobId: string; reason: string | null }>;
+  const reasonCounts = new Map<string, number>();
+  for (const row of rows) {
+    if (row.reason) reasonCounts.set(row.reason, (reasonCounts.get(row.reason) ?? 0) + 1);
+  }
+  return {
+    importJobIds: [...new Set(rows.map((row) => row.importJobId))],
+    reasons: [...reasonCounts.entries()]
+      .map(([reason, count]) => ({ count, reason }))
+      .toSorted((left, right) => right.count - left.count || left.reason.localeCompare(right.reason)),
+    repairRequired: rows.length
+  };
+}
+
 const HEALTH_SELECT = `SELECT
   work_unit_id AS workUnitId,
   import_job_id AS importJobId,

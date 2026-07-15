@@ -5,6 +5,7 @@ import {
   getWorkbenchMissingSessions,
   getWorkbenchAuthoringCapabilities,
   getWorkbenchActivity,
+  getWorkbenchImportHealthSummary,
   getWorkbenchNotAddedSessions,
   getWorkbenchNotAddedSummary,
   getWorkbenchSessions,
@@ -353,6 +354,7 @@ describe("daemon client review dispositions", () => {
     await getWorkbenchSessions("http://127.0.0.1:17373/projection", { limit: 25 });
     await getWorkbenchActivity("http://127.0.0.1:17373/projection", { limit: 10, sessionId: "session:1" });
     await getWorkbenchNotAddedSummary("http://127.0.0.1:17373/projection");
+    await getWorkbenchImportHealthSummary("http://127.0.0.1:17373/projection");
     await getWorkbenchNotAddedSessions("http://127.0.0.1:17373/projection", { limit: 10 });
 
     expect(fetch).toHaveBeenNthCalledWith(
@@ -372,6 +374,11 @@ describe("daemon client review dispositions", () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       4,
+      "http://127.0.0.1:17373/workbench/import-health-summary",
+      expect.objectContaining({ headers: { accept: "application/json" } })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      5,
       "http://127.0.0.1:17373/workbench/not-added?includeDetails=true&limit=10",
       expect.objectContaining({ headers: { accept: "application/json" } })
     );

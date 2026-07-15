@@ -13,6 +13,7 @@ import {
 import {
   getWorkbenchAuthoringCapabilities,
   getWorkbenchActivity,
+  getWorkbenchImportHealthSummary,
   getWorkbenchNotAddedSessions,
   getWorkbenchNotAddedSummary,
   getWorkbenchSessions,
@@ -27,6 +28,7 @@ import {
 const daemonClientMocks = vi.hoisted(() => ({
   getWorkbenchAuthoringCapabilities: vi.fn(),
   getWorkbenchActivity: vi.fn(),
+  getWorkbenchImportHealthSummary: vi.fn().mockResolvedValue({ ok: true, importJobIds: [], reasons: [], repairRequired: 0 }),
   getWorkbenchNotAddedSessions: vi.fn(),
   getWorkbenchNotAddedSummary: vi.fn(),
   getWorkbenchSessions: vi.fn(),
@@ -923,6 +925,7 @@ function mockWorkbenchResponse(sessions: WorkbenchQueueSessionDto[]): void {
   vi.mocked(getWorkbenchSessions).mockResolvedValue(response(sessions));
   vi.mocked(getWorkbenchActivity).mockResolvedValue(activityResponse());
   vi.mocked(getWorkbenchNotAddedSummary).mockResolvedValue(notAddedSummary());
+  vi.mocked(getWorkbenchImportHealthSummary).mockResolvedValue({ ok: true, importJobIds: [], reasons: [], repairRequired: 0 });
 }
 
 function authoringCapabilities(databaseId: string, command: string): WorkbenchAuthoringCapabilitiesDto {

@@ -2,19 +2,22 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { canImportHarness, harnessForRuntime } from "../../adapters/harnessCatalog";
 import type { RuntimeKind } from "../../adapters/types";
 import type { AdapterStatus, SourcesImportPreview } from "../../app/daemonClient";
-import type { ImportScopeDto } from "../../shared/sourceImport";
+import type { ImportCompletionReportDto, ImportScopeDto } from "../../shared/sourceImport";
 import type { SourcesSetupRunInput } from "../../shared/sourcesSetup";
 import { AppButton } from "../primitives/AppButton";
 import { HarnessImportCard } from "./HarnessImportCard";
+import { ImportCompletionReport } from "./ImportCompletionReport";
 
 type Props = {
   adapters: AdapterStatus[];
   busy?: boolean;
   open: boolean;
   previews?: SourcesImportPreview[];
+  completionReports?: ImportCompletionReportDto[];
   onClose: () => void;
   onPreviewImport?: (input: SourcesSetupRunInput) => Promise<SourcesImportPreview[]> | SourcesImportPreview[];
   onRunSetup?: (input: SourcesSetupRunInput) => Promise<unknown> | unknown;
+  onPreviewRepair?: (importJobId: string) => void;
 };
 
 type ScopeChoice = "recent" | "full";
@@ -22,8 +25,10 @@ type ScopeChoice = "recent" | "full";
 export function SourcesImportModal({
   adapters,
   busy = false,
+  completionReports = [],
   onClose,
   onPreviewImport,
+  onPreviewRepair,
   onRunSetup,
   open,
   previews: externalPreviews
@@ -260,6 +265,18 @@ export function SourcesImportModal({
                 </label>
               </div>
             </section>
+
+            {completionReports.length > 0 ? (
+              <section className="sources-import-panel" aria-label="Recent import receipts">
+                <div className="sources-import-section-head">
+                  <h3>Recent import receipts</h3>
+                  <span>{completionReports.length} harness{completionReports.length === 1 ? "" : "es"}</span>
+                </div>
+                {completionReports.map((report) => (
+                  <ImportCompletionReport report={report} onPreviewRepair={onPreviewRepair} key={report.importJobId} />
+                ))}
+              </section>
+            ) : null}
 
           </div>
         </div>

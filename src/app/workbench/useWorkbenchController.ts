@@ -2,6 +2,7 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } f
 import {
   getWorkbenchAuthoringCapabilities,
   getWorkbenchActivity,
+  getWorkbenchImportHealthSummary,
   getWorkbenchNotAddedSessions,
   getWorkbenchNotAddedSummary,
   getWorkbenchSessions,
@@ -16,6 +17,7 @@ import type {
   WorkbenchActivityDto,
   WorkbenchNotAddedSessionDto,
   WorkbenchNotAddedSummaryDto,
+  WorkbenchImportHealthSummaryDto,
   WorkbenchQueueSessionDto,
   WorkbenchSessionsResponse
 } from "../../shared/workbench";
@@ -62,6 +64,7 @@ export type UseWorkbenchControllerResult = {
   notAddedOpen: boolean;
   notAddedSessions: WorkbenchNotAddedSessionDto[];
   notAddedSummary?: WorkbenchNotAddedSummaryDto;
+  importHealthSummary?: WorkbenchImportHealthSummaryDto;
   page: number;
   pageSize: number;
   retry: () => void;
@@ -86,6 +89,7 @@ export function useWorkbenchController({
   const [sessions, setSessions] = useState<WorkbenchQueueSessionDto[]>([]);
   const [activity, setActivity] = useState<WorkbenchActivityDto[]>([]);
   const [notAddedSummary, setNotAddedSummary] = useState<WorkbenchNotAddedSummaryDto>();
+  const [importHealthSummary, setImportHealthSummary] = useState<WorkbenchImportHealthSummaryDto>();
   const [notAddedSessions, setNotAddedSessions] = useState<WorkbenchNotAddedSessionDto[]>([]);
   const [authoringCapabilities, setAuthoringCapabilities] = useState<WorkbenchAuthoringCapabilitiesDto>();
   const [notAddedOpen, setNotAddedOpenState] = useState(false);
@@ -113,7 +117,7 @@ export function useWorkbenchController({
       const capabilitiesPromise = getWorkbenchAuthoringCapabilities(activeProjectionUrl, {
         signal: options.signal
       }).catch(() => undefined);
-      const [response, activityResponse, notAdded, capabilities] = await Promise.all([
+      const [response, activityResponse, notAdded, importHealth, capabilities] = await Promise.all([
         getWorkbenchSessions(activeProjectionUrl, {
           limit: pageSize,
           offset: pageIndex * pageSize,
@@ -121,6 +125,7 @@ export function useWorkbenchController({
         }),
         getWorkbenchActivity(activeProjectionUrl, { limit: 30, signal: options.signal }),
         getWorkbenchNotAddedSummary(activeProjectionUrl, { signal: options.signal }),
+        getWorkbenchImportHealthSummary(activeProjectionUrl, { signal: options.signal }),
         capabilitiesPromise
       ]);
       if (options.signal?.aborted || requestId !== loadRequestId.current) return;
@@ -136,6 +141,7 @@ export function useWorkbenchController({
       setTotal(typeof response.total === "number" ? response.total : response.sessions.length);
       setActivity(activityResponse.activity);
       setNotAddedSummary(notAdded);
+      setImportHealthSummary(importHealth);
       setAuthoringCapabilities(capabilities);
       setSelectedCompileReadySessionIds((current) => {
         const next = new Set(current);
@@ -448,6 +454,7 @@ export function useWorkbenchController({
     notAddedOpen,
     notAddedSessions,
     notAddedSummary,
+    importHealthSummary,
     page,
     pageSize,
     retry,

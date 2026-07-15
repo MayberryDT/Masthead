@@ -1,8 +1,12 @@
 import type { ImportJob } from "../app/daemonClient";
+import { latestImportCompletionReportsByRuntime } from "../shared/sourceImport";
 
 export function SidebarImportActivity({ imports }: { imports: ImportJob[] }) {
   const active = imports.filter((job) => job.status === "queued" || job.status === "running" || job.status === "cancelling");
-  if (active.length === 0) return null;
+  const issueReports = latestImportCompletionReportsByRuntime(imports).filter(
+    (report) => report.sessionsRepairRequired > 0 || report.recordsRejected > 0 || report.cappedUnits > 0 || report.anomalies.length > 0
+  );
+  if (active.length === 0 && issueReports.length === 0) return null;
 
   const current = active.find((job) => job.status === "running" || job.status === "cancelling");
   const waiting = active.filter((job) => job.status === "queued").length;
@@ -16,8 +20,8 @@ export function SidebarImportActivity({ imports }: { imports: ImportJob[] }) {
   return (
     <aside className="sidebar-import-activity" aria-label="History import activity">
       <div className="sidebar-import-heading">
-        <span>Updating history</span>
-        <span className="sidebar-import-live" aria-hidden="true" />
+        <span>{current ? "Updating history" : "Import health"}</span>
+        {current ? <span className="sidebar-import-live" aria-hidden="true" /> : null}
       </div>
       {current ? (
         <>
@@ -34,6 +38,14 @@ export function SidebarImportActivity({ imports }: { imports: ImportJob[] }) {
         <p className="sidebar-import-command">$ Waiting to start</p>
       )}
       {waiting > 0 ? <p className="sidebar-import-waiting">{waiting} harness{waiting === 1 ? "" : "es"} waiting</p> : null}
+      {issueReports.map((report) => (
+        <div className="sidebar-import-receipt" key={report.importJobId}>
+          <strong>{runtimeLabel(`${report.runtime}:receipt`)}</strong>
+          <span>{report.recordsRecognized.toLocaleString()} recognized · {report.recordsRejected.toLocaleString()} rejected</span>
+          <span>{report.sessionsFinalized.toLocaleString()} canonical · {report.sessionsOnPackagePath.toLocaleString()} package · {report.sessionsRepairRequired.toLocaleString()} repair</span>
+          <span>{report.sessionsSuppressed.toLocaleString()} noise · {report.cappedUnits.toLocaleString()} capped</span>
+        </div>
+      ))}
     </aside>
   );
 }

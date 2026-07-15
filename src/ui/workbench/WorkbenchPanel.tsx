@@ -20,6 +20,7 @@ type WorkbenchPanelProps = Partial<
     | "notAddedOpen"
     | "notAddedSessions"
     | "notAddedSummary"
+    | "importHealthSummary"
     | "page"
     | "pageSize"
     | "runAction"
@@ -35,6 +36,7 @@ type WorkbenchPanelProps = Partial<
   onSelectAll?: () => void;
   onSelectPage?: () => void;
   onToggleSession?: (sessionId: string) => void;
+  onOpenImportReceipt?: (importJobId: string) => void;
 };
 
 const EMPTY_SELECTION = new Set<string>();
@@ -96,11 +98,13 @@ export function WorkbenchPanel({
   notAddedOpen = false,
   notAddedSessions = EMPTY_NOT_ADDED,
   notAddedSummary,
+  importHealthSummary,
   onClearSelection,
   onRetry,
   onSelectAll,
   onSelectPage,
   onToggleSession,
+  onOpenImportReceipt,
   page = 0,
   pageSize = 100,
   runAction,
@@ -296,6 +300,12 @@ export function WorkbenchPanel({
             <dt>Selected</dt>
             <dd>{selectionCount}</dd>
           </div>
+          {importHealthSummary ? (
+            <div className={importHealthSummary.repairRequired > 0 ? "is-warning" : undefined} title="Import units held outside the package path until their evidence is repaired">
+              <dt>Import repair</dt>
+              <dd>{importHealthSummary.repairRequired}</dd>
+            </div>
+          ) : null}
           {notAddedLabel != null ? (
             <div className={notAddedOpen ? "is-active" : undefined} title={TOOLTIPS.notAdded}>
               <dt>Not Added</dt>
@@ -315,6 +325,25 @@ export function WorkbenchPanel({
           ) : null}
         </dl>
       </div>
+
+      {importHealthSummary && importHealthSummary.repairRequired > 0 ? (
+        <section className="workbench-import-repair-panel" aria-label="Import repair">
+          <div>
+            <p className="mono-label">Import repair — outside the package path</p>
+            <p>
+              {importHealthSummary.repairRequired} import repair issue{importHealthSummary.repairRequired === 1 ? "" : "s"} remain outside the package path.
+              Repair units are not selectable sessions and are not counted as Not Added.
+            </p>
+          </div>
+          <div className="workbench-import-repair-receipts">
+            {importHealthSummary.importJobIds.map((importJobId) => (
+              <AppButton variant="quiet" key={importJobId} onClick={() => onOpenImportReceipt?.(importJobId)} disabled={!onOpenImportReceipt}>
+                Open import receipt
+              </AppButton>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {toastMessage ? (
         <div className={`workbench-toast is-${toastTone}`} role="status" aria-live="polite" aria-atomic="true">

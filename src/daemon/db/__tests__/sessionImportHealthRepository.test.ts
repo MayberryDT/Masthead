@@ -8,6 +8,7 @@ import {
   readImportWorkUnitHealth,
   readSessionImportHealth,
   recordSessionImportHealth,
+  summarizeCurrentSessionImportHealth,
   summarizeSessionImportHealth
 } from "../sessionImportHealthRepository.ts";
 import { openMastheadDatabase } from "../sqlite.ts";
@@ -105,6 +106,11 @@ describe("session import health repository", () => {
       total: 1
     });
     expect(countRepairRequiredSessions(db, "import-health-1")).toBe(0);
+    expect(summarizeCurrentSessionImportHealth(db)).toEqual({
+      importJobIds: ["import-health-1"],
+      reasons: [{ count: 1, reason: "missing_identity" }],
+      repairRequired: 1
+    });
     db.close();
   });
 });

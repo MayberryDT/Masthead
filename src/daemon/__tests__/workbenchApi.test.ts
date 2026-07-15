@@ -18,6 +18,7 @@ import {
 import { createMastheadDaemon, type MastheadDaemon } from "../server.ts";
 import { migrateDatabase } from "../db/schema.ts";
 import { openMastheadDatabase } from "../db/sqlite.ts";
+import { recordSessionImportHealth } from "../db/sessionImportHealthRepository.ts";
 
 const tempDirs: string[] = [];
 const daemons: MastheadDaemon[] = [];
@@ -30,6 +31,59 @@ afterEach(async () => {
 });
 
 describe("workbench API", () => {
+  test("summarizes current repair-required units including failures without a session identity", async () => {
+    const { baseUrl, daemon } = await startTestDaemon();
+    seedImportHealthUnits(daemon.database, ["unit-repaired", "unit-current", "unit-no-identity"]);
+    seedSession(daemon.database, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:repaired", title: "Repaired import" });
+    seedSession(daemon.database, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:needs-repair", title: "Needs import repair" });
+    recordSessionImportHealth(daemon.database, {
+      evidenceRevision: "rev-1",
+      importJobId: "import-current",
+      reason: "partial_parse",
+      sessionId: "session:repaired",
+      status: "repair_required",
+      updatedAt: "2026-07-15T10:00:00.000Z",
+      workUnitId: "unit-repaired"
+    });
+    recordSessionImportHealth(daemon.database, {
+      evidenceRevision: "rev-2",
+      importJobId: "import-current",
+      sessionId: "session:repaired",
+      status: "complete",
+      updatedAt: "2026-07-15T11:00:00.000Z",
+      workUnitId: "unit-repaired"
+    });
+    recordSessionImportHealth(daemon.database, {
+      evidenceRevision: "rev-3",
+      importJobId: "import-current",
+      reason: "schema_drift",
+      sessionId: "session:needs-repair",
+      status: "repair_required",
+      updatedAt: "2026-07-15T12:00:00.000Z",
+      workUnitId: "unit-current"
+    });
+    recordSessionImportHealth(daemon.database, {
+      evidenceRevision: "rev-4",
+      importJobId: "import-current",
+      reason: "missing_session_identity",
+      status: "repair_required",
+      updatedAt: "2026-07-15T12:01:00.000Z",
+      workUnitId: "unit-no-identity"
+    });
+
+    const summary = await getJson(baseUrl, "/workbench/import-health-summary");
+
+    expect(summary).toEqual({
+      ok: true,
+      importJobIds: ["import-current"],
+      reasons: [
+        { count: 1, reason: "missing_session_identity" },
+        { count: 1, reason: "schema_drift" }
+      ],
+      repairRequired: 2
+    });
+  });
+
   test("does not expose standalone session or canonical dossier publication routes", async () => {
     const serverSource = await readFile(resolve("src/daemon/server.ts"), "utf8");
     expect(serverSource).not.toContain('url.pathname === "/workbench/dossiers/publish"');
@@ -598,6 +652,29 @@ function seedIngestSource(db: MastheadDaemon["database"], sourceId: string): voi
       source_id, adapter, source_kind, source_path, confidence, discovered_at, last_seen_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?)`
   ).run(sourceId, "codex", "jsonl", `/tmp/${sourceId}.jsonl`, "authoritative", now, now);
+}
+
+function seedImportHealthUnits(db: MastheadDaemon["database"], workUnitIds: string[]): void {
+  seedIngestSource(db, "source:import-health");
+  db.prepare(
+    `INSERT INTO import_jobs (import_job_id, source_id, import_kind, status, updated_at)
+    VALUES (?, ?, ?, ?, ?)`
+  ).run("import-current", "source:import-health", "transcript", "running", "2026-07-15T10:00:00.000Z");
+  db.prepare(
+    `INSERT INTO import_manifests (
+      manifest_id, import_job_id, source_id, runtime_kind, import_kind, scope_json,
+      generated_at, total_units, included_units, capped_units, excluded_units, total_bytes
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run("manifest-current", "import-current", "source:import-health", "codex", "transcript", "{}", "2026-07-15T10:00:00.000Z", workUnitIds.length, workUnitIds.length, 0, 0, workUnitIds.length);
+  const insert = db.prepare(
+    `INSERT INTO import_work_units (
+      work_unit_id, manifest_id, import_job_id, source_id, runtime_kind, source_kind,
+      confidence, unit_kind, source_path, status, timestamp_basis
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  );
+  for (const workUnitId of workUnitIds) {
+    insert.run(workUnitId, "manifest-current", "import-current", "source:import-health", "codex", "jsonl", "authoritative", "transcript_file", `/tmp/${workUnitId}.jsonl`, "running", "unknown");
+  }
 }
 
 async function postJson(baseUrl: string, path: string, body: unknown = {}, expectedStatus = 200): Promise<Record<string, any>> {
