@@ -50,7 +50,7 @@ export async function parseGrokTranscriptUnit(unit: TranscriptUnitPlan, cursor?:
   const path = unit.source.path;
   if (!conversationId || !path) return emptyParsedUnit(unit, "grok_conversation_identity_missing", "error");
 
-  const records = await grokRecords(path, conversationId, unit.source, cursor);
+  const records = await grokRecords(path, conversationId, unit.source, cursor?.sourcePath === path ? cursor : undefined);
   const auxiliaryDiagnostics = await knownAuxiliaryDiagnostics(dirname(path));
   const parsed = parsedTranscriptUnit(unit, records);
   return {

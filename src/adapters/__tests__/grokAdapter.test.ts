@@ -8,6 +8,7 @@ import type { AdapterRecord, DiscoveredSource } from "../types.ts";
 
 const fixturesDir = join(dirname(fileURLToPath(import.meta.url)), "..", "__fixtures__");
 const grokSessionId = "019f42f6-8ada-7001-afff-c722e75faf45";
+const secondGrokSessionId = "019f42f6-8ada-7002-afff-c722e75faf46";
 
 describe("Grok adapter", () => {
   test("groups one Grok conversation file under the directory session id", async () => {
@@ -54,6 +55,44 @@ describe("Grok adapter", () => {
       await rm(root, { force: true, recursive: true });
     }
   });
+
+  test("applies a conversation cursor only to its matching chat history", async () => {
+    const root = await mkdtemp(join(tmpdir(), "masthead-grok-tree-"));
+    const firstPath = join(root, grokSessionId, "chat_history.jsonl");
+    const secondPath = join(root, secondGrokSessionId, "chat_history.jsonl");
+    const userRow = '{"type":"user","content":"Hello"}\n';
+    const assistantRow = '{"type":"assistant","content":"Hi"}\n';
+    await mkdir(dirname(firstPath));
+    await mkdir(dirname(secondPath));
+    await writeFile(firstPath, userRow + assistantRow);
+    await writeFile(secondPath, userRow + assistantRow);
+    await writeFile(join(dirname(secondPath), "updates.jsonl"), "");
+
+    try {
+      const source = grokFixtureSource(root);
+      const units = await grokAdapter.planTranscriptUnits(source);
+      const first = units.find((unit) => unit.sourceSessionId === grokSessionId)!;
+      const second = units.find((unit) => unit.sourceSessionId === secondGrokSessionId)!;
+      const cursor = {
+        byteOffset: Buffer.byteLength(userRow),
+        cursorId: "cursor:first-grok-conversation",
+        sourceId: source.sourceId,
+        sourcePath: firstPath
+      };
+
+      const firstParsed = await grokAdapter.parseTranscriptUnit(first, cursor);
+      const secondParsed = await grokAdapter.parseTranscriptUnit(second, cursor);
+
+      expect(messageRoles(firstParsed.records)).toEqual(["assistant"]);
+      expect(messageRoles(secondParsed.records)).toEqual(["user", "assistant"]);
+      expect(secondParsed.completeness).toBe("complete");
+      expect(secondParsed.diagnostics).toContainEqual(
+        expect.objectContaining({ code: "grok_auxiliary_file_ignored", details: "updates.jsonl", severity: "info" })
+      );
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
 });
 
 function grokFixtureSource(path = join(fixturesDir, "grok", grokSessionId, "chat_history.jsonl")): DiscoveredSource {
@@ -72,4 +111,12 @@ function normalizedSessionIds(record: AdapterRecord): string[] {
   const value = record.normalized.value;
   if (typeof value !== "object" || value === null || !("sessionId" in value)) return [];
   return typeof value.sessionId === "string" ? [value.sessionId] : [];
+}
+
+function messageRoles(records: AdapterRecord[]): string[] {
+  return records.flatMap((record) => {
+    if (record.normalized.kind !== "message") return [];
+    const value = record.normalized.value as { role?: unknown };
+    return typeof value.role === "string" ? [value.role] : [];
+  });
 }
