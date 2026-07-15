@@ -129,7 +129,7 @@ import { buildSourcesSetupState, scanResultToOnboardingScan } from "./sources/so
 import { clearConnectorActivation, setConnectorActivation } from "./sources/connectorActivationStore.ts";
 import { discoverHarnessConnectors, listHarnessConnectors, withHistoryDiscovery } from "./sources/harnessConnectorService.ts";
 import type { ImportScopeDto, ImportWorkUnitStatus } from "../shared/sourceImport.ts";
-import type { ImportRepairSourceMapping } from "../shared/importRepair.ts";
+import type { ImportRepairJobPlan, ImportRepairSourceMapping } from "../shared/importRepair.ts";
 import type { SessionDossierDto, SessionDossierManualEnrichmentJob } from "../shared/sessionDossier.ts";
 import type {
   WorkbenchActivityDto,
@@ -1098,7 +1098,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     const sourceIds = [...new Set(jobs.map((job) => job.sourceId))].sort();
     const snapshot = await discoverSourceSnapshot({ homeDir: config.codexHomeDir, now: new Date().toISOString(), exclusions: [] });
     const discoveredBySourceId = new Map<string, DiscoveredSource>();
-    const mappings = sourceIds.map((sourceId): ImportRepairSourceMapping => {
+    const preliminaryMappings = sourceIds.map((sourceId): ImportRepairSourceMapping => {
       const stored = database.prepare(`SELECT adapter, source_kind AS sourceKind, schema_version AS schemaVersion,
           runtime_version AS runtimeVersion
         FROM ingest_sources WHERE source_id = ?`)
@@ -1128,6 +1128,19 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         correctedSourceId: discovered.sourceId,
         sourceId
       };
+    });
+    const correctedCounts = new Map<string, number>();
+    for (const mapping of preliminaryMappings) {
+      if (mapping.available && mapping.correctedSourceId) {
+        correctedCounts.set(mapping.correctedSourceId, (correctedCounts.get(mapping.correctedSourceId) ?? 0) + 1);
+      }
+    }
+    const mappings = preliminaryMappings.map((mapping): ImportRepairSourceMapping => {
+      if (mapping.correctedSourceId && (correctedCounts.get(mapping.correctedSourceId) ?? 0) > 1) {
+        discoveredBySourceId.delete(mapping.sourceId);
+        return { available: false, reason: "ambiguous_many_to_one", sourceId: mapping.sourceId };
+      }
+      return mapping;
     });
     return { discoveredBySourceId, mappings };
   }
@@ -3090,16 +3103,13 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           return;
         }
         if (typeof body.planHash !== "string" || !/^[a-f0-9]{64}$/.test(body.planHash)) throw new Error("valid planHash is required");
-        const jobsToReimport = [...new Set(body.importJobIds)].sort()
-          .map((importJobId) => getImportJob(database, importJobId))
-          .filter((job): job is ImportJobDto => Boolean(job && viability.discoveredBySourceId.has(job.sourceId)));
-        const staged = new Map<string, { existing: ImportJobDto; source: DiscoveredSource }>();
+        const staged = new Map<string, { plan: ImportRepairJobPlan; source: DiscoveredSource }>();
         const receipt = applyImportRepair(database, {
           importJobIds: body.importJobIds,
           planHash: body.planHash,
           sourceMappings: viability.mappings,
-          stageReimports: () => jobsToReimport.map((existing, index) => {
-            const source = viability.discoveredBySourceId.get(existing.sourceId)!;
+          stageReimports: (jobPlans) => jobPlans.map((plan, index) => {
+            const source = viability.discoveredBySourceId.get(plan.originalSourceId)!;
             const updatedAt = new Date(Date.now() + index).toISOString();
             database.prepare(`INSERT INTO ingest_sources(source_id, adapter, source_kind, source_path, endpoint, schema_version,
                 runtime_version, confidence, discovered_at, last_seen_at)
@@ -3115,8 +3125,9 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
                 last_seen_at = excluded.last_seen_at`)
               .run(source.sourceId, source.runtime, source.sourceKind, source.path ?? null, source.endpoint ?? null,
                 source.schemaVersion ?? null, source.runtimeVersion ?? null, source.confidence, updatedAt, updatedAt);
-            const job = createImportJob(database, { importKind: existing.importKind, sourceId: source.sourceId, updatedAt });
-            staged.set(job.importJobId, { existing, source });
+            const job = createImportJob(database, { importKind: plan.importKind, sourceId: plan.correctedSourceId!, updatedAt });
+            updateImportJob(database, job.importJobId, { scope: plan.scope, updatedAt });
+            staged.set(job.importJobId, { plan, source });
             return job.importJobId;
           })
         });
@@ -3124,7 +3135,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         for (const importJobId of receipt.reimportJobIds) {
           const spec = staged.get(importJobId)!;
           jobs.push(resumeImportJob(database, importJobId, (controls) =>
-            runImportWorkerForSource(spec.existing.importKind, spec.source, controls, spec.existing.scope ?? defaultTranscriptImportScope())
+            runImportWorkerForSource(spec.plan.importKind, spec.source, controls, spec.plan.scope ?? defaultTranscriptImportScope())
           ));
         }
         sendJson(request, response, config.allowedOrigins, 202, {

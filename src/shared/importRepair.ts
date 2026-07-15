@@ -1,15 +1,26 @@
 import type { RuntimeKind } from "../adapters/types.ts";
+import type { ImportJobKind, ImportScopeDto } from "./sourceImport.ts";
 
 export type ImportRepairSourceMapping = {
   sourceId: string;
   available: boolean;
   correctedSourceId?: string;
   adapterRuntime?: RuntimeKind;
-  reason?: "source_not_discovered" | "adapter_unavailable" | "runtime_mismatch" | "ambiguous_candidates";
+  reason?: "source_not_discovered" | "adapter_unavailable" | "runtime_mismatch" | "ambiguous_candidates" | "ambiguous_many_to_one";
 };
 
 export type ImportRepairSourcePlan = ImportRepairSourceMapping & {
   importJobIds: string[];
+};
+
+export type ImportRepairJobPlan = {
+  selectedJobId: string;
+  originalSourceId: string;
+  correctedSourceId?: string;
+  available: boolean;
+  repairEligible: boolean;
+  importKind: ImportJobKind;
+  scope: ImportScopeDto | null;
 };
 
 export type ImportRepairPreservationReason = {
@@ -32,6 +43,7 @@ export type ImportRepairPreview = {
   cursorSourcesToReset: string[];
   unavailableSources: string[];
   sourcePlans: ImportRepairSourcePlan[];
+  jobPlans: ImportRepairJobPlan[];
   applyAllowed: boolean;
   planHash: string;
 };

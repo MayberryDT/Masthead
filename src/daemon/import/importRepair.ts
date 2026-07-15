@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type {
   ImportRepairPreservationReason,
+  ImportRepairJobPlan,
   ImportRepairPreview,
   ImportRepairReceipt,
   ImportRepairSourceMapping,
@@ -32,9 +33,6 @@ export function previewImportRepair(
   );
   const affectedSessions = [...new Set([...impactedSessions, ...sourceLinkedSessions])].sort();
   const sourceLinkedOnly = new Set(sourceLinkedSessions.filter((sessionId) => !impactedSessions.includes(sessionId)));
-  const reimportSources = sourcePlans.filter((source) => source.available).map((source) => source.correctedSourceId!);
-  const cursorSourcesToReset = [...new Set(sourcePlans.filter((source) => source.available)
-    .flatMap((source) => [source.sourceId, source.correctedSourceId!]))].sort();
   const unavailableSources = sourcePlans.filter((source) => !source.available).map((source) => source.sourceId);
   const affectedArtifacts = affectedSessions.length === 0 ? [] : ids(
     db.prepare(`SELECT artifact_id AS id FROM session_artifact_provenance WHERE session_id IN (${placeholders(affectedSessions)})
@@ -55,6 +53,11 @@ export function previewImportRepair(
       WHERE import_job_id IN (${selected}) AND impact_kind = 'created' ORDER BY session_id`).all(...importJobIds) as IdRow[]
   ));
   const blocked = new Set(blockedPublishedSessions);
+  const jobPlans = buildJobPlans(db, importJobIds, sourcePlans, blocked);
+  const eligibleJobPlans = jobPlans.filter((job) => job.available && job.repairEligible);
+  const reimportSources = [...new Set(eligibleJobPlans.map((job) => job.correctedSourceId!))].sort();
+  const cursorSourcesToReset = [...new Set(eligibleJobPlans
+    .flatMap((job) => [job.originalSourceId, job.correctedSourceId!]))].sort();
   const deferred = new Set(outOfRangeSessionsToDefer);
   const manual = new Set(manualDecisionSessions(db, affectedSessions));
   const unavailable = new Set(sessionsWithUnavailableSources(db, importJobIds, sourcePlans));
@@ -90,11 +93,12 @@ export function previewImportRepair(
   const plan = {
     affectedArtifacts,
     affectedSessions,
-    applyAllowed: blockedPublishedSessions.length === 0,
+    applyAllowed: blockedPublishedSessions.length === 0 || eligibleJobPlans.length > 0,
     automaticSuppressionsToReopen,
     blockedPublishedSessions,
     cursorSourcesToReset,
     importJobIds,
+    jobPlans,
     outOfRangeSessionsToDefer,
     preservationReasons,
     preservedSessions,
@@ -113,7 +117,7 @@ export function applyImportRepair(
     importJobIds: string[];
     planHash: string;
     sourceMappings: ImportRepairSourceMapping[];
-    stageReimports?: () => string[];
+    stageReimports?: (jobPlans: ImportRepairJobPlan[]) => string[];
   }
 ): ImportRepairReceipt {
   const preview = previewImportRepair(db, { importJobIds: input.importJobIds, sourceMappings: input.sourceMappings });
@@ -137,13 +141,14 @@ export function applyImportRepair(
       db.prepare(`DELETE FROM ingest_cursors WHERE source_id IN (${placeholders(lockedPreview.cursorSourcesToReset)})`)
         .run(...lockedPreview.cursorSourcesToReset);
     }
-    const reimportJobIds = input.stageReimports?.() ?? [];
+    const viableJobPlans = lockedPreview.jobPlans.filter((job) => job.available && job.repairEligible);
+    const reimportJobIds = input.stageReimports?.(viableJobPlans) ?? [];
     if (lockedPreview.reimportSources.length > 0 && reimportJobIds.length === 0) throw new Error("replacement job staging required");
-    if (lockedPreview.reimportSources.length > 0 && !durableReimportsCoverSources(db, reimportJobIds, lockedPreview.reimportSources)) {
-      throw new Error("durable replacement jobs required");
+    if (lockedPreview.reimportSources.length > 0 && !exactReimportsMatchPlans(db, reimportJobIds, viableJobPlans)) {
+      throw new Error("exact replacement jobs required");
     }
     return {
-      blockedPublishedSessions: [],
+      blockedPublishedSessions: lockedPreview.blockedPublishedSessions,
       cursorSourcesToReset: lockedPreview.cursorSourcesToReset,
       importJobIds: lockedPreview.importJobIds,
       planHash: lockedPreview.planHash,
@@ -157,15 +162,23 @@ export function applyImportRepair(
   });
 }
 
-function durableReimportsCoverSources(db: MastheadDatabase, importJobIds: string[], sourceIds: string[]): boolean {
+function exactReimportsMatchPlans(db: MastheadDatabase, importJobIds: string[], plans: ImportRepairJobPlan[]): boolean {
+  if (importJobIds.length !== plans.length) return false;
   const uniqueJobIds = [...new Set(importJobIds)];
   if (uniqueJobIds.length !== importJobIds.length) return false;
-  const rows = db.prepare(`SELECT import_job_id AS importJobId, source_id AS sourceId FROM import_jobs
-    WHERE import_job_id IN (${placeholders(uniqueJobIds)}) AND status = 'queued'`)
-    .all(...uniqueJobIds) as Array<{ importJobId: string; sourceId: string }>;
-  if (rows.length !== uniqueJobIds.length) return false;
-  const coveredSources = new Set(rows.map((row) => row.sourceId));
-  return sourceIds.every((sourceId) => coveredSources.has(sourceId));
+  return importJobIds.every((importJobId, index) => {
+    const row = db.prepare(`SELECT source_id AS sourceId, import_kind AS importKind, scope_json AS scopeJson, status
+      FROM import_jobs WHERE import_job_id = ?`).get(importJobId) as
+      | { importKind: string; scopeJson: string | null; sourceId: string; status: string }
+      | undefined;
+    const plan = plans[index];
+    return Boolean(row && plan && row.status === "queued" && row.sourceId === plan.correctedSourceId &&
+      row.importKind === plan.importKind && normalizedScopeJson(row.scopeJson) === stableStringify(plan.scope));
+  });
+}
+
+function normalizedScopeJson(value: string | null): string {
+  return stableStringify(value ? JSON.parse(value) : null);
 }
 
 function exclusivelyOwned(
@@ -203,6 +216,43 @@ function buildSourcePlans(db: MastheadDatabase, jobIds: string[], mappings: Impo
       importJobIds: rows.filter((row) => row.sourceId === sourceId).map((row) => row.importJobId),
       reason: viable ? undefined : mapping?.reason ?? "source_not_discovered",
       sourceId
+    };
+  });
+}
+
+function buildJobPlans(
+  db: MastheadDatabase,
+  jobIds: string[],
+  sourcePlans: ImportRepairSourcePlan[],
+  blockedPublishedSessions: Set<string>
+): ImportRepairJobPlan[] {
+  const sourcePlanById = new Map(sourcePlans.map((plan) => [plan.sourceId, plan]));
+  const rows = db.prepare(`SELECT import_job_id AS selectedJobId, source_id AS originalSourceId,
+      import_kind AS importKind, scope_json AS scopeJson
+    FROM import_jobs WHERE import_job_id IN (${placeholders(jobIds)}) ORDER BY import_job_id`)
+    .all(...jobIds) as Array<{
+      importKind: ImportRepairJobPlan["importKind"];
+      originalSourceId: string;
+      scopeJson: string | null;
+      selectedJobId: string;
+    }>;
+  return rows.map((row) => {
+    const source = sourcePlanById.get(row.originalSourceId)!;
+    const relatedSessions = ids(db.prepare(`SELECT session_id AS id FROM import_session_impacts WHERE import_job_id = ?
+      UNION SELECT session_id AS id FROM session_sources WHERE source_id = ? ORDER BY id`)
+      .all(row.selectedJobId, row.originalSourceId) as IdRow[]);
+    const storedScope = row.scopeJson ? JSON.parse(row.scopeJson) as ImportRepairJobPlan["scope"] : null;
+    const scope = storedScope ?? (row.importKind === "transcript"
+      ? { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 }
+      : null);
+    return {
+      available: source.available,
+      correctedSourceId: source.correctedSourceId,
+      importKind: row.importKind,
+      originalSourceId: row.originalSourceId,
+      repairEligible: relatedSessions.length === 0 || relatedSessions.some((sessionId) => !blockedPublishedSessions.has(sessionId)),
+      scope,
+      selectedJobId: row.selectedJobId
     };
   });
 }
@@ -259,5 +309,15 @@ function ids(rows: IdRow[]): string[] {
 }
 
 function hashPlan(plan: Omit<ImportRepairPreview, "planHash">): string {
-  return createHash("sha256").update(JSON.stringify(plan)).digest("hex");
+  return createHash("sha256").update(stableStringify(plan)).digest("hex");
+}
+
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).filter((key) => record[key] !== undefined).sort()
+      .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
 }

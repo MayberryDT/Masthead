@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import { migrateDatabase } from "../../db/schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../../db/sqlite.ts";
 import { applyImportRepair, previewImportRepair } from "../importRepair.ts";
+import type { ImportRepairJobPlan } from "../../../shared/importRepair.ts";
 
 const availableSources = [
   { adapterRuntime: "grok" as const, available: true, correctedSourceId: "source:grok", sourceId: "source:grok" },
@@ -85,7 +86,7 @@ describe("import repair", () => {
     expect(() => applyImportRepair(db, {
       importJobIds: ["job:grok"], planHash: preview.planHash, sourceMappings: availableSources,
       stageReimports: () => ["job:not-durable"]
-    })).toThrow("durable replacement jobs required");
+    })).toThrow("exact replacement jobs required");
     expect(readSession(db, "session:grok-fragment")).toBeDefined();
   });
 
@@ -105,7 +106,7 @@ describe("import repair", () => {
 
     applyImportRepair(db, {
       importJobIds: ["job:grok"], planHash: preview.planHash, sourceMappings: mappings,
-      stageReimports: () => stageReplacementJobs(db, ["source:grok:moved"])
+      stageReimports: (plans) => stageReplacementJobs(db, plans)
     });
 
     expect(db.prepare("SELECT source_id FROM ingest_cursors ORDER BY source_id").all()).toEqual([]);
@@ -119,9 +120,62 @@ describe("import repair", () => {
 
     expect(() => applyImportRepair(db, {
       importJobIds: ["job:grok"], planHash: preview.planHash, sourceMappings: availableSources,
-      stageReimports: () => stageReplacementJobs(db, ["source:grok"])
+      stageReimports: (plans) => stageReplacementJobs(db, plans)
     })).not.toThrow();
     expect(readSession(db, "session:unrelated-late")).toBeDefined();
+  });
+
+  test("selected job kind or scope drift changes the immutable plan hash", async () => {
+    const db = await repairDatabase();
+    const preview = previewImportRepair(db, { importJobIds: ["job:grok"], sourceMappings: availableSources });
+    db.prepare("UPDATE import_jobs SET scope_json = ? WHERE import_job_id = 'job:grok'")
+      .run(JSON.stringify({ includeChangedSinceCursor: true, mode: "transcript_full" }));
+
+    expect(() => applyImportRepair(db, {
+      importJobIds: ["job:grok"], planHash: preview.planHash, sourceMappings: availableSources,
+      stageReimports: (plans: ImportRepairJobPlan[]) => stageReplacementJobs(db, plans)
+    })).toThrow("repair plan changed");
+    expect(readSession(db, "session:grok-fragment")).toBeDefined();
+  });
+
+  test("scope key order does not create a false execution-spec conflict", async () => {
+    const db = await repairDatabase();
+    db.prepare("UPDATE import_jobs SET scope_json = ? WHERE import_job_id = 'job:grok'")
+      .run('{"mode":"transcript_recent","days":30,"includeChangedSinceCursor":true,"unitLimit":500}');
+    const preview = previewImportRepair(db, { importJobIds: ["job:grok"], sourceMappings: availableSources });
+    db.prepare("UPDATE import_jobs SET scope_json = ? WHERE import_job_id = 'job:grok'")
+      .run('{"unitLimit":500,"includeChangedSinceCursor":true,"days":30,"mode":"transcript_recent"}');
+
+    expect(() => applyImportRepair(db, {
+      importJobIds: ["job:grok"], planHash: preview.planHash, sourceMappings: availableSources,
+      stageReimports: (plans) => stageReplacementJobs(db, plans)
+    })).not.toThrow();
+  });
+
+  test("replacement jobs must match every selected execution spec exactly once", async () => {
+    const missingDb = await repairDatabase();
+    const missingPreview = previewImportRepair(missingDb, { importJobIds: ["job:grok", "job:hermes"], sourceMappings: availableSources });
+    expect(() => applyImportRepair(missingDb, {
+      importJobIds: missingPreview.importJobIds, planHash: missingPreview.planHash, sourceMappings: availableSources,
+      stageReimports: (plans: ImportRepairJobPlan[]) => stageReplacementJobs(missingDb, plans.slice(0, 1))
+    })).toThrow("exact replacement jobs required");
+
+    const wrongDb = await repairDatabase();
+    const wrongPreview = previewImportRepair(wrongDb, { importJobIds: ["job:grok"], sourceMappings: availableSources });
+    expect(() => applyImportRepair(wrongDb, {
+      importJobIds: ["job:grok"], planHash: wrongPreview.planHash, sourceMappings: availableSources,
+      stageReimports: (plans: ImportRepairJobPlan[]) => stageReplacementJobs(wrongDb, plans, { importKind: "metadata" })
+    })).toThrow("exact replacement jobs required");
+
+    const extraDb = await repairDatabase();
+    const extraPreview = previewImportRepair(extraDb, { importJobIds: ["job:grok"], sourceMappings: availableSources });
+    expect(() => applyImportRepair(extraDb, {
+      importJobIds: ["job:grok"], planHash: extraPreview.planHash, sourceMappings: availableSources,
+      stageReimports: (plans: ImportRepairJobPlan[]) => [
+        ...stageReplacementJobs(extraDb, plans),
+        ...stageReplacementJobs(extraDb, plans, { idSuffix: ":extra" })
+      ]
+    })).toThrow("exact replacement jobs required");
   });
 
   test("published provenance blocks apply and remains untouched", async () => {
@@ -140,6 +194,33 @@ describe("import repair", () => {
     expect(db.prepare("SELECT artifact_id FROM session_artifacts WHERE artifact_id = ?").get("artifact:published")).toBeDefined();
   });
 
+  test("mixed plans preserve published sessions and continue independent eligible repairs", async () => {
+    const db = await repairDatabase();
+    seedImpact(db, "job:published", "source:published", "session:published", "created");
+    const mappings = [
+      ...availableSources,
+      { adapterRuntime: "grok" as const, available: true, correctedSourceId: "source:published", sourceId: "source:published" }
+    ];
+    const preview = previewImportRepair(db, {
+      importJobIds: ["job:grok", "job:published"],
+      sourceMappings: mappings
+    });
+
+    expect(preview.applyAllowed).toBe(true);
+    expect(preview.preservationReasons).toContainEqual({ reason: "published_artifact", sessionId: "session:published" });
+    const receipt = applyImportRepair(db, {
+      importJobIds: preview.importJobIds,
+      planHash: preview.planHash,
+      sourceMappings: mappings,
+      stageReimports: (plans) => stageReplacementJobs(db, plans)
+    });
+
+    expect(receipt.removedSessions).toEqual(["session:grok-fragment"]);
+    expect(receipt.reimportJobIds).toEqual(["job:replacement:job:grok"]);
+    expect(readSession(db, "session:published")).toBeDefined();
+    expect(db.prepare("SELECT artifact_id FROM session_artifacts WHERE artifact_id = ?").get("artifact:published")).toBeDefined();
+  });
+
   test("apply removes only exclusively owned pseudo-sessions and preserves live, manual, and unrelated data", async () => {
     const db = await repairDatabase();
     const preview = previewImportRepair(db, { importJobIds: ["job:grok", "job:hermes"], sourceMappings: availableSources });
@@ -148,7 +229,7 @@ describe("import repair", () => {
       importJobIds: preview.importJobIds,
       planHash: preview.planHash,
       sourceMappings: availableSources,
-      stageReimports: () => stageReplacementJobs(db, ["source:grok", "source:hermes"])
+      stageReimports: (plans) => stageReplacementJobs(db, plans)
     });
 
     expect(receipt).toMatchObject({
@@ -234,7 +315,7 @@ describe("import repair", () => {
 
     applyImportRepair(db, {
       importJobIds: ["job:hermes"], planHash: deferred.planHash, sourceMappings: availableSources,
-      stageReimports: () => stageReplacementJobs(db, ["source:hermes"])
+      stageReimports: (plans) => stageReplacementJobs(db, plans)
     });
     expect(db.prepare("SELECT status, status_reason FROM import_work_units WHERE import_job_id = 'job:hermes'").get())
       .toEqual({ status: "succeeded", status_reason: null });
@@ -315,11 +396,16 @@ function seedImportUnit(db: MastheadDatabase, jobId: string, sourceId: string): 
     .run(`unit:${jobId}`, `manifest:${jobId}`, jobId, sourceId);
 }
 
-function stageReplacementJobs(db: MastheadDatabase, sourceIds: string[]): string[] {
-  return sourceIds.map((sourceId) => {
-    const importJobId = `job:replacement:${sourceId}`;
-    db.prepare(`INSERT INTO import_jobs(import_job_id, source_id, import_kind, status, updated_at)
-      VALUES (?, ?, 'transcript', 'queued', '2026-07-15T12:30:00.000Z')`).run(importJobId, sourceId);
+function stageReplacementJobs(
+  db: MastheadDatabase,
+  plans: ImportRepairJobPlan[],
+  overrides: { idSuffix?: string; importKind?: "metadata" | "transcript" } = {}
+): string[] {
+  return plans.map((plan) => {
+    const importJobId = `job:replacement:${plan.selectedJobId}${overrides.idSuffix ?? ""}`;
+    db.prepare(`INSERT INTO import_jobs(import_job_id, source_id, import_kind, status, scope_json, updated_at)
+      VALUES (?, ?, ?, 'queued', ?, '2026-07-15T12:30:00.000Z')`)
+      .run(importJobId, plan.correctedSourceId!, overrides.importKind ?? plan.importKind, plan.scope ? JSON.stringify(plan.scope) : null);
     return importJobId;
   });
 }

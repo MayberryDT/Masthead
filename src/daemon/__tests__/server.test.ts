@@ -129,6 +129,28 @@ describe("Masthead daemon startup", () => {
     expect(daemon.database.prepare("SELECT session_id FROM sessions WHERE session_id = 'session:repair'").get()).toBeDefined();
   });
 
+  test("import repair rejects many historical sources mapping to one current candidate", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-repair-many-to-one-"));
+    tempDirs.push(tempDir);
+    await mkdir(join(tempDir, ".grok/sessions"), { recursive: true });
+    await writeFile(join(tempDir, ".grok/sessions/current.jsonl"), "{}\n");
+    const daemon = await createTestDaemon(tempDir);
+    seedRepairRouteData(daemon, "source:grok:old-a", "/old/a.jsonl", "grok-jsonl-tree", {
+      jobId: "job:repair:a", sessionId: "session:repair:a"
+    });
+    seedRepairRouteData(daemon, "source:grok:old-b", "/old/b.jsonl", "grok-jsonl-tree", {
+      jobId: "job:repair:b", sessionId: "session:repair:b"
+    });
+    const baseUrl = await listen(daemon);
+
+    const previewResponse = await postRaw(baseUrl, "/imports/repair/preview", { importJobIds: ["job:repair:a", "job:repair:b"] });
+    const previewBody = await previewResponse.json() as { preview: { sourcePlans: Array<Record<string, unknown>> } };
+    expect(previewBody.preview.sourcePlans).toEqual([
+      expect.objectContaining({ available: false, reason: "ambiguous_many_to_one", sourceId: "source:grok:old-a" }),
+      expect.objectContaining({ available: false, reason: "ambiguous_many_to_one", sourceId: "source:grok:old-b" })
+    ]);
+  });
+
   test("migration backup retains the promoted WAL-complete snapshot over future-dated equal-mtime stale snapshots", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-daemon-migration-backup-"));
     tempDirs.push(tempDir);
@@ -639,19 +661,25 @@ function postRaw(baseUrl: string, path: string, body: Record<string, unknown>): 
   });
 }
 
-function seedRepairRouteData(daemon: MastheadDaemon, sourceId: string, sourcePath: string, schemaVersion?: string): void {
+function seedRepairRouteData(
+  daemon: MastheadDaemon,
+  sourceId: string,
+  sourcePath: string,
+  schemaVersion?: string,
+  identity: { jobId: string; sessionId: string } = { jobId: "job:repair", sessionId: "session:repair" }
+): void {
   const now = "2026-07-15T12:00:00.000Z";
   seedSession(daemon.database, {
-    lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:repair", title: "Repair route"
+    lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: identity.sessionId, title: "Repair route"
   });
   daemon.database.prepare(`INSERT INTO ingest_sources(source_id, adapter, source_kind, source_path, schema_version, confidence, discovered_at, last_seen_at)
     VALUES (?, 'grok', 'jsonl', ?, ?, 'heuristic', ?, ?)`).run(sourceId, sourcePath, schemaVersion ?? null, now, now);
   daemon.database.prepare(`INSERT INTO import_jobs(import_job_id, source_id, import_kind, status, updated_at)
-    VALUES ('job:repair', ?, 'transcript', 'succeeded', ?)`).run(sourceId, now);
+    VALUES (?, ?, 'transcript', 'succeeded', ?)`).run(identity.jobId, sourceId, now);
   daemon.database.prepare(`INSERT INTO import_session_impacts(impact_id, import_job_id, source_id, runtime_kind, session_id, impact_kind, observed_at)
-    VALUES ('impact:repair', 'job:repair', ?, 'grok', 'session:repair', 'created', ?)`).run(sourceId, now);
+    VALUES (?, ?, ?, 'grok', ?, 'created', ?)`).run(`impact:${identity.jobId}`, identity.jobId, sourceId, identity.sessionId, now);
   daemon.database.prepare(`INSERT INTO session_sources(session_id, source_id, first_seen_at, last_seen_at)
-    VALUES ('session:repair', ?, ?, ?)`).run(sourceId, now, now);
+    VALUES (?, ?, ?, ?)`).run(identity.sessionId, sourceId, now, now);
 }
 
 function databaseChanges(daemon: MastheadDaemon): number {

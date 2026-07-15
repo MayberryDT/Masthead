@@ -58,6 +58,9 @@ The deletion set is intentionally conservative. Sessions with any artifact, live
   - 5 files passed, 104 tests passed.
 - `git diff --check`
   - Passed.
+- Final time-boxed gate after canonical scope serialization:
+  - `npm run typecheck` passed.
+  - Repair/server suites passed: 2 files, 34 tests.
 
 ### Added safety evidence
 
@@ -103,3 +106,30 @@ The deletion set is intentionally conservative. Sessions with any artifact, live
 - Destructive apply refuses any viable plan without `stageReimports` before opening the transaction.
 - Returned staging IDs must identify real queued import jobs and collectively cover every viable corrected source. Missing, duplicate, fabricated, non-queued, or incomplete staging rolls the transaction back.
 - `preservedSessions` contains only affected-union sessions. Unrelated canonical/live session arrival after preview does not change the plan hash and remains untouched by apply.
+
+## Final integrity findings — execution specs and mixed published plans
+
+### RED
+
+- Global discovery mapped two historical source IDs to the same current candidate; both were incorrectly treated as available.
+- A selected job's persisted scope could drift after preview without changing the plan hash.
+- Replacement validation accepted incomplete or semantically wrong staging (one job covering multiple selected jobs, wrong kind/scope, or extra jobs).
+- A mixed plan containing one published session and one independent eligible repair was blocked in full.
+
+### GREEN
+
+- `npm run typecheck`
+  - Passed.
+- `npx vitest --run src/daemon/import/__tests__/importRepair.test.ts src/daemon/__tests__/server.test.ts src/cli/__tests__/mastheadctl.test.ts src/app/__tests__/daemonClient.test.ts src/core/__tests__/worktreeConnector.test.ts`
+  - 5 files passed, 114 tests passed.
+- `git diff --check`
+  - Passed.
+
+### Final integrity evidence
+
+- Compatible candidates are reserved across the complete selected plan. Any many-to-one collision marks every conflicting historical source `ambiguous_many_to_one`; affected sessions are preserved and no replacement is scheduled.
+- The hashed execution spec now includes each selected job ID, original and corrected source IDs, import kind, canonical parsed scope/options, availability, and repair eligibility.
+- Plan hashing and replacement-scope comparison use stable object-key ordering, so semantically identical persisted scopes cannot cause a false conflict.
+- Apply recomputes that complete spec under the immediate transaction and stages exclusively from the locked hashed job plans. It does not reread mutable old-job kind or scope to construct replacements.
+- Each eligible selected job requires exactly one distinct queued replacement job, in deterministic plan order, with the exact corrected source, import kind, and canonical scope. Missing, duplicate, extra, fabricated, wrong-kind, wrong-source, or wrong-scope staging rolls back cleanup.
+- Published affected sessions remain explicitly preserved with `published_artifact`. An all-published plan remains blocked, while a mixed plan continues independent eligible cleanup and schedules replacements only for eligible selected jobs.
