@@ -8,7 +8,8 @@ import { runCaptureQualityPrecheck } from "../../workbench/qualityPrecheck.ts";
 import { upsertSessionSource } from "./sessionSourceRepository.ts";
 import type { MastheadDatabase } from "./sqlite.ts";
 import { deriveTranscriptFileEffects } from "./transcriptEffects.ts";
-import { enrollWorkbenchSession } from "./workbenchPipelineRepository.ts";
+import { enrollWorkbenchSession, markWorkbenchQualityForReview } from "./workbenchPipelineRepository.ts";
+import { authoringEvidenceRevision } from "../../workbench/authoring/evidenceCatalog.ts";
 
 export { canonicalSessionId, runtimeIdFor } from "../../shared/sessionIdentity.ts";
 
@@ -652,8 +653,17 @@ function afterSessionMaterialized(
   sessionId: string,
   actorId: "live_ingest"
 ): void {
-  if (!runCaptureQualityPrecheck(db, sessionId).ok) return;
-  enrollWorkbenchSession(db, { actor: { kind: "system", id: actorId }, sessionId });
+  const quality = runCaptureQualityPrecheck(db, sessionId);
+  if (quality.disposition === "suppress") return;
+  const actor = { kind: "system" as const, id: actorId };
+  enrollWorkbenchSession(db, { actor, sessionId });
+  if (quality.disposition === "review") {
+    markWorkbenchQualityForReview(db, {
+      actor,
+      evidenceRevision: authoringEvidenceRevision(db, [sessionId]),
+      sessionId
+    });
+  }
 }
 
 function predictedCanonicalSessionId(record: AdapterRecord, context: AdapterIngestionContext): string | undefined {

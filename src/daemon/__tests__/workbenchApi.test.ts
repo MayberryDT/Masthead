@@ -394,7 +394,11 @@ describe("workbench API", () => {
     const precheckPass = await postJson(baseUrl, "/workbench/sessions/session%3Aquality/quality", { mode: "precheck" });
     expect(precheckPass).toMatchObject({
       ok: true,
-      precheck: expect.objectContaining({ ok: true, reason: "meaningful_message", sessionId: "session:quality" }),
+      precheck: expect.objectContaining({
+        disposition: "keep",
+        reason: "durable_file_effect",
+        sessionId: "session:quality"
+      }),
       state: expect.objectContaining({
         publicationStatus: "publish_path",
         qualityStatus: "passed",
@@ -412,9 +416,9 @@ describe("workbench API", () => {
     const precheckFail = await postJson(baseUrl, "/workbench/sessions/session%3Aquality/quality", { mode: "precheck" });
     expect(precheckFail).toMatchObject({
       ok: false,
-      precheck: expect.objectContaining({ ok: false, reason: "metadata_only", sessionId: "session:quality" }),
+      precheck: expect.objectContaining({ disposition: "suppress", reason: "empty", sessionId: "session:quality" }),
       state: expect.objectContaining({
-        nonPublicationReason: "metadata_only",
+        nonPublicationReason: "empty",
         publicationStatus: "not_added_to_logbook",
         qualityStatus: "failed",
         sessionId: "session:quality"

@@ -135,6 +135,11 @@ const migrations = [
     version: 26,
     name: "026_session_import_health",
     path: resolve(currentDir, "migrations/026_session_import_health.sql")
+  },
+  {
+    version: 27,
+    name: "027_workbench_suppression_provenance",
+    path: resolve(currentDir, "migrations/027_workbench_suppression_provenance.sql")
   }
 ];
 

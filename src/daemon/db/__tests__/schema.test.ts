@@ -33,7 +33,7 @@ describe("daemon database schema", () => {
     migrateDatabase(db);
     migrateDatabase(db);
 
-    expect(CURRENT_SCHEMA_VERSION).toBe(26);
+    expect(CURRENT_SCHEMA_VERSION).toBe(27);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'virtual') ORDER BY name").all() as Array<{ name: string }>;
     expect(tables.map((row) => row.name)).toEqual(
@@ -122,7 +122,8 @@ describe("daemon database schema", () => {
       { version: 23, name: "023_workbench_artifact_candidates" },
       { version: 24, name: "024_artifact_candidate_detector_revision" },
       { version: 25, name: "025_import_unit_scope" },
-      { version: 26, name: "026_session_import_health" }
+      { version: 26, name: "026_session_import_health" },
+      { version: 27, name: "027_workbench_suppression_provenance" }
     ]);
     expect(
       (db.prepare("PRAGMA table_info(workbench_artifact_candidate_scans)").all() as Array<{ name: string }>).map(
@@ -396,7 +397,7 @@ describe("daemon database schema", () => {
       "2026-07-15T00:00:00.000Z"
     );
 
-    expect(CURRENT_SCHEMA_VERSION).toBe(26);
+    expect(CURRENT_SCHEMA_VERSION).toBe(27);
     expect(db.prepare("SELECT version, name FROM schema_migrations ORDER BY version DESC LIMIT 1").get()).toEqual({
       name: "024_artifact_candidate_detector_revision",
       version: 24

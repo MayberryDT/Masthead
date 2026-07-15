@@ -67,6 +67,8 @@ import {
   listWorkbenchActivity,
   listWorkbenchQueue,
   markWorkbenchQuality,
+  markWorkbenchQualityForReview,
+  readWorkbenchSessionState,
   recordWorkbenchActivity,
   releaseWorkbenchClaim,
   type WorkbenchActivityRecord,
@@ -100,6 +102,7 @@ import { legacyCandidatesFromDirectory, maybeCopyLegacySqliteBeforeOpen } from "
 import { migrateLegacyJournalOnce } from "./legacyJournalMigration.ts";
 import { runLegacyWorkbenchPublicationBackfill } from "../workbench/legacyPublicationBackfill.ts";
 import { runCaptureQualityPrecheck } from "../workbench/qualityPrecheck.ts";
+import { authoringEvidenceRevision } from "../workbench/authoring/evidenceCatalog.ts";
 import { addSourceExclusion, sourceIsExcluded, sourceRecordIsExcluded } from "./db/sourceRepository.ts";
 import { setSourcePolicy, sourcePolicyExplicitlyEnabled, type SourcePolicyKind } from "./db/sourcePolicyRepository.ts";
 import {
@@ -2668,14 +2671,36 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       try {
         if (body.mode === "precheck") {
           const precheck = runCaptureQualityPrecheck(database, sessionId);
-          const result = markWorkbenchQuality(database, {
-            actor,
-            reason: precheck.reason,
-            sessionId,
-            status: precheck.ok ? "passed" : "failed"
-          });
+          const currentState = readWorkbenchSessionState(database, sessionId);
+          if (
+            currentState?.publicationStatus === "not_added_to_logbook" &&
+            currentState.qualityDecisionSource === "user"
+          ) {
+            sendJson(request, response, config.allowedOrigins, 200, {
+              ok: precheck.disposition !== "suppress",
+              precheck,
+              state: currentState
+            });
+            return;
+          }
+          const result =
+            precheck.disposition === "review"
+              ? markWorkbenchQualityForReview(database, {
+                  actor,
+                  evidenceRevision: authoringEvidenceRevision(database, [sessionId]),
+                  sessionId
+                })
+              : markWorkbenchQuality(database, {
+                  actor,
+                  evidenceRevision: authoringEvidenceRevision(database, [sessionId]),
+                  qualityDecisionSource: "automatic",
+                  reason: precheck.reason,
+                  sessionId,
+                  status: precheck.disposition === "keep" ? "passed" : "failed",
+                  suppressionCategory: precheck.disposition === "suppress" ? "confirmed_noise" : undefined
+                });
           sendJson(request, response, config.allowedOrigins, 200, {
-            ok: precheck.ok,
+            ok: precheck.disposition !== "suppress",
             activity: result.activity,
             precheck,
             state: result.state

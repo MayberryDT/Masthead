@@ -3,9 +3,11 @@ import type { MastheadDatabase } from "../daemon/db/sqlite.ts";
 import {
   markWorkbenchNotAdded,
   markWorkbenchPublished,
+  markWorkbenchQualityForReview,
   readWorkbenchSessionState
 } from "../daemon/db/workbenchPipelineRepository.ts";
-import { runCaptureQualityPrecheck, type CaptureQualityFailureReason } from "./qualityPrecheck.ts";
+import { runCaptureQualityPrecheck, type CaptureQualityDisposition } from "./qualityPrecheck.ts";
+import { authoringEvidenceRevision } from "./authoring/evidenceCatalog.ts";
 
 export const WORKBENCH_PUBLICATION_BACKFILL_KEY = "workbench_publication_backfill_v1";
 
@@ -13,7 +15,11 @@ export type LegacyWorkbenchPublicationBackfillResult = {
   ok: true;
   totalCandidates: number;
   published: string[];
-  notAdded: Array<{ sessionId: string; reason: CaptureQualityFailureReason }>;
+  notAdded: Array<{
+    sessionId: string;
+    reason: Extract<CaptureQualityDisposition, { disposition: "suppress" }>["reason"];
+  }>;
+  review: string[];
   skippedExistingState: number;
 };
 
@@ -27,6 +33,7 @@ export function runLegacyWorkbenchPublicationBackfill(db: MastheadDatabase): Leg
       ok: true,
       notAdded: [],
       published: [],
+      review: [],
       skippedExistingState: 0,
       totalCandidates: 0
     };
@@ -44,6 +51,7 @@ export function runLegacyWorkbenchPublicationBackfill(db: MastheadDatabase): Leg
     ok: true,
     notAdded: [],
     published: [],
+    review: [],
     skippedExistingState: 0,
     totalCandidates: candidates.length
   };
@@ -55,20 +63,27 @@ export function runLegacyWorkbenchPublicationBackfill(db: MastheadDatabase): Leg
     }
 
     const quality = runCaptureQualityPrecheck(db, candidate.sessionId);
-    if (quality.ok) {
+    if (quality.disposition === "keep") {
       markWorkbenchPublished(db, {
         actor: { kind: "system", id: "legacy_backfill" },
         publishedVia: "legacy_backfill",
         sessionId: candidate.sessionId
       });
       result.published.push(candidate.sessionId);
-    } else {
+    } else if (quality.disposition === "suppress") {
       markWorkbenchNotAdded(db, {
         actor: { kind: "system", id: "legacy_backfill" },
         reason: quality.reason,
         sessionId: candidate.sessionId
       });
       result.notAdded.push({ reason: quality.reason, sessionId: candidate.sessionId });
+    } else {
+      markWorkbenchQualityForReview(db, {
+        actor: { kind: "system", id: "legacy_backfill" },
+        evidenceRevision: authoringEvidenceRevision(db, [candidate.sessionId]),
+        sessionId: candidate.sessionId
+      });
+      result.review.push(candidate.sessionId);
     }
   }
   markLegacyDataMigrationCompleted(db, WORKBENCH_PUBLICATION_BACKFILL_KEY, result);

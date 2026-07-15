@@ -1288,7 +1288,9 @@ function coverageWarningsBySession(db: MastheadDatabase, sessionIds: string[]): 
       const summary = getAuthoringEvidenceManifest(db, [sessionId]).sessions[0]!;
       const warnings: string[] = [];
       const precheck = runCaptureQualityPrecheck(db, sessionId);
-      if (!precheck.ok) warnings.push(`Capture quality precheck reported ${precheck.reason}.`);
+      if (precheck.disposition === "suppress") {
+        warnings.push(`Capture quality precheck reported ${precheck.reason}.`);
+      }
       if (summary.coverage.messages < 2) warnings.push("Fewer than two canonical messages are available.");
       if (summary.coverage.userMessages === 0) warnings.push("No user-authored message is available.");
       if (summary.coverage.assistantMessages === 0) warnings.push("No assistant-authored message is available.");

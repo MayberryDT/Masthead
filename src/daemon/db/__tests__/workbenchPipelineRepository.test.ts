@@ -25,6 +25,7 @@ import {
   publishWorkbenchCandidateSessionInTransaction,
   publishWorkbenchSession,
   readWorkbenchSessionState,
+  reopenWorkbenchSessionForQualityReview,
   releaseWorkbenchClaim,
   setWorkbenchArtifactApplicability
 } from "../workbenchPipelineRepository.ts";
@@ -465,6 +466,50 @@ describe("workbench pipeline repository", () => {
     expect(result.state.publicationStatus).toBe("not_added_to_logbook");
     expect(result.state.nonPublicationReason).toBe("hook_only_noise");
     expect(result.activity.eventType).toBe("quality_failed");
+  });
+
+  test("persists automatic suppression provenance and can reopen it for changed evidence", async () => {
+    const db = await testDb();
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:automatic-suppression",
+      title: "Automatic suppression"
+    });
+
+    const suppressed = markWorkbenchQuality(db, {
+      actor: { kind: "system", id: "transcript_import" },
+      evidenceRevision: "sha256:old",
+      qualityDecisionSource: "automatic",
+      reason: "hook_only",
+      sessionId: "session:automatic-suppression",
+      status: "failed",
+      suppressionCategory: "confirmed_noise"
+    });
+
+    expect(suppressed.state).toMatchObject({
+      qualityDecisionSource: "automatic",
+      qualityEvidenceRevision: "sha256:old",
+      suppressionCategory: "confirmed_noise"
+    });
+
+    const reopened = reopenWorkbenchSessionForQualityReview(db, {
+      actor: { kind: "system", id: "transcript_import" },
+      evidenceRevision: "sha256:new",
+      sessionId: "session:automatic-suppression"
+    });
+
+    expect(reopened.state).toMatchObject({
+      nextAction: "review_quality",
+      nonPublicationReason: undefined,
+      publicationStatus: "publish_path",
+      qualityDecisionSource: "automatic",
+      qualityEvidenceRevision: "sha256:new",
+      qualityStatus: "unchecked",
+      suppressionCategory: undefined
+    });
+    expect(reopened.activity.eventType).toBe("quality_reopened");
   });
 
   test("quality pass after fail restores publish_path and advances next action", async () => {
