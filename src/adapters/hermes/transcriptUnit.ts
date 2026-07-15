@@ -1,11 +1,14 @@
 import { readFile, stat } from "node:fs/promises";
 import { basename } from "node:path";
+import type { DatabaseSync } from "node:sqlite";
 import { adapterPayload, hash, isRecord, normalizeRole, readString } from "../generic/jsonlAdapterKit.ts";
-import { quoteIdentifier, sqliteTables, withReadonlySqliteCopy } from "../generic/sqliteAdapterKit.ts";
+import { quoteIdentifier, sqliteTables, tableColumns, withReadonlySqliteCopy } from "../generic/sqliteAdapterKit.ts";
 import { streamJsonlLines } from "../generic/streamJsonl.ts";
 import type { ParsedTranscriptUnit, TranscriptUnitPlan } from "../transcriptUnits.ts";
 import { parsedTranscriptUnit } from "../transcriptUnits.ts";
-import type { AdapterRecord, DiscoveredSource, IngestCursor } from "../types.ts";
+import type { AdapterDiagnostic, AdapterRecord, DiscoveredSource, IngestCursor } from "../types.ts";
+
+const SQLITE_PAGE_SIZE = 1_000;
 
 type HermesRow = {
   cursorAfter?: AdapterRecord["cursorAfter"];
@@ -15,8 +18,10 @@ type HermesRow = {
 };
 
 type HermesRows = {
+  diagnostics?: AdapterDiagnostic[];
   lastUpdated?: string;
   rows: HermesRow[];
+  startedAt?: string;
 };
 
 export async function planHermesTranscriptUnits(source: DiscoveredSource): Promise<TranscriptUnitPlan[]> {
@@ -29,7 +34,7 @@ export async function planHermesTranscriptUnits(source: DiscoveredSource): Promi
     content.rows.filter(({ row }) => isMessageRole(readString(row, ["role", "type"]))).map(({ row }) => observedAt(row))
   );
   const pathActivityAt = timestampFromHermesFilename(source.path);
-  const semanticActivityAt = content.lastUpdated ?? latestMessageAt ?? pathActivityAt;
+  const semanticActivityAt = content.lastUpdated ?? latestMessageAt ?? content.startedAt ?? pathActivityAt;
 
   return [
     {
@@ -39,7 +44,7 @@ export async function planHermesTranscriptUnits(source: DiscoveredSource): Promi
       semanticActivityAt,
       source: sourceSessionId ? { ...source, sourceSessionId } : source,
       sourceSessionId,
-      timestampBasis: content.lastUpdated || latestMessageAt ? "semantic" : pathActivityAt ? "source_path" : "file_modified",
+      timestampBasis: content.lastUpdated || latestMessageAt || content.startedAt ? "semantic" : pathActivityAt ? "source_path" : "file_modified",
       unitId: `hermes:${sourceSessionId ?? source.path}`
     }
   ];
@@ -51,7 +56,13 @@ export async function parseHermesTranscriptUnit(unit: TranscriptUnitPlan, cursor
   const records = deduplicateRecords(
     content.rows.flatMap((entry) => recordFromRow(source, unit.sourceSessionId, entry))
   );
-  return parsedTranscriptUnit({ ...unit, source }, records);
+  const parsed = parsedTranscriptUnit({ ...unit, source }, records);
+  if (!content.diagnostics?.length) return parsed;
+  return {
+    ...parsed,
+    completeness: content.diagnostics.some((diagnostic) => diagnostic.severity === "error") ? "unrecognized" : "partial",
+    diagnostics: [...parsed.diagnostics, ...content.diagnostics]
+  };
 }
 
 export async function* backfillHermesSource(source: DiscoveredSource, cursor?: IngestCursor): AsyncIterable<AdapterRecord> {
@@ -113,27 +124,62 @@ async function readJsonlRows(source: DiscoveredSource, cursor?: IngestCursor): P
 
 async function readSqliteRows(path: string): Promise<HermesRows> {
   return withReadonlySqliteCopy(path, (db) => {
+    const diagnostics: AdapterDiagnostic[] = [];
     const rows: HermesRow[] = [];
     let lastUpdated: string | undefined;
+    let startedAt: string | undefined;
     for (const table of sqliteTables(db)) {
-      const values = db.prepare(`SELECT * FROM ${quoteIdentifier(table)} LIMIT 5000`).all() as Array<Record<string, unknown>>;
-      for (const [index, rawRow] of values.entries()) {
-        const value = sqliteJsonValue(rawRow) ?? rawRow;
-        const parsed = rowsFromJsonValue(value, `${path}:${table}:${index}`);
-        rows.push(...parsed.rows);
-        lastUpdated = newestTimestamp([lastUpdated, parsed.lastUpdated]);
+      let offset = 0;
+      while (true) {
+        let values: Array<Record<string, unknown>>;
+        try {
+          values = sqliteTablePage(db, table, offset);
+        } catch (error) {
+          diagnostics.push(sqliteQueryDiagnostic(table, error));
+          break;
+        }
+        for (const [index, rawRow] of values.entries()) {
+          const value = sqliteJsonValue(rawRow) ?? rawRow;
+          const parsed = rowsFromJsonValue(value, `${path}:${table}:${offset + index}`);
+          rows.push(...parsed.rows);
+          lastUpdated = newestTimestamp([lastUpdated, parsed.lastUpdated]);
+          startedAt = newestTimestamp([startedAt, parsed.startedAt]);
+        }
+        if (values.length < SQLITE_PAGE_SIZE) break;
+        offset += values.length;
       }
     }
-    return { lastUpdated, rows };
-  }).catch(() => ({ rows: [] }));
+    return { diagnostics, lastUpdated, rows, startedAt };
+  }).catch((error) => ({ diagnostics: [sqliteQueryDiagnostic("database", error)], rows: [] }));
+}
+
+function sqliteTablePage(db: DatabaseSync, table: string, offset: number): Array<Record<string, unknown>> {
+  const schema = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(table) as { sql?: unknown } | undefined;
+  const withoutRowid = typeof schema?.sql === "string" && /\bWITHOUT\s+ROWID\b/i.test(schema.sql);
+  const orderBy = withoutRowid ? tableColumns(db, table).map(quoteIdentifier).join(", ") : "rowid";
+  if (!orderBy) throw new Error("table has no deterministic ordering columns");
+  return db
+    .prepare(`SELECT * FROM ${quoteIdentifier(table)} ORDER BY ${orderBy} LIMIT ? OFFSET ?`)
+    .all(SQLITE_PAGE_SIZE, offset) as Array<Record<string, unknown>>;
+}
+
+function sqliteQueryDiagnostic(table: string, error: unknown): AdapterDiagnostic {
+  return {
+    code: "hermes_sqlite_query_failed",
+    details: error instanceof Error ? error.message : String(error),
+    message: `Hermes SQLite table could not be read completely: ${table}.`,
+    observedAt: new Date(0).toISOString(),
+    severity: "error"
+  };
 }
 
 function sqliteJsonValue(row: Record<string, unknown>): unknown {
-  for (const key of ["value", "data", "json", "payload"]) {
+  for (const key of ["value", "data", "json", "payload", "record", "content"]) {
     const value = row[key];
     if (typeof value !== "string") continue;
     try {
-      return JSON.parse(value);
+      const parsed = JSON.parse(value);
+      return isRecord(parsed) ? { ...row, ...parsed } : parsed;
     } catch {
       // This is an ordinary relational value, not a JSON document.
     }
@@ -144,14 +190,16 @@ function sqliteJsonValue(row: Record<string, unknown>): unknown {
 function rowsFromJsonValue(value: unknown, locator: string): HermesRows {
   if (!isRecord(value)) return { rows: [] };
   const inheritedSessionId = readString(value, ["session_id", "sessionId", "conversation_id", "conversationId"]);
-  const lastUpdated = readTimestamp(value, ["last_updated"]);
+  const lastUpdated = newestTimestamp([readTimestamp(value, ["last_updated"]), readTimestamp(value, ["ended_at"])]);
+  const startedAt = readTimestamp(value, ["started_at"]);
   if (Array.isArray(value.messages)) {
     return {
       lastUpdated,
-      rows: value.messages.filter(isRecord).map((row, index) => ({ inheritedSessionId, locator: `${locator}:message:${index}`, row }))
+      rows: value.messages.filter(isRecord).map((row, index) => ({ inheritedSessionId, locator: `${locator}:message:${index}`, row })),
+      startedAt
     };
   }
-  return { lastUpdated, rows: [{ inheritedSessionId, locator, row: value }] };
+  return { lastUpdated, rows: [{ inheritedSessionId, locator, row: value }], startedAt };
 }
 
 function recordFromRow(source: DiscoveredSource, unitSessionId: string | undefined, entry: HermesRow): AdapterRecord[] {
@@ -191,16 +239,33 @@ function recordFromRow(source: DiscoveredSource, unitSessionId: string | undefin
     ];
   }
   if (role === "user" || role === "assistant" || role === "system") {
+    const records: AdapterRecord[] = [];
     const text = textValue(row.content ?? row.text ?? row.message);
-    if (!text) return [];
-    return [
-      makeRecord(sourceWithSession, entry, timestamp, "message", {
+    if (text) {
+      records.push(makeRecord(sourceWithSession, entry, timestamp, "message", {
         observedAt: timestamp,
         role: normalizeRole(role),
         sessionId: sourceSessionId,
         text
-      })
-    ];
+      }));
+    }
+    if (role === "assistant" && Array.isArray(row.tool_calls)) {
+      for (const [index, value] of row.tool_calls.entries()) {
+        if (!isRecord(value)) continue;
+        const fn = isRecord(value.function) ? value.function : undefined;
+        const toolName = readString(value, ["name"]) ?? readString(fn, ["name"]);
+        if (!toolName) continue;
+        const argumentsValue = value.arguments ?? fn?.arguments;
+        records.push(makeRecord(sourceWithSession, entry, timestamp, "tool_call", {
+          arguments: toolArguments(argumentsValue),
+          callId: readString(value, ["id", "tool_call_id", "call_id"]) ?? stableToolCallId(sourceSessionId, timestamp, index, value),
+          observedAt: timestamp,
+          sessionId: sourceSessionId,
+          toolName
+        }));
+      }
+    }
+    return records;
   }
   return [];
 }
@@ -257,8 +322,21 @@ function observedAt(row: Record<string, unknown>): string | undefined {
 }
 
 function readTimestamp(row: Record<string, unknown>, keys: string[]): string | undefined {
-  const value = readString(row, keys);
-  return value && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : undefined;
+  for (const key of keys) {
+    const value = row[key];
+    if (typeof value === "number" && Number.isFinite(value)) return unixTimestamp(value);
+    if (typeof value !== "string" || !value.trim()) continue;
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) return unixTimestamp(numeric);
+    if (Number.isFinite(Date.parse(value))) return new Date(value).toISOString();
+  }
+  return undefined;
+}
+
+function unixTimestamp(value: number): string | undefined {
+  const milliseconds = Math.abs(value) < 1_000_000_000_000 ? value * 1_000 : value;
+  const date = new Date(milliseconds);
+  return Number.isFinite(date.valueOf()) ? date.toISOString() : undefined;
 }
 
 function timestampFromHermesFilename(path: string): string | undefined {
@@ -299,6 +377,10 @@ function toolArguments(value: unknown): Record<string, unknown> {
   } catch {
     return { raw: value };
   }
+}
+
+function stableToolCallId(sourceSessionId: string, observedAt: string, index: number, value: Record<string, unknown>): string {
+  return `hermes:${hash(stableJson({ index, observedAt, sourceSessionId, value })).slice(0, 24)}`;
 }
 
 function stableJson(value: unknown): string {

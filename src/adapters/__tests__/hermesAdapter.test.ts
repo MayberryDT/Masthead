@@ -86,10 +86,10 @@ describe("Hermes adapter", () => {
     const observedAt = "2026-07-10T10:00:01.000Z";
     await writeFile(jsonlPath, JSON.stringify({ content: "Repair the parser.", role: "user", timestamp: observedAt }) + "\n", "utf8");
     const sqlite = new DatabaseSync(sqlitePath);
-    sqlite.exec("CREATE TABLE messages (session_id TEXT, role TEXT, content TEXT, timestamp TEXT);");
+    sqlite.exec("CREATE TABLE messages (session_id TEXT, role TEXT, content TEXT, timestamp REAL);");
     sqlite
       .prepare("INSERT INTO messages (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)")
-      .run("20260710_100000_fixture", "user", "Repair the parser.", observedAt);
+      .run("20260710_100000_fixture", "user", "Repair the parser.", Date.parse(observedAt) / 1_000);
     sqlite.close();
     const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
     migrateDatabase(db);
@@ -131,6 +131,95 @@ describe("Hermes adapter", () => {
     expect(unit).toEqual(
       expect.objectContaining({
         semanticActivityAt: "2026-07-11T12:30:00.000Z",
+        sourceSessionId: "20260710_100000_fixture",
+        timestampBasis: "semantic"
+      })
+    );
+  });
+
+  test("normalizes SQLite assistant tool_calls and links following tool results", async () => {
+    const tempDir = await makeTempDir();
+    const sqlitePath = join(tempDir, "state.db");
+    const sqlite = new DatabaseSync(sqlitePath);
+    sqlite.exec(
+      "CREATE TABLE messages (session_id TEXT, role TEXT, content TEXT, record TEXT, tool_call_id TEXT, timestamp REAL);"
+    );
+    sqlite
+      .prepare("INSERT INTO messages (session_id, role, record, tool_call_id, timestamp) VALUES (?, ?, ?, ?, ?)")
+      .run(
+        "20260710_100000_fixture",
+        "assistant",
+        JSON.stringify({
+          content: "I will inspect the adapter.",
+          tool_calls: [
+            {
+              function: { arguments: JSON.stringify({ path: "src/adapters/hermes/adapter.ts" }), name: "read_file" },
+              id: "tool_sqlite_001",
+              type: "function"
+            }
+          ]
+        }),
+        null,
+        1_783_677_603
+      );
+    sqlite
+      .prepare("INSERT INTO messages (session_id, role, content, tool_call_id, timestamp) VALUES (?, ?, ?, ?, ?)")
+      .run("20260710_100000_fixture", "tool", "sanitized adapter source", "tool_sqlite_001", 1_783_677_604);
+    sqlite.close();
+
+    const parsedRecords = await collect(hermesAdapter.backfill(sqliteSource(sqlitePath)));
+    expect(parsedRecords.filter((record) => record.normalized.kind === "message")).toHaveLength(1);
+    expect(parsedRecords.filter((record) => record.normalized.kind === "tool_call").map(normalizedValue)).toEqual([
+      expect.objectContaining({ callId: "tool_sqlite_001", toolName: "read_file" })
+    ]);
+    expect(parsedRecords.filter((record) => record.normalized.kind === "tool_result").map(normalizedValue)).toEqual([
+      expect.objectContaining({ callId: "tool_sqlite_001", output: "sanitized adapter source" })
+    ]);
+
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+    migrateDatabase(db);
+    for (const record of parsedRecords) {
+      ingestAdapterRecord(db, record, { hostId: "host:test", hostname: "masthead-test", runtimeKind: "hermes" });
+    }
+    expect(db.prepare("SELECT COUNT(*) AS count FROM tool_calls").get()).toEqual({ count: 1 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM tool_results").get()).toEqual({ count: 1 });
+    db.close();
+  });
+
+  test("imports Hermes SQLite rows beyond the 5,000-row page boundary", async () => {
+    const tempDir = await makeTempDir();
+    const sqlitePath = join(tempDir, "state.db");
+    const sqlite = new DatabaseSync(sqlitePath);
+    sqlite.exec("CREATE TABLE messages (session_id TEXT, role TEXT, content TEXT, timestamp REAL);");
+    const insert = sqlite.prepare("INSERT INTO messages (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)");
+    sqlite.exec("BEGIN");
+    for (let index = 0; index < 5_001; index += 1) {
+      insert.run("20260710_100000_fixture", "user", `Sanitized message ${index}`, 1_783_677_600 + index);
+    }
+    sqlite.exec("COMMIT");
+    sqlite.close();
+
+    const records = await collect(hermesAdapter.backfill(sqliteSource(sqlitePath)));
+
+    expect(records.filter((record) => record.normalized.kind === "message")).toHaveLength(5_001);
+    expect(records.map(normalizedValue)).toContainEqual(expect.objectContaining({ text: "Sanitized message 5000" }));
+  });
+
+  test("plans SQLite activity from numeric session started_at and ended_at", async () => {
+    const tempDir = await makeTempDir();
+    const sqlitePath = join(tempDir, "state.db");
+    const sqlite = new DatabaseSync(sqlitePath);
+    sqlite.exec("CREATE TABLE sessions (session_id TEXT, started_at REAL, ended_at REAL);");
+    sqlite
+      .prepare("INSERT INTO sessions (session_id, started_at, ended_at) VALUES (?, ?, ?)")
+      .run("20260710_100000_fixture", 1_783_677_600, 1_783_677_699_000);
+    sqlite.close();
+
+    const [unit] = await hermesAdapter.planTranscriptUnits(sqliteSource(sqlitePath));
+
+    expect(unit).toEqual(
+      expect.objectContaining({
+        semanticActivityAt: "2026-07-10T10:01:39.000Z",
         sourceSessionId: "20260710_100000_fixture",
         timestampBasis: "semantic"
       })
@@ -203,5 +292,9 @@ async function collect(records: AsyncIterable<AdapterRecord>): Promise<AdapterRe
 
 function messageValue(record: AdapterRecord): Record<string, unknown> {
   expect(record.normalized.kind).toBe("message");
+  return record.normalized.value as Record<string, unknown>;
+}
+
+function normalizedValue(record: AdapterRecord): Record<string, unknown> {
   return record.normalized.value as Record<string, unknown>;
 }
