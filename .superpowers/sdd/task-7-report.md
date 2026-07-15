@@ -59,3 +59,41 @@ The standards review found one historical manual-exclusion backfill gap; migrati
 ## Concerns
 
 Exact-duplicate detection intentionally uses a strict canonical evidence fingerprint and scans only earlier non-deleted sessions. This is conservative and deterministic, but a future performance pass may want a persisted fingerprint if production volume makes repeated comparison material.
+
+## Follow-up review fixes
+
+Commit follow-up requested after review of the initial Task 7 implementation.
+
+### RED
+
+Command:
+
+```text
+npx vitest --run src/daemon/db/__tests__/sessionRepository.test.ts src/daemon/db/__tests__/schema.test.ts src/workbench/authoring/__tests__/authoringService.test.ts
+```
+
+Result: 5 failed, 55 passed. The failures demonstrated that live evidence did not reopen automatic suppression, ambiguous live evidence reopened a manual exclusion, migration 027 treated a user-triggered automatic `low_evidence` precheck as manual, the authoring warning for review dispositions was absent, and an old shallow-live assertion still expected no Workbench state.
+
+### GREEN
+
+Command:
+
+```text
+npx vitest --run src/workbench/__tests__/qualityPrecheck.test.ts src/workbench/__tests__/transcriptQualityReconciler.test.ts src/daemon/db/__tests__/sessionRepository.test.ts src/daemon/db/__tests__/schema.test.ts src/workbench/authoring/__tests__/authoringService.test.ts
+```
+
+Result: 5 files passed, 80 tests passed.
+
+Command:
+
+```text
+npm run typecheck
+```
+
+Result: passed (`tsc --noEmit`).
+
+### Resolution
+
+- Live session materialization now delegates to `reconcileImportedTranscript` with `finalizeNoise: false` and a `live_ingest` actor, sharing the evidence-revision and manual-stickiness semantics used by transcript reconciliation.
+- Migration 027 classifies the former automatic precheck reason union as automatic even when the historical activity actor was the user-facing Workbench API. `low_evidence` is retained as insufficient evidence; confirmed legacy noise codes use confirmed noise. Other user-authored exclusions remain manual.
+- Review dispositions again emit the pre-existing capture-quality warning in authoring evidence; no authoring output behavior was changed by Task 7.

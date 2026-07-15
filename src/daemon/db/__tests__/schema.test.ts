@@ -25,6 +25,78 @@ afterEach(async () => {
 });
 
 describe("daemon database schema", () => {
+  test("migration 027 distinguishes historical automatic prechecks from manual exclusions", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-db-"));
+    tempDirs.push(tempDir);
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+    migrateTestDatabaseThrough(db, 26);
+
+    for (const [sessionId, reason] of [
+      ["session:auto-duplicate", "duplicate_noise"],
+      ["session:auto-hook", "hook_only"],
+      ["session:auto-low", "low_evidence"],
+      ["session:auto-metadata", "metadata_only"],
+      ["session:auto-no-messages", "no_messages"],
+      ["session:manual-exclusion", "operator_excluded"]
+    ] as const) {
+      seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId, title: reason });
+      db.prepare(
+        `INSERT INTO workbench_session_state (
+          session_id, publication_status, next_action, transcript_status, quality_status,
+          session_enrichment_status, session_dossier_status, bug_fix_trace_status,
+          non_publication_reason, created_at, updated_at
+        ) VALUES (?, 'not_added_to_logbook', 'none', 'imported', 'failed', 'missing', 'missing', 'unknown', ?, ?, ?)`
+      ).run(sessionId, reason, "2026-07-14T00:00:00.000Z", "2026-07-14T00:00:00.000Z");
+      db.prepare(
+        `INSERT INTO workbench_activity (
+          activity_id, session_id, event_type, event_at, actor_kind, actor_id, summary, details_json
+        ) VALUES (?, ?, 'quality_failed', ?, 'user', 'workbench_ui', 'Quality failed', ?)`
+      ).run(`${sessionId}:activity`, sessionId, "2026-07-14T00:00:00.000Z", JSON.stringify({ reason }));
+    }
+
+    db.exec(readFileSync(join(migrationsDir, "027_workbench_suppression_provenance.sql"), "utf8"));
+
+    expect(
+      db.prepare(
+        `SELECT session_id AS sessionId, suppression_category AS suppressionCategory,
+          quality_decision_source AS qualityDecisionSource
+         FROM workbench_session_state ORDER BY session_id`
+      ).all()
+    ).toEqual([
+      {
+        qualityDecisionSource: "automatic",
+        sessionId: "session:auto-duplicate",
+        suppressionCategory: "confirmed_noise"
+      },
+      {
+        qualityDecisionSource: "automatic",
+        sessionId: "session:auto-hook",
+        suppressionCategory: "confirmed_noise"
+      },
+      {
+        qualityDecisionSource: "automatic",
+        sessionId: "session:auto-low",
+        suppressionCategory: "insufficient_evidence"
+      },
+      {
+        qualityDecisionSource: "automatic",
+        sessionId: "session:auto-metadata",
+        suppressionCategory: "confirmed_noise"
+      },
+      {
+        qualityDecisionSource: "automatic",
+        sessionId: "session:auto-no-messages",
+        suppressionCategory: "confirmed_noise"
+      },
+      {
+        qualityDecisionSource: "user",
+        sessionId: "session:manual-exclusion",
+        suppressionCategory: "manual_exclusion"
+      }
+    ]);
+    db.close();
+  });
+
   test("creates raw journal, canonical graph, enrichment, FTS, and audit tables idempotently", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-db-"));
     tempDirs.push(tempDir);

@@ -529,6 +529,24 @@ describe("Workbench authoring service", () => {
     db.close();
   });
 
+  test("retains the capture-quality warning for review dispositions", async () => {
+    const db = await readyAuthoringDb();
+    db.prepare("DELETE FROM file_effects WHERE session_id = ?").run("session:a");
+    db.prepare("DELETE FROM tool_results WHERE session_id = ?").run("session:a");
+    db.prepare("DELETE FROM tool_calls WHERE session_id = ?").run("session:a");
+
+    const opened = openAuthoringRun(db, {
+      actorId: "codex",
+      databaseId: testDatabaseId(db),
+      sessionIds: ["session:a"]
+    });
+
+    expect(opened.evidence.sessions[0]?.warnings).toContain(
+      "Capture quality precheck reported insufficient_evidence."
+    );
+    db.close();
+  });
+
   test("does not weaken an imported transcript while opening authoring", async () => {
     const db = await readyAuthoringDb();
     db.prepare(

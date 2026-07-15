@@ -7,6 +7,7 @@ import {
   markWorkbenchTranscriptStatus,
   readWorkbenchSessionState,
   reopenWorkbenchSessionForQualityReview,
+  type WorkbenchActor,
   type WorkbenchSessionStateRecord
 } from "../daemon/db/workbenchPipelineRepository.ts";
 import { runCaptureQualityPrecheck, type CaptureQualityPrecheckResult } from "./qualityPrecheck.ts";
@@ -20,9 +21,9 @@ export type TranscriptQualityReconciliationResult = {
 export function reconcileImportedTranscript(
   db: MastheadDatabase,
   sessionId: string,
-  options: { finalizeNoise?: boolean } = {}
+  options: { actor?: WorkbenchActor; finalizeNoise?: boolean } = {}
 ): TranscriptQualityReconciliationResult {
-  const actor = { kind: "system" as const, id: "transcript_import" };
+  const actor = options.actor ?? { kind: "system" as const, id: "transcript_import" };
   const finalizeNoise = options.finalizeNoise ?? true;
   const quality = runCaptureQualityPrecheck(db, sessionId);
   let state = readWorkbenchSessionState(db, sessionId);

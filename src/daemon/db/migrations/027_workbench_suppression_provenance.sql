@@ -7,8 +7,38 @@ ALTER TABLE workbench_session_state ADD COLUMN quality_decision_source TEXT NOT 
 ALTER TABLE workbench_session_state ADD COLUMN quality_evidence_revision TEXT;
 
 UPDATE workbench_session_state
+SET suppression_category = CASE
+      WHEN non_publication_reason = 'low_evidence' THEN 'insufficient_evidence'
+      ELSE 'confirmed_noise'
+    END,
+    quality_decision_source = 'automatic'
+WHERE publication_status = 'not_added_to_logbook'
+  AND non_publication_reason IN (
+    'no_messages',
+    'hook_only',
+    'metadata_only',
+    'duplicate_noise',
+    'low_evidence',
+    'missing_identity',
+    'empty',
+    'diagnostic_only',
+    'exact_duplicate'
+  );
+
+UPDATE workbench_session_state
 SET suppression_category = 'manual_exclusion', quality_decision_source = 'user'
 WHERE publication_status = 'not_added_to_logbook'
+  AND non_publication_reason NOT IN (
+    'no_messages',
+    'hook_only',
+    'metadata_only',
+    'duplicate_noise',
+    'low_evidence',
+    'missing_identity',
+    'empty',
+    'diagnostic_only',
+    'exact_duplicate'
+  )
   AND (
     non_publication_reason = 'user_suppressed'
     OR EXISTS (

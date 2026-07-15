@@ -8,7 +8,12 @@ import type { AdapterRecord } from "../../../adapters/types.ts";
 import { migrateDatabase } from "../schema.ts";
 import { canonicalSessionId, createSessionRepository, ingestAdapterRecord, runtimeIdFor } from "../sessionRepository.ts";
 import { openMastheadDatabase } from "../sqlite.ts";
-import { readWorkbenchSessionState } from "../workbenchPipelineRepository.ts";
+import {
+  markWorkbenchNotAdded,
+  markWorkbenchQuality,
+  readWorkbenchSessionState
+} from "../workbenchPipelineRepository.ts";
+import { authoringEvidenceRevision } from "../../../workbench/authoring/evidenceCatalog.ts";
 
 const tempDirs: string[] = [];
 
@@ -18,6 +23,61 @@ afterEach(async () => {
 });
 
 describe("session repository", () => {
+  test("live evidence changes reopen an automatic suppression", async () => {
+    const db = await openMigratedDatabase();
+    const repository = createSessionRepository(db, {
+      hostId: "host:test",
+      hostname: "masthead-test-host",
+      runtimeKind: "opencode",
+      runtimeVersion: "codex-test"
+    });
+    const sessionId = repository.upsertLiveEvent(liveEvent("start", "session.started", { title: "Live recovery" }))!;
+    markWorkbenchQuality(db, {
+      actor: { kind: "system", id: "live_ingest" },
+      evidenceRevision: authoringEvidenceRevision(db, [sessionId]),
+      qualityDecisionSource: "automatic",
+      reason: "empty",
+      sessionId,
+      status: "failed",
+      suppressionCategory: "confirmed_noise"
+    });
+
+    repository.upsertLiveEvent(liveEvent("file", "file.changed", { path: "src/recovered.ts" }));
+
+    expect(readWorkbenchSessionState(db, sessionId)).toMatchObject({
+      nonPublicationReason: undefined,
+      publicationStatus: "publish_path",
+      qualityStatus: "passed"
+    });
+    db.close();
+  });
+
+  test("live evidence changes never reopen a manual exclusion", async () => {
+    const db = await openMigratedDatabase();
+    const repository = createSessionRepository(db, {
+      hostId: "host:test",
+      hostname: "masthead-test-host",
+      runtimeKind: "opencode",
+      runtimeVersion: "codex-test"
+    });
+    const sessionId = repository.upsertLiveEvent(liveEvent("start", "session.started", { title: "Manual exclusion" }))!;
+    markWorkbenchNotAdded(db, {
+      actor: { kind: "user", id: "tyler" },
+      reason: "operator_excluded",
+      sessionId
+    });
+
+    repository.upsertLiveEvent(liveEvent("question", "user.question", { message: "New ambiguous evidence" }));
+
+    expect(readWorkbenchSessionState(db, sessionId)).toMatchObject({
+      nonPublicationReason: "operator_excluded",
+      publicationStatus: "not_added_to_logbook",
+      qualityDecisionSource: "user",
+      suppressionCategory: "manual_exclusion"
+    });
+    db.close();
+  });
+
   test("upserts live events into the canonical session graph idempotently", async () => {
     const db = await openMigratedDatabase();
     const repository = createSessionRepository(db, {
@@ -83,7 +143,7 @@ describe("session repository", () => {
     db.close();
   });
 
-  test("does not enroll a shallow live capture onto the publish path", async () => {
+  test("keeps a shallow live capture on the quality-review path", async () => {
     const db = await openMigratedDatabase();
     const repository = createSessionRepository(db, {
       hostId: "host:test",
@@ -100,12 +160,20 @@ describe("session repository", () => {
     );
     expect(sessionId).toBeDefined();
 
-    expect(readWorkbenchSessionState(db, sessionId!)).toBeUndefined();
+    expect(readWorkbenchSessionState(db, sessionId!)).toMatchObject({
+      nextAction: "review_quality",
+      publicationStatus: "publish_path",
+      qualityStatus: "unchecked"
+    });
 
     repository.upsertLiveEvent(
       liveEvent("question", "user.question", { message: "Is this enough evidence yet?" })
     );
-    expect(readWorkbenchSessionState(db, sessionId!)).toBeUndefined();
+    expect(readWorkbenchSessionState(db, sessionId!)).toMatchObject({
+      nextAction: "review_quality",
+      publicationStatus: "publish_path",
+      qualityStatus: "unchecked"
+    });
     db.close();
   });
 

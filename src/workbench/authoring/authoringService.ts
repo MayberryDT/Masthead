@@ -1288,7 +1288,7 @@ function coverageWarningsBySession(db: MastheadDatabase, sessionIds: string[]): 
       const summary = getAuthoringEvidenceManifest(db, [sessionId]).sessions[0]!;
       const warnings: string[] = [];
       const precheck = runCaptureQualityPrecheck(db, sessionId);
-      if (precheck.disposition === "suppress") {
+      if (precheck.disposition !== "keep") {
         warnings.push(`Capture quality precheck reported ${precheck.reason}.`);
       }
       if (summary.coverage.messages < 2) warnings.push("Fewer than two canonical messages are available.");

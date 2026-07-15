@@ -4,12 +4,10 @@ import type { AdapterRecord } from "../../adapters/types.ts";
 import { redactJsonValue, redactText } from "../../core/redaction.ts";
 import type { LiveBoardProjection, NormalizedEvent } from "../../core/types.ts";
 import { canonicalSessionId, runtimeIdFor } from "../../shared/sessionIdentity.ts";
-import { runCaptureQualityPrecheck } from "../../workbench/qualityPrecheck.ts";
+import { reconcileImportedTranscript } from "../../workbench/transcriptQualityReconciler.ts";
 import { upsertSessionSource } from "./sessionSourceRepository.ts";
 import type { MastheadDatabase } from "./sqlite.ts";
 import { deriveTranscriptFileEffects } from "./transcriptEffects.ts";
-import { enrollWorkbenchSession, markWorkbenchQualityForReview } from "./workbenchPipelineRepository.ts";
-import { authoringEvidenceRevision } from "../../workbench/authoring/evidenceCatalog.ts";
 
 export { canonicalSessionId, runtimeIdFor } from "../../shared/sessionIdentity.ts";
 
@@ -653,17 +651,10 @@ function afterSessionMaterialized(
   sessionId: string,
   actorId: "live_ingest"
 ): void {
-  const quality = runCaptureQualityPrecheck(db, sessionId);
-  if (quality.disposition === "suppress") return;
-  const actor = { kind: "system" as const, id: actorId };
-  enrollWorkbenchSession(db, { actor, sessionId });
-  if (quality.disposition === "review") {
-    markWorkbenchQualityForReview(db, {
-      actor,
-      evidenceRevision: authoringEvidenceRevision(db, [sessionId]),
-      sessionId
-    });
-  }
+  reconcileImportedTranscript(db, sessionId, {
+    actor: { kind: "system", id: actorId },
+    finalizeNoise: false
+  });
 }
 
 function predictedCanonicalSessionId(record: AdapterRecord, context: AdapterIngestionContext): string | undefined {
