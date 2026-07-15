@@ -2,7 +2,11 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, test } from "vitest";
+import { migrateDatabase } from "../../daemon/db/schema.ts";
+import { ingestAdapterRecord } from "../../daemon/db/sessionRepository.ts";
+import { openMastheadDatabase } from "../../daemon/db/sqlite.ts";
 import { hermesAdapter } from "../hermes/adapter.ts";
 import type { AdapterRecord, DiscoveredSource } from "../types.ts";
 
@@ -66,12 +70,71 @@ describe("Hermes adapter", () => {
   });
 
   test("normalizes Hermes tool-role rows as tool calls and results", async () => {
-    const records = await collect(hermesAdapter.backfill(hermesFixtureSource()));
+    const [unit] = await hermesAdapter.planTranscriptUnits(hermesFixtureSource());
+    const parsed = await hermesAdapter.parseTranscriptUnit(unit);
 
-    expect(records.filter((record) => record.normalized.kind === "message")).toHaveLength(3);
-    expect(records.filter((record) => record.normalized.kind === "tool_call")).toHaveLength(1);
-    expect(records.filter((record) => record.normalized.kind === "tool_result")).toHaveLength(1);
-    expect(new Set(records.flatMap(normalizedSessionIds))).toEqual(new Set(["20260710_100000_fixture"]));
+    expect(parsed.records.filter((record) => record.normalized.kind === "message")).toHaveLength(3);
+    expect(parsed.records.filter((record) => record.normalized.kind === "tool_call")).toHaveLength(1);
+    expect(parsed.records.filter((record) => record.normalized.kind === "tool_result")).toHaveLength(1);
+    expect(parsed.sourceSessionIds).toEqual(["20260710_100000_fixture"]);
+  });
+
+  test("merges JSONL and SQLite evidence under one canonical Hermes session without double counting", async () => {
+    const tempDir = await makeTempDir();
+    const jsonlPath = join(tempDir, "session_20260710_100000_fixture.jsonl");
+    const sqlitePath = join(tempDir, "state.db");
+    const observedAt = "2026-07-10T10:00:01.000Z";
+    await writeFile(jsonlPath, JSON.stringify({ content: "Repair the parser.", role: "user", timestamp: observedAt }) + "\n", "utf8");
+    const sqlite = new DatabaseSync(sqlitePath);
+    sqlite.exec("CREATE TABLE messages (session_id TEXT, role TEXT, content TEXT, timestamp TEXT);");
+    sqlite
+      .prepare("INSERT INTO messages (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)")
+      .run("20260710_100000_fixture", "user", "Repair the parser.", observedAt);
+    sqlite.close();
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+    migrateDatabase(db);
+
+    for (const candidate of [source(jsonlPath), sqliteSource(sqlitePath)]) {
+      for await (const record of hermesAdapter.backfill(candidate)) {
+        ingestAdapterRecord(db, record, {
+          hostId: "host:test",
+          hostname: "masthead-test",
+          runtimeKind: "hermes"
+        });
+      }
+    }
+
+    expect(db.prepare("SELECT source_session_id AS sourceSessionId FROM sessions").all()).toEqual([
+      { sourceSessionId: "20260710_100000_fixture" }
+    ]);
+    expect(db.prepare("SELECT role, text_redacted AS text FROM messages").all()).toEqual([{ role: "user", text: "Repair the parser." }]);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM raw_events").get()).toEqual({ count: 2 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM session_sources").get()).toEqual({ count: 2 });
+    db.close();
+  });
+
+  test("plans recent Hermes activity from session semantics before filename or file mtime", async () => {
+    const tempDir = await makeTempDir();
+    const path = join(tempDir, "session_20260710_100000_fixture.json");
+    await writeFile(
+      path,
+      JSON.stringify({
+        last_updated: "2026-07-11T12:30:00.000Z",
+        messages: [{ content: "Later message", role: "assistant", timestamp: "2026-07-12T09:00:00.000Z" }],
+        session_id: "20260710_100000_fixture"
+      }),
+      "utf8"
+    );
+
+    const [unit] = await hermesAdapter.planTranscriptUnits(source(path));
+
+    expect(unit).toEqual(
+      expect.objectContaining({
+        semanticActivityAt: "2026-07-11T12:30:00.000Z",
+        sourceSessionId: "20260710_100000_fixture",
+        timestampBasis: "semantic"
+      })
+    );
   });
 
   test("discovers Hermes session files without crawling request dumps or logs", async () => {
@@ -121,6 +184,17 @@ function hermesFixtureSource(): DiscoveredSource {
   };
 }
 
+function sqliteSource(path: string): DiscoveredSource {
+  return {
+    confidence: "heuristic",
+    path,
+    runtime: "hermes",
+    schemaVersion: "hermes-sqlite-file",
+    sourceId: `hermes:${path}`,
+    sourceKind: "sqlite"
+  };
+}
+
 async function collect(records: AsyncIterable<AdapterRecord>): Promise<AdapterRecord[]> {
   const output: AdapterRecord[] = [];
   for await (const record of records) output.push(record);
@@ -130,10 +204,4 @@ async function collect(records: AsyncIterable<AdapterRecord>): Promise<AdapterRe
 function messageValue(record: AdapterRecord): Record<string, unknown> {
   expect(record.normalized.kind).toBe("message");
   return record.normalized.value as Record<string, unknown>;
-}
-
-function normalizedSessionIds(record: AdapterRecord): string[] {
-  const value = record.normalized.value;
-  if (typeof value !== "object" || value === null || !("sessionId" in value)) return [];
-  return typeof value.sessionId === "string" ? [value.sessionId] : [];
 }

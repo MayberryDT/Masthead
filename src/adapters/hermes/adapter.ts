@@ -2,14 +2,18 @@ import { basename } from "node:path";
 import { createLocalAdapter, genericCodingProfile } from "../generic/localAdapterFactory.ts";
 import type { DiscoveredSource } from "../types.ts";
 import { hermesCandidatePaths } from "./discovery.ts";
+import { backfillHermesSource, parseHermesTranscriptUnit, planHermesTranscriptUnits } from "./transcriptUnit.ts";
 
 const baseHermesAdapter = createLocalAdapter({ runtime: "hermes", candidatePaths: hermesCandidatePaths, jsonlProfile: genericCodingProfile("hermes") });
 
 export const hermesAdapter = {
   ...baseHermesAdapter,
+  backfill: backfillHermesSource,
   async discover(...args: Parameters<typeof baseHermesAdapter.discover>) {
     return dedupeSessionFilePairs(await baseHermesAdapter.discover(...args));
-  }
+  },
+  parseTranscriptUnit: parseHermesTranscriptUnit,
+  planTranscriptUnits: planHermesTranscriptUnits
 };
 
 function dedupeSessionFilePairs(sources: DiscoveredSource[]): DiscoveredSource[] {
