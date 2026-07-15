@@ -71,3 +71,35 @@ The deletion set is intentionally conservative. Sessions with any artifact, live
 - The successful apply response reports the exact new durable `reimportJobIds`; unavailable sources schedule none.
 - Server-route coverage now includes missing job IDs, malformed hashes, read-only preview, hash conflict, unavailable-source preservation, and successful replacement scheduling.
 - Shared repair DTOs now define both daemon and typed-client response shapes.
+
+## Final findings — corrected source identity and selected-only plans
+
+### RED
+
+- Domain suite failed 3 of 12 tests:
+  - viable cleanup succeeded without any staging callback,
+  - distinct moved-source repair reset only the corrected cursor and left the original cursor,
+  - `preservedSessions` included unrelated canonical sessions, so unrelated arrival changed the plan.
+- Server suite failed 2 of 16 tests:
+  - one unique compatible moved source was reported as `source_not_discovered`,
+  - multiple compatible candidates were also reported as `source_not_discovered` instead of ambiguous.
+- A final domain regression showed fabricated replacement IDs were accepted as though they were durable jobs.
+
+### GREEN
+
+- `npm run typecheck`
+  - Passed.
+- `npx vitest --run src/daemon/import/__tests__/importRepair.test.ts src/daemon/__tests__/server.test.ts src/cli/__tests__/mastheadctl.test.ts src/app/__tests__/daemonClient.test.ts src/core/__tests__/worktreeConnector.test.ts`
+  - 5 files passed, 110 tests passed.
+- `git diff --check`
+  - Passed.
+
+### Final safety evidence
+
+- Discovery prefers an exact source ID. Without one, it accepts exactly one compatible candidate matching runtime and source kind, plus schema/runtime version whenever both sides provide them.
+- Zero compatible candidates produce `source_not_discovered`; multiple compatible candidates produce `ambiguous_candidates`. Both states are explicit in the hashed source plan and preserve affected sessions.
+- A unique moved source records the explicit original-to-corrected mapping in the hash, persists the corrected source only during transactional apply, and creates the replacement job against the corrected ID.
+- Cursor reset scope is hashed and contains both original selected source IDs and corrected source IDs when they differ.
+- Destructive apply refuses any viable plan without `stageReimports` before opening the transaction.
+- Returned staging IDs must identify real queued import jobs and collectively cover every viable corrected source. Missing, duplicate, fabricated, non-queued, or incomplete staging rolls the transaction back.
+- `preservedSessions` contains only affected-union sessions. Unrelated canonical/live session arrival after preview does not change the plan hash and remains untouched by apply.

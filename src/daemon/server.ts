@@ -1099,9 +1099,24 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     const snapshot = await discoverSourceSnapshot({ homeDir: config.codexHomeDir, now: new Date().toISOString(), exclusions: [] });
     const discoveredBySourceId = new Map<string, DiscoveredSource>();
     const mappings = sourceIds.map((sourceId): ImportRepairSourceMapping => {
-      const stored = database.prepare("SELECT adapter, source_path AS sourcePath FROM ingest_sources WHERE source_id = ?")
-        .get(sourceId) as { adapter: RuntimeKind; sourcePath: string | null } | undefined;
-      const discovered = snapshot.sources.find((source) => source.sourceId === sourceId);
+      const stored = database.prepare(`SELECT adapter, source_kind AS sourceKind, schema_version AS schemaVersion,
+          runtime_version AS runtimeVersion
+        FROM ingest_sources WHERE source_id = ?`)
+        .get(sourceId) as {
+          adapter: RuntimeKind;
+          runtimeVersion: string | null;
+          schemaVersion: string | null;
+          sourceKind: DiscoveredSource["sourceKind"];
+        } | undefined;
+      const exact = snapshot.sources.find((source) => source.sourceId === sourceId);
+      const compatible = exact || !stored ? [] : snapshot.sources.filter((source) =>
+        source.runtime === stored.adapter &&
+        source.sourceKind === stored.sourceKind &&
+        metadataMatchesWhenAvailable(stored.schemaVersion, source.schemaVersion) &&
+        metadataMatchesWhenAvailable(stored.runtimeVersion, source.runtimeVersion)
+      );
+      if (!exact && compatible.length > 1) return { available: false, reason: "ambiguous_candidates", sourceId };
+      const discovered = exact ?? compatible[0];
       if (!discovered) return { available: false, reason: "source_not_discovered", sourceId };
       const adapter = adapterForRuntime(discovered.runtime);
       if (!adapter) return { available: false, reason: "adapter_unavailable", sourceId };
@@ -3086,6 +3101,20 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           stageReimports: () => jobsToReimport.map((existing, index) => {
             const source = viability.discoveredBySourceId.get(existing.sourceId)!;
             const updatedAt = new Date(Date.now() + index).toISOString();
+            database.prepare(`INSERT INTO ingest_sources(source_id, adapter, source_kind, source_path, endpoint, schema_version,
+                runtime_version, confidence, discovered_at, last_seen_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT(source_id) DO UPDATE SET
+                adapter = excluded.adapter,
+                source_kind = excluded.source_kind,
+                source_path = excluded.source_path,
+                endpoint = excluded.endpoint,
+                schema_version = excluded.schema_version,
+                runtime_version = excluded.runtime_version,
+                confidence = excluded.confidence,
+                last_seen_at = excluded.last_seen_at`)
+              .run(source.sourceId, source.runtime, source.sourceKind, source.path ?? null, source.endpoint ?? null,
+                source.schemaVersion ?? null, source.runtimeVersion ?? null, source.confidence, updatedAt, updatedAt);
             const job = createImportJob(database, { importKind: existing.importKind, sourceId: source.sourceId, updatedAt });
             staged.set(job.importJobId, { existing, source });
             return job.importJobId;
@@ -3700,6 +3729,10 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     }
     throw error;
   }
+}
+
+function metadataMatchesWhenAvailable(stored: string | null, discovered: string | undefined): boolean {
+  return !stored || !discovered || stored === discovered;
 }
 
 function closeDatabase(database: MastheadDatabase): void {

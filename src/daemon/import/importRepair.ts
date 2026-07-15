@@ -33,6 +33,8 @@ export function previewImportRepair(
   const affectedSessions = [...new Set([...impactedSessions, ...sourceLinkedSessions])].sort();
   const sourceLinkedOnly = new Set(sourceLinkedSessions.filter((sessionId) => !impactedSessions.includes(sessionId)));
   const reimportSources = sourcePlans.filter((source) => source.available).map((source) => source.correctedSourceId!);
+  const cursorSourcesToReset = [...new Set(sourcePlans.filter((source) => source.available)
+    .flatMap((source) => [source.sourceId, source.correctedSourceId!]))].sort();
   const unavailableSources = sourcePlans.filter((source) => !source.available).map((source) => source.sourceId);
   const affectedArtifacts = affectedSessions.length === 0 ? [] : ids(
     db.prepare(`SELECT artifact_id AS id FROM session_artifact_provenance WHERE session_id IN (${placeholders(affectedSessions)})
@@ -84,14 +86,14 @@ export function previewImportRepair(
         AND suppression_category IN ('confirmed_noise', 'insufficient_evidence')
       ORDER BY session_id`).all(...sessionsToReparse) as IdRow[]
   );
-  const allSessions = ids(db.prepare("SELECT session_id AS id FROM sessions ORDER BY session_id").all() as IdRow[]);
-  const preservedSessions = allSessions.filter((sessionId) => !removed.has(sessionId) && !sessionsToReparse.includes(sessionId));
+  const preservedSessions = affectedSessions.filter((sessionId) => !removed.has(sessionId) && !sessionsToReparse.includes(sessionId));
   const plan = {
     affectedArtifacts,
     affectedSessions,
     applyAllowed: blockedPublishedSessions.length === 0,
     automaticSuppressionsToReopen,
     blockedPublishedSessions,
+    cursorSourcesToReset,
     importJobIds,
     outOfRangeSessionsToDefer,
     preservationReasons,
@@ -117,6 +119,7 @@ export function applyImportRepair(
   const preview = previewImportRepair(db, { importJobIds: input.importJobIds, sourceMappings: input.sourceMappings });
   if (preview.planHash !== input.planHash) throw new Error("repair plan changed");
   if (!preview.applyAllowed) throw new Error("published artifacts block repair");
+  if (preview.reimportSources.length > 0 && !input.stageReimports) throw new Error("replacement job staging required");
 
   return withImmediateTransaction(db, () => {
     const lockedPreview = previewImportRepair(db, { importJobIds: input.importJobIds, sourceMappings: input.sourceMappings });
@@ -130,13 +133,18 @@ export function applyImportRepair(
       db.prepare("DELETE FROM session_search WHERE session_id = ?").run(sessionId);
       db.prepare("DELETE FROM sessions WHERE session_id = ?").run(sessionId);
     }
-    if (lockedPreview.reimportSources.length > 0) {
-      db.prepare(`DELETE FROM ingest_cursors WHERE source_id IN (${placeholders(lockedPreview.reimportSources)})`)
-        .run(...lockedPreview.reimportSources);
+    if (lockedPreview.cursorSourcesToReset.length > 0) {
+      db.prepare(`DELETE FROM ingest_cursors WHERE source_id IN (${placeholders(lockedPreview.cursorSourcesToReset)})`)
+        .run(...lockedPreview.cursorSourcesToReset);
     }
     const reimportJobIds = input.stageReimports?.() ?? [];
+    if (lockedPreview.reimportSources.length > 0 && reimportJobIds.length === 0) throw new Error("replacement job staging required");
+    if (lockedPreview.reimportSources.length > 0 && !durableReimportsCoverSources(db, reimportJobIds, lockedPreview.reimportSources)) {
+      throw new Error("durable replacement jobs required");
+    }
     return {
       blockedPublishedSessions: [],
+      cursorSourcesToReset: lockedPreview.cursorSourcesToReset,
       importJobIds: lockedPreview.importJobIds,
       planHash: lockedPreview.planHash,
       preservedSessions: lockedPreview.preservedSessions,
@@ -147,6 +155,17 @@ export function applyImportRepair(
       resetSessions: lockedPreview.sessionsToReparse
     };
   });
+}
+
+function durableReimportsCoverSources(db: MastheadDatabase, importJobIds: string[], sourceIds: string[]): boolean {
+  const uniqueJobIds = [...new Set(importJobIds)];
+  if (uniqueJobIds.length !== importJobIds.length) return false;
+  const rows = db.prepare(`SELECT import_job_id AS importJobId, source_id AS sourceId FROM import_jobs
+    WHERE import_job_id IN (${placeholders(uniqueJobIds)}) AND status = 'queued'`)
+    .all(...uniqueJobIds) as Array<{ importJobId: string; sourceId: string }>;
+  if (rows.length !== uniqueJobIds.length) return false;
+  const coveredSources = new Set(rows.map((row) => row.sourceId));
+  return sourceIds.every((sourceId) => coveredSources.has(sourceId));
 }
 
 function exclusivelyOwned(

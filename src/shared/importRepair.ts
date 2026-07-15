@@ -5,7 +5,7 @@ export type ImportRepairSourceMapping = {
   available: boolean;
   correctedSourceId?: string;
   adapterRuntime?: RuntimeKind;
-  reason?: "source_not_discovered" | "adapter_unavailable" | "runtime_mismatch";
+  reason?: "source_not_discovered" | "adapter_unavailable" | "runtime_mismatch" | "ambiguous_candidates";
 };
 
 export type ImportRepairSourcePlan = ImportRepairSourceMapping & {
@@ -29,6 +29,7 @@ export type ImportRepairPreview = {
   blockedPublishedSessions: string[];
   affectedArtifacts: string[];
   reimportSources: string[];
+  cursorSourcesToReset: string[];
   unavailableSources: string[];
   sourcePlans: ImportRepairSourcePlan[];
   applyAllowed: boolean;
@@ -44,5 +45,6 @@ export type ImportRepairReceipt = {
   preservedSessions: string[];
   blockedPublishedSessions: string[];
   reimportSources: string[];
+  cursorSourcesToReset: string[];
   reimportJobIds: string[];
 };
