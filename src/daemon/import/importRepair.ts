@@ -39,13 +39,13 @@ export function previewImportRepair(
       UNION SELECT artifact_id AS id FROM session_artifacts WHERE session_id IN (${placeholders(affectedSessions)}) ORDER BY id`)
       .all(...affectedSessions, ...affectedSessions) as IdRow[]
   );
-  const blockedPublishedSessions = impactedSessions.length === 0 ? [] : ids(
+  const blockedPublishedSessions = affectedSessions.length === 0 ? [] : ids(
     db.prepare(`SELECT provenance.session_id AS id FROM session_artifact_provenance provenance
       JOIN session_artifacts artifacts ON artifacts.artifact_id = provenance.artifact_id
-      WHERE provenance.session_id IN (${placeholders(impactedSessions)}) AND artifacts.publication_status = 'published'
+      WHERE provenance.session_id IN (${placeholders(affectedSessions)}) AND artifacts.publication_status = 'published'
       UNION SELECT session_id AS id FROM session_artifacts
-      WHERE session_id IN (${placeholders(impactedSessions)}) AND publication_status = 'published'
-      ORDER BY id`).all(...impactedSessions, ...impactedSessions) as IdRow[]
+      WHERE session_id IN (${placeholders(affectedSessions)}) AND publication_status = 'published'
+      ORDER BY id`).all(...affectedSessions, ...affectedSessions) as IdRow[]
   );
   const outOfRangeSessionsToDefer = outOfRangeSessions(db, importJobIds);
   const createdSessions = new Set(affectedSessions.length === 0 ? [] : ids(
@@ -53,32 +53,45 @@ export function previewImportRepair(
       WHERE import_job_id IN (${selected}) AND impact_kind = 'created' ORDER BY session_id`).all(...importJobIds) as IdRow[]
   ));
   const blocked = new Set(blockedPublishedSessions);
-  const jobPlans = buildJobPlans(db, importJobIds, sourcePlans, blocked);
+  const deferred = new Set(outOfRangeSessionsToDefer);
+  const manual = new Set(manualDecisionSessions(db, affectedSessions));
+  const unavailable = new Set(sessionsWithUnavailableSources(db, importJobIds, sourcePlans));
+  const ownershipBySession = new Map(affectedSessions.map((sessionId) => [
+    sessionId,
+    exclusivelyOwned(db, sessionId, importJobIds, sourcePlans.map((source) => source.sourceId))
+  ]));
+  const executionBlocked = new Set(affectedSessions.filter((sessionId) => {
+    const reason = ownershipBySession.get(sessionId)?.reason;
+    return blocked.has(sessionId) || manual.has(sessionId) || reason === "artifact_preserved" || reason === "live_state" || reason === "shared_ownership";
+  }));
+  const jobPlans = buildJobPlans(db, importJobIds, sourcePlans, executionBlocked);
+  const indivisibleBlockedSessions = new Set(jobPlans.filter((job) => job.repairBlockReason)
+    .flatMap((job) => relatedSessionsForJob(db, job.selectedJobId, job.originalSourceId)));
   const eligibleJobPlans = jobPlans.filter((job) => job.available && job.repairEligible);
   const reimportSources = [...new Set(eligibleJobPlans.map((job) => job.correctedSourceId!))].sort();
   const cursorSourcesToReset = [...new Set(eligibleJobPlans
     .flatMap((job) => [job.originalSourceId, job.correctedSourceId!]))].sort();
-  const deferred = new Set(outOfRangeSessionsToDefer);
-  const manual = new Set(manualDecisionSessions(db, affectedSessions));
-  const unavailable = new Set(sessionsWithUnavailableSources(db, importJobIds, sourcePlans));
   const preservationReasons: ImportRepairPreservationReason[] = [];
   const pseudoSessionsToRemove = affectedSessions.filter((sessionId) =>
-    createdSessions.has(sessionId) && !blocked.has(sessionId) && !deferred.has(sessionId) && !manual.has(sessionId) && !unavailable.has(sessionId) &&
+    createdSessions.has(sessionId) && !blocked.has(sessionId) && !indivisibleBlockedSessions.has(sessionId) && !deferred.has(sessionId) && !manual.has(sessionId) && !unavailable.has(sessionId) &&
       exclusivelyOwned(db, sessionId, importJobIds, sourcePlans.map((source) => source.sourceId)).owned
   );
   const removed = new Set(pseudoSessionsToRemove);
   const sessionsToReparse = affectedSessions.filter((sessionId) =>
-    !sourceLinkedOnly.has(sessionId) && !removed.has(sessionId) && !blocked.has(sessionId) && !deferred.has(sessionId) &&
+    !sourceLinkedOnly.has(sessionId) && !removed.has(sessionId) && !blocked.has(sessionId) && !indivisibleBlockedSessions.has(sessionId) && !deferred.has(sessionId) &&
       !manual.has(sessionId) && !unavailable.has(sessionId)
   );
   for (const sessionId of affectedSessions) {
-    const ownership = exclusivelyOwned(db, sessionId, importJobIds, sourcePlans.map((source) => source.sourceId));
+    const ownership = ownershipBySession.get(sessionId)!;
     const reason = blocked.has(sessionId) ? "published_artifact"
       : manual.has(sessionId) ? "manual_decision"
         : unavailable.has(sessionId) ? "source_unavailable"
           : deferred.has(sessionId) ? "out_of_range"
-            : sourceLinkedOnly.has(sessionId) ? "source_linked_only"
-              : ownership.reason;
+            : ownership.reason === "artifact_preserved" || ownership.reason === "live_state" || ownership.reason === "shared_ownership"
+              ? ownership.reason
+              : indivisibleBlockedSessions.has(sessionId) ? "blocked_session_in_indivisible_job"
+                : sourceLinkedOnly.has(sessionId) ? "source_linked_only"
+                  : ownership.reason;
     if (!removed.has(sessionId) && !sessionsToReparse.includes(sessionId) && reason) preservationReasons.push({ reason, sessionId });
   }
   const automaticSuppressionsToReopen = sessionsToReparse.length === 0 ? [] : ids(
@@ -224,7 +237,7 @@ function buildJobPlans(
   db: MastheadDatabase,
   jobIds: string[],
   sourcePlans: ImportRepairSourcePlan[],
-  blockedPublishedSessions: Set<string>
+  executionBlockedSessions: Set<string>
 ): ImportRepairJobPlan[] {
   const sourcePlanById = new Map(sourcePlans.map((plan) => [plan.sourceId, plan]));
   const rows = db.prepare(`SELECT import_job_id AS selectedJobId, source_id AS originalSourceId,
@@ -238,23 +251,30 @@ function buildJobPlans(
     }>;
   return rows.map((row) => {
     const source = sourcePlanById.get(row.originalSourceId)!;
-    const relatedSessions = ids(db.prepare(`SELECT session_id AS id FROM import_session_impacts WHERE import_job_id = ?
-      UNION SELECT session_id AS id FROM session_sources WHERE source_id = ? ORDER BY id`)
-      .all(row.selectedJobId, row.originalSourceId) as IdRow[]);
+    const relatedSessions = relatedSessionsForJob(db, row.selectedJobId, row.originalSourceId);
+    const blockedSessionIds = relatedSessions.filter((sessionId) => executionBlockedSessions.has(sessionId));
     const storedScope = row.scopeJson ? JSON.parse(row.scopeJson) as ImportRepairJobPlan["scope"] : null;
     const scope = storedScope ?? (row.importKind === "transcript"
       ? { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 }
       : null);
     return {
       available: source.available,
+      blockedSessionIds,
       correctedSourceId: source.correctedSourceId,
       importKind: row.importKind,
       originalSourceId: row.originalSourceId,
-      repairEligible: relatedSessions.length === 0 || relatedSessions.some((sessionId) => !blockedPublishedSessions.has(sessionId)),
+      repairBlockReason: blockedSessionIds.length > 0 ? "blocked_session_in_indivisible_job" : undefined,
+      repairEligible: blockedSessionIds.length === 0,
       scope,
       selectedJobId: row.selectedJobId
     };
   });
+}
+
+function relatedSessionsForJob(db: MastheadDatabase, importJobId: string, sourceId: string): string[] {
+  return ids(db.prepare(`SELECT session_id AS id FROM import_session_impacts WHERE import_job_id = ?
+    UNION SELECT session_id AS id FROM session_sources WHERE source_id = ? ORDER BY id`)
+    .all(importJobId, sourceId) as IdRow[]);
 }
 
 function sessionsWithUnavailableSources(db: MastheadDatabase, jobIds: string[], plans: ImportRepairSourcePlan[]): string[] {

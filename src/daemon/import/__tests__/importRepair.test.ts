@@ -30,11 +30,11 @@ describe("import repair", () => {
       importJobIds: ["job:grok", "job:hermes"],
       affectedSessions: ["session:grok-fragment", "session:hermes-old", "session:manual"],
       pseudoSessionsToRemove: ["session:grok-fragment"],
-      sessionsToReparse: ["session:hermes-old"],
-      automaticSuppressionsToReopen: ["session:hermes-old"],
-      preservedSessions: ["session:manual"],
+      sessionsToReparse: [],
+      automaticSuppressionsToReopen: [],
+      preservedSessions: ["session:hermes-old", "session:manual"],
       blockedPublishedSessions: [],
-      reimportSources: ["source:grok", "source:hermes"],
+      reimportSources: ["source:grok"],
       sourcePlans: [
         expect.objectContaining({ available: true, correctedSourceId: "source:grok", sourceId: "source:grok" }),
         expect.objectContaining({ available: true, correctedSourceId: "source:hermes", sourceId: "source:hermes" })
@@ -154,9 +154,14 @@ describe("import repair", () => {
 
   test("replacement jobs must match every selected execution spec exactly once", async () => {
     const missingDb = await repairDatabase();
-    const missingPreview = previewImportRepair(missingDb, { importJobIds: ["job:grok", "job:hermes"], sourceMappings: availableSources });
+    seedImpact(missingDb, "job:other", "source:other", "session:unrelated", "created");
+    const missingMappings = [
+      ...availableSources,
+      { adapterRuntime: "codex" as const, available: true, correctedSourceId: "source:other", sourceId: "source:other" }
+    ];
+    const missingPreview = previewImportRepair(missingDb, { importJobIds: ["job:grok", "job:other"], sourceMappings: missingMappings });
     expect(() => applyImportRepair(missingDb, {
-      importJobIds: missingPreview.importJobIds, planHash: missingPreview.planHash, sourceMappings: availableSources,
+      importJobIds: missingPreview.importJobIds, planHash: missingPreview.planHash, sourceMappings: missingMappings,
       stageReimports: (plans: ImportRepairJobPlan[]) => stageReplacementJobs(missingDb, plans.slice(0, 1))
     })).toThrow("exact replacement jobs required");
 
@@ -221,7 +226,126 @@ describe("import repair", () => {
     expect(db.prepare("SELECT artifact_id FROM session_artifacts WHERE artifact_id = ?").get("artifact:published")).toBeDefined();
   });
 
-  test("apply removes only exclusively owned pseudo-sessions and preserves live, manual, and unrelated data", async () => {
+  test("a published session blocks its indivisible job while an independent safe job repairs", async () => {
+    const db = await repairDatabase();
+    seedImpact(db, "job:grok", "source:grok", "session:published", "updated");
+    db.prepare(`INSERT INTO session_sources(session_id, source_id, first_seen_at, last_seen_at)
+      VALUES ('session:published', 'source:grok', '2026-07-15T12:00:00.000Z', '2026-07-15T12:00:00.000Z')`).run();
+    seedImpact(db, "job:other", "source:other", "session:unrelated", "created");
+    const mappings = [
+      ...availableSources,
+      { adapterRuntime: "codex" as const, available: true, correctedSourceId: "source:other", sourceId: "source:other" }
+    ];
+    const preview = previewImportRepair(db, {
+      importJobIds: ["job:grok", "job:other"],
+      sourceMappings: mappings
+    });
+
+    expect(preview.jobPlans).toEqual([
+      expect.objectContaining({
+        blockedSessionIds: ["session:published"],
+        repairBlockReason: "blocked_session_in_indivisible_job",
+        repairEligible: false,
+        selectedJobId: "job:grok"
+      }),
+      expect.objectContaining({ repairEligible: true, selectedJobId: "job:other" })
+    ]);
+    expect(preview.pseudoSessionsToRemove).toEqual(["session:unrelated"]);
+    expect(preview.preservationReasons).toContainEqual({
+      reason: "blocked_session_in_indivisible_job",
+      sessionId: "session:grok-fragment"
+    });
+
+    const receipt = applyImportRepair(db, {
+      importJobIds: preview.importJobIds,
+      planHash: preview.planHash,
+      sourceMappings: mappings,
+      stageReimports: (plans) => stageReplacementJobs(db, plans)
+    });
+    expect(receipt.reimportJobIds).toEqual(["job:replacement:job:other"]);
+    expect(readSession(db, "session:grok-fragment")).toBeDefined();
+    expect(readSession(db, "session:published")).toBeDefined();
+    expect(readSession(db, "session:unrelated")).toBeUndefined();
+  });
+
+  test("a manual decision blocks its indivisible job while an independent safe job repairs", async () => {
+    const db = await repairDatabase();
+    const preview = previewImportRepair(db, {
+      importJobIds: ["job:grok", "job:hermes"],
+      sourceMappings: availableSources
+    });
+
+    expect(preview.jobPlans).toEqual([
+      expect.objectContaining({ repairEligible: true, selectedJobId: "job:grok" }),
+      expect.objectContaining({
+        blockedSessionIds: ["session:manual"],
+        repairBlockReason: "blocked_session_in_indivisible_job",
+        repairEligible: false,
+        selectedJobId: "job:hermes"
+      })
+    ]);
+    expect(preview.sessionsToReparse).toEqual([]);
+    expect(preview.automaticSuppressionsToReopen).toEqual([]);
+    expect(preview.preservationReasons).toContainEqual({
+      reason: "blocked_session_in_indivisible_job",
+      sessionId: "session:hermes-old"
+    });
+
+    const receipt = applyImportRepair(db, {
+      importJobIds: preview.importJobIds,
+      planHash: preview.planHash,
+      sourceMappings: availableSources,
+      stageReimports: (plans) => stageReplacementJobs(db, plans)
+    });
+    expect(receipt.reimportJobIds).toEqual(["job:replacement:job:grok"]);
+    expect(receipt.reopenedSuppressions).toEqual([]);
+    expect(readSession(db, "session:hermes-old")).toBeDefined();
+  });
+
+  test("live state blocks its indivisible job while an independent safe job repairs", async () => {
+    const db = await repairDatabase();
+    seedImpact(db, "job:other", "source:other", "session:live-codex", "updated");
+    seedImpact(db, "job:other", "source:other", "session:unrelated", "created");
+    db.prepare(`INSERT INTO live_state_reports(report_id, runtime, source, source_session_id, canonical_session_id,
+        state, authority, observed_at, created_at)
+      VALUES ('report:live-repair', 'codex', 'test:codex', 'live', 'session:live-codex',
+        'working', 'hook', '2026-07-15T12:00:00.000Z', '2026-07-15T12:00:00.000Z')`).run();
+    const mappings = [
+      ...availableSources,
+      { adapterRuntime: "codex" as const, available: true, correctedSourceId: "source:other", sourceId: "source:other" }
+    ];
+    const preview = previewImportRepair(db, {
+      importJobIds: ["job:grok", "job:other"],
+      sourceMappings: mappings
+    });
+
+    expect(preview.jobPlans).toEqual([
+      expect.objectContaining({ repairEligible: true, selectedJobId: "job:grok" }),
+      expect.objectContaining({
+        blockedSessionIds: ["session:live-codex"],
+        repairBlockReason: "blocked_session_in_indivisible_job",
+        repairEligible: false,
+        selectedJobId: "job:other"
+      })
+    ]);
+    expect(preview.preservationReasons).toContainEqual({ reason: "live_state", sessionId: "session:live-codex" });
+    expect(preview.preservationReasons).toContainEqual({
+      reason: "blocked_session_in_indivisible_job",
+      sessionId: "session:unrelated"
+    });
+
+    const receipt = applyImportRepair(db, {
+      importJobIds: preview.importJobIds,
+      planHash: preview.planHash,
+      sourceMappings: mappings,
+      stageReimports: (plans) => stageReplacementJobs(db, plans)
+    });
+    expect(receipt.reimportJobIds).toEqual(["job:replacement:job:grok"]);
+    expect(readSession(db, "session:live-codex")).toBeDefined();
+    expect(readSession(db, "session:unrelated")).toBeDefined();
+  });
+
+  test("apply repairs only safe indivisible jobs and preserves manual-scoped sessions", async () => {
     const db = await repairDatabase();
     const preview = previewImportRepair(db, { importJobIds: ["job:grok", "job:hermes"], sourceMappings: availableSources });
 
@@ -235,9 +359,9 @@ describe("import repair", () => {
     expect(receipt).toMatchObject({
       planHash: preview.planHash,
       removedSessions: ["session:grok-fragment"],
-      resetSessions: ["session:hermes-old"],
-      reopenedSuppressions: ["session:hermes-old"],
-      reimportSources: ["source:grok", "source:hermes"]
+      resetSessions: [],
+      reopenedSuppressions: [],
+      reimportSources: ["source:grok"]
     });
     expect(readSession(db, "session:grok-fragment")).toBeUndefined();
     expect(readSession(db, "session:hermes-old")).toBeDefined();
@@ -245,7 +369,7 @@ describe("import repair", () => {
     expect(readSession(db, "session:manual")).toBeDefined();
     expect(readSession(db, "session:unrelated")).toBeDefined();
     expect(db.prepare("SELECT publication_status, suppression_category FROM workbench_session_state WHERE session_id = ?").get("session:hermes-old"))
-      .toEqual({ publication_status: "publish_path", suppression_category: null });
+      .toEqual({ publication_status: "not_added_to_logbook", suppression_category: "insufficient_evidence" });
     expect(db.prepare("SELECT publication_status, suppression_category FROM workbench_session_state WHERE session_id = ?").get("session:manual"))
       .toEqual({ publication_status: "not_added_to_logbook", suppression_category: "manual_exclusion" });
   });

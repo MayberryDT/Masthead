@@ -19,13 +19,15 @@ export type ImportRepairJobPlan = {
   correctedSourceId?: string;
   available: boolean;
   repairEligible: boolean;
+  blockedSessionIds: string[];
+  repairBlockReason?: "blocked_session_in_indivisible_job";
   importKind: ImportJobKind;
   scope: ImportScopeDto | null;
 };
 
 export type ImportRepairPreservationReason = {
   sessionId: string;
-  reason: "artifact_preserved" | "live_state" | "manual_decision" | "out_of_range" | "published_artifact" | "shared_ownership" | "source_linked_only" | "source_unavailable";
+  reason: "artifact_preserved" | "blocked_session_in_indivisible_job" | "live_state" | "manual_decision" | "out_of_range" | "published_artifact" | "shared_ownership" | "source_linked_only" | "source_unavailable";
 };
 
 export type ImportRepairPreview = {

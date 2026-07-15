@@ -133,3 +133,27 @@ The deletion set is intentionally conservative. Sessions with any artifact, live
 - Apply recomputes that complete spec under the immediate transaction and stages exclusively from the locked hashed job plans. It does not reread mutable old-job kind or scope to construct replacements.
 - Each eligible selected job requires exactly one distinct queued replacement job, in deterministic plan order, with the exact corrected source, import kind, and canonical scope. Missing, duplicate, extra, fabricated, wrong-kind, wrong-source, or wrong-scope staging rolls back cleanup.
 - Published affected sessions remain explicitly preserved with `published_artifact`. An all-published plan remains blocked, while a mixed plan continues independent eligible cleanup and schedules replacements only for eligible selected jobs.
+
+## P1 closeout — indivisible execution scopes
+
+### RED
+
+- A selected job with both a published session and an otherwise eligible session still staged a full source/scope replacement, so session-level cleanup skipping did not protect the published execution boundary.
+- A manual-decision session linked to the same source likewise allowed its sibling session to be reparsed and its automatic suppression reopened.
+
+### GREEN
+
+- `npm run typecheck`
+  - Passed.
+- `npx vitest --run src/daemon/import/__tests__/importRepair.test.ts src/daemon/__tests__/server.test.ts`
+  - 2 files passed, 37 tests passed.
+- `git diff --check`
+  - Passed.
+
+### Execution-boundary evidence
+
+- Every hashed job plan now records `blockedSessionIds` and the explicit `blocked_session_in_indivisible_job` reason.
+- Published, manual, live-state, artifact-owned, or shared-ownership sessions block the entire selected job plan at its actual source/scope rerun boundary.
+- Cleanup, reparse, suppression reopening, cursor reset, and replacement staging all exclude every session and source belonging to a blocked indivisible job.
+- The session that triggered the block retains its specific preservation reason (`published_artifact`, `manual_decision`, `live_state`, artifact/shared ownership). Safe sibling sessions record `blocked_session_in_indivisible_job`.
+- Independent safe selected jobs in the same repair request continue transactionally and receive exactly one validated replacement job.
