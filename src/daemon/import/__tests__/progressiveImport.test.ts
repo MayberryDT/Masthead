@@ -6,6 +6,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import type { DaemonConfig } from "../../config.ts";
 import { createImportJob, getImportJob, listImportJobs, updateImportJob, type ImportJobDto } from "../../db/importJobRepository.ts";
 import { setSourcePolicy } from "../../db/sourcePolicyRepository.ts";
+import { readImportWorkUnitHealth } from "../../db/sessionImportHealthRepository.ts";
 import { markWorkbenchPublished } from "../../db/workbenchPipelineRepository.ts";
 import { createMastheadDaemon, type MastheadDaemon } from "../../server.ts";
 import { createManifestForJob } from "../importManifestService.ts";
@@ -481,7 +482,7 @@ describe("progressive OpenCode imports", () => {
     await utimes(oldPath, recentMtime, recentMtime);
     await utimes(currentPath, recentMtime, recentMtime);
     const baseUrl = await listen(daemon);
-    const sourceIds = await approveRuntimeTranscriptSources(baseUrl, daemon, "hermes", hermesRoot);
+    const sourceIds = await approveRuntimeTranscriptSources(baseUrl, daemon, "hermes", hermesRoot, 2);
 
     const previewResponse = await fetch(`${baseUrl}/sources/import/preview`, {
       body: JSON.stringify({
@@ -529,6 +530,73 @@ describe("progressive OpenCode imports", () => {
         )
         .get(oldJobId ?? "", oldPath)
     ).toMatchObject({ scopeReason: "outside_recent_range", status: "skipped", timestampBasis: "semantic" });
+  });
+
+  test("imports one canonical Grok conversation from chat history and auxiliary files", async () => {
+    const { daemon, tempDir } = await createTestHarness();
+    const conversationId = "019f42f6-8ada-7001-afff-c722e75faf45";
+    const grokRoot = join(tempDir, ".grok", "sessions");
+    const conversationDir = join(grokRoot, conversationId);
+    const chatPath = join(conversationDir, "chat_history.jsonl");
+    const observedAt = new Date().toISOString();
+    await writeRawJsonl(chatPath, [
+      { content: "Canonical Grok question", timestamp: observedAt, type: "user" },
+      { content: "Canonical Grok answer", timestamp: observedAt, type: "assistant" }
+    ]);
+    await writeRawJsonl(join(conversationDir, "updates.jsonl"), [{ status: "complete" }]);
+    await writeRawJsonl(join(conversationDir, "feedback.jsonl"), [{ score: 1 }]);
+    const baseUrl = await listen(daemon);
+    const sourceIds = await approveRuntimeTranscriptSources(baseUrl, daemon, "grok", grokRoot, 3);
+
+    const previewResponse = await fetch(`${baseUrl}/sources/import/preview`, {
+      body: JSON.stringify({ runtimes: ["grok"], sourceIds }),
+      headers: { accept: "application/json", "content-type": "application/json" },
+      method: "POST"
+    });
+    expect(previewResponse.status).toBe(200);
+    await expect(previewResponse.json()).resolves.toMatchObject({
+      ok: true,
+      previews: [{ runtime: "grok", summary: { excludedUnits: 0, includedUnits: 1, totalUnits: 1 } }]
+    });
+
+    const queued = await postJson(baseUrl, "/sources/setup/run", {
+      importMetadata: false,
+      importScope: { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 },
+      queueEnrichment: false,
+      runtimes: ["grok"],
+      sourceIds
+    });
+    expect(queued.jobs).toHaveLength(1);
+    const job = queued.jobs[0]!;
+    await waitFor(() => ["failed", "succeeded", "succeeded_with_issues"].includes(getImportJob(daemon.database, job.importJobId)?.status ?? ""));
+
+    expect(getImportJob(daemon.database, job.importJobId)?.status).toBe("succeeded");
+    expect(countWhere(daemon.database, "import_work_units", "import_job_id = ?", job.importJobId)).toBe(1);
+    expect(countWhere(daemon.database, "sessions", "source_session_id = ?", conversationId)).toBe(1);
+    expect(countWhere(daemon.database, "messages", "session_id = ?", sessionIdFor(daemon.database, conversationId))).toBe(2);
+    const workUnit = daemon.database
+      .prepare(
+        `SELECT source_id AS sourceId, source_path AS sourcePath, work_unit_id AS workUnitId
+        FROM import_work_units
+        WHERE import_job_id = ?`
+      )
+      .get(job.importJobId) as { sourceId: string; sourcePath: string; workUnitId: string };
+    const canonicalChatSource = daemon.database
+      .prepare("SELECT source_id AS sourceId FROM ingest_sources WHERE adapter = 'grok' AND source_path = ?")
+      .get(chatPath) as { sourceId: string };
+    expect(workUnit).toMatchObject({ sourcePath: chatPath });
+    expect(workUnit.sourceId).toBe(canonicalChatSource.sourceId);
+    expect(
+      JSON.parse(
+        (daemon.database.prepare("SELECT source_ref_json AS sourceRef FROM messages WHERE session_id = ? LIMIT 1").get(
+          sessionIdFor(daemon.database, conversationId)
+        ) as { sourceRef: string }).sourceRef
+      )
+    ).toContainEqual(expect.objectContaining({ sourcePath: chatPath }));
+    expect(readImportWorkUnitHealth(daemon.database, workUnit.workUnitId)?.diagnostics).toEqual([
+      expect.objectContaining({ code: "grok_auxiliary_file_ignored", severity: "info" }),
+      expect.objectContaining({ code: "grok_auxiliary_file_ignored", severity: "info" })
+    ]);
   });
 });
 
@@ -696,7 +764,8 @@ async function approveRuntimeTranscriptSources(
   baseUrl: string,
   daemon: MastheadDaemon,
   runtime: string,
-  sourceRoot: string
+  sourceRoot: string,
+  expectedCount: number
 ): Promise<string[]> {
   const scan = await fetch(`${baseUrl}/sources/scan`, { headers: { accept: "application/json" }, method: "POST" });
   expect(scan.status).toBe(202);
@@ -709,7 +778,7 @@ async function approveRuntimeTranscriptSources(
       ORDER BY source_path ASC, source_id ASC`
     )
     .all(runtime, `${sourceRoot}%`) as Array<{ sourceId: string }>;
-  expect(rows).toHaveLength(2);
+  expect(rows).toHaveLength(expectedCount);
   for (const { sourceId } of rows) {
     setSourcePolicy(daemon.database, {
       decidedAt: new Date().toISOString(),
