@@ -1,7 +1,7 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import type { DaemonConfig } from "../config.ts";
 import { upsertSessionEnrichment } from "../db/enrichmentRepository.ts";
@@ -18,7 +18,6 @@ import {
   recordWorkbenchActivity
 } from "../db/workbenchPipelineRepository.ts";
 import { createMastheadDaemon, type MastheadDaemon } from "../server.ts";
-import { publishCanonicalDossiersFromWorkbenchApi } from "../workbenchApi.ts";
 import { migrateDatabase } from "../db/schema.ts";
 import { openMastheadDatabase } from "../db/sqlite.ts";
 
@@ -33,39 +32,27 @@ afterEach(async () => {
 });
 
 describe("workbench API", () => {
-  test("validates and applies the daemon-owned canonical dossier request", async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), "masthead-workbench-dossier-api-"));
-    tempDirs.push(tempDir);
-    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
-    migrateDatabase(db);
-    seedSession(db, {
+  test("does not expose a standalone canonical dossier publication route", async () => {
+    const serverSource = await readFile(resolve("src/daemon/server.ts"), "utf8");
+    expect(serverSource).not.toContain('url.pathname === "/workbench/dossiers/publish"');
+
+    const { baseUrl, daemon } = await startTestDaemon();
+    seedSession(daemon.database, {
       lifecycle: "ended",
       model: "gpt-5",
       project: "Masthead",
-      sessionId: "session:canonical-request",
-      title: "Canonical request"
+      sessionId: "session:raw-no-publication-route",
+      title: "Raw session must remain unpublished"
     });
 
-    expect(() =>
-      publishCanonicalDossiersFromWorkbenchApi(db, {
-        actorId: "recovery",
-        dossier: { title: "Authored prose" },
-        sessionIds: ["session:canonical-request"]
-      })
-    ).toThrow("invalid_request:unsupported field dossier");
-    expect(
-      publishCanonicalDossiersFromWorkbenchApi(db, {
-        actorId: "recovery",
-        sessionIds: ["session:canonical-request"]
-      })
-    ).toMatchObject({
-      ok: true,
-      receipt: {
-        artifactIds: [expect.any(String)],
-        sessionIds: ["session:canonical-request"]
-      }
-    });
-    db.close();
+    await postJson(
+      baseUrl,
+      "/workbench/dossiers/publish",
+      { actorId: "recovery", sessionIds: ["session:raw-no-publication-route"] },
+      404
+    );
+    const logbook = await getJson(baseUrl, "/logbook/artifacts?q=Raw%20session%20must%20remain%20unpublished");
+    expect(logbook.artifacts).toHaveLength(0);
   });
 
   test("returns only publish-path sessions without leaking published or Not Added details", async () => {
@@ -228,58 +215,6 @@ describe("workbench API", () => {
       activity: { eventType: "published" },
       state: { publicationStatus: "published", sessionId: "session:publish" }
     });
-  });
-
-  test("publishes canonical dossiers without accepting authored dossier content", async () => {
-    const { baseUrl, daemon } = await startTestDaemon();
-    seedSession(daemon.database, {
-      lifecycle: "ended",
-      model: "gpt-5",
-      project: "Masthead",
-      sessionId: "session:canonical-dossier",
-      title: "Repair OAuth callback routing"
-    });
-
-    const rejected = await postJson(
-      baseUrl,
-      "/workbench/dossiers/publish",
-      {
-        actorId: "recovery",
-        dossier: { title: "Agent-authored content must be rejected" },
-        sessionIds: ["session:canonical-dossier"]
-      },
-      400
-    );
-    expect(rejected).toEqual({
-      error: "invalid_request:unsupported field dossier",
-      ok: false
-    });
-
-    const body = await postJson(baseUrl, "/workbench/dossiers/publish", {
-      actorId: "recovery",
-      sessionIds: ["session:canonical-dossier"]
-    });
-
-    expect(body).toMatchObject({
-      ok: true,
-      receipt: {
-        artifactIds: [expect.any(String)],
-        sessionIds: ["session:canonical-dossier"]
-      }
-    });
-    const artifact = daemon.database
-      .prepare(
-        `SELECT schema_version AS schemaVersion, content_json AS contentJson
-         FROM session_artifacts
-         WHERE artifact_id = ?`
-      )
-      .get(body.receipt.artifactIds[0]) as { schemaVersion: string; contentJson: string };
-    expect(artifact.schemaVersion).toBe("canonical-session-dossier-v1");
-    expect(JSON.parse(artifact.contentJson)).toMatchObject({
-      identity: { title: "Repair OAuth callback routing" },
-      snapshotVersion: "canonical-session-dossier-v1"
-    });
-    expect(artifact.contentJson).not.toContain("Agent-authored content must be rejected");
   });
 
   test("checks transcripts and requires source-scoped permission for Workbench transcript import", async () => {

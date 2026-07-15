@@ -31,14 +31,14 @@ Important contracts:
 - `GET /sessions` and session detail routes remain for evidence, Workbench, and compile — not the primary Logbook listing.
 - `GET /workbench/sessions` (and related Workbench reads) expose package-path pipeline state.
 - `GET /workbench/authoring/candidates` exposes keyset-paginated positive-evidence candidates and advances one bounded discovery page.
-- `POST /workbench/dossiers/publish` publishes 1–100 daemon-built canonical dossier snapshots without accepting prose.
-- `POST /workbench/authoring/runs` opens one candidate-owned V2 run from `{ actorId, databaseId, candidateId }`; arbitrary session arrays are rejected.
+- `POST /workbench/authoring/runs` opens one selection-scoped V3 run from `{ actorId, databaseId, sessionIds }`.
+- `POST /workbench/authoring/runs/:runId/finish` is the only normal dossier-publication path; it applies current agent enrichment before rebuilding canonical dossier snapshots.
 - `GET /sources/connectors` and hook routes support Sources V2 live connect.
 - Write endpoints (`/ingest`, Workbench mutations, `/data/delete`, etc.) stay local to the daemon and are not exposed through MCP.
 
 `POST /ingest` uses the runtime query parameter or `x-masthead-runtime` header. Connector tests use a validation-only ingest variant so installer/test flows can verify the hook path without mutating the store when appropriate.
 
-Workbench enrichment and optional-artifact authoring go through Workbench/CLI paths with receipts. Normal `mastheadctl workbench` authoring commands are thin daemon HTTP calls. The candidate supplies the exact 1–12 provenance sessions, and submit accepts one `workbench-authoring-v2` optional artifact with typed, verbatim claim support. There is **no Logbook bulk-enrich UI or primary bulk-enrich product path**.
+Workbench enrichment and optional-artifact authoring go through Workbench/CLI paths with receipts. Normal `mastheadctl workbench` authoring commands are thin daemon HTTP calls. A V3 run covers 1–12 selected sessions; the agent enriches every selected session and may submit zero or more grounded optional artifacts. There is **no Logbook bulk-enrich UI or primary bulk-enrich product path**.
 
 The original dossier is different: the daemon snapshots `SessionDossierDto` as
 `canonical-session-dossier-v1`, and Logbook renders that immutable body through

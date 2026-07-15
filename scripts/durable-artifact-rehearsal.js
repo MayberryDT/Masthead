@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+// Historical V2/candidate-driven recovery evidence only. Its exported audit
+// helpers remain available to tests, but the obsolete workflow must not run.
+
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, createWriteStream, lstatSync, realpathSync } from "node:fs";
@@ -26,6 +29,11 @@ import { DatabaseSync } from "node:sqlite";
 import { verifyPackagedBundleManifest } from "./packaged-bundle-manifest.js";
 
 export const REHEARSAL_PORT = 17483;
+export const OBSOLETE_REHEARSAL_ERROR = "obsolete_v2_rehearsal";
+
+export function assertHistoricalRehearsalNotExecutable() {
+  throw new Error(`${OBSOLETE_REHEARSAL_ERROR}: the V2 candidate rehearsal is audit-only`);
+}
 const REHEARSAL_ROOT_PREFIX = "masthead-durable-rehearsal-";
 const STATE_VERSION = 1;
 const EXPECTED_SCHEMA_VERSION = 24;
@@ -2946,7 +2954,7 @@ function parseOptions(args) {
 
 function rehearsalHelp() {
   return [
-    "Usage: npm run rehearse:durable-artifacts -- <phase> [options]",
+    `${OBSOLETE_REHEARSAL_ERROR}: historical V2 audit evidence only; execution is disabled`,
     "",
     "Phases:",
     "  preflight             validate immutable bundle, external backup bytes, sample, labels, and port",
@@ -3054,7 +3062,10 @@ function isMainModule() {
 }
 
 if (isMainModule()) {
-  runCli(process.argv.slice(2)).then((result) => {
+  Promise.resolve().then(() => {
+    assertHistoricalRehearsalNotExecutable();
+    return runCli(process.argv.slice(2));
+  }).then((result) => {
     if (result.help) process.stdout.write(`${result.help}\n`);
     else process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   }).catch((error) => {

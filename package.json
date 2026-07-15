@@ -57,7 +57,6 @@
     "dogfood:fixture": "node scripts/masthead-dogfood.js",
     "dogfood:live": "node scripts/masthead-dogfood.js --live",
     "dogfood:durable-artifacts": "npm run build:daemon && node scripts/dogfood-durable-artifacts.js",
-    "rehearse:durable-artifacts": "node scripts/durable-artifact-rehearsal.js",
     "ingest": "npm run build:daemon && node dist/daemon/src/daemon/main.js",
     "mcp": "npm run build:daemon && node dist/daemon/src/mcp/server.js",
     "demo:hook": "node scripts/masthead-demo.js"

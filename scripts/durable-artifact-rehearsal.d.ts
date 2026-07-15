@@ -1,4 +1,6 @@
 export const REHEARSAL_PORT: number;
+export const OBSOLETE_REHEARSAL_ERROR: "obsolete_v2_rehearsal";
+export function assertHistoricalRehearsalNotExecutable(): never;
 
 export type RehearsalConfigInput = {
   bundleRoot: string;

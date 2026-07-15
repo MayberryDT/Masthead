@@ -74,7 +74,6 @@ import {
   type WorkbenchSessionStateRecord
 } from "./db/workbenchPipelineRepository.ts";
 import { workbenchSessionIsPublished } from "./db/workbenchPublicationSql.ts";
-import { publishCanonicalDossiersFromWorkbenchApi } from "./workbenchApi.ts";
 import { currentBoardHeadlineFrames, insertBoardHeadlineGeneration, upsertBoardHeadlineFrame } from "./db/boardHeadlineFrameRepository.ts";
 import { listReviewDispositions, upsertReviewDisposition } from "./db/reviewDispositionRepository.ts";
 import { readCursor, upsertCursor } from "./db/cursorRepository.ts";
@@ -2606,31 +2605,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         generatedAt: new Date().toISOString()
       };
       sendJson(request, response, config.allowedOrigins, 200, responseBody);
-      return;
-    }
-
-    if (request.method === "POST" && url.pathname === "/workbench/dossiers/publish") {
-      try {
-        const body = await optionalJsonBody(request);
-        sendJson(
-          request,
-          response,
-          config.allowedOrigins,
-          200,
-          publishCanonicalDossiersFromWorkbenchApi(database, body)
-        );
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        const status = message.startsWith("canonical_dossier_missing:")
-          ? 404
-          : message.startsWith("invalid_request:") || message === "canonical_dossier_batch_too_large"
-            ? 400
-            : 500;
-        sendJson(request, response, config.allowedOrigins, status, {
-          error: message,
-          ok: false
-        });
-      }
       return;
     }
 

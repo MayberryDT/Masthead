@@ -112,13 +112,3 @@ export type WorkbenchEnrollMissingResponse = {
   limit: number;
   generatedAt: string;
 };
-
-export type CanonicalDossierPublicationReceipt = {
-  artifactIds: string[];
-  sessionIds: string[];
-};
-
-export type WorkbenchCanonicalDossierPublicationResponse = {
-  ok: true;
-  receipt: CanonicalDossierPublicationReceipt;
-};

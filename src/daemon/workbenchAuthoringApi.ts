@@ -208,6 +208,7 @@ const authoringConflictCodes = new Set([
   "evidence_revision_changed",
   "evidence_revision_mismatch",
   "missing_canonical_evidence",
+  "session_enrichment_required",
   "unsupported_authoring_bundle_version"
 ]);
 

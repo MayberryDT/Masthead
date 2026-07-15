@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   getWorkbenchMissingSessions,
@@ -24,7 +26,6 @@ import {
   postWorkbenchImportTranscript,
   postWorkbenchImportTranscriptPreview,
   postWorkbenchPublish,
-  postWorkbenchPublishCanonicalDossiers,
   postWorkbenchQuality,
   postWorkbenchReleaseClaim,
   previewSourcesImport,
@@ -43,6 +44,12 @@ afterEach(() => {
 });
 
 describe("daemon client review dispositions", () => {
+  test("does not expose standalone canonical dossier publication", async () => {
+    const daemonClientSource = await readFile(resolve("src/app/daemonClient.ts"), "utf8");
+    expect(daemonClientSource).not.toContain("postWorkbenchPublishCanonicalDossiers");
+    expect(daemonClientSource).not.toContain("/workbench/dossiers/publish");
+  });
+
   test("unions multi-value Logbook filters when the daemon only honors the first repeated param", async () => {
     vi.stubGlobal(
       "fetch",
@@ -409,21 +416,6 @@ describe("daemon client review dispositions", () => {
       "http://127.0.0.1:17374/workbench/authoring/candidates?kind=runbook&limit=25&status=pending",
       expect.objectContaining({ headers: { accept: "application/json" } })
     );
-  });
-
-  test("publishes canonical dossiers with one daemon-owned batch request", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => response({ ok: true, receipt: { artifactIds: [], sessionIds: [] } })));
-
-    await postWorkbenchPublishCanonicalDossiers("http://127.0.0.1:17373/projection", {
-      actorId: "workbench_ui",
-      sessionIds: ["session:1", "session:2"]
-    });
-    expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:17373/workbench/dossiers/publish", {
-      body: JSON.stringify({ actorId: "workbench_ui", sessionIds: ["session:1", "session:2"] }),
-      headers: { accept: "application/json", "content-type": "application/json" },
-      method: "POST",
-      signal: undefined
-    });
   });
 
   test("rejects authoring capabilities that do not identify an absolute installed command", async () => {

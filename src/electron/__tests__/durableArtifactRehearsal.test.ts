@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { describe, expect, test } from "vitest";
 import {
   REHEARSAL_PORT,
+  assertHistoricalRehearsalNotExecutable,
   assertDiscoveryCompletion,
   buildIsolatedDaemonEnv,
   classifyPreparedInvalidationState,
@@ -39,6 +40,10 @@ function config(overrides: Record<string, unknown> = {}) {
 }
 
 describe("durable artifact temporary-copy rehearsal coordinator", () => {
+  test("keeps the historical V2 rehearsal fail-closed", () => {
+    expect(() => assertHistoricalRehearsalNotExecutable()).toThrow("obsolete_v2_rehearsal");
+  });
+
   test("pins every writable path beneath a dedicated temporary root", () => {
     const validated = validateStaticRehearsalConfig(config());
 

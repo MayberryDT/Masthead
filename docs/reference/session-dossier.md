@@ -36,20 +36,12 @@ original dossier. It preserves identity, coverage, narrative, files, tools,
 verification, attention, excerpts, timeline, durable enrichment and state, reuse,
 and usage. Only the live DTO's recursive `artifacts` listing is excluded.
 
-Publication is daemon-owned:
-
-```http
-POST /workbench/dossiers/publish
-Content-Type: application/json
-
-{ "actorId": "workbench_ui", "sessionIds": ["session:..."] }
-```
-
-The request accepts 1–100 canonical session IDs. It builds each snapshot
-from current canonical data, publishes and indexes it atomically, records exactly
-one provenance session, and is idempotent for unchanged content. The request has
-no dossier-body field. Agents never author, summarize, enrich, or replace dossier
-prose; optional-artifact bundles cannot contain a dossier.
+Publication is daemon-owned and occurs only through V3 authoring finish. The agent
+must first provide grounded enrichment for every selected session. Finish applies
+that enrichment, rebuilds the canonical snapshot from current canonical data,
+publishes and indexes it atomically, and records exactly one provenance session.
+Agents never author or replace dossier presentation; optional-artifact bundles
+cannot contain a dossier.
 
 Logbook recognizes the exact `canonical-session-dossier-v1` schema and renders it
 through `SessionDossierContent`, the body component used by the original dossier

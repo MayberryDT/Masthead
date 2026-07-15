@@ -365,31 +365,17 @@ ignores SIGTERM for 30 seconds, the coordinator SIGKILLs and reaps it, flushes
 the log, and fails the phase. That exception never applies to a production or
 installed Masthead process.
 
-The fail-closed coordinator for this section is:
+The former V2 candidate-driven rehearsal coordinator is preserved only as
+historical audit evidence. Its npm entrypoint has been removed and direct script
+execution fails closed with `obsolete_v2_rehearsal` before any mutation. A future
+production rehearsal must be designed around the V3 enrichment-first finish path
+and separately authorized before use.
 
-```bash
-ROOT="$(mktemp -d /tmp/masthead-durable-rehearsal-XXXXXXXX)"
-EXPORT_PARENT="$(mktemp -d /tmp/masthead-durable-export-parent-XXXXXXXX)"
-chmod 700 "$ROOT" "$EXPORT_PARENT"
-EVIDENCE_EXPORT="$EXPORT_PARENT/masthead-durable-rehearsal-evidence-$(date +%Y%m%dT%H%M%S)"
+Historical V2 rehearsal record (non-executable; do not run):
 
-npm run rehearse:durable-artifacts -- help
-npm run rehearse:durable-artifacts -- preflight <all pinned identity/hash/path options>
-npm run rehearse:durable-artifacts -- stage <the same pinned options> --confirm-temporary-only
-npm run rehearse:durable-artifacts -- migrate-invalidate --root "$ROOT" --confirm-temporary-only
-npm run rehearse:durable-artifacts -- publish-discover --root "$ROOT" --confirm-temporary-only
-npm run rehearse:durable-artifacts -- serve-authoring --root "$ROOT" --confirm-temporary-only
-npm run rehearse:durable-artifacts -- verify --root "$ROOT" --confirm-temporary-only
-npm run rehearse:durable-artifacts -- human-review --root "$ROOT" --receipt "$REVIEW_RECEIPT" --receipt-sha256 "$REVIEW_SHA256" --confirm-temporary-only
-npm run rehearse:durable-artifacts -- restore --root "$ROOT" --evidence-export "$EVIDENCE_EXPORT" --confirm-temporary-only
-```
-
-Run `help` for the complete pinned preflight/stage option list. The coordinator
-never SQLite-opens the external production backup: it hashes and byte-copies it,
-then audits only the exact-hash temporary copy. Restore exports the complete
-evidence set outside the disposable root before that root may be deleted.
-
-Run the rehearsal in this exact order:
+The numbered sequence, unchecked criteria, and recorded values below are retained
+only to preserve the prior audit trail. They are not current instructions or
+release acceptance criteria.
 
 1. Rebuild the immutable packaged bundle from exact corrected HEAD
    `95b23fc19f8e55afb11ae28dddba83e5f2a86d5a`. Do not run this step until that

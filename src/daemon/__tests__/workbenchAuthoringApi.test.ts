@@ -175,6 +175,34 @@ describe("Workbench authoring HTTP API", () => {
       .toEqual(finished.body);
   });
 
+  test("refuses to finish a raw session without current agent enrichment", async () => {
+    const { baseUrl, daemon } = await startTestDaemon();
+    seedAuthoringSession(daemon, "session:raw-finish");
+    const opened = await postJson(baseUrl, "/workbench/authoring/runs", {
+      actorId: "agent:test",
+      databaseId: getOrCreateDatabaseIdentity(daemon.database),
+      sessionIds: ["session:raw-finish"]
+    }, 201);
+    const runId = opened.body.run.runId as string;
+    const bundle = validV3Bundle(runId, opened.body.run.evidenceRevision, "session:raw-finish");
+    await postJson(baseUrl, `/workbench/authoring/runs/${encodeURIComponent(runId)}/submit`, bundle);
+
+    daemon.database
+      .prepare("UPDATE workbench_authoring_runs SET bundle_json = ? WHERE run_id = ?")
+      .run(JSON.stringify({ ...bundle, sessionEnrichments: [] }), runId);
+
+    const finished = await postJson(
+      baseUrl,
+      `/workbench/authoring/runs/${encodeURIComponent(runId)}/finish`,
+      {},
+      409
+    );
+    expect(finished.body.error.code).toBe("session_enrichment_required");
+
+    const logbook = await getJson(baseUrl, "/logbook/artifacts?q=raw%20finish");
+    expect(logbook.body.artifacts).toHaveLength(0);
+  });
+
   test("rejects candidate-based and oversized V3 run opens", async () => {
     const { baseUrl, daemon } = await startTestDaemon();
     seedAuthoringSession(daemon, "session:a");

@@ -35,7 +35,7 @@
 ## Session dossier
 - [x] Board detail loads canonical dossier when available. Evidence: Board cards carry canonical IDs and `npm run doctor:json` loaded a real canonical dossier on 2026-06-26.
 - [x] Logbook canonical dossier artifacts use the original dossier body component. Evidence: `LogbookInspector` routes the exact canonical schema through `SessionDossierContent`; focused UI tests cover all original sections.
-- [x] Dossier publication is daemon-owned and immutable. Evidence: `POST /workbench/dossiers/publish` accepts only actor/session IDs, snapshots `SessionDossierDto`, records one provenance session, and rejects authored body fields.
+- [x] Dossier publication is daemon-owned and immutable. V3 finish applies current durable enrichment before the daemon rebuilds the canonical `SessionDossierDto` snapshot; no standalone dossier publication route accepts raw sessions or authored dossier bodies.
 - [x] Dossier shows files, tools, verification, excerpts, timeline, provenance, token usage, and MCP reuse status. Evidence: `SessionDossier.test.tsx` and `sessionDossierRepository.test.ts` passed on 2026-06-26.
 - [x] Dossier has live-only fallback. Evidence: `SessionDossier.test.tsx` covers live-only fallback on 2026-06-26.
 - [x] Unsupported source-opening actions are hidden. Evidence: `SessionDossier.test.tsx` verifies source-opening actions are omitted on 2026-06-26.
@@ -63,6 +63,10 @@
 - [x] Doctor verifies the authoring command and boundary. Evidence: `artifact-authoring` check requires health capability, exact operation definitions, executable absolute or PATH-resolved command, installed CLI/daemon database identity equality, while the MCP check rejects non-read-only tools.
 
 ## Workbench
+- [ ] A raw or merely deterministic session cannot create a Logbook dossier.
+- [ ] Agent enrichment is applied before the canonical dossier snapshot is rendered.
+- [ ] Copy Agent Prompt is the only primary authoring control in Workbench.
+- [ ] Optional artifact kinds are agent-selected; detector suggestions are nonbinding.
 - [x] Development and packaged `mastheadctl` launchers are installed beside the app and report the active daemon database identity. Evidence: launcher/daemon/packaged CLI tests, Doctor, and packaged Electron smoke.
 - [x] Normal authoring CLI operations are thin daemon HTTP calls; no authoring command opens SQLite. Evidence: `authoringClient`/CLI tests and long-session dogfood with explicit `MASTHEAD_DAEMON_URL`.
 - [x] V2 capabilities, candidates, open, status, candidate evidence, submit, and finish have focused service/API/CLI tests. Open rejects a different database, arbitrary session arrays, stale candidates, and claim conflicts before output writes.
@@ -103,7 +107,7 @@
 - [x] Recovery audit is read-only and fail-closed on the exact known population: 1,283 V1 dossiers, zero optional artifacts, 66 completed V1 runs, exact membership/template/windows/actor/schema, and one SHA-256 audit hash.
 - [x] Recovery prepare requires an explicit database path and exclusive daemon-equivalent writer ownership, makes a SQLite-consistent backup including WAL state, verifies identity and integrity, refuses audit drift, and retains exactly one backup.
 - [x] Recovery invalidation requires the exact audit hash and `--confirm`, is one transaction, removes only matched artifact/search/provenance rows, resets affected sessions and optional statuses, releases matched claims, records Activity, and preserves V1 runs/receipts.
-- [x] Workbench candidate and canonical dossier controls have been inspected in the in-app Browser at desktop, tablet, and narrow widths on the release commit. Evidence: fixture-backed `iab` inspection on 2026-07-13 at 1440×900, 1024×768, 480×844, and 390×844 showed all seven positive-evidence candidates, readable kind/provenance/status/signal fields, distinct `Author candidate` and `Publish canonical dossiers` controls, internal table scrolling, and no page-level horizontal overflow. The inspection found and closed a responsive action-row collapse at tablet widths and the 401–640px cascade regression.
+- [x] Historical V2 candidate/control inspection is retained as release evidence only. Current V3 Workbench exposes Copy Agent Prompt as its primary authoring control and has no independent canonical-dossier publication control.
 - [x] Gate C code readiness is signed from the exact app candidate plus proportionate verification of later surgical deltas. Evidence: app commit `95b23fc1` passed Workbench focused suites 88/88, durable-artifact dogfood with `machineGatePassed: true` and `productionAccessed: false`, full verification at 274 files/2,138 tests, build, schema-24 endpoint matrix, all smokes, and responsive inspection. The later Logbook-only `claimSupport` renderer follow-up passed its 14-test inspector suite, no-citation/product/surface contracts, typecheck, production build, read-only responsive live-fixture inspection, and independent focused review; it is not part of the running `95b23fc1` evaluation package.
 
 Fixture machine PASS does not authorize production. A separately authorized
@@ -131,7 +135,7 @@ stratified review sample and automatic pause on any stop condition.
 - [x] cargo tests pass. Evidence: 23 Rust tests passed on 2026-06-26.
 - [x] npm run doctor passes. Evidence: isolated current-branch daemon doctor passed on 2026-06-26.
 - [x] Durable artifact fixture dogfood passes the machine gate. Evidence: on 2026-07-13, `npm run dogfood:durable-artifacts` reported the exact 3/2/2 candidate mix, all required fidelity/support/retrieval/reuse rates at `1.0`, zero integrity failures/leaks/duplicates/kind errors/raw-session reuse, and a 323.37 ms 100-session discovery page; `productionAccessed` was false. Human review remains deliberately incomplete in fixture output.
-- [x] Current authoring capabilities identify `workbench-authoring-v2`, candidate-scoped canonical evidence, and the six operations `candidates`, `open`, `status`, `evidence`, `submit`, `finish`; the transport protocol identifier remains `masthead.workbench.authoring/v1`.
+- [x] Current authoring capabilities identify `workbench-authoring-v3`, selected-session canonical evidence, nonbinding suggestions, and the operations `suggestions`, `open`, `status`, `evidence`, `context`, `submit`, `finish`; the transport protocol identifier remains `masthead.workbench.authoring/v1`.
 - [x] Current contract gates pass. Evidence: `verify:no-citations`, `check:product-contract`, `check:surface-contract`, `check:endpoint-matrix`, and `typecheck` passed on the app release candidate. Endpoint smoke probed schema 24 and exercised the read-only bridge allowlist and mutation blocklist.
 - [x] Release-candidate hermetic Vitest suite passes. Evidence: the full gate passed 274 files / 2,138 tests on app commit `95b23fc1`; the later renderer delta passed its focused suite.
 - [x] Current production build passes. Evidence: `npm run build` completed Vite and daemon builds after the Logbook renderer follow-up on 2026-07-14.

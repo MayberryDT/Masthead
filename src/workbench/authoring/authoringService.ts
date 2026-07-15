@@ -561,11 +561,15 @@ export function finishAuthoringRun(
     const existing = requireAuthoringRun(db, input.runId);
     if (existing.contractVersion !== "workbench-authoring-v3") throw new Error("authoring_contract_audit_only");
     if (existing.receipt) return existing.receipt;
+    const existingBundle = requireAgentLedAuthoringBundle(existing);
+    const enrichedSessionIds = new Set(existingBundle.sessionEnrichments.map(({ sessionId }) => sessionId));
+    if (existing.sessionIds.some((sessionId) => !enrichedSessionIds.has(sessionId))) {
+      throw new Error("session_enrichment_required");
+    }
     if (existing.status !== "ready_to_finish") {
       throw new Error(`authoring_run_not_ready:${existing.status}`);
     }
 
-    const existingBundle = requireAgentLedAuthoringBundle(existing);
     const signatureCollisions = findArtifactSignatureFindings(existingBundle.artifacts).filter(
       (finding) => finding.code === "duplicate_artifact_signature"
     );
