@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { SessionTranscriptOrder } from "../../shared/sessionTranscript.ts";
+import type { SessionTranscriptKind, SessionTranscriptOrder } from "../../shared/sessionTranscript.ts";
 import type {
   WorkbenchAuthoringBundle,
   WorkbenchAuthoringBundleV2,
@@ -16,6 +16,7 @@ import type {
 } from "../../shared/workbenchAuthoring.ts";
 import type { PublishedSessionDossierV1, SessionDossierDto } from "../../shared/sessionDossier.ts";
 import type { DurableSessionEnrichment } from "../../shared/sessionEnrichment.ts";
+import type { EvidenceKind, EvidenceRef } from "../../core/types.ts";
 import { hasSemanticRedactedText } from "../../core/redaction.ts";
 import type { SessionArtifactRecord } from "../../daemon/db/sessionArtifactRepository.ts";
 import {
@@ -209,15 +210,18 @@ export function openAgentLedAuthoringRun(
       databaseId,
       sessionIds
     });
+    if (reusable?.status === "completed" && reusable.evidenceRevision === evidence.evidenceRevision) {
+      return openAgentLedResult(db, reusable, evidence);
+    }
+    assertSessionsCompileReady(db, sessionIds);
     if (reusable?.evidenceRevision === evidence.evidenceRevision) {
-      const run = reusable.status === "completed" ? reusable : renewOrReacquireAuthoringClaimsInTransaction(db, {
+      const run = renewOrReacquireAuthoringClaimsInTransaction(db, {
         actorId: input.actorId,
         expiresAt: authoringLeaseExpiry(),
         runId: reusable.runId
       });
       return openAgentLedResult(db, run, evidence);
     }
-    assertSessionsOnPublishPath(db, sessionIds);
     if (reusable && reusable.status !== "completed") {
       resetWorkbenchAuthoringRunEvidence(db, {
         evidenceRevision: evidence.evidenceRevision,
@@ -233,11 +237,6 @@ export function openAgentLedAuthoringRun(
     }
     assertSessionsUnclaimed(db, sessionIds);
     const actor = { id: input.actorId, kind: "agent" } as const;
-    for (const sessionId of sessionIds) {
-      ensureWorkbenchSessionState(db, sessionId);
-      markWorkbenchTranscriptAvailableInTransaction(db, { actor, sessionId });
-      markWorkbenchQualityPassedInTransaction(db, { actor, sessionId });
-    }
     const claims = claimWorkbenchSessionsInTransaction(db, {
       claimedBy: input.actorId,
       expiresAt: authoringLeaseExpiry(),
@@ -497,7 +496,7 @@ export function submitAuthoringBundle(
     const validationInput = {
       coverageWarningsBySession: coverageWarningsBySession(db, renewed.sessionIds),
       evidenceByRef: evidenceByRef(db, renewed.sessionIds),
-      publishedArtifacts: recentCurrentOptionalArtifacts(db),
+      publishedArtifacts: allCurrentOptionalArtifacts(db),
       selectedSessionIds: renewed.sessionIds
     };
     const validation = validateAuthoringBundleV3({ ...validationInput, bundle: input.bundle });
@@ -1221,6 +1220,16 @@ function assertSessionsOnPublishPath(db: MastheadDatabase, sessionIds: string[])
   }
 }
 
+function assertSessionsCompileReady(db: MastheadDatabase, sessionIds: string[]): void {
+  for (const sessionId of sessionIds) {
+    const state = readWorkbenchSessionState(db, sessionId);
+    const transcriptReady = state?.transcriptStatus === "available" || state?.transcriptStatus === "imported";
+    if (state?.publicationStatus !== "publish_path" || !transcriptReady || state.qualityStatus !== "passed") {
+      throw new Error(`authoring_session_not_compile_ready:${sessionId}`);
+    }
+  }
+}
+
 function assertSessionsCandidateAuthorable(db: MastheadDatabase, sessionIds: string[]): void {
   for (const sessionId of sessionIds) {
     const state = readWorkbenchSessionState(db, sessionId);
@@ -1314,16 +1323,15 @@ function currentArtifacts(db: MastheadDatabase, sessionIds: string[]): SessionAr
   return [...artifacts.values()].sort((left, right) => left.artifactId.localeCompare(right.artifactId));
 }
 
-function recentCurrentOptionalArtifacts(db: MastheadDatabase, limit = 100): SessionArtifactRecord[] {
+function allCurrentOptionalArtifacts(db: MastheadDatabase): SessionArtifactRecord[] {
   const rows = db.prepare(
     `SELECT artifact_id AS artifactId
      FROM session_artifacts
      WHERE status = 'current'
        AND publication_status = 'published'
        AND artifact_kind IN ('runbook', 'adr', 'incident_timeline')
-     ORDER BY COALESCE(published_at, updated_at) DESC, artifact_id DESC
-     LIMIT ?`
-  ).all(limit) as Array<{ artifactId: string }>;
+     ORDER BY artifact_id`
+  ).all() as Array<{ artifactId: string }>;
   return rows.flatMap(({ artifactId }) => {
     const artifact = getSessionArtifact(db, artifactId);
     return artifact ? [artifact] : [];
@@ -1457,37 +1465,38 @@ function applyDurableSessionEnrichmentInTransaction(
   enrichment: DurableSessionEnrichment,
   actorId: string
 ): void {
-  const generatedAt = enrichment.generatedAt ?? new Date().toISOString();
-  const contentFingerprint = fingerprintWorkbenchOutput(enrichment);
+  const canonicalEnrichment = canonicalizeDurableEnrichmentEvidence(db, sessionId, enrichment);
+  const generatedAt = canonicalEnrichment.generatedAt ?? new Date().toISOString();
+  const contentFingerprint = fingerprintWorkbenchOutput(canonicalEnrichment);
   const sourceRefs = [
-    ...enrichment.sessionTitle.evidenceRefs,
-    ...enrichment.sessionSummary.evidenceRefs,
-    ...enrichment.sessionDossier.evidenceRefs,
-    ...enrichment.sessionDossier.verification.evidenceRefs
+    ...canonicalEnrichment.sessionTitle.evidenceRefs,
+    ...canonicalEnrichment.sessionSummary.evidenceRefs,
+    ...canonicalEnrichment.sessionDossier.evidenceRefs,
+    ...canonicalEnrichment.sessionDossier.verification.evidenceRefs
   ].filter((ref, index, refs) => refs.findIndex((candidate) => candidate.id === ref.id) === index);
   const capsule: SessionCapsule = {
     candidateDecisions: [],
-    confidence: enrichment.sessionSummary.confidence,
-    durableEnrichment: { ...structuredClone(enrichment), generatedAt },
-    liveSummary: enrichment.sessionSummary.text,
-    outcome: enrichment.sessionDossier.outcome,
+    confidence: canonicalEnrichment.sessionSummary.confidence,
+    durableEnrichment: { ...canonicalEnrichment, generatedAt },
+    liveSummary: canonicalEnrichment.sessionSummary.text,
+    outcome: canonicalEnrichment.sessionDossier.outcome,
     searchPhrases: [],
-    searchSummary: enrichment.sessionSummary.text,
-    sessionDossier: enrichment.sessionDossier,
-    sessionSummary: enrichment.sessionSummary,
-    sessionTitle: enrichment.sessionTitle,
+    searchSummary: canonicalEnrichment.sessionSummary.text,
+    sessionDossier: canonicalEnrichment.sessionDossier,
+    sessionSummary: canonicalEnrichment.sessionSummary,
+    sessionTitle: canonicalEnrichment.sessionTitle,
     technologies: [],
-    title: enrichment.sessionTitle.text,
+    title: canonicalEnrichment.sessionTitle.text,
     titleSource: "llm",
     topics: [],
     unresolved: [],
-    validationWarnings: enrichment.sessionDossier.warnings
+    validationWarnings: canonicalEnrichment.sessionDossier.warnings
   };
   const contents = {
-    live_summary: { text: enrichment.sessionSummary.text },
+    live_summary: { text: canonicalEnrichment.sessionSummary.text },
     search_projection: {
-      searchText: `${enrichment.sessionTitle.text}\n${enrichment.sessionSummary.text}`,
-      title: enrichment.sessionTitle.text
+      searchText: `${canonicalEnrichment.sessionTitle.text}\n${canonicalEnrichment.sessionSummary.text}`,
+      title: canonicalEnrichment.sessionTitle.text
     },
     session_capsule: capsule
   } as const;
@@ -1516,6 +1525,41 @@ function applyDurableSessionEnrichmentInTransaction(
     actor: { id: actorId, kind: "agent" },
     sessionId
   });
+}
+
+function canonicalizeDurableEnrichmentEvidence(
+  db: MastheadDatabase,
+  sessionId: string,
+  enrichment: DurableSessionEnrichment
+): DurableSessionEnrichment {
+  const canonicalById = new Map<string, EvidenceRef>();
+  for (const item of iterateSessionTranscriptItems(db, { order: "asc", sessionId })) {
+    canonicalById.set(item.itemId, {
+      id: item.itemId,
+      kind: canonicalEvidenceKind(item.kind),
+      observedAt: item.observedAt,
+      source: "canonical"
+    });
+  }
+  const resolve = (refs: EvidenceRef[]): EvidenceRef[] => refs.map(({ id }) => {
+    const canonical = canonicalById.get(id);
+    if (!canonical) throw new Error(`unknown_canonical_evidence_ref:${sessionId}:${id}`);
+    return canonical;
+  });
+  const canonical = structuredClone(enrichment);
+  canonical.sessionTitle.evidenceRefs = resolve(canonical.sessionTitle.evidenceRefs);
+  canonical.sessionSummary.evidenceRefs = resolve(canonical.sessionSummary.evidenceRefs);
+  canonical.sessionDossier.evidenceRefs = resolve(canonical.sessionDossier.evidenceRefs);
+  canonical.sessionDossier.verification.evidenceRefs = resolve(
+    canonical.sessionDossier.verification.evidenceRefs
+  );
+  return canonical;
+}
+
+function canonicalEvidenceKind(kind: SessionTranscriptKind): EvidenceKind {
+  if (kind === "tool_call" || kind === "tool_result") return "command";
+  if (kind === "file_effect") return "file_change";
+  return "event";
 }
 
 function applyAgentLedArtifactInTransaction(

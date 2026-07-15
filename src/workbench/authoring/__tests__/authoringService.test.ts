@@ -9,10 +9,16 @@ import type {
   WorkbenchClaimSupport
 } from "../../../shared/workbenchAuthoring.ts";
 import { seedSession } from "../../../daemon/db/__tests__/sessionTestHelpers.ts";
-import { getSessionArtifact } from "../../../daemon/db/sessionArtifactRepository.ts";
+import {
+  applySessionArtifact,
+  getSessionArtifact,
+  publishSessionArtifact
+} from "../../../daemon/db/sessionArtifactRepository.ts";
+import { readCurrentSessionEnrichment } from "../../../daemon/db/enrichmentRepository.ts";
 import type { StoredWorkbenchArtifactCandidate } from "../../../daemon/db/workbenchArtifactCandidateRepository.ts";
 import {
   claimWorkbenchSessions,
+  ensureWorkbenchSessionState,
   markWorkbenchNotAdded,
   readWorkbenchSessionState
 } from "../../../daemon/db/workbenchPipelineRepository.ts";
@@ -42,7 +48,7 @@ afterEach(async () => {
 
 describe("Workbench authoring service", () => {
   test("publishes enrichment-derived canonical dossiers with zero optional artifacts", async () => {
-    const db = await readyAuthoringDb();
+    const db = await readyV3AuthoringDb();
     const opened = openAgentLedAuthoringRun(db, {
       actorId: "codex",
       databaseId: testDatabaseId(db),
@@ -71,6 +77,45 @@ describe("Workbench authoring service", () => {
       receipt,
       runId: opened.run.runId,
       status: "completed"
+    });
+    db.close();
+  });
+
+  test("rebuilds submitted enrichment evidence refs from canonical daemon evidence", async () => {
+    const db = await readyV3AuthoringDb();
+    const opened = openAgentLedAuthoringRun(db, {
+      actorId: "codex",
+      databaseId: testDatabaseId(db),
+      sessionIds: ["session:a"]
+    });
+    const bundle = validV3Bundle(opened.run.runId, opened.run.evidenceRevision);
+    const submittedRef = bundle.sessionEnrichments[0]!.enrichment.sessionTitle.evidenceRefs[0]!;
+    submittedRef.kind = "conflict";
+    submittedRef.observedAt = "2099-01-01T00:00:00.000Z";
+    submittedRef.source = "forged-agent-metadata";
+
+    expect(submitAuthoringBundle(db, { bundle, runId: opened.run.runId }).accepted).toBe(true);
+    finishAuthoringRun(db, { runId: opened.run.runId });
+
+    const enrichment = readCurrentSessionEnrichment(db, "session:a", "session_capsule")!;
+    expect(enrichment.sourceRefs).toContainEqual({
+      id: "message:session:a:message",
+      kind: "event",
+      observedAt: "2026-06-25T12:00:00.000Z",
+      source: "canonical"
+    });
+    expect(enrichment.sourceRefs).not.toContainEqual(expect.objectContaining({ source: "forged-agent-metadata" }));
+    expect(enrichment.content).toMatchObject({
+      durableEnrichment: {
+        sessionTitle: {
+          evidenceRefs: [{
+            id: "message:session:a:message",
+            kind: "event",
+            observedAt: "2026-06-25T12:00:00.000Z",
+            source: "canonical"
+          }]
+        }
+      }
     });
     db.close();
   });
@@ -140,6 +185,62 @@ describe("Workbench authoring service", () => {
     db.close();
   });
 
+  test("rejects a duplicate optional artifact even when the matching current artifact is older than 100", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    const candidate = discoverArtifactCandidates(db, ["session:oauth-fixed"]).find((entry) => entry.kind === "runbook")!;
+    const opened = openAgentLedAuthoringRun(db, {
+      actorId: "codex",
+      databaseId: testDatabaseId(db),
+      sessionIds: ["session:oauth-fixed"]
+    });
+    const bundle = validV3Bundle(
+      opened.run.runId,
+      opened.run.evidenceRevision,
+      "session:oauth-fixed",
+      candidate.signalEvidenceRefs.find((ref) => ref.startsWith("tool_result:"))!
+    );
+    bundle.artifacts = [validCandidateBundle(opened.run, candidate).artifact];
+
+    for (let index = 0; index <= 100; index += 1) {
+      const sessionId = `session:historical:${index}`;
+      seedSession(db, {
+        lifecycle: "ended",
+        model: "gpt-5",
+        project: "Masthead",
+        sessionId,
+        title: `Historical artifact ${index}`
+      });
+      const content = index === 0
+        ? bundle.artifacts[0]!.output
+        : { summary: `Distinct historical summary ${index}`, title: `Distinct historical runbook ${index}` };
+      const applied = applySessionArtifact(db, {
+        artifactKind: "runbook",
+        content,
+        contentFingerprint: `historical:${index}`,
+        createdBy: "test",
+        evidenceRefs: [],
+        provenanceSessionIds: [sessionId],
+        schemaVersion: "runbook-v2",
+        sessionId,
+        title: `Historical artifact ${index}`,
+        validation: { ok: true }
+      });
+      const published = publishSessionArtifact(db, applied.artifactId)!;
+      db.prepare("UPDATE session_artifacts SET published_at = ?, updated_at = ? WHERE artifact_id = ?").run(
+        `2026-07-${String(index === 0 ? 1 : 2 + Math.floor(index / 24)).padStart(2, "0")}T${String(index % 24).padStart(2, "0")}:00:00.000Z`,
+        `2026-07-${String(index === 0 ? 1 : 2 + Math.floor(index / 24)).padStart(2, "0")}T${String(index % 24).padStart(2, "0")}:00:00.000Z`,
+        published.artifactId
+      );
+    }
+
+    const submitted = submitAuthoringBundle(db, { bundle, runId: opened.run.runId });
+
+    expect(submitted.accepted).toBe(false);
+    expect(submitted.findings).toContainEqual(expect.objectContaining({ code: "duplicate_human_content" }));
+    db.close();
+  });
+
   test("rolls back V3 finish after every mutation boundary", async () => {
     const boundaries = [
       "enrichment_applied",
@@ -198,7 +299,7 @@ describe("Workbench authoring service", () => {
   });
 
   test("bounds V3 selections to 1-12 sessions and reuses only the exact current revision", async () => {
-    const db = await readyAuthoringDb();
+    const db = await readyV3AuthoringDb();
     const input = { actorId: "codex", databaseId: testDatabaseId(db), sessionIds: [" session:a ", "session:a"] };
     const first = openAgentLedAuthoringRun(db, input);
     const retry = openAgentLedAuthoringRun(db, input);
@@ -212,10 +313,34 @@ describe("Workbench authoring service", () => {
     db.close();
   });
 
+  test("requires every selected session to already be compile-ready in Workbench", async () => {
+    const db = await testDb();
+    seedSessionWithRedactedEvidence(db, "session:no-state");
+    seedSessionWithRedactedEvidence(db, "session:not-ready");
+    const notReady = ensureWorkbenchSessionState(db, "session:not-ready");
+    const rowsBefore = authoringRowCounts(db);
+
+    expect(() => openAgentLedAuthoringRun(db, {
+      actorId: "codex",
+      databaseId: testDatabaseId(db),
+      sessionIds: ["session:no-state"]
+    })).toThrow("authoring_session_not_compile_ready:session:no-state");
+    expect(readWorkbenchSessionState(db, "session:no-state")).toBeUndefined();
+
+    expect(() => openAgentLedAuthoringRun(db, {
+      actorId: "codex",
+      databaseId: testDatabaseId(db),
+      sessionIds: ["session:not-ready"]
+    })).toThrow("authoring_session_not_compile_ready:session:not-ready");
+    expect(readWorkbenchSessionState(db, "session:not-ready")).toEqual(notReady);
+    expect(authoringRowCounts(db)).toEqual(rowsBefore);
+    db.close();
+  });
+
   test("resets an open V3 run onto changed evidence without conflicting with its own stale claim", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-10T12:00:00.000Z"));
-    const db = await readyAuthoringDb();
+    const db = await readyV3AuthoringDb();
     const input = { actorId: "codex", databaseId: testDatabaseId(db), sessionIds: ["session:a"] };
     const opened = openAgentLedAuthoringRun(db, input);
     const staleClaimId = opened.run.claimIds[0]!;
@@ -233,7 +358,7 @@ describe("Workbench authoring service", () => {
   });
 
   test("returns original canonical dossiers and nonbinding suggestions without mutating the run", async () => {
-    const db = await readyAuthoringDb();
+    const db = await readyV3AuthoringDb();
     const opened = openAgentLedAuthoringRun(db, {
       actorId: "codex",
       databaseId: testDatabaseId(db),
@@ -700,9 +825,15 @@ async function readyAuthoringDb(): Promise<MastheadDatabase> {
   return db;
 }
 
+async function readyV3AuthoringDb(): Promise<MastheadDatabase> {
+  const db = await readyAuthoringDb();
+  markSessionCompileReady(db, "session:a");
+  return db;
+}
+
 
 async function submittedV3AuthoringDb(): Promise<{ db: MastheadDatabase; runId: string }> {
-  const db = await readyAuthoringDb();
+  const db = await readyV3AuthoringDb();
   const opened = openAgentLedAuthoringRun(db, {
     actorId: "codex",
     databaseId: testDatabaseId(db),
@@ -726,6 +857,15 @@ function seedSessionWithRedactedEvidence(db: MastheadDatabase, sessionId: string
     sessionId,
     title: `Authoring ${sessionId}`
   });
+}
+
+function markSessionCompileReady(db: MastheadDatabase, sessionId: string): void {
+  db.prepare(
+    `INSERT INTO workbench_session_state (
+      session_id, publication_status, next_action, transcript_status, quality_status,
+      session_enrichment_status, session_dossier_status, bug_fix_trace_status, created_at, updated_at
+    ) VALUES (?, 'publish_path', 'enrich', 'imported', 'passed', 'missing', 'missing', 'unknown', ?, ?)`
+  ).run(sessionId, "2026-07-10T11:00:00.000Z", "2026-07-10T11:00:00.000Z");
 }
 
 function testDatabaseId(db: MastheadDatabase): string {

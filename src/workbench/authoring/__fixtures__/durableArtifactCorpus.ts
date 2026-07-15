@@ -404,7 +404,9 @@ export function seedFocusedAgentLedCorpus(
     ) VALUES (?, 'host:corpus', 'runtime:corpus', ?, 'Masthead', ?, 'ended', ?, ?, ?, 'authoritative', ?, ?)`
   );
   const insertState = db.prepare(
-    "INSERT INTO workbench_session_state (session_id, publication_status) VALUES (?, 'publish_path')"
+    `INSERT INTO workbench_session_state (
+      session_id, publication_status, next_action, transcript_status, quality_status
+    ) VALUES (?, 'publish_path', 'enrich', 'imported', 'passed')`
   );
 
   for (const session of sessions) {
