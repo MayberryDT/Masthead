@@ -117,6 +117,7 @@ import { buildImportCompletionReport, settleImportSessionClassifications } from 
 import { buildImportManifestPlan, createManifestForJob } from "./import/importManifestService.ts";
 import { countImportedRecord, emptyImportResult } from "./import/importWorker.ts";
 import { runImportWorkUnit } from "./import/importWorkUnitRunner.ts";
+import { applyImportRepair, previewImportRepair } from "./import/importRepair.ts";
 import { reconcileImportedTranscript } from "../workbench/transcriptQualityReconciler.ts";
 import { getAdapterStatuses, getSourceStatuses } from "./import/sourceStatusService.ts";
 import { recordRequestDiagnostic, recordRuntimeDiagnostic, runtimeDiagnosticsSnapshot } from "./diagnostics.ts";
@@ -3027,6 +3028,39 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         ok: true,
         imports: page.jobs
       });
+      return;
+    }
+
+    if (request.method === "POST" && (url.pathname === "/imports/repair/preview" || url.pathname === "/imports/repair/apply")) {
+      try {
+        const body = JSON.parse(await readBody(request)) as { importJobIds?: unknown; planHash?: unknown; databasePath?: unknown; db?: unknown };
+        if (body.databasePath !== undefined || body.db !== undefined) throw new Error("database path is not accepted");
+        if (!Array.isArray(body.importJobIds) || !body.importJobIds.every((value) => typeof value === "string")) {
+          throw new Error("importJobIds must be an array of strings");
+        }
+        if (url.pathname.endsWith("/preview")) {
+          const preview = previewImportRepair(database, { importJobIds: body.importJobIds });
+          sendJson(request, response, config.allowedOrigins, 200, { ok: true, preview });
+          return;
+        }
+        if (typeof body.planHash !== "string" || !/^[a-f0-9]{64}$/.test(body.planHash)) throw new Error("valid planHash is required");
+        const jobsToReimport = body.importJobIds.map((importJobId) => getImportJob(database, importJobId));
+        const receipt = applyImportRepair(database, { importJobIds: body.importJobIds, planHash: body.planHash });
+        const jobs: ImportJobDto[] = [];
+        for (const existing of jobsToReimport) {
+          if (!existing) continue;
+          const source = await sourceById(existing.sourceId);
+          if (!source) continue;
+          jobs.push(queueImportJob(database, { importKind: existing.importKind, sourceId: source.sourceId }, (controls) =>
+            runImportWorkerForSource(existing.importKind, source, controls, existing.scope ?? defaultTranscriptImportScope())
+          ));
+        }
+        sendJson(request, response, config.allowedOrigins, 202, { jobs, ok: true, receipt });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const conflict = message.includes("repair plan changed") || message.includes("published artifacts block repair");
+        sendJson(request, response, config.allowedOrigins, conflict ? 409 : 400, { ok: false, error: message });
+      }
       return;
     }
 

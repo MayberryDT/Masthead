@@ -85,6 +85,7 @@ const staticReadOnlyBridgePaths = new Set([
 ]);
 
 const staticReadOnlyBridgePostPaths: Record<string, true> = {
+  "/imports/repair/preview": true,
   "/mcp/launch-config/validate": true,
   "/mcp/test-connection": true,
   "/settings/llm-provider/models": true,

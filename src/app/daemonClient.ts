@@ -794,6 +794,49 @@ export async function startImport(
   return body.job;
 }
 
+export type ImportRepairPreview = {
+  importJobIds: string[];
+  affectedSessions: string[];
+  pseudoSessionsToRemove: string[];
+  sessionsToReparse: string[];
+  automaticSuppressionsToReopen: string[];
+  outOfRangeSessionsToDefer: string[];
+  preservedSessions: string[];
+  blockedPublishedSessions: string[];
+  affectedArtifacts: string[];
+  reimportSources: string[];
+  applyAllowed: boolean;
+  planHash: string;
+};
+
+export type ImportRepairReceipt = {
+  importJobIds: string[];
+  planHash: string;
+  removedSessions: string[];
+  resetSessions: string[];
+  reopenedSuppressions: string[];
+  preservedSessions: string[];
+  blockedPublishedSessions: string[];
+  reimportSources: string[];
+};
+
+export async function previewImportRepair(importJobIds: string[], baseUrl = defaultLiveProjectionUrl()): Promise<ImportRepairPreview> {
+  const body = await postJson<{ ok: true; preview: ImportRepairPreview }>(baseUrl, "/imports/repair/preview", {
+    body: { importJobIds }, label: "import repair preview"
+  });
+  return body.preview;
+}
+
+export async function applyImportRepair(
+  input: { importJobIds: string[]; planHash: string },
+  baseUrl = defaultLiveProjectionUrl()
+): Promise<{ jobs: ImportJob[]; receipt: ImportRepairReceipt }> {
+  const body = await postJson<{ ok: true; jobs: ImportJob[]; receipt: ImportRepairReceipt }>(baseUrl, "/imports/repair/apply", {
+    body: input, label: "import repair apply"
+  });
+  return { jobs: body.jobs, receipt: body.receipt };
+}
+
 export async function listImports(
   baseUrl = defaultLiveProjectionUrl(),
   options: {

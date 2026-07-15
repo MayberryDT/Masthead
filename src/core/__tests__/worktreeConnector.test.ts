@@ -184,6 +184,8 @@ describe("Masthead worktree connector planning", () => {
   });
 
   test("still blocks mutations", () => {
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/imports/repair/preview")).toBe(true);
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/imports/repair/apply")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/imports")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/data/delete")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/runs")).toBe(false);
