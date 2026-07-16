@@ -8,6 +8,7 @@ import type {
   ImportRepairSourcePlan
 } from "../../shared/importRepair.ts";
 import type { MastheadDatabase } from "../db/sqlite.ts";
+import { recordImportRepairReplacements } from "../db/sessionImportHealthRepository.ts";
 import { withImmediateTransaction } from "../db/sqlite.ts";
 export type { ImportRepairPreview, ImportRepairReceipt } from "../../shared/importRepair.ts";
 
@@ -160,6 +161,10 @@ export function applyImportRepair(
     if (lockedPreview.reimportSources.length > 0 && !exactReimportsMatchPlans(db, reimportJobIds, viableJobPlans)) {
       throw new Error("exact replacement jobs required");
     }
+    recordImportRepairReplacements(db, viableJobPlans.map((job, index) => ({
+      originalImportJobId: job.selectedJobId,
+      replacementImportJobId: reimportJobIds[index]!
+    })));
     return {
       blockedPublishedSessions: lockedPreview.blockedPublishedSessions,
       cursorSourcesToReset: lockedPreview.cursorSourcesToReset,

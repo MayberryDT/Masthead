@@ -3,6 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { migrateDatabase } from "../../db/schema.ts";
+import {
+  recordSessionImportHealth,
+  summarizeCurrentSessionImportHealth
+} from "../../db/sessionImportHealthRepository.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../../db/sqlite.ts";
 import { applyImportRepair, previewImportRepair } from "../importRepair.ts";
 import type { ImportRepairJobPlan } from "../../../shared/importRepair.ts";
@@ -20,6 +24,40 @@ afterEach(async () => {
 });
 
 describe("import repair", () => {
+  test("successful replacement jobs resolve the original global repair warning", async () => {
+    const db = await repairDatabase();
+    seedImportUnit(db, "job:grok", "source:grok");
+    recordSessionImportHealth(db, {
+      evidenceRevision: "sha256:broken-grok",
+      importJobId: "job:grok",
+      reason: "partial_parse",
+      sessionId: "session:grok-fragment",
+      status: "repair_required",
+      updatedAt: "2026-07-15T12:05:00.000Z",
+      workUnitId: "unit:job:grok"
+    });
+    const preview = previewImportRepair(db, {
+      importJobIds: ["job:grok"],
+      sourceMappings: availableSources
+    });
+
+    const receipt = applyImportRepair(db, {
+      importJobIds: ["job:grok"],
+      planHash: preview.planHash,
+      sourceMappings: availableSources,
+      stageReimports: (plans) => stageReplacementJobs(db, plans)
+    });
+
+    expect(summarizeCurrentSessionImportHealth(db).repairRequired).toBe(1);
+    db.prepare("UPDATE import_jobs SET status = 'succeeded' WHERE import_job_id = ?")
+      .run(receipt.reimportJobIds[0]);
+    expect(summarizeCurrentSessionImportHealth(db)).toMatchObject({
+      importJobIds: [],
+      reasons: [],
+      repairRequired: 0
+    });
+  });
+
   test("repair preview scopes every deletion and reimport to selected import jobs without writing", async () => {
     const db = await repairDatabase();
     const before = databaseChanges(db);

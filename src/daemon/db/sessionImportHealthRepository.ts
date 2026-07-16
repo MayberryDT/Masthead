@@ -137,8 +137,16 @@ export function summarizeCurrentSessionImportHealth(db: MastheadDatabase): {
 } {
   const rows = db.prepare(
     `SELECT import_job_id AS importJobId, reason
-    FROM session_import_health
+    FROM session_import_health health
     WHERE status = 'repair_required'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM import_repair_replacements replacements
+        JOIN import_jobs replacement_jobs
+          ON replacement_jobs.import_job_id = replacements.replacement_import_job_id
+        WHERE replacements.original_import_job_id = health.import_job_id
+          AND replacement_jobs.status = 'succeeded'
+      )
     ORDER BY import_job_id, reason, work_unit_id`
   ).all() as Array<{ importJobId: string; reason: string | null }>;
   const reasonCounts = new Map<string, number>();
@@ -152,6 +160,20 @@ export function summarizeCurrentSessionImportHealth(db: MastheadDatabase): {
       .toSorted((left, right) => right.count - left.count || left.reason.localeCompare(right.reason)),
     repairRequired: rows.length
   };
+}
+
+export function recordImportRepairReplacements(
+  db: MastheadDatabase,
+  replacements: Array<{ originalImportJobId: string; replacementImportJobId: string }>
+): void {
+  const statement = db.prepare(
+    `INSERT INTO import_repair_replacements (
+      original_import_job_id, replacement_import_job_id
+    ) VALUES (?, ?)`
+  );
+  for (const replacement of replacements) {
+    statement.run(replacement.originalImportJobId, replacement.replacementImportJobId);
+  }
 }
 
 const HEALTH_SELECT = `SELECT

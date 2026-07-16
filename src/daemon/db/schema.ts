@@ -145,6 +145,11 @@ const migrations = [
     version: 28,
     name: "028_session_transcript_fingerprints",
     path: resolve(currentDir, "migrations/028_session_transcript_fingerprints.sql")
+  },
+  {
+    version: 29,
+    name: "029_import_repair_replacements",
+    path: resolve(currentDir, "migrations/029_import_repair_replacements.sql")
   }
 ];
 
@@ -187,6 +192,7 @@ const criticalTables = [
   "import_failure_groups",
   "import_session_impacts",
   "session_import_health",
+  "import_repair_replacements",
   "session_transcript_fingerprints",
   "legacy_migrations",
   "board_headline_frames",
