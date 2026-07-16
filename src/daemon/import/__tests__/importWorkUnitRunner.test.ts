@@ -210,7 +210,7 @@ describe("import work unit runner", () => {
     expect(readWorkbenchSessionState(db, partial.sessionIds[0])).toBeUndefined();
   });
 
-  test("a later partial unit reopens provisional package enrollment for the same import and canonical session", async () => {
+  test("a later partial unit removes provisional package enrollment for the same import and canonical session", async () => {
     const complete = await runParsedMessageUnit({ completeness: "complete", sourceSessionId: "merged-reopen", unitLabel: "complete-first" });
     expect(readWorkbenchSessionState(db, complete.sessionIds[0])).toBeDefined();
     const partial = await runParsedMessageUnit({ completeness: "partial", sourceSessionId: "merged-reopen", unitLabel: "partial-second" });
@@ -220,11 +220,7 @@ describe("import work unit runner", () => {
       reason: "partial_parse",
       status: "repair_required"
     });
-    expect(readWorkbenchSessionState(db, partial.sessionIds[0])).toMatchObject({
-      nextAction: "review_quality",
-      publicationStatus: "publish_path",
-      qualityStatus: "unchecked"
-    });
+    expect(readWorkbenchSessionState(db, partial.sessionIds[0])).toBeUndefined();
   });
 
   test.each([
