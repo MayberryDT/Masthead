@@ -16,9 +16,11 @@ import { buildObservabilityDemoBoard, observabilitySessionTotal } from "../ui/ob
 import { OperationsPanel } from "../ui/OperationsPanel";
 import {
   prefersReducedMotion,
+  readStoredKeepRunningInTray,
   readStoredMotionDisabled,
   readStoredSessionEndedNotificationsEnabled,
   writeStoredMotionDisabled,
+  writeStoredKeepRunningInTray,
   writeStoredSessionEndedNotificationsEnabled
 } from "../ui/motionPreference";
 import { emitSessionTransitionNotifications } from "./liveSessionEndedNotifications";
@@ -51,7 +53,7 @@ import {
   normalizeLiveBoardProjection,
 } from "./liveProjectionClient";
 import { startLiveConnector } from "./connectorClient";
-import { isDesktopBridgeAvailable } from "./desktopBridge";
+import { invokeDesktopCommand, isDesktopBridgeAvailable } from "./desktopBridge";
 import { useMastheadConnection } from "./connection/useMastheadConnection";
 import { MastheadApiClient } from "./api/MastheadApiClient";
 import { ConnectionRecoveryPanel, type CollectorStartupLogEntry, type ConnectorActionView } from "../ui/ConnectionRecoveryPanel";
@@ -104,6 +106,7 @@ const emptyLiveBoard: LiveBoardProjection = {
 
 export function App() {
   const [activeSurface, setActiveSurface] = useState<AppSurface>(() => readOnboardingDismissed() ? "now" : "sources");
+  const [importReceiptIntent, setImportReceiptIntent] = useState<{ importJobId: string }>();
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<BoardFilter>("all");
@@ -114,6 +117,7 @@ export function App() {
   const [refreshRateMs, setRefreshRateMs] = useState(10_000);
   const [density, setDensity] = useState<CardDensity>("comfortable");
   const [motionDisabled, setMotionDisabled] = useState(() => readStoredMotionDisabled());
+  const [keepRunningInTray, setKeepRunningInTray] = useState(() => readStoredKeepRunningInTray());
   const [sessionEndedNotificationsEnabled, setSessionEndedNotificationsEnabled] = useState(() =>
     readStoredSessionEndedNotificationsEnabled()
   );
@@ -281,6 +285,11 @@ export function App() {
   useEffect(() => {
     writeStoredMotionDisabled(motionDisabled);
   }, [motionDisabled]);
+
+  useEffect(() => {
+    writeStoredKeepRunningInTray(keepRunningInTray);
+    void invokeDesktopCommand("set_keep_running_in_tray_command", { enabled: keepRunningInTray });
+  }, [keepRunningInTray]);
 
   useEffect(() => {
     writeStoredSessionEndedNotificationsEnabled(sessionEndedNotificationsEnabled);
@@ -628,6 +637,7 @@ export function App() {
           imports={imports}
           importTotal={importPage.total}
           importFilterRuntime={importFilterRuntime}
+          importReceiptIntent={importReceiptIntent}
           lastRefreshAt={sourcesLastRefreshAt}
           setup={sourcesSetup}
           busy={sourcesBusy || sourcesConnectors.busy}
@@ -662,11 +672,14 @@ export function App() {
           onConnectSelected={handleConnectSelectedSources}
           onExcludePath={handleExcludeSourcePath}
           onImportMetadata={handleImportMetadata}
+          onImportReceiptIntentConsumed={() => setImportReceiptIntent(undefined)}
+          onLoadImportReport={sourcesController.loadImportReport}
           onLoadAdapterSources={handleLoadAdapterSources}
           onOpenImportJobsForRuntime={handleOpenImportJobsForRuntime}
           onOpenOnboarding={sourcesConnectors.openOnboarding}
           onPollImports={handlePollActiveImports}
           onPreviewImport={sourcesController.previewImport}
+          onPreviewImportRepair={sourcesController.previewImportRepair}
           onRepairSources={handleRepairSources}
           onRefresh={() => {
             // Sources V2: refresh only live harness connections (not history import scan).
@@ -732,6 +745,11 @@ export function App() {
           notAddedOpen={workbench.notAddedOpen}
           notAddedSessions={workbench.notAddedSessions}
           notAddedSummary={workbench.notAddedSummary}
+          importHealthSummary={workbench.importHealthSummary}
+          onOpenImportReceipt={(importJobId) => {
+            setImportReceiptIntent({ importJobId });
+            setActiveSurface("sources");
+          }}
           onClearSelection={workbench.clearSelection}
           onRetry={workbench.retry}
           onSelectAll={workbench.selectAll}
@@ -761,6 +779,7 @@ export function App() {
             deletionScopeKind={settingsData.deletionScopeKind}
             deletionScopeTarget={settingsData.deletionScopeTarget}
             localDataStatus={settingsData.localDataStatus}
+            keepRunningInTray={keepRunningInTray}
             motionDisabled={motionDisabled}
             sessionEndedNotificationsEnabled={sessionEndedNotificationsEnabled}
             onSessionEndedNotificationsEnabledChange={setSessionEndedNotificationsEnabled}
@@ -771,6 +790,7 @@ export function App() {
             onDeletionScopeKindChange={settingsData.changeDeletionScopeKind}
             onDeletionScopeTargetChange={settingsData.changeDeletionScopeTarget}
             onExportLocalData={settingsData.exportLocalData}
+            onKeepRunningInTrayChange={setKeepRunningInTray}
             onMotionDisabledChange={handleMotionDisabledChange}
             onReloadSettings={() => void settingsData.loadSettingsState()}
             onRequestPruneLocalData={settingsData.requestPruneLocalData}

@@ -15,6 +15,17 @@ The main idea is simple:
 
 Live connector events are part of that flow: `src/daemon/server.ts` routes ingest by runtime, and `src/core/liveIdentity.ts` scopes canonical live sessions by host plus runtime so multiple harnesses can share a source session ID without colliding.
 
+Transcript adapters own unit boundaries and source-session identity; the daemon owns manifests,
+scope decisions, import health, canonical persistence, and Workbench reconciliation. Recent imports
+exclude old units on a fresh run, but may include an old changed unit when an existing unit cursor
+proves it is an incremental refresh. Completion reports expose capped/deferred units and the
+timestamp basis used for every planned unit.
+
+Import health is not a quality verdict. Partial parses, unrecognized schemas, and missing or
+ambiguous identity are repair-required import outcomes and never become Workbench Not Added
+reasons. Quality reconciliation starts only after complete import evidence. Automatic suppression
+can reopen when the evidence revision changes; user exclusion remains sticky.
+
 **Published knowledge** lives in artifact tables (`session_artifacts` + provenance), not as “Logbook session rows.” Schema migration `018_artifact_first_logbook` introduces that model. Dogfood may wipe published artifact state and rebuild via Workbench; see `docs/reference/artifact-first-logbook-cutover.md`.
 
 ## Daemon API
@@ -30,12 +41,28 @@ Important contracts:
 - **`GET /logbook/search`** is an artifact-only compatibility alias. It returns `artifacts`, never session rows.
 - `GET /sessions` and session detail routes remain for evidence, Workbench, and compile — not the primary Logbook listing.
 - `GET /workbench/sessions` (and related Workbench reads) expose package-path pipeline state.
+- `GET /workbench/authoring/candidates` exposes keyset-paginated positive-evidence candidates and advances one bounded discovery page.
+- `POST /workbench/authoring/runs` opens one selection-scoped V3 run from `{ actorId, databaseId, sessionIds }`.
+- `POST /workbench/authoring/runs/:runId/finish` is the only normal dossier-publication path; it applies current agent enrichment before rebuilding canonical dossier snapshots.
 - `GET /sources/connectors` and hook routes support Sources V2 live connect.
 - Write endpoints (`/ingest`, Workbench mutations, `/data/delete`, etc.) stay local to the daemon and are not exposed through MCP.
 
 `POST /ingest` uses the runtime query parameter or `x-masthead-runtime` header. Connector tests use a validation-only ingest variant so installer/test flows can verify the hook path without mutating the store when appropriate.
 
-Workbench enrichment and kind authoring go through Workbench/CLI paths with receipts. There is **no Logbook bulk-enrich UI or primary bulk-enrich product path**.
+Import repair is provenance-scoped and two-phase. Preview is read-only and reports affected
+sessions, pseudo-sessions, out-of-range sessions, automatic suppressions eligible to reopen,
+preservation reasons, published-artifact blockers, source mappings, and a SHA-256 plan hash. Apply
+requires that exact unchanged hash. It preserves live/shared/manual/published state, refuses an
+unsafe or drifted plan, and stages replacement imports only for eligible source/job plans. Always
+exercise repair against a disposable database copy before authorizing work on an active store.
+
+Workbench enrichment and optional-artifact authoring go through Workbench/CLI paths with receipts. Normal `mastheadctl workbench` authoring commands are thin daemon HTTP calls. A V3 run covers 1–12 selected sessions; the agent enriches every selected session and may submit zero or more grounded optional artifacts. There is **no Logbook bulk-enrich UI or primary bulk-enrich product path**.
+
+The original dossier is different: the daemon snapshots `SessionDossierDto` as
+`canonical-session-dossier-v1`, and Logbook renders that immutable body through
+the original dossier presentation. An authoring agent has no dossier-body write
+path. Optional artifacts (`runbook`, `adr`, `incident_timeline`) exist only for
+positive-evidence candidates; no candidate means no optional work and no N/A prose.
 
 ## MCP
 
@@ -59,7 +86,27 @@ Session/transcript tools remain for compile-time evidence. Full list: `docs/refe
 
 `src/enrichment/enrichmentCoordinator.ts` turns session facts into durable derived records (capsules, live summaries, search projections). The pipeline is evidence-sensitive: it fingerprints facts and avoids rewriting a current result when the fingerprint and provider match.
 
-Published multi-kind artifacts (dossier / runbook / ADR / timeline) are authored and published on the Workbench path with per-artifact gates; enrichment alone does not put a row in Logbook.
+Published knowledge reaches Logbook on two explicit paths: the daemon publishes
+canonical dossier snapshots, while a candidate-sized V2 run validates and
+atomically publishes one supported runbook, ADR, or incident timeline. Enrichment
+alone does not put a row in Logbook.
+
+## Failed V1 recovery
+
+Recovery is intentionally CLI-only and offline; there are no recovery HTTP or MCP
+routes. `audit-v1-generation --db <path> --json` is read-only and recognizes only
+the exact failed population. `prepare-v1-recovery --db <path> --json` acquires
+exclusive writer ownership and retains one verified SQLite-consistent backup.
+`invalidate-v1-generation --db <path> --audit-hash <sha256> --confirm --json`
+re-audits and removes only the hash-matched artifact/search/provenance rows in one
+transaction, resets affected sessions for canonical dossier publication and V2
+candidate discovery, releases matching claims, and preserves V1 runs and receipts.
+`restore-v1-recovery --db <active> --backup <sibling masthead.sqlite.backup-current>
+--audit-hash <sha256> --confirm --json` is the offline rollback command. It holds
+daemon-equivalent ownership through staged verification, atomic replacement, and
+post-restore verification while preserving the verified backup.
+Production recovery requires separate authorization after the fixture release gate
+and temporary-copy rehearsal.
 
 ## Identity and privacy notes
 

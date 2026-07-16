@@ -227,6 +227,80 @@ describe("session transcript repository", () => {
     db.close();
   });
 
+  test("classifies agent control envelopes as non-narrative canonical evidence", async () => {
+    const db = await openTestDatabase();
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session-control-envelopes",
+      title: "Control envelopes"
+    });
+    db.prepare(
+      `UPDATE runtimes
+       SET runtime_kind = 'codex'
+       WHERE runtime_id = (SELECT runtime_id FROM sessions WHERE session_id = ?)`
+    ).run("session-control-envelopes");
+    clearCanonicalRows(db, "session-control-envelopes");
+    insertMessage(
+      db,
+      "session-control-envelopes",
+      "skill",
+      "user",
+      "<skill>\nInternal workflow instructions only.",
+      "2026-06-26T13:00:00.000Z"
+    );
+    insertMessage(
+      db,
+      "session-control-envelopes",
+      "agents",
+      "user",
+      "# AGENTS.md instructions for /tmp/example\nInternal repository instructions only.",
+      "2026-06-26T13:01:00.000Z"
+    );
+    insertMessage(
+      db,
+      "session-control-envelopes",
+      "current-modes",
+      "user",
+      "<multi_agent_mode>Internal</multi_agent_mode>\n<collaboration_mode>Internal</collaboration_mode>",
+      "2026-06-26T13:01:30.000Z"
+    );
+    insertMessage(
+      db,
+      "session-control-envelopes",
+      "standalone-instructions",
+      "user",
+      "<INSTRUCTIONS>Internal repository instructions only.</INSTRUCTIONS>",
+      "2026-06-26T13:01:45.000Z"
+    );
+    insertMessage(
+      db,
+      "session-control-envelopes",
+      "mixed-agents-and-prompt",
+      "user",
+      [
+        "# AGENTS.md instructions for /tmp/example",
+        "<INSTRUCTIONS>Internal repository instructions only.</INSTRUCTIONS>",
+        "<environment_context><cwd>/tmp/example</cwd></environment_context>",
+        "Use the recorded decision to prepare the migration plan."
+      ].join("\n"),
+      "2026-06-26T13:02:00.000Z"
+    );
+
+    const result = getSessionTranscript(db, { sessionId: "session-control-envelopes" });
+
+    expect(result.items).toHaveLength(5);
+    expect(result.items.map((item) => item.lowValue)).toEqual([true, true, true, true, false]);
+    expect(result.items[4]?.narrativeText).toBe("Use the recorded decision to prepare the migration plan.");
+    expect(result.coverage).toMatchObject({
+      hasUsableTranscript: true,
+      lowValueItems: 4,
+      messages: 5
+    });
+    db.close();
+  });
+
   test("pages old tool-heavy transcripts without materializing every tool result body", async () => {
     const db = await openTestDatabase();
     seedToolHeavyTranscriptSession(db, 180);

@@ -4,13 +4,22 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
-import type { WorkbenchAuthoringBundle } from "../../shared/workbenchAuthoring.ts";
+import type {
+  WorkbenchAuthoringBundle,
+  WorkbenchAuthoringBundleV3
+} from "../../shared/workbenchAuthoring.ts";
 import type { DaemonConfig } from "../config.ts";
-import { seedSession } from "../db/__tests__/sessionTestHelpers.ts";
+import { markSessionCompileReady, seedSession } from "../db/__tests__/sessionTestHelpers.ts";
 import { getOrCreateDatabaseIdentity } from "../db/schema.ts";
-import { applySessionArtifact, publishSessionArtifact } from "../db/sessionArtifactRepository.ts";
 import { createMastheadDaemon, type MastheadDaemon } from "../server.ts";
 import type { MastheadDatabase } from "../db/sqlite.ts";
+import {
+  openAgentLedAuthoringRun,
+  openAuthoringRun
+} from "../../workbench/authoring/authoringService.ts";
+import {
+  seedDurableArtifactCorpus
+} from "../../workbench/authoring/__fixtures__/durableArtifactCorpus.ts";
 import {
   getWorkbenchAuthoringBodyLimit,
   isWorkbenchAuthoringPath,
@@ -28,18 +37,19 @@ afterEach(async () => {
 });
 
 describe("Workbench authoring HTTP API", () => {
-  test("runs the complete daemon-owned authoring lifecycle", async () => {
+  test("advertises V3 capabilities and preserves historical run reads", async () => {
     const { baseUrl, daemon } = await startTestDaemon();
     seedAuthoringSession(daemon, "session:a");
 
     const capabilities = await getJson(baseUrl, "/workbench/authoring/capabilities");
     expect(capabilities.body).toMatchObject({
-      bundleVersion: "workbench-authoring-v1",
+      bundleVersion: "workbench-authoring-v3",
       capability: "artifact_authoring",
       command: expect.any(String),
       databaseId: getOrCreateDatabaseIdentity(daemon.database),
-      evidencePolicy: "all_canonical_redacted_evidence",
-      operations: ["open", "status", "evidence", "submit", "finish"],
+      evidencePolicy: "selected_session_canonical_evidence",
+      maxSessionsPerRun: 12,
+      operations: ["suggestions", "open", "status", "evidence", "context", "submit", "finish"],
       protocol: "masthead.workbench.authoring/v1",
       transport: "daemon_http"
     });
@@ -70,16 +80,7 @@ describe("Workbench authoring HTTP API", () => {
       else process.env.MASTHEAD_CLI_COMMAND = previousCommand;
     }
 
-    const opened = await postJson(
-      baseUrl,
-      "/workbench/authoring/runs",
-      {
-        actorId: "codex",
-        databaseId: capabilities.body.databaseId,
-        sessionIds: ["session:a"]
-      },
-      201
-    );
+    const opened = openLegacyRun(daemon, "session:a", "codex");
     expect(opened.status).toBe(201);
     expect(opened.body).toMatchObject({ ok: true, run: { sessionIds: ["session:a"], status: "open" } });
     const runId = opened.body.run.runId as string;
@@ -97,30 +98,140 @@ describe("Workbench authoring HTTP API", () => {
     const submitted = await postJson(
       baseUrl,
       `/workbench/authoring/runs/${encodeURIComponent(runId)}/submit`,
-      validBundle(runId, opened.body.run.evidenceRevision, "session:a")
+      validBundle(runId, opened.body.run.evidenceRevision, "session:a"),
+      409
     );
-    expect(submitted).toMatchObject({ status: 200, body: { accepted: true, ok: true, run: { status: "ready_to_finish" } } });
+    expect(submitted.body).toMatchObject({ error: { code: "authoring_contract_audit_only" }, ok: false });
 
-    const finished = await postJson(baseUrl, `/workbench/authoring/runs/${encodeURIComponent(runId)}/finish`, {});
-    expect(finished).toMatchObject({
-      status: 200,
-      body: { ok: true, receipt: { resolvedSessionIds: ["session:a"], runId } }
-    });
-
-    const retried = await postJson(baseUrl, `/workbench/authoring/runs/${encodeURIComponent(runId)}/finish`, {});
-    expect(retried.body.receipt).toEqual(finished.body.receipt);
+    const finished = await postJson(baseUrl, `/workbench/authoring/runs/${encodeURIComponent(runId)}/finish`, {}, 409);
+    expect(finished.body).toMatchObject({ error: { code: "authoring_contract_audit_only" }, ok: false });
   });
 
-  test("keeps deterministic revision findings in a successful domain response", async () => {
+  test("exposes advisory suggestions and canonical context for selected sessions", async () => {
+    const { baseUrl, daemon } = await startTestDaemon();
+    seedDurableArtifactCorpus(daemon.database);
+    const sessionIds = ["session:oauth-fixed", "session:migration-fixed"];
+    const normalizedSessionIds = [...sessionIds].sort();
+
+    const suggestions = await postJson(baseUrl, "/workbench/authoring/suggestions", { sessionIds });
+    expect(suggestions.body).toEqual(
+      expect.arrayContaining([expect.objectContaining({ advisory: true })])
+    );
+
+    const opened = await postJson(baseUrl, "/workbench/authoring/runs", {
+      actorId: "agent:test",
+      databaseId: getOrCreateDatabaseIdentity(daemon.database),
+      sessionIds
+    }, 201);
+    expect(opened.body.run).toMatchObject({
+      contractVersion: "workbench-authoring-v3",
+      sessionIds: normalizedSessionIds
+    });
+    expect(opened.body.run).not.toHaveProperty("candidateId");
+
+    const context = await getJson(
+      baseUrl,
+      `/workbench/authoring/runs/${encodeURIComponent(opened.body.run.runId)}/context`
+    );
+    expect(context.body).toMatchObject({
+      evidenceRevision: opened.body.run.evidenceRevision,
+      ok: true,
+      runId: opened.body.run.runId,
+      sessions: normalizedSessionIds.map((sessionId) => ({ sessionId })),
+      suggestions: expect.arrayContaining([expect.objectContaining({ advisory: true })])
+    });
+    expect(context.body.sessions.every((entry: any) => entry.dossier)).toBe(true);
+  });
+
+  test("submits and finishes a V3 selection through HTTP", async () => {
+    const { baseUrl, daemon } = await startTestDaemon();
+    seedAuthoringSession(daemon, "session:v3");
+    const opened = await postJson(baseUrl, "/workbench/authoring/runs", {
+      actorId: "agent:test",
+      databaseId: getOrCreateDatabaseIdentity(daemon.database),
+      sessionIds: ["session:v3"]
+    }, 201);
+    const runId = opened.body.run.runId as string;
+    const bundle = validV3Bundle(runId, opened.body.run.evidenceRevision, "session:v3");
+
+    const submitted = await postJson(
+      baseUrl,
+      `/workbench/authoring/runs/${encodeURIComponent(runId)}/submit`,
+      bundle
+    );
+    expect(submitted.body).toMatchObject({ accepted: true, ok: true, run: { status: "ready_to_finish" } });
+
+    const finished = await postJson(baseUrl, `/workbench/authoring/runs/${encodeURIComponent(runId)}/finish`);
+    expect(finished.body).toMatchObject({
+      ok: true,
+      receipt: {
+        contractVersion: "workbench-authoring-v3",
+        optionalArtifacts: [],
+        resolvedSessionIds: ["session:v3"],
+        runId
+      }
+    });
+    expect((await postJson(baseUrl, `/workbench/authoring/runs/${encodeURIComponent(runId)}/finish`)).body)
+      .toEqual(finished.body);
+  });
+
+  test("refuses to finish a raw session without current agent enrichment", async () => {
+    const { baseUrl, daemon } = await startTestDaemon();
+    seedAuthoringSession(daemon, "session:raw-finish");
+    const opened = await postJson(baseUrl, "/workbench/authoring/runs", {
+      actorId: "agent:test",
+      databaseId: getOrCreateDatabaseIdentity(daemon.database),
+      sessionIds: ["session:raw-finish"]
+    }, 201);
+    const runId = opened.body.run.runId as string;
+    const bundle = validV3Bundle(runId, opened.body.run.evidenceRevision, "session:raw-finish");
+    await postJson(baseUrl, `/workbench/authoring/runs/${encodeURIComponent(runId)}/submit`, bundle);
+
+    daemon.database
+      .prepare("UPDATE workbench_authoring_runs SET bundle_json = ? WHERE run_id = ?")
+      .run(JSON.stringify({ ...bundle, sessionEnrichments: [] }), runId);
+
+    const finished = await postJson(
+      baseUrl,
+      `/workbench/authoring/runs/${encodeURIComponent(runId)}/finish`,
+      {},
+      409
+    );
+    expect(finished.body.error.code).toBe("session_enrichment_required");
+
+    const logbook = await getJson(baseUrl, "/logbook/artifacts?q=raw%20finish");
+    expect(logbook.body.artifacts).toHaveLength(0);
+  });
+
+  test("rejects candidate-based and oversized V3 run opens", async () => {
+    const { baseUrl, daemon } = await startTestDaemon();
+    seedAuthoringSession(daemon, "session:a");
+    const databaseId = getOrCreateDatabaseIdentity(daemon.database);
+
+    expect((await postJson(baseUrl, "/workbench/authoring/runs", {
+      actorId: "agent:test",
+      candidateId: "candidate:legacy",
+      databaseId,
+      sessionIds: ["session:a"]
+    }, 400)).body).toMatchObject({ error: { code: "candidate_id_not_allowed" }, ok: false });
+
+    expect((await postJson(baseUrl, "/workbench/authoring/runs", {
+      actorId: "agent:test",
+      databaseId,
+      sessionIds: Array.from({ length: 13 }, (_, index) => `session:${index}`)
+    }, 400)).body).toMatchObject({ error: { code: "authoring_session_count_invalid" }, ok: false });
+
+    expect((await postJson(baseUrl, "/workbench/authoring/runs", {
+      actorId: "agent:test",
+      databaseId,
+      sessionIds: Array.from({ length: 13 }, () => "session:a")
+    }, 400)).body).toMatchObject({ error: { code: "authoring_session_count_invalid" }, ok: false });
+  });
+
+  test("keeps historical submissions audit-only", async () => {
     const { baseUrl, daemon } = await startTestDaemon();
     seedAuthoringSession(daemon, "session:revision");
-    const databaseId = getOrCreateDatabaseIdentity(daemon.database);
-    const opened = await postJson(
-      baseUrl,
-      "/workbench/authoring/runs",
-      { actorId: "codex", databaseId, sessionIds: ["session:revision"] },
-      201
-    );
+    const opened = openLegacyRun(daemon, "session:revision", "codex");
     const runId = opened.body.run.runId as string;
 
     const submitted = await postJson(baseUrl, `/workbench/authoring/runs/${encodeURIComponent(runId)}/submit`, {
@@ -132,11 +243,9 @@ describe("Workbench authoring HTTP API", () => {
       padding: "x".repeat(1_100_000),
       runId,
       sessionPackages: []
-    });
+    }, 409);
 
-    expect(submitted.status).toBe(200);
-    expect(submitted.body).toMatchObject({ accepted: false, ok: true, run: { status: "needs_revision" } });
-    expect(submitted.body.findings.length).toBeGreaterThan(0);
+    expect(submitted.body).toMatchObject({ error: { code: "authoring_contract_audit_only" }, ok: false });
   });
 
   test("maps malformed, missing, identity, and state failures to transport statuses", async () => {
@@ -177,12 +286,7 @@ describe("Workbench authoring HTTP API", () => {
     });
 
     const databaseId = getOrCreateDatabaseIdentity(daemon.database);
-    const opened = await postJson(
-      baseUrl,
-      "/workbench/authoring/runs",
-      { actorId: "codex", databaseId, sessionIds: ["session:errors"] },
-      201
-    );
+    const opened = openLegacyRun(daemon, "session:errors", "codex");
     expect(
       (
         await postJson(
@@ -192,7 +296,7 @@ describe("Workbench authoring HTTP API", () => {
           409
         )
       ).body
-    ).toMatchObject({ ok: false, error: { code: "authoring_run_not_ready" } });
+    ).toMatchObject({ ok: false, error: { code: "authoring_contract_audit_only" } });
 
     seedAuthoringSession(daemon, "session:no-evidence");
     for (const table of ["messages", "tool_results", "tool_calls", "file_effects"]) {
@@ -212,8 +316,11 @@ describe("Workbench authoring HTTP API", () => {
 
   test("matches only authoring routes and gives submit a five MiB body budget", () => {
     expect(isWorkbenchAuthoringPath("/workbench/authoring/capabilities")).toBe(true);
+    expect(isWorkbenchAuthoringPath("/workbench/authoring/suggestions")).toBe(true);
     expect(isWorkbenchAuthoringPath("/workbench/authoring/runs")).toBe(true);
     expect(isWorkbenchAuthoringPath("/workbench/authoring/runs/run%3A1/evidence")).toBe(true);
+    expect(isWorkbenchAuthoringPath("/workbench/authoring/runs/run%3A1/context")).toBe(true);
+    expect(isWorkbenchAuthoringPath("/workbench/authoring/candidates")).toBe(false);
     expect(isWorkbenchAuthoringPath("/workbench/sessions")).toBe(false);
     expect(getWorkbenchAuthoringBodyLimit("/workbench/authoring/runs/run%3A1/submit", 1024)).toBe(5 * 1024 * 1024);
     expect(getWorkbenchAuthoringBodyLimit("/workbench/authoring/runs", 1024)).toBe(1024);
@@ -263,17 +370,12 @@ describe("Workbench authoring HTTP API", () => {
   test("returns sanitized 500 responses for corrupted run invariants and unexpected adapter errors", async () => {
     const { baseUrl, daemon } = await startTestDaemon();
     seedAuthoringSession(daemon, "session:corrupted");
-    const opened = await postJson(
-      baseUrl,
-      "/workbench/authoring/runs",
-      {
-        actorId: "codex",
-        databaseId: getOrCreateDatabaseIdentity(daemon.database),
-        sessionIds: ["session:corrupted"]
-      },
-      201
-    );
-    const runId = opened.body.run.runId as string;
+    const opened = openAgentLedAuthoringRun(daemon.database, {
+      actorId: "codex",
+      databaseId: getOrCreateDatabaseIdentity(daemon.database),
+      sessionIds: ["session:corrupted"]
+    });
+    const runId = opened.run.runId;
     daemon.database
       .prepare("UPDATE workbench_authoring_runs SET status = 'ready_to_finish', bundle_json = NULL WHERE run_id = ?")
       .run(runId);
@@ -315,61 +417,6 @@ describe("Workbench authoring HTTP API", () => {
     expect(JSON.stringify(unexpected)).not.toContain("secret database invariant detail");
   });
 
-  test("returns 409 when an accepted contribution becomes invalid before finish", async () => {
-    const { baseUrl, daemon } = await startTestDaemon();
-    seedAuthoringSession(daemon, "session:contribution");
-    const existing = applySessionArtifact(daemon.database, {
-      artifactKind: "runbook",
-      content: { title: "Published contribution" },
-      contentFingerprint: "published-contribution",
-      createdBy: "test",
-      evidenceRefs: ["message:session:contribution:message"],
-      provenanceSessionIds: ["session:contribution"],
-      schemaVersion: "runbook-v1",
-      sessionId: "session:contribution",
-      title: "Published contribution",
-      validation: { ok: true }
-    });
-    publishSessionArtifact(daemon.database, existing.artifactId);
-    const opened = await postJson(
-      baseUrl,
-      "/workbench/authoring/runs",
-      {
-        actorId: "codex",
-        databaseId: getOrCreateDatabaseIdentity(daemon.database),
-        sessionIds: ["session:contribution"]
-      },
-      201
-    );
-    const runId = opened.body.run.runId as string;
-    const bundle = validBundle(runId, opened.body.run.evidenceRevision, "session:contribution");
-    bundle.notApplicable = bundle.notApplicable.filter((decision) => decision.kind !== "runbook");
-    bundle.contributions = [
-      {
-        kind: "runbook",
-        publishedArtifactId: existing.artifactId,
-        sessionId: "session:contribution"
-      }
-    ];
-    const submitted = await postJson(
-      baseUrl,
-      `/workbench/authoring/runs/${encodeURIComponent(runId)}/submit`,
-      bundle
-    );
-    expect(submitted.body).toMatchObject({ accepted: true, run: { status: "ready_to_finish" } });
-
-    daemon.database.prepare("UPDATE session_artifacts SET status = 'superseded' WHERE artifact_id = ?").run(existing.artifactId);
-    const finished = await postJson(
-      baseUrl,
-      `/workbench/authoring/runs/${encodeURIComponent(runId)}/finish`,
-      {},
-      409
-    );
-    expect(finished.body).toMatchObject({
-      error: { code: "authoring_finish_invalid_contribution" },
-      ok: false
-    });
-  });
 });
 
 async function startTestDaemon(): Promise<{ baseUrl: string; daemon: MastheadDaemon }> {
@@ -405,6 +452,18 @@ function seedAuthoringSession(daemon: MastheadDaemon, sessionId: string): void {
     sessionId,
     title: `Authoring ${sessionId}`
   });
+  markSessionCompileReady(daemon.database, sessionId);
+}
+
+function openLegacyRun(daemon: MastheadDaemon, sessionId: string, actorId: string) {
+  return {
+    body: openAuthoringRun(daemon.database, {
+      actorId,
+      databaseId: getOrCreateDatabaseIdentity(daemon.database),
+      sessionIds: [sessionId]
+    }),
+    status: 201
+  };
 }
 
 function validBundle(runId: string, evidenceRevision: string, sessionId: string): WorkbenchAuthoringBundle {
@@ -459,6 +518,59 @@ function validBundle(runId: string, evidenceRevision: string, sessionId: string)
         sessionId
       }
     ]
+  };
+}
+
+function validV3Bundle(
+  runId: string,
+  evidenceRevision: string,
+  sessionId: string
+): WorkbenchAuthoringBundleV3 {
+  const evidenceRef = {
+    id: `message:${sessionId}:message`,
+    kind: "event" as const,
+    observedAt: "2026-07-10T12:00:00.000Z",
+    source: "canonical"
+  };
+  return {
+    artifacts: [],
+    bundleVersion: "workbench-authoring-v3",
+    evidenceRevision,
+    runId,
+    sessionEnrichments: [{
+      enrichment: {
+        sessionDossier: {
+          blockers: [],
+          continuation: { constraints: [], openQuestions: [] },
+          decisions: ["Publish only after enrichment is current."],
+          evidenceRefs: [evidenceRef],
+          keyWork: ["Applied grounded durable enrichment before dossier rendering."],
+          outcome: "Published an enriched canonical dossier atomically.",
+          verification: {
+            commands: [],
+            evidenceRefs: [evidenceRef],
+            failures: [],
+            status: "unknown",
+            summary: "Canonical message evidence supports the enrichment."
+          },
+          warnings: []
+        },
+        sessionSummary: {
+          confidence: "low",
+          evidenceRefs: [evidenceRef],
+          state: "completed",
+          text: "Agent-enriched summary grounded in the selected canonical evidence."
+        },
+        sessionTitle: {
+          basis: "dominant_work",
+          confidence: "low",
+          evidenceRefs: [evidenceRef],
+          text: "Agent-enriched title"
+        },
+        version: "session-capsule-v4"
+      },
+      sessionId
+    }]
   };
 }
 

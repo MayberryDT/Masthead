@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type {
   WorkbenchAuthoringBundle,
+  WorkbenchAuthoringBundleV2,
   WorkbenchAuthoringReceipt
 } from "../../../shared/workbenchAuthoring.ts";
 import { seedSession as seedCanonicalSession } from "./sessionTestHelpers.ts";
@@ -120,6 +121,13 @@ describe("workbench authoring repository", () => {
       receipt,
       status: "completed"
     });
+
+    const { contractVersion: _contractVersion, ...legacyReceipt } = receipt;
+    db.prepare("UPDATE workbench_authoring_runs SET receipt_json = ? WHERE run_id = ?").run(
+      JSON.stringify(legacyReceipt),
+      "authoring:1"
+    );
+    expect(getWorkbenchAuthoringRun(db, "authoring:1")?.receipt).toEqual(receipt);
   });
 
   test("resets changed evidence without reopening a completed run", async () => {
@@ -171,6 +179,118 @@ describe("workbench authoring repository", () => {
       })
     ).toEqual(completed);
   });
+
+  test("reuses V2 runs only for the exact actor, sessions, contract, and candidate", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime("2026-07-10T12:00:00.000Z");
+    const db = await testDb();
+    seedSession(db, { sessionId: "session:a", project: "Masthead" });
+    const claim = claimWorkbenchSessions(db, {
+      claimedBy: "codex",
+      expiresAt: "2026-07-10T12:15:00.000Z",
+      sessionIds: ["session:a"]
+    }).claims[0]!;
+
+    const v1 = createWorkbenchAuthoringRun(db, {
+      actorId: "codex",
+      databaseId: testDatabaseId(db),
+      evidenceRevision: "evidence:v1",
+      runId: "authoring:v1",
+      sessions: [{ claimId: claim.claimId, ordinal: 0, sessionId: claim.sessionId }]
+    });
+    expect(v1).toMatchObject({ contractVersion: "workbench-authoring-v1" });
+    expect(v1.candidateId).toBeUndefined();
+    completeWorkbenchAuthoringRun(db, { receipt: receiptFor("authoring:v1"), runId: "authoring:v1" });
+    expect(() =>
+      saveWorkbenchAuthoringSubmission(db, {
+        bundle: validV2Bundle("authoring:v1", "candidate:runbook:oauth"),
+        evidenceRevision: "evidence:v1",
+        findings: [],
+        runId: "authoring:v1",
+        status: "ready_to_finish"
+      })
+    ).toThrow("unsupported_authoring_bundle_version");
+
+    const v2 = createWorkbenchAuthoringRun(db, {
+      actorId: "codex",
+      candidateId: "candidate:runbook:oauth",
+      contractVersion: "workbench-authoring-v2",
+      databaseId: testDatabaseId(db),
+      evidenceRevision: "evidence:v2",
+      runId: "authoring:v2",
+      sessions: [{ claimId: claim.claimId, ordinal: 0, sessionId: claim.sessionId }]
+    });
+    expect(v2).toMatchObject({
+      candidateId: "candidate:runbook:oauth",
+      contractVersion: "workbench-authoring-v2",
+      runId: "authoring:v2"
+    });
+
+    expect(() =>
+      saveWorkbenchAuthoringSubmission(db, {
+        bundle: validBundle("authoring:v2", ["session:a"]),
+        evidenceRevision: "evidence:v2",
+        findings: [],
+        runId: "authoring:v2",
+        status: "ready_to_finish"
+      })
+    ).toThrow("unsupported_authoring_bundle_version");
+
+    const submittedV2 = saveWorkbenchAuthoringSubmission(db, {
+      bundle: validV2Bundle("authoring:v2", "candidate:runbook:oauth"),
+      evidenceRevision: "evidence:v2",
+      findings: [],
+      runId: "authoring:v2",
+      status: "ready_to_finish"
+    });
+    expect(submittedV2.bundle?.bundleVersion).toBe("workbench-authoring-v2");
+
+    const reusable = findReusableWorkbenchAuthoringRun(db, {
+      actorId: "codex",
+      candidateId: "candidate:runbook:oauth",
+      contractVersion: "workbench-authoring-v2",
+      databaseId: testDatabaseId(db),
+      sessionIds: ["session:a"]
+    });
+    expect(reusable).toEqual(submittedV2);
+    expect(reusable?.receipt).toBeUndefined();
+
+    expect(
+      findReusableWorkbenchAuthoringRun(db, {
+        actorId: "codex",
+        candidateId: "candidate:adr:oauth",
+        contractVersion: "workbench-authoring-v2",
+        databaseId: testDatabaseId(db),
+        sessionIds: ["session:a"]
+      })
+    ).toBeUndefined();
+    expect(
+      findReusableWorkbenchAuthoringRun(db, {
+        actorId: "other-agent",
+        candidateId: "candidate:runbook:oauth",
+        contractVersion: "workbench-authoring-v2",
+        databaseId: testDatabaseId(db),
+        sessionIds: ["session:a"]
+      })
+    ).toBeUndefined();
+    expect(
+      findReusableWorkbenchAuthoringRun(db, {
+        actorId: "codex",
+        candidateId: "candidate:runbook:oauth",
+        contractVersion: "workbench-authoring-v2",
+        databaseId: testDatabaseId(db),
+        sessionIds: ["session:a", "session:b"]
+      })
+    ).toBeUndefined();
+    expect(
+      findReusableWorkbenchAuthoringRun(db, {
+        actorId: "codex",
+        contractVersion: "workbench-authoring-v1",
+        databaseId: testDatabaseId(db),
+        sessionIds: ["session:a"]
+      })?.runId
+    ).toBe("authoring:v1");
+  });
 });
 
 async function testDb(): Promise<MastheadDatabase> {
@@ -218,9 +338,25 @@ function validBundle(runId: string, sessionIds: string[]): WorkbenchAuthoringBun
   };
 }
 
+function validV2Bundle(runId: string, candidateId: string): WorkbenchAuthoringBundleV2 {
+  return {
+    artifact: {
+      kind: "runbook",
+      output: { title: "Repair OAuth callback failures" },
+      provenanceSessionIds: ["session:a"],
+      seedSessionId: "session:a"
+    },
+    bundleVersion: "workbench-authoring-v2",
+    candidateId,
+    evidenceRevision: "evidence:v2",
+    runId
+  };
+}
+
 function receiptFor(runId: string): WorkbenchAuthoringReceipt {
   return {
     completedAt: "2026-07-10T12:10:00.000Z",
+    contractVersion: "workbench-authoring-v1",
     contributions: [],
     notApplicable: [{ kind: "runbook", sessionId: "session:a" }],
     publishedArtifactIds: ["artifact:dossier:a"],

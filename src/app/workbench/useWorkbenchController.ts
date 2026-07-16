@@ -2,6 +2,7 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } f
 import {
   getWorkbenchAuthoringCapabilities,
   getWorkbenchActivity,
+  getWorkbenchImportHealthSummary,
   getWorkbenchNotAddedSessions,
   getWorkbenchNotAddedSummary,
   getWorkbenchSessions,
@@ -9,7 +10,6 @@ import {
   postWorkbenchClaim,
   postWorkbenchEnrollMissing,
   postWorkbenchImportTranscript,
-  postWorkbenchPublish,
   postWorkbenchQuality,
   postWorkbenchReleaseClaim
 } from "../daemonClient";
@@ -17,7 +17,9 @@ import type {
   WorkbenchActivityDto,
   WorkbenchNotAddedSessionDto,
   WorkbenchNotAddedSummaryDto,
-  WorkbenchQueueSessionDto
+  WorkbenchImportHealthSummaryDto,
+  WorkbenchQueueSessionDto,
+  WorkbenchSessionsResponse
 } from "../../shared/workbench";
 import type { WorkbenchAuthoringCapabilitiesDto } from "../../shared/workbenchAuthoring";
 import { buildWorkbenchHandoff } from "../../ui/workbench/workbenchHandoff";
@@ -43,7 +45,6 @@ export type WorkbenchActionKind =
   | "quality_pass"
   | "quality_fail"
   | "quality_precheck"
-  | "publish"
   | "claim"
   | "release"
   | "copy_agent_prompt";
@@ -63,6 +64,7 @@ export type UseWorkbenchControllerResult = {
   notAddedOpen: boolean;
   notAddedSessions: WorkbenchNotAddedSessionDto[];
   notAddedSummary?: WorkbenchNotAddedSummaryDto;
+  importHealthSummary?: WorkbenchImportHealthSummaryDto;
   page: number;
   pageSize: number;
   retry: () => void;
@@ -87,10 +89,12 @@ export function useWorkbenchController({
   const [sessions, setSessions] = useState<WorkbenchQueueSessionDto[]>([]);
   const [activity, setActivity] = useState<WorkbenchActivityDto[]>([]);
   const [notAddedSummary, setNotAddedSummary] = useState<WorkbenchNotAddedSummaryDto>();
+  const [importHealthSummary, setImportHealthSummary] = useState<WorkbenchImportHealthSummaryDto>();
   const [notAddedSessions, setNotAddedSessions] = useState<WorkbenchNotAddedSessionDto[]>([]);
   const [authoringCapabilities, setAuthoringCapabilities] = useState<WorkbenchAuthoringCapabilitiesDto>();
   const [notAddedOpen, setNotAddedOpenState] = useState(false);
   const [selectedSessionIds, setSelectedSessionIds] = useState(() => new Set<string>());
+  const [selectedCompileReadySessionIds, setSelectedCompileReadySessionIds] = useState(() => new Set<string>());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
   const [actionBusy, setActionBusy] = useState(false);
@@ -100,6 +104,8 @@ export function useWorkbenchController({
   const [total, setTotal] = useState(0);
   const pageSize = WORKBENCH_PAGE_SIZE;
   const loadRequestId = useRef(0);
+  const selectedSessionIdsRef = useRef(selectedSessionIds);
+  selectedSessionIdsRef.current = selectedSessionIds;
 
   const load = useCallback(async (options: { signal?: AbortSignal; page?: number } = {}) => {
     const requestId = ++loadRequestId.current;
@@ -111,7 +117,7 @@ export function useWorkbenchController({
       const capabilitiesPromise = getWorkbenchAuthoringCapabilities(activeProjectionUrl, {
         signal: options.signal
       }).catch(() => undefined);
-      const [response, activityResponse, notAdded, capabilities] = await Promise.all([
+      const [response, activityResponse, notAdded, importHealth, capabilities] = await Promise.all([
         getWorkbenchSessions(activeProjectionUrl, {
           limit: pageSize,
           offset: pageIndex * pageSize,
@@ -119,17 +125,34 @@ export function useWorkbenchController({
         }),
         getWorkbenchActivity(activeProjectionUrl, { limit: 30, signal: options.signal }),
         getWorkbenchNotAddedSummary(activeProjectionUrl, { signal: options.signal }),
+        getWorkbenchImportHealthSummary(activeProjectionUrl, { signal: options.signal }),
         capabilitiesPromise
       ]);
+      if (options.signal?.aborted || requestId !== loadRequestId.current) return;
+      const selectedAtLoad = new Set(selectedSessionIdsRef.current);
+      const compileReadySelected = await resolveSelectedCompileReadiness(
+        activeProjectionUrl,
+        selectedAtLoad,
+        response,
+        options.signal
+      );
       if (options.signal?.aborted || requestId !== loadRequestId.current) return;
       setSessions(response.sessions);
       setTotal(typeof response.total === "number" ? response.total : response.sessions.length);
       setActivity(activityResponse.activity);
       setNotAddedSummary(notAdded);
+      setImportHealthSummary(importHealth);
       setAuthoringCapabilities(capabilities);
-      setSelectedSessionIds((current) => {
-        const visibleIds = new Set(response.sessions.map((session) => session.sessionId));
-        return new Set(Array.from(current).filter((sessionId) => visibleIds.has(sessionId)));
+      setSelectedCompileReadySessionIds((current) => {
+        const next = new Set(current);
+        for (const sessionId of selectedAtLoad) next.delete(sessionId);
+        for (const sessionId of compileReadySelected) {
+          if (selectedSessionIdsRef.current.has(sessionId)) next.add(sessionId);
+        }
+        for (const sessionId of next) {
+          if (!selectedSessionIdsRef.current.has(sessionId)) next.delete(sessionId);
+        }
+        return next;
       });
     } catch (loadError) {
       if (!options.signal?.aborted && requestId === loadRequestId.current) {
@@ -144,7 +167,6 @@ export function useWorkbenchController({
     (nextPage: number) => {
       const safe = Math.max(0, Math.trunc(nextPage));
       setPageState(safe);
-      setSelectedSessionIds(new Set());
       void load({ page: safe });
     },
     [load]
@@ -189,19 +211,16 @@ export function useWorkbenchController({
     [selectedSessionIds, sessions]
   );
 
-  // Handoff text can lag a frame when selection is large — keep checkbox paint snappy.
   const deferredSelectedSessionIds = useDeferredValue(selectedSessionIds);
   const handoffSessions = useMemo(
-    () =>
-      deferredSelectedSessionIds === selectedSessionIds
-        ? selectedSessions
-        : sessions.filter((session) => deferredSelectedSessionIds.has(session.sessionId)),
-    [deferredSelectedSessionIds, selectedSessionIds, selectedSessions, sessions]
+    () => sessions.filter((session) => deferredSelectedSessionIds.has(session.sessionId)),
+    [deferredSelectedSessionIds, sessions]
   );
 
   const handoffText = useMemo(
     () =>
-      authoringCapabilities
+      authoringCapabilities?.bundleVersion === "workbench-authoring-v3" &&
+      isCompileReadySelection(selectedSessionIds, selectedCompileReadySessionIds)
         ? buildWorkbenchHandoff({
             authoringCommand: authoringCapabilities.command,
             databaseId: authoringCapabilities.databaseId,
@@ -217,7 +236,8 @@ export function useWorkbenchController({
       if (!isLive || actionBusy) return false;
       if (kind === "enroll_missing") return true;
       if (kind === "copy_agent_prompt") {
-        return Boolean(authoringCapabilities) && selectedSessionIds.size > 0;
+        return authoringCapabilities?.bundleVersion === "workbench-authoring-v3" &&
+          isCompileReadySelection(selectedSessionIds, selectedCompileReadySessionIds);
       }
       if (selectedSessions.length === 0) return false;
 
@@ -244,8 +264,6 @@ export function useWorkbenchController({
           return selectedSessions.some(
             (session) => session.qualityStatus === "unchecked" || session.nextAction === "review_quality"
           );
-        case "publish":
-          return selectedSessions.some((session) => session.nextAction === "publish");
         case "claim":
           return selectedSessions.some((session) => !session.activeClaim);
         case "release":
@@ -254,7 +272,7 @@ export function useWorkbenchController({
           return false;
       }
     },
-    [actionBusy, authoringCapabilities, isLive, selectedSessionIds, selectedSessions]
+    [actionBusy, authoringCapabilities, isLive, selectedCompileReadySessionIds, selectedSessionIds, selectedSessions]
   );
 
   const runAction = useCallback(
@@ -263,7 +281,7 @@ export function useWorkbenchController({
 
       if (kind === "copy_agent_prompt") {
         setActionError(undefined);
-        setLastActionSummary("Agent prompt ready to copy");
+        setLastActionSummary(`Agent prompt copied for ${selectedSessionIds.size} sessions`);
         return;
       }
 
@@ -318,12 +336,6 @@ export function useWorkbenchController({
             acted += 1;
           }
           setLastActionSummary(`Prechecked quality for ${acted} session${acted === 1 ? "" : "s"}`);
-        } else if (kind === "publish") {
-          for (const sessionId of ids) {
-            await postWorkbenchPublish(activeProjectionUrl, sessionId);
-            acted += 1;
-          }
-          setLastActionSummary(`Published ${acted} session${acted === 1 ? "" : "s"}`);
         } else if (kind === "claim") {
           for (const sessionId of ids) {
             await postWorkbenchClaim(activeProjectionUrl, sessionId, {
@@ -361,16 +373,30 @@ export function useWorkbenchController({
   }, [active, isLive, load]);
 
   const toggleSession = useCallback((sessionId: string) => {
+    const selecting = !selectedSessionIds.has(sessionId);
     setSelectedSessionIds((current) => {
       const next = new Set(current);
-      if (next.has(sessionId)) next.delete(sessionId);
-      else next.add(sessionId);
+      if (selecting) next.add(sessionId);
+      else next.delete(sessionId);
       return next;
     });
-  }, []);
+    setSelectedCompileReadySessionIds((compileReady) => {
+      const next = new Set(compileReady);
+      if (selecting && sessions.some((session) => session.sessionId === sessionId && isCompileReadySession(session))) {
+        next.add(sessionId);
+      } else if (!selecting) {
+        next.delete(sessionId);
+      }
+      return next;
+    });
+  }, [selectedSessionIds, sessions]);
 
   const selectPage = useCallback(() => {
-    setSelectedSessionIds(new Set(sessions.map((session) => session.sessionId)));
+    setSelectedSessionIds((current) => new Set([...current, ...sessions.map((session) => session.sessionId)]));
+    setSelectedCompileReadySessionIds((current) => new Set([
+      ...current,
+      ...sessions.filter(isCompileReadySession).map((session) => session.sessionId)
+    ]));
   }, [sessions]);
 
   const selectAll = useCallback(async () => {
@@ -379,18 +405,23 @@ export function useWorkbenchController({
     setActionError(undefined);
     try {
       const ids = new Set<string>();
+      const compileReadyIds = new Set<string>();
       let offset = 0;
       let queueTotal = Number.POSITIVE_INFINITY;
       const limit = 500;
       while (offset < queueTotal) {
         const response = await getWorkbenchSessions(activeProjectionUrl, { limit, offset });
         queueTotal = typeof response.total === "number" ? response.total : response.sessions.length;
-        for (const session of response.sessions) ids.add(session.sessionId);
+        for (const session of response.sessions) {
+          ids.add(session.sessionId);
+          if (isCompileReadySession(session)) compileReadyIds.add(session.sessionId);
+        }
         if (response.sessions.length === 0) break;
         offset += response.sessions.length;
         if (ids.size >= queueTotal) break;
       }
       setSelectedSessionIds(ids);
+      setSelectedCompileReadySessionIds(compileReadyIds);
       setLastActionSummary(
         ids.size === 0 ? "No package-path sessions to select" : `Selected all ${ids.size} package-path sessions`
       );
@@ -403,6 +434,7 @@ export function useWorkbenchController({
 
   const clearSelection = useCallback(() => {
     setSelectedSessionIds(new Set());
+    setSelectedCompileReadySessionIds(new Set());
   }, []);
 
   return {
@@ -422,6 +454,7 @@ export function useWorkbenchController({
     notAddedOpen,
     notAddedSessions,
     notAddedSummary,
+    importHealthSummary,
     page,
     pageSize,
     retry,
@@ -435,6 +468,53 @@ export function useWorkbenchController({
     total,
     toggleSession
   };
+}
+
+function isCompileReadySession(session: WorkbenchQueueSessionDto): boolean {
+  return (session.transcriptStatus === "available" || session.transcriptStatus === "imported") &&
+    session.qualityStatus === "passed";
+}
+
+function isCompileReadySelection(selectedSessionIds: Set<string>, compileReadySessionIds: Set<string>): boolean {
+  return selectedSessionIds.size > 0 &&
+    Array.from(selectedSessionIds).every((sessionId) => compileReadySessionIds.has(sessionId));
+}
+
+async function resolveSelectedCompileReadiness(
+  activeProjectionUrl: string,
+  selectedSessionIds: Set<string>,
+  visibleResponse: WorkbenchSessionsResponse,
+  signal?: AbortSignal
+): Promise<Set<string>> {
+  const unresolved = new Set(selectedSessionIds);
+  const compileReady = new Set<string>();
+  collectCompileReadiness(visibleResponse.sessions, unresolved, compileReady);
+  if (unresolved.size === 0 || visibleResponse.offset === 0 && visibleResponse.sessions.length >= visibleResponse.total) {
+    return compileReady;
+  }
+
+  const limit = 500;
+  let offset = 0;
+  let total = Number.POSITIVE_INFINITY;
+  while (unresolved.size > 0 && offset < total) {
+    const response = await getWorkbenchSessions(activeProjectionUrl, { limit, offset, signal });
+    collectCompileReadiness(response.sessions, unresolved, compileReady);
+    total = typeof response.total === "number" ? response.total : response.sessions.length;
+    if (response.sessions.length === 0) break;
+    offset += response.sessions.length;
+  }
+  return compileReady;
+}
+
+function collectCompileReadiness(
+  sessions: WorkbenchQueueSessionDto[],
+  unresolved: Set<string>,
+  compileReady: Set<string>
+): void {
+  for (const session of sessions) {
+    if (!unresolved.delete(session.sessionId)) continue;
+    if (isCompileReadySession(session)) compileReady.add(session.sessionId);
+  }
 }
 
 function formatActionError(error: unknown): string {

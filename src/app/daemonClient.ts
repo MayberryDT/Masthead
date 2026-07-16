@@ -7,6 +7,7 @@ import type { SessionSummaryEnrichment, SessionTitleEnrichment } from "../shared
 import type { SessionTranscriptCoverage, SessionTranscriptItem, SessionTranscriptResult } from "../shared/sessionTranscript";
 import type { SourcesAdvancedDto, SourcesOnboardingScanDto, SourcesSetupDto, SourcesSetupRunRequest } from "../shared/sourcesSetup";
 import type { ImportCompletionReportDto, ImportJobStatus, ImportManifestSummaryDto, ImportScopeDto, ImportStage, ImportWorkUnitDto, ImportWorkUnitStatus } from "../shared/sourceImport";
+import type { ImportRepairPreview, ImportRepairReceipt } from "../shared/importRepair";
 import type {
   ConnectorActionRequired,
   ConnectorActivation,
@@ -21,6 +22,7 @@ import type {
   WorkbenchMissingSessionsResponse,
   WorkbenchNotAddedResponse,
   WorkbenchNotAddedSummaryDto,
+  WorkbenchImportHealthSummaryDto,
   WorkbenchSessionsResponse
 } from "../shared/workbench";
 import {
@@ -30,6 +32,7 @@ import {
 
 export type { SessionTranscriptCoverage, SessionTranscriptItem, SessionTranscriptResult };
 export type { SourcesAdvancedDto, SourcesOnboardingScanDto, SourcesSetupDto, SourcesSetupRunRequest };
+export type { ImportRepairPreview, ImportRepairReceipt };
 export type {
   ConnectorActionRequired,
   ConnectorActivation,
@@ -794,6 +797,23 @@ export async function startImport(
   return body.job;
 }
 
+export async function previewImportRepair(importJobIds: string[], baseUrl = defaultLiveProjectionUrl()): Promise<ImportRepairPreview> {
+  const body = await postJson<{ ok: true; preview: ImportRepairPreview }>(baseUrl, "/imports/repair/preview", {
+    body: { importJobIds }, label: "import repair preview"
+  });
+  return body.preview;
+}
+
+export async function applyImportRepair(
+  input: { importJobIds: string[]; planHash: string },
+  baseUrl = defaultLiveProjectionUrl()
+): Promise<{ jobs: ImportJob[]; receipt: ImportRepairReceipt; reimportJobIds: string[] }> {
+  const body = await postJson<{ ok: true; jobs: ImportJob[]; receipt: ImportRepairReceipt; reimportJobIds: string[] }>(baseUrl, "/imports/repair/apply", {
+    body: input, label: "import repair apply"
+  });
+  return { jobs: body.jobs, receipt: body.receipt, reimportJobIds: body.reimportJobIds };
+}
+
 export async function listImports(
   baseUrl = defaultLiveProjectionUrl(),
   options: {
@@ -1322,6 +1342,16 @@ export async function getWorkbenchNotAddedSummary(
   });
 }
 
+export async function getWorkbenchImportHealthSummary(
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { signal?: AbortSignal } = {}
+): Promise<WorkbenchImportHealthSummaryDto> {
+  return getJson<WorkbenchImportHealthSummaryDto>(baseUrl, "/workbench/import-health-summary", {
+    label: "workbench import health summary",
+    signal: options.signal
+  });
+}
+
 export async function getWorkbenchNotAddedSessions(
   baseUrl = defaultLiveProjectionUrl(),
   options: { limit?: number; signal?: AbortSignal } = {}
@@ -1378,17 +1408,6 @@ export async function postWorkbenchImportTranscript(
   return postJson(baseUrl, `/workbench/sessions/${encodeURIComponent(sessionId)}/import-transcript`, {
     body,
     label: "workbench import transcript",
-    signal: options.signal
-  });
-}
-
-export async function postWorkbenchPublish(
-  baseUrl: string,
-  sessionId: string,
-  options: { signal?: AbortSignal } = {}
-): Promise<unknown> {
-  return postJson(baseUrl, `/workbench/sessions/${encodeURIComponent(sessionId)}/publish`, {
-    label: "workbench publish",
     signal: options.signal
   });
 }

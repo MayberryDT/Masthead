@@ -142,14 +142,14 @@ export function getSessionDossier(db: MastheadDatabase, sessionId: string): Sess
     usage,
     verification
   };
-  const reuse = {
+  const reuse: Omit<SessionDossierDto["reuse"], "copyableContext"> = {
     canonicalSessionId: dossierIdentity.sessionId,
     mcpIncluded: isMcpIncluded(db, sessionId),
     sourceConfidence: dossierIdentity.sourceConfidence,
     sourceRuntime: dossierIdentity.runtime,
     sourceSessionId: dossierIdentity.sourceSessionId
   };
-  return { ...partial, reuse: { ...reuse, copyableContext: buildCopyableContext(partial, reuse.mcpIncluded) } } as SessionDossierDto;
+  return { ...partial, reuse: { ...reuse, copyableContext: buildCopyableContext(partial, reuse.mcpIncluded) } };
 }
 
 type DossierWithoutReuse = Omit<SessionDossierDto, "reuse">;

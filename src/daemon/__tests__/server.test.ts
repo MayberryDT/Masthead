@@ -1,12 +1,15 @@
-import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, test } from "vitest";
 import { canonicalSessionId, runtimeIdFor } from "../../shared/sessionIdentity.ts";
 import type { DaemonConfig } from "../config.ts";
 import { seedSession } from "../db/__tests__/sessionTestHelpers.ts";
+import { migrateDatabase } from "../db/schema.ts";
 import { createMastheadDaemon, type MastheadDaemon } from "../server.ts";
+import { grokAdapter } from "../../adapters/grok/adapter.ts";
 
 const tempDirs: string[] = [];
 const daemons: MastheadDaemon[] = [];
@@ -19,6 +22,209 @@ afterEach(async () => {
 });
 
 describe("Masthead daemon startup", () => {
+  test("import repair routes validate input, preview without writes, reject hash drift, and schedule viable reimports", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-repair-route-"));
+    tempDirs.push(tempDir);
+    await mkdir(join(tempDir, ".grok/sessions"), { recursive: true });
+    await writeFile(join(tempDir, ".grok/sessions/repair.jsonl"), `${JSON.stringify({ sessionId: "repair", role: "user", content: "repair" })}\n`);
+    const [source] = await grokAdapter.discover({ exclusions: [], homeDir: tempDir, now: "2026-07-15T12:00:00.000Z" });
+    expect(source).toBeDefined();
+    const daemon = await createTestDaemon(tempDir);
+    seedRepairRouteData(daemon, source!.sourceId, source!.path!);
+    const baseUrl = await listen(daemon);
+
+    expect((await postRaw(baseUrl, "/imports/repair/preview", { importJobIds: ["missing"] })).status).toBe(400);
+    expect((await postRaw(baseUrl, "/imports/repair/apply", { importJobIds: ["job:repair"], planHash: "wrong" })).status).toBe(400);
+    for (const [route, forbidden] of [
+      ["/imports/repair/preview", { databasePath: "/tmp/other.sqlite" }],
+      ["/imports/repair/preview", { db: "other" }],
+      ["/imports/repair/apply", { databasePath: "/tmp/other.sqlite" }],
+      ["/imports/repair/apply", { db: "other" }]
+    ] as const) {
+      const changes = databaseChanges(daemon);
+      const rejected = await postRaw(baseUrl, route, {
+        importJobIds: ["job:repair"],
+        planHash: "0".repeat(64),
+        ...forbidden
+      });
+      expect(rejected.status).toBe(400);
+      expect(databaseChanges(daemon)).toBe(changes);
+    }
+    const before = databaseChanges(daemon);
+    const previewResponse = await postRaw(baseUrl, "/imports/repair/preview", { importJobIds: ["job:repair"] });
+    expect(previewResponse.status).toBe(200);
+    const previewBody = await previewResponse.json() as { preview: { planHash: string; sourcePlans: Array<Record<string, unknown>> } };
+    expect(previewBody.preview.sourcePlans).toEqual([
+      expect.objectContaining({ available: true, correctedSourceId: source!.sourceId, sourceId: source!.sourceId })
+    ]);
+    expect(databaseChanges(daemon)).toBe(before);
+    expect((await postRaw(baseUrl, "/imports/repair/apply", {
+      importJobIds: ["job:repair"], planHash: "0".repeat(64)
+    })).status).toBe(409);
+
+    const applyResponse = await postRaw(baseUrl, "/imports/repair/apply", {
+      importJobIds: ["job:repair"], planHash: previewBody.preview.planHash
+    });
+    expect(applyResponse.status).toBe(202);
+    const applyBody = await applyResponse.json() as { jobs: Array<{ importJobId: string }>; reimportJobIds: string[] };
+    expect(applyBody.reimportJobIds).toEqual(applyBody.jobs.map((job) => job.importJobId));
+    expect(applyBody.reimportJobIds).toHaveLength(1);
+    expect(daemon.database.prepare("SELECT status FROM import_jobs WHERE import_job_id = 'job:repair'").get()).toEqual({ status: "succeeded" });
+    await waitForImportJobSettled(daemon, applyBody.reimportJobIds[0]!);
+  });
+
+  test("import repair preserves unavailable-source sessions and schedules no replacement job", async () => {
+    const daemon = await createTestDaemon();
+    seedRepairRouteData(daemon, "source:missing", "/missing/repair.jsonl");
+    const baseUrl = await listen(daemon);
+    const previewResponse = await postRaw(baseUrl, "/imports/repair/preview", { importJobIds: ["job:repair"] });
+    const previewBody = await previewResponse.json() as { preview: { planHash: string; preservationReasons: unknown[]; unavailableSources: string[] } };
+    expect(previewBody.preview.unavailableSources).toEqual(["source:missing"]);
+    expect(previewBody.preview.preservationReasons).toContainEqual({ reason: "source_unavailable", sessionId: "session:repair" });
+
+    const applyResponse = await postRaw(baseUrl, "/imports/repair/apply", {
+      importJobIds: ["job:repair"], planHash: previewBody.preview.planHash
+    });
+    expect(applyResponse.status).toBe(202);
+    await expect(applyResponse.json()).resolves.toMatchObject({ jobs: [], reimportJobIds: [] });
+    expect(daemon.database.prepare("SELECT session_id FROM sessions WHERE session_id = 'session:repair'").get()).toBeDefined();
+  });
+
+  test("import repair maps a moved source to one compatible discovered candidate", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-repair-moved-"));
+    tempDirs.push(tempDir);
+    await mkdir(join(tempDir, ".grok/sessions"), { recursive: true });
+    await writeFile(join(tempDir, ".grok/sessions/moved.jsonl"), `${JSON.stringify({ sessionId: "moved", role: "user", content: "moved" })}\n`);
+    const [corrected] = await grokAdapter.discover({ exclusions: [], homeDir: tempDir, now: "2026-07-15T12:00:00.000Z" });
+    const daemon = await createTestDaemon(tempDir);
+    seedRepairRouteData(daemon, "source:grok:old-path", "/old/grok.jsonl", corrected!.schemaVersion);
+    const baseUrl = await listen(daemon);
+
+    const previewResponse = await postRaw(baseUrl, "/imports/repair/preview", { importJobIds: ["job:repair"] });
+    const previewBody = await previewResponse.json() as { preview: { planHash: string; sourcePlans: Array<Record<string, unknown>> } };
+    expect(previewBody.preview.sourcePlans).toEqual([
+      expect.objectContaining({
+        available: true,
+        correctedSourceId: corrected!.sourceId,
+        sourceId: "source:grok:old-path"
+      })
+    ]);
+    const applyResponse = await postRaw(baseUrl, "/imports/repair/apply", {
+      importJobIds: ["job:repair"], planHash: previewBody.preview.planHash
+    });
+    expect(applyResponse.status).toBe(202);
+    const applyBody = await applyResponse.json() as { reimportJobIds: string[] };
+    expect(applyBody.reimportJobIds).toHaveLength(1);
+    expect(daemon.database.prepare("SELECT source_id FROM import_jobs WHERE import_job_id = ?").get(applyBody.reimportJobIds[0]!))
+      .toEqual({ source_id: corrected!.sourceId });
+    await waitForImportJobSettled(daemon, applyBody.reimportJobIds[0]!);
+  });
+
+  test("import repair treats multiple compatible moved-source candidates as ambiguous", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-repair-ambiguous-"));
+    tempDirs.push(tempDir);
+    await mkdir(join(tempDir, ".grok/sessions"), { recursive: true });
+    await writeFile(join(tempDir, ".grok/sessions/one.jsonl"), "{}\n");
+    await writeFile(join(tempDir, ".grok/sessions/two.jsonl"), "{}\n");
+    const daemon = await createTestDaemon(tempDir);
+    seedRepairRouteData(daemon, "source:grok:old-path", "/old/grok.jsonl", "grok-jsonl-tree");
+    const baseUrl = await listen(daemon);
+
+    const previewResponse = await postRaw(baseUrl, "/imports/repair/preview", { importJobIds: ["job:repair"] });
+    const previewBody = await previewResponse.json() as {
+      preview: { planHash: string; preservationReasons: unknown[]; sourcePlans: Array<Record<string, unknown>> }
+    };
+    expect(previewBody.preview.sourcePlans).toEqual([
+      expect.objectContaining({ available: false, reason: "ambiguous_candidates", sourceId: "source:grok:old-path" })
+    ]);
+    const applyResponse = await postRaw(baseUrl, "/imports/repair/apply", {
+      importJobIds: ["job:repair"], planHash: previewBody.preview.planHash
+    });
+    await expect(applyResponse.json()).resolves.toMatchObject({ reimportJobIds: [] });
+    expect(daemon.database.prepare("SELECT session_id FROM sessions WHERE session_id = 'session:repair'").get()).toBeDefined();
+  });
+
+  test("import repair rejects many historical sources mapping to one current candidate", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-repair-many-to-one-"));
+    tempDirs.push(tempDir);
+    await mkdir(join(tempDir, ".grok/sessions"), { recursive: true });
+    await writeFile(join(tempDir, ".grok/sessions/current.jsonl"), "{}\n");
+    const daemon = await createTestDaemon(tempDir);
+    seedRepairRouteData(daemon, "source:grok:old-a", "/old/a.jsonl", "grok-jsonl-tree", {
+      jobId: "job:repair:a", sessionId: "session:repair:a"
+    });
+    seedRepairRouteData(daemon, "source:grok:old-b", "/old/b.jsonl", "grok-jsonl-tree", {
+      jobId: "job:repair:b", sessionId: "session:repair:b"
+    });
+    const baseUrl = await listen(daemon);
+
+    const previewResponse = await postRaw(baseUrl, "/imports/repair/preview", { importJobIds: ["job:repair:a", "job:repair:b"] });
+    const previewBody = await previewResponse.json() as { preview: { sourcePlans: Array<Record<string, unknown>> } };
+    expect(previewBody.preview.sourcePlans).toEqual([
+      expect.objectContaining({ available: false, reason: "ambiguous_many_to_one", sourceId: "source:grok:old-a" }),
+      expect.objectContaining({ available: false, reason: "ambiguous_many_to_one", sourceId: "source:grok:old-b" })
+    ]);
+  });
+
+  test("migration backup retains the promoted WAL-complete snapshot over future-dated equal-mtime stale snapshots", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-daemon-migration-backup-"));
+    tempDirs.push(tempDir);
+    const databasePath = join(tempDir, "masthead.sqlite");
+    const source = new DatabaseSync(databasePath);
+    try {
+      source.exec("PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0;");
+      migrateDatabase(source);
+      source.prepare("PRAGMA wal_checkpoint(TRUNCATE);").all();
+      source.exec("BEGIN IMMEDIATE;");
+      source.prepare("DELETE FROM schema_migrations WHERE version = 7").run();
+      source.prepare(
+        "INSERT INTO app_settings (setting_key, setting_json, updated_at) VALUES (?, ?, ?)"
+      ).run("migration_backup_wal_marker", JSON.stringify({ durable: true }), "2026-07-13T12:00:00.000Z");
+      source.exec("COMMIT;");
+      expect((await stat(`${databasePath}-wal`)).size).toBeGreaterThan(0);
+      const staleBackups = [`${databasePath}.backup-future-a`, `${databasePath}.backup-future-b`];
+      for (const stalePath of staleBackups) {
+        await writeFile(stalePath, "stale migration snapshot", "utf8");
+        await utimes(stalePath, new Date("2040-01-01T00:00:00.000Z"), new Date("2040-01-01T00:00:00.000Z"));
+      }
+
+      const daemon = await createMastheadDaemon({
+        allowedOrigins: ["http://127.0.0.1:5173"],
+        backgroundHydrationEnabled: false,
+        codexHomeDir: tempDir,
+        databasePath,
+        fixturePath: join(tempDir, "fixture.json"),
+        gitRefreshMs: 0,
+        host: "127.0.0.1",
+        hookTranscriptCatchupEnabled: false,
+        llmCopyEnabled: false,
+        port: 0,
+        storePath: join(tempDir, "events.ndjson")
+      } satisfies DaemonConfig);
+      daemons.push(daemon);
+
+      const backups = (await readdir(tempDir)).filter((name) => name.startsWith("masthead.sqlite.backup-"));
+      expect(backups).toHaveLength(1);
+      expect(backups[0]).not.toMatch(/future-[ab]$/u);
+      const backupPath = join(tempDir, backups[0]!);
+      const backup = new DatabaseSync(backupPath, { readOnly: true });
+      try {
+        expect(
+          backup.prepare("SELECT setting_json AS value FROM app_settings WHERE setting_key = ?")
+            .get("migration_backup_wal_marker")
+        ).toEqual({ value: JSON.stringify({ durable: true }) });
+        expect(backup.prepare("PRAGMA integrity_check;").get()).toEqual({ integrity_check: "ok" });
+      } finally {
+        backup.close();
+      }
+      for (const suffix of ["-journal", "-shm", "-wal"]) {
+        await expect(access(`${backupPath}${suffix}`)).rejects.toMatchObject({ code: "ENOENT" });
+      }
+    } finally {
+      source.close();
+    }
+  });
+
   test("source setup reads do not persist derived snapshots", async () => {
     const daemon = await createTestDaemon();
     const baseUrl = await listen(daemon);
@@ -460,6 +666,48 @@ async function postJson(baseUrl: string, path: string, body: Record<string, unkn
   const payload = await response.json();
   expect(payload).toBeTypeOf("object");
   return payload as Record<string, unknown>;
+}
+
+function postRaw(baseUrl: string, path: string, body: Record<string, unknown>): Promise<Response> {
+  return fetch(`${baseUrl}${path}`, {
+    body: JSON.stringify(body),
+    headers: { accept: "application/json", "content-type": "application/json" },
+    method: "POST"
+  });
+}
+
+function seedRepairRouteData(
+  daemon: MastheadDaemon,
+  sourceId: string,
+  sourcePath: string,
+  schemaVersion?: string,
+  identity: { jobId: string; sessionId: string } = { jobId: "job:repair", sessionId: "session:repair" }
+): void {
+  const now = "2026-07-15T12:00:00.000Z";
+  seedSession(daemon.database, {
+    lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: identity.sessionId, title: "Repair route"
+  });
+  daemon.database.prepare(`INSERT INTO ingest_sources(source_id, adapter, source_kind, source_path, schema_version, confidence, discovered_at, last_seen_at)
+    VALUES (?, 'grok', 'jsonl', ?, ?, 'heuristic', ?, ?)`).run(sourceId, sourcePath, schemaVersion ?? null, now, now);
+  daemon.database.prepare(`INSERT INTO import_jobs(import_job_id, source_id, import_kind, status, updated_at)
+    VALUES (?, ?, 'transcript', 'succeeded', ?)`).run(identity.jobId, sourceId, now);
+  daemon.database.prepare(`INSERT INTO import_session_impacts(impact_id, import_job_id, source_id, runtime_kind, session_id, impact_kind, observed_at)
+    VALUES (?, ?, ?, 'grok', ?, 'created', ?)`).run(`impact:${identity.jobId}`, identity.jobId, sourceId, identity.sessionId, now);
+  daemon.database.prepare(`INSERT INTO session_sources(session_id, source_id, first_seen_at, last_seen_at)
+    VALUES (?, ?, ?, ?)`).run(identity.sessionId, sourceId, now, now);
+}
+
+function databaseChanges(daemon: MastheadDaemon): number {
+  return (daemon.database.prepare("SELECT total_changes() AS changes").get() as { changes: number }).changes;
+}
+
+async function waitForImportJobSettled(daemon: MastheadDaemon, importJobId: string): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const row = daemon.database.prepare("SELECT status FROM import_jobs WHERE import_job_id = ?").get(importJobId) as { status: string } | undefined;
+    if (row && !["queued", "running", "cancelling"].includes(row.status)) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`import job did not settle: ${importJobId}`);
 }
 
 async function getJson(baseUrl: string, path: string): Promise<Record<string, any>> {

@@ -2073,8 +2073,40 @@ main {
 .workbench-panel > .workbench-toolbar,
 .workbench-panel > .workbench-error,
 .workbench-panel > .workbench-action-summary,
+.workbench-panel > .workbench-import-repair-panel,
 .workbench-panel > .workbench-not-added-panel {
   flex: 0 0 auto;
+}
+
+.workbench-import-repair-panel {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  border: 1px solid rgba(247, 201, 72, 0.28);
+  border-radius: 5px;
+  background: rgba(247, 201, 72, 0.06);
+  padding: 10px 12px;
+}
+
+.workbench-import-repair-panel p {
+  margin: 0;
+  color: var(--mute);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.workbench-import-repair-panel .mono-label {
+  margin-bottom: 3px;
+  color: var(--yellow);
+}
+
+.workbench-import-repair-receipts {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .workbench-surface {
@@ -3212,9 +3244,15 @@ main {
     width: 100%;
   }
 
+  .workbench-toolbar.observability-toolbar .workbench-toolbar-actions {
+    flex: 0 0 auto;
+    min-height: 40px;
+  }
+
   .workbench-layout {
     grid-template-columns: 1fr;
   }
+
 }
 
 @media (max-width: 920px) {
@@ -3224,7 +3262,7 @@ main {
 }
 
 @media (max-width: 640px) {
-  .workbench-toolbar-actions {
+  .workbench-toolbar.observability-toolbar .workbench-toolbar-actions {
     width: 100%;
     flex-wrap: wrap;
     overflow-x: visible;
@@ -3250,6 +3288,7 @@ main {
     flex-direction: column;
     align-items: stretch;
   }
+
 }
 
 .surface-card-grid {
@@ -4462,6 +4501,24 @@ body {
   height: 100%;
   background: var(--blue);
   transition: width 320ms var(--layout-ease);
+}
+
+.sidebar-import-receipt {
+  display: grid;
+  gap: 3px;
+  margin-top: 9px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+  color: var(--mute);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.35;
+}
+
+.sidebar-import-receipt strong {
+  color: var(--yellow);
+  font-family: var(--font-sans);
+  font-size: 10.5px;
 }
 
 .sources-discovery-status {

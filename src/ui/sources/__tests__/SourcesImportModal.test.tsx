@@ -8,6 +8,60 @@ import type { SourcesImportPreview } from "../../../app/daemonClient";
 import { SourcesImportModal } from "../SourcesImportModal";
 
 describe("SourcesImportModal", () => {
+  test("reports capped and repair-required import outcomes without misclassifying rejected records", () => {
+    const html = renderToStaticMarkup(
+      <SourcesImportModal
+        adapters={[]}
+        completionReports={[
+          {
+            anomalies: [{ code: "schema_rejection_dominates", severity: "error", count: 121, message: "Parser rejected most source records." }],
+            cappedUnits: 300,
+            dossierReadySessions: 0,
+            enrichedSessions: 0,
+            failedUnits: 0,
+            generatedAt: "2026-07-15T12:00:00.000Z",
+            importJobId: "import-opencode",
+            logbookSearchableSessions: 0,
+            mcpVisibleSessions: 0,
+            nextActions: ["repair_import"],
+            outOfRangeSessions: 0,
+            recordsFailed: 121,
+            recordsImported: 500,
+            recordsRecognized: 500,
+            recordsRejected: 121,
+            recordsSkipped: 0,
+            runtime: "opencode",
+            sessionsCreated: 500,
+            sessionsDiscovered: 512,
+            sessionsFinalized: 500,
+            sessionsOnPackagePath: 102,
+            sessionsRepairRequired: 12,
+            sessionsSuppressed: 386,
+            sessionsUpdated: 0,
+            skippedUnits: 0,
+            sourceUnitsDeferred: 300,
+            sourceUnitsHydrated: 500,
+            status: "succeeded_with_issues",
+            timestampBasis: { file_modified: 20, semantic: 480, source_path: 0, unknown: 0 },
+            transcriptsImported: 500
+          }
+        ]}
+        onClose={() => undefined}
+        onPreviewImport={() => Promise.resolve([])}
+        onRunSetup={() => undefined}
+        open
+      />
+    );
+    const text = visibleText(html);
+
+    expect(text).toContain("500 recent units imported");
+    expect(text).toContain("300 recent units deferred by the safety cap");
+    expect(text).toContain("12 sessions need import repair");
+    expect(text).toContain("Timestamp basis: 480 semantic · 20 file modified");
+    expect(text).toContain("Parser rejected 121 source records");
+    expect(text).not.toContain("121 sessions were not useful");
+  });
+
   test("renders harness-first choices and import age preview", () => {
     const html = renderToStaticMarkup(
       <SourcesImportModal
@@ -31,6 +85,7 @@ describe("SourcesImportModal", () => {
           {
             runtime: "opencode",
             summary: {
+              cappedUnits: 0,
               excludedUnits: 1,
               generatedAt: "2026-07-01T00:00:00.000Z",
               importJobId: "preview:opencode",
@@ -185,6 +240,10 @@ describe("SourcesImportModal", () => {
   });
 });
 
+function visibleText(html: string): string {
+  return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+
 function previewForRuntime(
   runtime: SourcesImportPreview["summary"]["runtime"],
   includedUnits: number,
@@ -193,6 +252,7 @@ function previewForRuntime(
   estimatedRecords: number | undefined
 ): SourcesImportPreview {
   const summary: SourcesImportPreview["summary"] = {
+    cappedUnits: 0,
     excludedUnits,
     generatedAt: "2026-07-01T00:00:00.000Z",
     importJobId: `preview:${runtime}`,

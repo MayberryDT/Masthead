@@ -17,6 +17,7 @@ export type SessionTranscriptItem = {
   role: SessionTranscriptRole;
   label: string;
   text: string;
+  narrativeText?: string;
   observedAt: string;
   sourceRef: unknown;
   status?: string;

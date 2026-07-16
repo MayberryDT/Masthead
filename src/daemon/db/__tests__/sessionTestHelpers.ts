@@ -128,3 +128,13 @@ export function publishSessionToLogbook(db: MastheadDatabase, sessionId: string)
     sessionId
   });
 }
+
+export function markSessionCompileReady(db: MastheadDatabase, sessionId: string): void {
+  const now = "2026-06-25T12:00:00.000Z";
+  db.prepare(
+    `INSERT INTO workbench_session_state (
+      session_id, publication_status, next_action, transcript_status, quality_status,
+      session_enrichment_status, session_dossier_status, bug_fix_trace_status, created_at, updated_at
+    ) VALUES (?, 'publish_path', 'enrich', 'imported', 'passed', 'missing', 'missing', 'unknown', ?, ?)`
+  ).run(sessionId, now, now);
+}

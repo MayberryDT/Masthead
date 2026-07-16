@@ -1,4 +1,4 @@
-import { writeFile, mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
+import { writeFile, mkdir, mkdtemp, rm, symlink, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -6,6 +6,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import type { DaemonConfig } from "../../config.ts";
 import { createImportJob, getImportJob, listImportJobs, updateImportJob, type ImportJobDto } from "../../db/importJobRepository.ts";
 import { setSourcePolicy } from "../../db/sourcePolicyRepository.ts";
+import { readImportWorkUnitHealth } from "../../db/sessionImportHealthRepository.ts";
 import { markWorkbenchPublished } from "../../db/workbenchPipelineRepository.ts";
 import { createMastheadDaemon, type MastheadDaemon } from "../../server.ts";
 import { createManifestForJob } from "../importManifestService.ts";
@@ -462,6 +463,141 @@ describe("progressive OpenCode imports", () => {
     expect(cancelled.job).toMatchObject({ importJobId: job.importJobId, status: "cancelled" });
     expect(getImportJob(daemon.database, job.importJobId)?.status).toBe("cancelled");
   });
+
+  test("uses semantic transcript activity for real preview and queued import admission", async () => {
+    const { daemon, tempDir } = await createTestHarness();
+    const hermesRoot = join(tempDir, ".hermes", "sessions");
+    const now = new Date();
+    const currentActivityAt = new Date(now.getTime() - 24 * 60 * 60 * 1_000).toISOString();
+    const oldActivityAt = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1_000).toISOString();
+    const recentMtime = new Date(now.getTime() - 60 * 1_000);
+    const oldPath = join(hermesRoot, "session_20260401_120000_old.jsonl");
+    const currentPath = join(hermesRoot, "session_20260714_120000_current.jsonl");
+    await writeRawJsonl(oldPath, [
+      { content: "This semantic transcript is old.", last_updated: oldActivityAt, role: "user", session_id: "old-semantic" }
+    ]);
+    await writeRawJsonl(currentPath, [
+      { content: "This semantic transcript is current.", last_updated: currentActivityAt, role: "user", session_id: "current-semantic" }
+    ]);
+    await utimes(oldPath, recentMtime, recentMtime);
+    await utimes(currentPath, recentMtime, recentMtime);
+    const baseUrl = await listen(daemon);
+    const sourceIds = await approveRuntimeTranscriptSources(baseUrl, daemon, "hermes", hermesRoot, 2);
+
+    const previewResponse = await fetch(`${baseUrl}/sources/import/preview`, {
+      body: JSON.stringify({
+        importScope: { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 },
+        runtimes: ["hermes"],
+        sourceIds
+      }),
+      headers: { accept: "application/json", "content-type": "application/json" },
+      method: "POST"
+    });
+    expect(previewResponse.status).toBe(200);
+    await expect(previewResponse.json()).resolves.toMatchObject({
+      ok: true,
+      previews: [{ runtime: "hermes", summary: { excludedUnits: 1, includedUnits: 1, totalUnits: 2 } }]
+    });
+
+    const sourceRows = daemon.database
+      .prepare("SELECT source_id AS sourceId, source_path AS sourcePath FROM ingest_sources WHERE source_id IN (?, ?)")
+      .all(...sourceIds) as Array<{ sourceId: string; sourcePath: string }>;
+    const queuedJobs = await Promise.all(
+      sourceRows.map(async (source) => {
+        const response = await postJson(baseUrl, "/imports", { kind: "transcript", sourceId: source.sourceId });
+        return response.job ?? response.jobs[0]!;
+      })
+    );
+    expect(queuedJobs.every(Boolean)).toBe(true);
+    await waitFor(() => queuedJobs.every((job) => ["failed", "succeeded", "succeeded_with_issues"].includes(getImportJob(daemon.database, job.importJobId)?.status ?? "")));
+
+    expect(countWhere(daemon.database, "sessions", "source_session_id = ?", "current-semantic")).toBe(1);
+    expect(countWhere(daemon.database, "sessions", "source_session_id = ?", "old-semantic")).toBe(0);
+    const oldSourceId = sourceRows.find((source) => source.sourcePath === oldPath)?.sourceId;
+    const oldJobId = queuedJobs.find((job) => job.sourceId === oldSourceId)?.importJobId;
+    const currentSourceId = sourceRows.find((source) => source.sourcePath === currentPath)?.sourceId;
+    const currentJobId = queuedJobs.find((job) => job.sourceId === currentSourceId)?.importJobId;
+    expect(oldJobId).toBeDefined();
+    expect(currentJobId).toBeDefined();
+    expect(["succeeded", "succeeded_with_issues"]).toContain(getImportJob(daemon.database, oldJobId ?? "")?.status);
+    expect(["succeeded", "succeeded_with_issues"]).toContain(getImportJob(daemon.database, currentJobId ?? "")?.status);
+    expect(
+      daemon.database
+        .prepare(
+          `SELECT scope_reason AS scopeReason, status, timestamp_basis AS timestampBasis
+          FROM import_work_units
+          WHERE import_job_id = ? AND source_path = ?`
+        )
+        .get(oldJobId ?? "", oldPath)
+    ).toMatchObject({ scopeReason: "outside_recent_range", status: "skipped", timestampBasis: "semantic" });
+  });
+
+  test("imports one canonical Grok conversation from chat history and auxiliary files", async () => {
+    const { daemon, tempDir } = await createTestHarness();
+    const conversationId = "019f42f6-8ada-7001-afff-c722e75faf45";
+    const grokRoot = join(tempDir, ".grok", "sessions");
+    const conversationDir = join(grokRoot, conversationId);
+    const chatPath = join(conversationDir, "chat_history.jsonl");
+    const observedAt = new Date().toISOString();
+    await writeRawJsonl(chatPath, [
+      { content: "Canonical Grok question", timestamp: observedAt, type: "user" },
+      { content: "Canonical Grok answer", timestamp: observedAt, type: "assistant" }
+    ]);
+    await writeRawJsonl(join(conversationDir, "updates.jsonl"), [{ status: "complete" }]);
+    await writeRawJsonl(join(conversationDir, "feedback.jsonl"), [{ score: 1 }]);
+    const baseUrl = await listen(daemon);
+    const sourceIds = await approveRuntimeTranscriptSources(baseUrl, daemon, "grok", grokRoot, 3);
+
+    const previewResponse = await fetch(`${baseUrl}/sources/import/preview`, {
+      body: JSON.stringify({ runtimes: ["grok"], sourceIds }),
+      headers: { accept: "application/json", "content-type": "application/json" },
+      method: "POST"
+    });
+    expect(previewResponse.status).toBe(200);
+    await expect(previewResponse.json()).resolves.toMatchObject({
+      ok: true,
+      previews: [{ runtime: "grok", summary: { excludedUnits: 0, includedUnits: 1, totalUnits: 1 } }]
+    });
+
+    const queued = await postJson(baseUrl, "/sources/setup/run", {
+      importMetadata: false,
+      importScope: { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 },
+      queueEnrichment: false,
+      runtimes: ["grok"],
+      sourceIds
+    });
+    expect(queued.jobs).toHaveLength(1);
+    const job = queued.jobs[0]!;
+    await waitFor(() => ["failed", "succeeded", "succeeded_with_issues"].includes(getImportJob(daemon.database, job.importJobId)?.status ?? ""));
+
+    expect(getImportJob(daemon.database, job.importJobId)?.status).toBe("succeeded");
+    expect(countWhere(daemon.database, "import_work_units", "import_job_id = ?", job.importJobId)).toBe(1);
+    expect(countWhere(daemon.database, "sessions", "source_session_id = ?", conversationId)).toBe(1);
+    expect(countWhere(daemon.database, "messages", "session_id = ?", sessionIdFor(daemon.database, conversationId))).toBe(2);
+    const workUnit = daemon.database
+      .prepare(
+        `SELECT source_id AS sourceId, source_path AS sourcePath, work_unit_id AS workUnitId
+        FROM import_work_units
+        WHERE import_job_id = ?`
+      )
+      .get(job.importJobId) as { sourceId: string; sourcePath: string; workUnitId: string };
+    const canonicalChatSource = daemon.database
+      .prepare("SELECT source_id AS sourceId FROM ingest_sources WHERE adapter = 'grok' AND source_path = ?")
+      .get(chatPath) as { sourceId: string };
+    expect(workUnit).toMatchObject({ sourcePath: chatPath });
+    expect(workUnit.sourceId).toBe(canonicalChatSource.sourceId);
+    expect(
+      JSON.parse(
+        (daemon.database.prepare("SELECT source_ref_json AS sourceRef FROM messages WHERE session_id = ? LIMIT 1").get(
+          sessionIdFor(daemon.database, conversationId)
+        ) as { sourceRef: string }).sourceRef
+      )
+    ).toContainEqual(expect.objectContaining({ sourcePath: chatPath }));
+    expect(readImportWorkUnitHealth(daemon.database, workUnit.workUnitId)?.diagnostics).toEqual([
+      expect.objectContaining({ code: "grok_auxiliary_file_ignored", severity: "info" }),
+      expect.objectContaining({ code: "grok_auxiliary_file_ignored", severity: "info" })
+    ]);
+  });
 });
 
 async function createTestHarness(
@@ -498,6 +634,11 @@ async function writeJsonl(path: string, rows: unknown[]): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   const supportedRows = supportedTranscriptRows(rows);
   await writeFile(path, `${supportedRows.map((row) => JSON.stringify(row)).join("\n")}\n`, "utf8");
+}
+
+async function writeRawJsonl(path: string, rows: unknown[]): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`, "utf8");
 }
 
 function supportedTranscriptRows(rows: unknown[]): unknown[] {
@@ -617,6 +758,37 @@ async function approveTranscriptSource(baseUrl: string, daemon: MastheadDaemon, 
     sourceId
   });
   return sourceId;
+}
+
+async function approveRuntimeTranscriptSources(
+  baseUrl: string,
+  daemon: MastheadDaemon,
+  runtime: string,
+  sourceRoot: string,
+  expectedCount: number
+): Promise<string[]> {
+  const scan = await fetch(`${baseUrl}/sources/scan`, { headers: { accept: "application/json" }, method: "POST" });
+  expect(scan.status).toBe(202);
+  const rows = daemon.database
+    .prepare(
+      `SELECT source_id AS sourceId
+      FROM ingest_sources
+      WHERE adapter = ?
+        AND source_path LIKE ?
+      ORDER BY source_path ASC, source_id ASC`
+    )
+    .all(runtime, `${sourceRoot}%`) as Array<{ sourceId: string }>;
+  expect(rows).toHaveLength(expectedCount);
+  for (const { sourceId } of rows) {
+    setSourcePolicy(daemon.database, {
+      decidedAt: new Date().toISOString(),
+      enabled: true,
+      policyKind: "transcript_import",
+      reason: "Production-path semantic admission regression.",
+      sourceId
+    });
+  }
+  return rows.map(({ sourceId }) => sourceId);
 }
 
 async function ingestHook(baseUrl: string, body: Record<string, unknown>): Promise<void> {

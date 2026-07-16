@@ -23,6 +23,7 @@ const REQUIRED_CAPABILITIES = [
 export type MastheadHealthSummary = {
   apiVersion?: number;
   buildSha?: string;
+  buildVersion?: string;
   databaseId?: string;
   databasePath?: string;
   dataDirectory?: string;
@@ -164,6 +165,7 @@ export function parseCompatibleHealth(value: unknown): MastheadHealthSummary | u
   return {
     apiVersion,
     buildSha: stringField(record.buildSha),
+    buildVersion: stringField(record.buildVersion),
     databaseId: stringField(data?.databaseId),
     databasePath: stringField(data?.databasePath),
     dataDirectory: stringField(data?.dataDirectory),

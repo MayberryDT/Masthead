@@ -7,6 +7,7 @@ import { migrateDatabase } from "../../db/schema.ts";
 import { openMastheadDatabase } from "../../db/sqlite.ts";
 import { listImportWorkUnits } from "../../db/importLedgerRepository.ts";
 import { buildImportManifestPlan, createManifestForJob } from "../importManifestService.ts";
+import { decideImportUnitScope } from "../importScope.ts";
 
 const tempDirs: string[] = [];
 
@@ -15,6 +16,59 @@ afterEach(async () => {
 });
 
 describe("import manifest service", () => {
+  test("changed old source refreshes only when a prior cursor exists", () => {
+    const generatedAt = "2026-07-15T00:00:00.000Z";
+    const scope = { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent" as const, unitLimit: 500 };
+    const oldChangedUnit = {
+      modifiedAt: "2026-05-01T00:00:00.000Z",
+      semanticActivityAt: "2026-05-01T00:00:00.000Z"
+    };
+    const oldCursor: IngestCursor = {
+      byteOffset: 3,
+      contentFingerprint: "old",
+      cursorId: "cursor:old-changed",
+      modifiedAt: "2026-04-30T00:00:00.000Z",
+      sourceId: "hermes-old",
+      sourcePath: "/tmp/hermes-old.jsonl"
+    };
+
+    expect(decideImportUnitScope({ unit: oldChangedUnit, cursor: undefined, generatedAt, scope })).toEqual({
+      include: false,
+      reason: "outside_recent_range"
+    });
+    expect(decideImportUnitScope({ unit: oldChangedUnit, cursor: oldCursor, generatedAt, scope })).toEqual({
+      include: true,
+      reason: "changed_since_cursor"
+    });
+  });
+
+  test("fresh recent import excludes old files when no cursor exists", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-import-recent-fresh-"));
+    tempDirs.push(tempDir);
+    const oldPath = join(tempDir, "old-hermes.jsonl");
+    await writeFile(oldPath, "{}\n", "utf8");
+    await utimes(oldPath, new Date("2026-05-01T00:00:00.000Z"), new Date("2026-05-01T00:00:00.000Z"));
+
+    const plan = await buildImportManifestPlan({
+      cursors: new Map(),
+      generatedAt: "2026-07-15T00:00:00.000Z",
+      importJobId: "recent-fresh",
+      importKind: "transcript",
+      runtime: "hermes",
+      scope: { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 },
+      sources: [{
+        confidence: "authoritative",
+        path: oldPath,
+        runtime: "hermes",
+        sourceId: "hermes-old",
+        sourceKind: "jsonl"
+      }]
+    });
+
+    expect(plan.summary.includedUnits).toBe(0);
+    expect(plan.units[0]).toMatchObject({ status: "skipped", statusReason: "Outside selected import age." });
+  });
+
   test("Everything schedules every discovered transcript beyond the internal 500-unit page size", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-import-everything-"));
     tempDirs.push(tempDir);
@@ -44,6 +98,41 @@ describe("import manifest service", () => {
     expect(plan.summary).toMatchObject({ excludedUnits: 0, includedUnits: 1_570, totalUnits: 1_570 });
     expect(plan.units.every((unit) => unit.status === "queued")).toBe(true);
     expect(plan.units.some((unit) => unit.statusReason === "Outside selected first-run cap.")).toBe(false);
+  });
+
+  test("reports units deferred by the requested recent import cap", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-import-recent-cap-"));
+    tempDirs.push(tempDir);
+    const transcriptRoot = join(tempDir, "sessions");
+    await mkdir(transcriptRoot, { recursive: true });
+    await Promise.all(
+      Array.from({ length: 800 }, (_, index) =>
+        writeFile(join(transcriptRoot, `session-${String(index).padStart(4, "0")}.jsonl`), "{}\n", "utf8")
+      )
+    );
+
+    const plan = await buildImportManifestPlan({
+      generatedAt: "2026-07-15T00:00:00.000Z",
+      importJobId: "recent-capped",
+      importKind: "transcript",
+      runtime: "codex",
+      scope: { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 },
+      sources: [{
+        confidence: "authoritative",
+        path: transcriptRoot,
+        runtime: "codex",
+        sourceId: "codex-sessions",
+        sourceKind: "jsonl"
+      }]
+    });
+
+    expect(plan.summary).toMatchObject({
+      cappedUnits: 300,
+      excludedUnits: 300,
+      includedUnits: 500,
+      totalUnits: 800
+    });
+    expect(plan.units.filter((unit) => unit.status === "skipped" && unit.scopeReason === "deferred_by_unit_limit")).toHaveLength(300);
   });
 
   test("previews recent and changed transcript files without persisting rows", async () => {
@@ -167,7 +256,7 @@ async function createTranscriptFixture(): Promise<{ cursors: Map<string, IngestC
     byteOffset: 0,
     contentFingerprint: "changed-before",
     cursorId: "cursor:changed",
-    modifiedAt: "2026-05-01T00:00:00.000Z",
+    modifiedAt: "2026-04-30T00:00:00.000Z",
     sourceId: `opencode:${changedPath}`,
     sourcePath: changedPath
   });

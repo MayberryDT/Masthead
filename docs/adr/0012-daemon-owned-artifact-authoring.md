@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted.
+Accepted for daemon ownership and atomic publication. The V1 session-bundle,
+agent-written dossier, complete-manifest, and per-kind N/A resolution portions are
+superseded by [ADR 0013](0013-canonical-dossier-and-candidate-authoring.md).
 
 ## Context
 
@@ -21,7 +23,7 @@ directed work lets the user steer the same underlying authoring loop.
 The writable Masthead daemon owns the artifact-authoring seam. `mastheadctl` is a thin HTTP adapter
 for agents, not a second domain implementation and not a SQLite client.
 
-The contract is `masthead.workbench.authoring/v1`:
+The historical contract was `masthead.workbench.authoring/v1`:
 
 1. `capabilities` discovers the installed command, database identity, contract version, evidence
    policy, and operations.
@@ -39,10 +41,15 @@ One artifact bundle contains exactly one session package per selected session pl
 resolution for each automatic kind: published artifact, N/A, or contribution to an existing
 published artifact. `applied` is an intermediate state and never counts as automatic resolution.
 
-The daemon uses the same grounded schema and evidence rules for copied handoffs and directed work.
-The copied handoff tells the agent to finish unattended, revise deterministic findings, publish
-valid outputs, and resolve every automatic kind. It contains a plain-language request rather than a
-shell recipe.
+> **Superseded by ADR 0013:** V2 does not accept session packages or dossier prose,
+> does not assign every optional kind to every session, and does not require an N/A
+> resolution. The daemon publishes canonical dossiers independently; one V2 run
+> owns one positive-evidence optional-artifact candidate.
+
+In V1, the daemon used the same grounded schema and evidence rules for copied handoffs and directed
+work. The copied handoff told the agent to finish unattended, revise deterministic findings, publish
+valid outputs, and resolve every automatic kind. It contained a plain-language request rather than
+a shell recipe. ADR 0013 replaces that resolution model with one candidate per V2 run.
 
 MCP remains artifact-primary and read-only. It can search full published artifact bodies and fetch
 artifact detail, but cannot open, submit, finish, improve, rewrite, remove, or otherwise mutate
@@ -57,11 +64,12 @@ does not justify weakening the automatic authoring path.
   the authority.
 - Installed development and packaged launchers can point agents at the active daemon without
   embedding implementation recipes in Workbench UI.
-- Long sessions remain authorable because the evidence manifest and cursor pages cover the complete
-  canonical redacted catalog in both ascending and descending order.
+- Candidate evidence remains cursor-paginated, but V2 authoring is scoped to one
+  candidate rather than an obligation to exhaust every item for an arbitrary session set.
 - Validation is bundle-wide and grounded. Findings are durable and revision is safe because submit
   has no output side effects.
-- Publication is atomic and idempotent across session enrichment, dossier, automatic artifacts,
-  Logbook search indexing, pipeline resolution, claims, and the completion receipt.
+- The retained decision is atomic, idempotent daemon publication. Under V2, finish publishes the
+  candidate's optional artifact plus daemon-built canonical dossiers for its provenance, Logbook
+  search indexing, pipeline updates, claims, Activity, and the completion receipt in one transaction.
 - Read-only worktree bridges allow authoring discovery, status, and evidence reads while blocking
   open, submit, and finish mutations.

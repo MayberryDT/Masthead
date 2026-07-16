@@ -3,6 +3,36 @@ import { describe, expect, test } from "vitest";
 import { LogbookInspector } from "../LogbookInspector";
 
 describe("LogbookInspector", () => {
+  test("renders canonical dossier artifacts with the original dossier sections", () => {
+    const html = renderToStaticMarkup(
+      <LogbookInspector
+        onClose={() => {}}
+        artifact={{
+          kind: "session_dossier",
+          schemaVersion: "canonical-session-dossier-v1",
+          title: "Repair OAuth callback",
+          body: canonicalDossierBody(),
+          provenanceSessionIds: ["canonical-session-1"],
+          provenanceTranscript: {
+            coverage: canonicalDossierBody().coverage.transcript,
+            items: [],
+            total: 0
+          }
+        }}
+      />
+    );
+
+    expect(html).toContain("Transcript evidence");
+    expect(html).toContain("Needs attention");
+    expect(html).toContain("Tools");
+    expect(html).toContain("Timeline");
+    expect(html).toContain("Verification not captured");
+    expect(html).not.toContain("Cursor pagination");
+    expect(html).not.toContain("Problem</p>");
+    expect(html).not.toContain("Approach</p>");
+    expect(html).not.toContain("Lessons learned</p>");
+  });
+
   test("renders runbook body and provenance", () => {
     const html = renderToStaticMarkup(
       <LogbookInspector
@@ -11,7 +41,11 @@ describe("LogbookInspector", () => {
           kind: "runbook",
           title: "Fix cache lock",
           body: {
-            problemSignature: { symptoms: ["EBUSY"], errorStrings: [], affectedScope: "cache" },
+            problemSignature: {
+              symptoms: ["EBUSY"],
+              errorStrings: [],
+              affectedScope: "cache"
+            },
             reproSteps: ["run tests twice"],
             fixSteps: ["serialize lock"],
             deadEnds: [],
@@ -41,6 +75,7 @@ describe("LogbookInspector", () => {
         onClose={() => {}}
         artifact={{
           kind: "session_dossier",
+          schemaVersion: "session_dossier-v1",
           title: "Repair OAuth callback",
           confidence: "high",
           project: "Masthead",
@@ -48,8 +83,19 @@ describe("LogbookInspector", () => {
             problemStatement: "OAuth return path fails",
             context: "Login callback after provider redirect",
             approach: ["Trace callback route", "Add state validation"],
-            claimEvidence: [{ path: "keyDecisions[0]", evidenceRefs: ["message:session:1:decision"] }],
-            commandsAndTools: [{ label: "npm test", purpose: "Verify callback behavior", status: "passed" }],
+            claimEvidence: [
+              {
+                path: "keyDecisions[0]",
+                evidenceRefs: ["message:session:1:decision"]
+              }
+            ],
+            commandsAndTools: [
+              {
+                label: "npm test",
+                purpose: "Verify callback behavior",
+                status: "passed"
+              }
+            ],
             evidenceRefs: ["message:session:1:decision"],
             filesTouched: [{ label: "src/auth/callback.ts", role: "callback handler" }],
             keyDecisions: ["Validate state before token exchange"],
@@ -83,6 +129,48 @@ describe("LogbookInspector", () => {
     expect(html).toContain("1 session");
   });
 
+  test("does not mislabel malformed canonical dossier bodies as legacy", () => {
+    const malformedBody = {
+      ...canonicalDossierBody(),
+      coverage: { ...canonicalDossierBody().coverage, warnings: "not-an-array" }
+    };
+    const html = renderToStaticMarkup(
+      <LogbookInspector
+        onClose={() => {}}
+        artifact={{
+          kind: "session_dossier",
+          schemaVersion: "canonical-session-dossier-v1",
+          title: "Malformed canonical dossier",
+          body: malformedBody,
+          provenanceSessionIds: ["canonical-session-1"]
+        }}
+      />
+    );
+
+    expect(html).toContain("Invalid canonical session dossier");
+    expect(html).not.toContain("Legacy session dossier");
+  });
+
+  test("does not render future dossier schemas as legacy", () => {
+    const html = renderToStaticMarkup(
+      <LogbookInspector
+        onClose={() => {}}
+        artifact={{
+          kind: "session_dossier",
+          schemaVersion: "canonical-session-dossier-v2",
+          title: "Future dossier",
+          body: canonicalDossierBody(),
+          provenanceSessionIds: ["canonical-session-1"]
+        }}
+      />
+    );
+
+    expect(html).toContain("Unsupported session dossier schema");
+    expect(html).toContain("canonical-session-dossier-v2");
+    expect(html).not.toContain("Legacy session dossier");
+    expect(html).not.toContain("Transcript evidence");
+  });
+
   test("renders every runbook field while tolerating absent historical fields", () => {
     const html = renderToStaticMarkup(
       <LogbookInspector
@@ -91,7 +179,11 @@ describe("LogbookInspector", () => {
           kind: "runbook",
           title: "Repair lock",
           body: {
-            problemSignature: { symptoms: ["Lock stalls"], errorStrings: ["ELOCK"], affectedScope: "cache" },
+            problemSignature: {
+              symptoms: ["Lock stalls"],
+              errorStrings: ["ELOCK"],
+              affectedScope: "cache"
+            },
             preconditions: ["Worker is cancelled"],
             reproSteps: ["Cancel worker"],
             deadEnds: ["Retry without cleanup"],
@@ -115,25 +207,40 @@ describe("LogbookInspector", () => {
       />
     );
 
-    for (const value of [
-      "Worker is cancelled",
-      "Cancel worker",
-      "Retry without cleanup",
-      "Close inherited descriptor",
-      "npm test",
-      "src/cache.ts",
-      "Lock suite passes",
-      "Linux",
-      "Descriptor ownership survived cancellation",
-      "Track descriptor ownership",
-      "Windows semantics unverified",
-      "tool_result:lock",
-      "No Windows trace",
-      "signature:lock"
-    ]) {
+    for (const value of ["Worker is cancelled", "Cancel worker", "Retry without cleanup", "Close inherited descriptor", "npm test", "src/cache.ts", "Lock suite passes", "Linux", "Descriptor ownership survived cancellation", "Track descriptor ownership", "Windows semantics unverified", "tool_result:lock", "No Windows trace", "signature:lock"]) {
       expect(html).toContain(value);
     }
     expect(html).not.toContain("logbook-inspector-json");
+  });
+
+  test("renders typed claim support as readable evidence", () => {
+    const html = renderToStaticMarkup(
+      <LogbookInspector
+        onClose={() => {}}
+        artifact={{
+          kind: "runbook",
+          schemaVersion: "runbook-v2",
+          title: "Repair lock",
+          body: {
+            fixSteps: ["Close the inherited descriptor"],
+            rootCause: "Cancellation left the lock descriptor open.",
+            claimSupport: [
+              {
+                path: "rootCause",
+                evidenceRef: "message:session:lock:root-cause",
+                excerpt: "The cancelled worker retained the lock descriptor after shutdown.",
+                supportKind: "root_cause"
+              }
+            ]
+          },
+          provenanceSessionIds: ["session:lock"]
+        }}
+      />
+    );
+
+    for (const value of ["Claim support", "rootCause", "Root cause", "The cancelled worker retained the lock descriptor after shutdown.", "message:session:lock:root-cause"]) {
+      expect(html).toContain(value);
+    }
   });
 
   test("renders complete ADR fields without raw JSON fallback", () => {
@@ -241,9 +348,7 @@ describe("LogbookInspector", () => {
   });
 
   test("renders error state when artifact detail fails to load", () => {
-    const html = renderToStaticMarkup(
-      <LogbookInspector error="Could not load artifact" onClose={() => undefined} />
-    );
+    const html = renderToStaticMarkup(<LogbookInspector error="Could not load artifact" onClose={() => undefined} />);
 
     expect(html).toContain("Artifact detail");
     expect(html).toContain("Could not load artifact");
@@ -269,3 +374,98 @@ describe("LogbookInspector", () => {
     expect(html).toContain("&quot;bar&quot;");
   });
 });
+
+function canonicalDossierBody() {
+  return {
+    snapshotVersion: "canonical-session-dossier-v1" as const,
+    capturedAt: "2026-07-12T18:00:00.000Z",
+    problemStatement: "Cursor pagination",
+    attention: [
+      {
+        kind: "missing_verification" as const,
+        severity: "P2" as const,
+        sourceRefs: [],
+        title: "Verification not captured"
+      }
+    ],
+    coverage: {
+      level: "complete" as const,
+      transcript: {
+        assistantMessages: 1,
+        checkpoints: 0,
+        fileEffects: 1,
+        hasUsableTranscript: true,
+        lowValueItems: 0,
+        messages: 2,
+        runtimeSignals: 0,
+        toolCalls: 1,
+        toolResults: 1,
+        userMessages: 1
+      },
+      warnings: []
+    },
+    enrichment: { status: "current" as const },
+    excerpts: [],
+    files: [],
+    identity: {
+      hostId: "host:test",
+      lastActivityAt: "2026-07-12T18:00:00.000Z",
+      lifecycle: "ended" as const,
+      model: "gpt-5",
+      models: ["gpt-5"],
+      project: "Masthead",
+      runtime: "codex",
+      sessionId: "canonical-session-1",
+      sourceConfidence: "authoritative" as const,
+      sourceSessionId: "source-session-1",
+      startedAt: "2026-07-12T17:00:00.000Z",
+      title: "Repair OAuth callback"
+    },
+    narrative: {
+      firstUserPrompt: "Repair the OAuth callback.",
+      objective: "Repair the OAuth callback.",
+      outcome: "The callback now validates state.",
+      technologies: ["React"],
+      topics: ["OAuth"],
+      unresolved: []
+    },
+    reuse: {
+      canonicalSessionId: "canonical-session-1",
+      copyableContext: "Reusable OAuth callback evidence",
+      mcpIncluded: true,
+      sourceConfidence: "authoritative" as const,
+      sourceRuntime: "codex",
+      sourceSessionId: "source-session-1"
+    },
+    timeline: [
+      {
+        eventId: "event-1",
+        kind: "tool" as const,
+        label: "succeeded",
+        observedAt: "2026-07-12T17:30:00.000Z",
+        summary: "OAuth tests passed"
+      }
+    ],
+    tools: [
+      {
+        completedAt: "2026-07-12T17:30:00.000Z",
+        outputPreview: "tests passed",
+        sourceRef: {},
+        status: "succeeded" as const,
+        toolCallId: "tool-1",
+        toolName: "npm test"
+      }
+    ],
+    usage: {
+      inputTokens: 120,
+      outputTokens: 40,
+      totalTokens: 160,
+      usageRows: 1
+    },
+    verification: {
+      commands: [],
+      status: "passed" as const,
+      summary: "OAuth tests passed."
+    }
+  };
+}

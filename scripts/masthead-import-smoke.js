@@ -96,9 +96,13 @@ async function assertSearch(baseUrl) {
   const sessions = await getJson(baseUrl, "/sessions?q=Logbook&limit=10");
   assert(sessions.total === 0, "unpublished imported sessions should not appear in published session evidence search");
   const workbench = await getJson(baseUrl, "/workbench/sessions?limit=10");
-  assert(workbench.total === 1, `expected one artifact candidate in Workbench, got ${workbench.total}`);
+  assert(workbench.total === 4, `expected all four imported sessions in Workbench, got ${workbench.total}`);
+  assert(
+    workbench.sessions?.filter((session) => session.nextAction === "review_quality").length === 3,
+    "expected three low-evidence imports on the Workbench quality-review path"
+  );
   const notAdded = await getJson(baseUrl, "/workbench/not-added-summary");
-  assert(notAdded.total === 3, `expected three low-evidence imports outside the default queue, got ${notAdded.total}`);
+  assert(notAdded.total === 0, `low-evidence review sessions should not be classified as Not Added, got ${notAdded.total}`);
   const logbook = await getJson(baseUrl, "/logbook/artifacts?q=Logbook&limit=10");
   assert(logbook.total === 0, "unpublished imported sessions should not appear in artifact-first Logbook");
 }

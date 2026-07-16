@@ -1,4 +1,5 @@
 import type { SessionTranscriptItem } from "./sessionTranscript.ts";
+import type { DurableSessionEnrichment } from "./sessionEnrichment.ts";
 
 export type WorkbenchAutomaticArtifactKind = "runbook" | "adr" | "incident_timeline";
 export type WorkbenchAuthoredArtifactKind = "session_dossier" | WorkbenchAutomaticArtifactKind;
@@ -9,18 +10,90 @@ export type WorkbenchClaimEvidence = {
   evidenceRefs: string[];
 };
 
-export type WorkbenchAuthoringCapabilitiesDto = {
+export type WorkbenchClaimSupport = {
+  path: string;
+  evidenceRef: string;
+  excerpt: string;
+  supportKind:
+    | "problem"
+    | "decision"
+    | "alternative"
+    | "change"
+    | "verification"
+    | "timeline"
+    | "remediation"
+    | "root_cause";
+};
+
+export type WorkbenchAuthoringContractVersion =
+  | "workbench-authoring-v1"
+  | "workbench-authoring-v2"
+  | "workbench-authoring-v3";
+
+type WorkbenchAuthoringCapabilitiesBase = {
   capability: "artifact_authoring";
   protocol: "masthead.workbench.authoring/v1";
   transport: "daemon_http";
   command: string;
   databaseId: string;
+};
+
+export type WorkbenchAuthoringCapabilitiesDto = WorkbenchAuthoringCapabilitiesBase & ({
+  operations: ["suggestions", "open", "status", "evidence", "context", "submit", "finish"];
+  bundleVersion: "workbench-authoring-v3";
+  evidencePolicy: "selected_session_canonical_evidence";
+  maxSessionsPerRun: 12;
+  suggestionsAreBinding: false;
+} | {
   operations: ["open", "status", "evidence", "submit", "finish"];
   bundleVersion: "workbench-authoring-v1";
   evidencePolicy: "all_canonical_redacted_evidence";
+});
+
+export const WORKBENCH_AUTHORING_OPERATIONS = [
+  "suggestions",
+  "open",
+  "status",
+  "evidence",
+  "context",
+  "submit",
+  "finish"
+] as const;
+
+export type WorkbenchArtifactSuggestionDto = {
+  suggestionId: string;
+  kind: WorkbenchAutomaticArtifactKind;
+  summary: string;
+  provenanceSessionIds: string[];
+  evidenceRefs: string[];
+  signatureKey?: string;
+  advisory: true;
 };
 
-export const WORKBENCH_AUTHORING_OPERATIONS = ["open", "status", "evidence", "submit", "finish"] as const;
+export type WorkbenchArtifactCandidateStatus = "pending" | "claimed" | "published" | "dismissed" | "superseded";
+
+export type WorkbenchArtifactCandidateDto = {
+  candidateId: string;
+  kind: WorkbenchAutomaticArtifactKind;
+  origin: "automatic" | "proposal";
+  seedSessionId: string;
+  provenanceSessionIds: string[];
+  signalEvidenceRefs: string[];
+  signalSummary: string;
+  signatureKey?: string;
+  evidenceRevision: string;
+  supersedesCandidateId?: string;
+  status: WorkbenchArtifactCandidateStatus;
+  dismissalReason?: string;
+  dismissalEvidenceRefs?: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type WorkbenchArtifactCandidatePageDto = {
+  candidates: WorkbenchArtifactCandidateDto[];
+  nextCursor?: string;
+};
 
 export function isWorkbenchAuthoringCapabilitiesDto(
   value: unknown,
@@ -33,8 +106,10 @@ export function isWorkbenchAuthoringCapabilitiesDto(
     capabilities.capability === "artifact_authoring" &&
     capabilities.protocol === "masthead.workbench.authoring/v1" &&
     capabilities.transport === "daemon_http" &&
-    capabilities.bundleVersion === "workbench-authoring-v1" &&
-    capabilities.evidencePolicy === "all_canonical_redacted_evidence" &&
+    capabilities.bundleVersion === "workbench-authoring-v3" &&
+    capabilities.evidencePolicy === "selected_session_canonical_evidence" &&
+    capabilities.maxSessionsPerRun === 12 &&
+    capabilities.suggestionsAreBinding === false &&
     typeof capabilities.databaseId === "string" &&
     Boolean(capabilities.databaseId.trim()) &&
     capabilities.databaseId === capabilities.databaseId.trim() &&
@@ -124,6 +199,32 @@ export type WorkbenchAuthoringBundle = {
   contributions: WorkbenchContributionDecision[];
 };
 
+export type WorkbenchAuthoringBundleV2 = {
+  bundleVersion: "workbench-authoring-v2";
+  runId: string;
+  candidateId: string;
+  evidenceRevision: string;
+  artifact: WorkbenchArtifactDraft;
+};
+
+export type WorkbenchSessionEnrichmentDraft = {
+  sessionId: string;
+  enrichment: DurableSessionEnrichment;
+};
+
+export type WorkbenchAuthoringBundleV3 = {
+  bundleVersion: "workbench-authoring-v3";
+  runId: string;
+  evidenceRevision: string;
+  sessionEnrichments: WorkbenchSessionEnrichmentDraft[];
+  artifacts: WorkbenchArtifactDraft[];
+};
+
+export type WorkbenchStoredAuthoringBundle =
+  | WorkbenchAuthoringBundle
+  | WorkbenchAuthoringBundleV2
+  | WorkbenchAuthoringBundleV3;
+
 export type WorkbenchAuthoringFinding = {
   code: string;
   message: string;
@@ -133,27 +234,56 @@ export type WorkbenchAuthoringFinding = {
   artifactKind?: "session_enrichment" | WorkbenchAuthoredArtifactKind;
 };
 
-export type WorkbenchAuthoringReceipt = {
+type WorkbenchAuthoringReceiptBase = {
   runId: string;
   completedAt: string;
   publishedArtifactIds: string[];
   resolvedSessionIds: string[];
-  notApplicable: Array<{ sessionId: string; kind: WorkbenchAutomaticArtifactKind }>;
   contributions: Array<{ sessionId: string; kind: WorkbenchAutomaticArtifactKind; artifactId: string }>;
 };
+
+export type WorkbenchAuthoringReceiptV1 = WorkbenchAuthoringReceiptBase & {
+  contractVersion: "workbench-authoring-v1";
+  notApplicable: Array<{ sessionId: string; kind: WorkbenchAutomaticArtifactKind }>;
+};
+
+export type WorkbenchAuthoringReceiptV2 = WorkbenchAuthoringReceiptBase & {
+  contractVersion: "workbench-authoring-v2";
+  candidateId: string;
+  dossierArtifactIds: string[];
+  optionalArtifact: { artifactId: string; kind: WorkbenchAutomaticArtifactKind };
+  provenanceSessionIds: string[];
+};
+
+export type WorkbenchAuthoringReceiptV3 = WorkbenchAuthoringReceiptBase & {
+  contractVersion: "workbench-authoring-v3";
+  dossierArtifactIds: string[];
+  optionalArtifacts: Array<{
+    artifactId: string;
+    kind: WorkbenchAutomaticArtifactKind;
+    provenanceSessionIds: string[];
+  }>;
+};
+
+export type WorkbenchAuthoringReceipt =
+  | WorkbenchAuthoringReceiptV1
+  | WorkbenchAuthoringReceiptV2
+  | WorkbenchAuthoringReceiptV3;
 
 export type WorkbenchAuthoringRunDto = {
   runId: string;
   actorId: string;
   databaseId: string;
   status: WorkbenchAuthoringRunStatus;
+  contractVersion: WorkbenchAuthoringContractVersion;
+  candidateId?: string;
   evidenceRevision: string;
   sessionIds: string[];
   claimIds: string[];
   claimsExpireAt: string;
   claimStatus: "active" | "expired" | "conflicted" | "released";
   findings: WorkbenchAuthoringFinding[];
-  bundle?: WorkbenchAuthoringBundle;
+  bundle?: WorkbenchStoredAuthoringBundle;
   receipt?: WorkbenchAuthoringReceipt;
   createdAt: string;
   updatedAt: string;

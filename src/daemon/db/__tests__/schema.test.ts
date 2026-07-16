@@ -4,10 +4,16 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
+import { ARTIFACT_CANDIDATE_DETECTOR_REVISION } from "../../../workbench/authoring/artifactCandidates.ts";
+import { migrateTestDatabaseThrough } from "./schemaTestHelpers.ts";
 import { seedSession } from "./sessionTestHelpers.ts";
 import { applySessionArtifact, publishSessionArtifact } from "../sessionArtifactRepository.ts";
 import { CURRENT_SCHEMA_VERSION, migrateDatabase } from "../schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../sqlite.ts";
+import {
+  hasWorkbenchArtifactCandidateScan,
+  recordWorkbenchArtifactCandidateScan
+} from "../workbenchArtifactCandidateRepository.ts";
 import { ensureWorkbenchSessionState } from "../workbenchPipelineRepository.ts";
 
 const tempDirs: string[] = [];
@@ -19,6 +25,126 @@ afterEach(async () => {
 });
 
 describe("daemon database schema", () => {
+  test("migration 027 distinguishes historical automatic prechecks from manual exclusions", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-db-"));
+    tempDirs.push(tempDir);
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+    migrateTestDatabaseThrough(db, 26);
+
+    for (const [sessionId, reason] of [
+      ["session:auto-duplicate", "duplicate_noise"],
+      ["session:auto-exact", "exact_duplicate"],
+      ["session:auto-hook", "hook_only"],
+      ["session:auto-low", "low_evidence"],
+      ["session:auto-metadata", "metadata_only"],
+      ["session:auto-missing", "missing_identity"],
+      ["session:auto-no-messages", "no_messages"],
+      ["session:manual-exclusion", "operator_excluded"]
+    ] as const) {
+      seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId, title: reason });
+      db.prepare(
+        `INSERT INTO workbench_session_state (
+          session_id, publication_status, next_action, transcript_status, quality_status,
+          session_enrichment_status, session_dossier_status, bug_fix_trace_status,
+          non_publication_reason, created_at, updated_at
+        ) VALUES (?, 'not_added_to_logbook', 'none', 'imported', 'failed', 'missing', 'missing', 'unknown', ?, ?, ?)`
+      ).run(sessionId, reason, "2026-07-14T00:00:00.000Z", "2026-07-14T00:00:00.000Z");
+      db.prepare(
+        `INSERT INTO workbench_activity (
+          activity_id, session_id, event_type, event_at, actor_kind, actor_id, summary, details_json
+        ) VALUES (?, ?, 'quality_failed', ?, 'user', 'workbench_ui', 'Quality failed', ?)`
+      ).run(`${sessionId}:activity`, sessionId, "2026-07-14T00:00:00.000Z", JSON.stringify({ reason }));
+    }
+
+    db.exec(readFileSync(join(migrationsDir, "027_workbench_suppression_provenance.sql"), "utf8"));
+
+    expect(
+      db.prepare(
+        `SELECT session_id AS sessionId, publication_status AS publicationStatus,
+          next_action AS nextAction, quality_status AS qualityStatus,
+          non_publication_reason AS nonPublicationReason,
+          suppression_category AS suppressionCategory,
+          quality_decision_source AS qualityDecisionSource
+         FROM workbench_session_state ORDER BY session_id`
+      ).all()
+    ).toEqual([
+      {
+        nextAction: "review_quality",
+        nonPublicationReason: "duplicate_noise",
+        publicationStatus: "publish_path",
+        qualityDecisionSource: "automatic",
+        qualityStatus: "unchecked",
+        sessionId: "session:auto-duplicate",
+        suppressionCategory: "insufficient_evidence"
+      },
+      {
+        nextAction: "none",
+        nonPublicationReason: "exact_duplicate",
+        publicationStatus: "not_added_to_logbook",
+        qualityDecisionSource: "automatic",
+        qualityStatus: "failed",
+        sessionId: "session:auto-exact",
+        suppressionCategory: "confirmed_noise"
+      },
+      {
+        nextAction: "none",
+        nonPublicationReason: "hook_only",
+        publicationStatus: "not_added_to_logbook",
+        qualityDecisionSource: "automatic",
+        qualityStatus: "failed",
+        sessionId: "session:auto-hook",
+        suppressionCategory: "confirmed_noise"
+      },
+      {
+        nextAction: "review_quality",
+        nonPublicationReason: "low_evidence",
+        publicationStatus: "publish_path",
+        qualityDecisionSource: "automatic",
+        qualityStatus: "unchecked",
+        sessionId: "session:auto-low",
+        suppressionCategory: "insufficient_evidence"
+      },
+      {
+        nextAction: "review_quality",
+        nonPublicationReason: "metadata_only",
+        publicationStatus: "publish_path",
+        qualityDecisionSource: "automatic",
+        qualityStatus: "unchecked",
+        sessionId: "session:auto-metadata",
+        suppressionCategory: "insufficient_evidence"
+      },
+      {
+        nextAction: "review_quality",
+        nonPublicationReason: "missing_identity",
+        publicationStatus: "publish_path",
+        qualityDecisionSource: "automatic",
+        qualityStatus: "unchecked",
+        sessionId: "session:auto-missing",
+        suppressionCategory: "insufficient_evidence"
+      },
+      {
+        nextAction: "review_quality",
+        nonPublicationReason: "no_messages",
+        publicationStatus: "publish_path",
+        qualityDecisionSource: "automatic",
+        qualityStatus: "unchecked",
+        sessionId: "session:auto-no-messages",
+        suppressionCategory: "insufficient_evidence"
+      },
+      {
+        nextAction: "none",
+        nonPublicationReason: "operator_excluded",
+        publicationStatus: "not_added_to_logbook",
+        qualityDecisionSource: "user",
+        qualityStatus: "failed",
+        sessionId: "session:manual-exclusion",
+        suppressionCategory: "manual_exclusion"
+      }
+    ]);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM workbench_activity").get()).toEqual({ count: 8 });
+    db.close();
+  });
+
   test("creates raw journal, canonical graph, enrichment, FTS, and audit tables idempotently", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-db-"));
     tempDirs.push(tempDir);
@@ -27,7 +153,7 @@ describe("daemon database schema", () => {
     migrateDatabase(db);
     migrateDatabase(db);
 
-    expect(CURRENT_SCHEMA_VERSION).toBe(21);
+    expect(CURRENT_SCHEMA_VERSION).toBe(29);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'virtual') ORDER BY name").all() as Array<{ name: string }>;
     expect(tables.map((row) => row.name)).toEqual(
@@ -68,6 +194,9 @@ describe("daemon database schema", () => {
         "import_work_units",
         "import_failure_groups",
         "import_session_impacts",
+        "session_import_health",
+        "import_repair_replacements",
+        "session_transcript_fingerprints",
         "legacy_migrations",
         "board_headline_frames",
         "board_headline_generations",
@@ -80,7 +209,12 @@ describe("daemon database schema", () => {
         "workbench_activity",
         "workbench_claims",
         "workbench_authoring_runs",
-        "workbench_authoring_run_sessions"
+        "workbench_authoring_run_sessions",
+        "workbench_artifact_candidates",
+        "workbench_artifact_candidate_provenance",
+        "workbench_artifact_candidate_signature_members",
+        "workbench_artifact_candidate_source_revisions",
+        "workbench_artifact_candidate_scans"
       ])
     );
     const applied = db.prepare("SELECT version, name FROM schema_migrations").all();
@@ -105,8 +239,21 @@ describe("daemon database schema", () => {
       { version: 18, name: "018_artifact_first_logbook" },
       { version: 19, name: "019_workbench_authoring_runs" },
       { version: 20, name: "020_normalize_workbench_optional_statuses" },
-      { version: 21, name: "021_artifact_body_search" }
+      { version: 21, name: "021_artifact_body_search" },
+      { version: 22, name: "022_workbench_authoring_v2" },
+      { version: 23, name: "023_workbench_artifact_candidates" },
+      { version: 24, name: "024_artifact_candidate_detector_revision" },
+      { version: 25, name: "025_import_unit_scope" },
+      { version: 26, name: "026_session_import_health" },
+      { version: 27, name: "027_workbench_suppression_provenance" },
+      { version: 28, name: "028_session_transcript_fingerprints" },
+      { version: 29, name: "029_import_repair_replacements" }
     ]);
+    expect(
+      (db.prepare("PRAGMA table_info(workbench_artifact_candidate_scans)").all() as Array<{ name: string }>).map(
+        (column) => column.name
+      )
+    ).toContain("detector_revision");
     const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' ORDER BY name").all() as Array<{ name: string }>;
     expect(indexes.map((row) => row.name)).toEqual(
       expect.arrayContaining([
@@ -114,7 +261,87 @@ describe("daemon database schema", () => {
         "tool_results_session_status_idx",
         "runtime_signals_session_observed_idx",
         "checkpoints_session_observed_idx",
-        "idx_live_state_reports_session"
+        "idx_live_state_reports_session",
+        "idx_workbench_authoring_run_contract_candidate",
+        "idx_workbench_candidates_current_signature",
+        "idx_workbench_candidates_current_session",
+        "idx_workbench_candidates_status_updated",
+        "idx_workbench_candidates_lineage",
+        "idx_workbench_candidates_signature_history",
+        "idx_workbench_candidates_session_history",
+        "idx_workbench_candidate_provenance_session",
+        "idx_workbench_signature_members_session",
+        "idx_workbench_candidate_scans_session_time",
+        "idx_session_transcript_fingerprints_lookup",
+        "idx_session_import_health_status",
+        "idx_import_repair_replacements_original"
+      ])
+    );
+    const importHealthColumns = db.prepare("PRAGMA table_info(session_import_health)").all() as Array<{
+      name: string;
+      notnull: number;
+      pk: number;
+    }>;
+    expect(importHealthColumns.find((column) => column.name === "session_id")).toMatchObject({ notnull: 0, pk: 0 });
+    expect(importHealthColumns.find((column) => column.name === "work_unit_id")).toMatchObject({ notnull: 1, pk: 1 });
+    expect(importHealthColumns.find((column) => column.name === "diagnostics_json")).toMatchObject({ notnull: 1 });
+    const sourceRevisionTriggers = db
+      .prepare(
+        `SELECT name
+         FROM sqlite_master
+         WHERE type = 'trigger' AND name LIKE 'workbench_candidate_%_revision'
+         ORDER BY name`
+      )
+      .all() as Array<{ name: string }>;
+    const transcriptTables = [
+      "messages",
+      "tool_calls",
+      "tool_results",
+      "checkpoints",
+      "runtime_signals",
+      "file_effects"
+    ];
+    expect(sourceRevisionTriggers.map((row) => row.name)).toEqual(
+      transcriptTables
+        .flatMap((table) =>
+          ["insert", "update", "delete"].map(
+            (operation) => `workbench_candidate_${table}_${operation}_revision`
+          )
+        )
+        .sort()
+    );
+    const authoringRunColumns = db.prepare("PRAGMA table_info(workbench_authoring_runs)").all() as Array<{
+      dflt_value: string | null;
+      name: string;
+      notnull: number;
+    }>;
+    expect(authoringRunColumns).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          dflt_value: "'workbench-authoring-v1'",
+          name: "contract_version",
+          notnull: 1
+        }),
+        expect.objectContaining({ dflt_value: null, name: "candidate_id" })
+      ])
+    );
+    const candidateColumns = db.prepare("PRAGMA table_info(workbench_artifact_candidates)").all() as Array<{
+      name: string;
+      notnull: number;
+    }>;
+    expect(candidateColumns).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "evidence_revision", notnull: 1 }),
+        expect.objectContaining({ name: "supersedes_candidate_id" })
+      ])
+    );
+    expect(db.prepare("PRAGMA foreign_key_list(workbench_artifact_candidates)").all()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          from: "supersedes_candidate_id",
+          table: "workbench_artifact_candidates",
+          to: "candidate_id"
+        })
       ])
     );
     const frameColumns = db.prepare("PRAGMA table_info(board_headline_frames)").all() as Array<{ name: string }>;
@@ -130,6 +357,284 @@ describe("daemon database schema", () => {
     expect(db.prepare("SELECT session_id FROM session_search WHERE session_search MATCH ?").all("historical")).toEqual([
       { session_id: "session-1" }
     ]);
+    db.close();
+  });
+
+  test("migration 023 enforces candidate lifecycle, current identity, and revision scans", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-db-v23-candidates-"));
+    tempDirs.push(tempDir);
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+    migrateDatabase(db);
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:candidate-schema",
+      title: "Candidate schema"
+    });
+    const insertCandidate = db.prepare(
+      `INSERT INTO workbench_artifact_candidates (
+        candidate_id, kind, seed_session_id, provenance_session_ids_json,
+        signal_evidence_refs_json, signal_summary, signature_key, evidence_revision,
+        status, created_at, updated_at
+      ) VALUES (?, 'runbook', 'session:candidate-schema', ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    const now = "2026-07-12T00:00:00.000Z";
+    insertCandidate.run(
+      "candidate:one",
+      JSON.stringify(["session:candidate-schema"]),
+      JSON.stringify(["message:session:candidate-schema:message"]),
+      "Grounded reusable procedure candidate.",
+      "error:ssh:missing-command",
+      "sha256:candidate-one",
+      "pending",
+      now,
+      now
+    );
+
+    expect(() =>
+      insertCandidate.run(
+        "candidate:duplicate-current",
+        JSON.stringify(["session:candidate-schema"]),
+        JSON.stringify(["message:session:candidate-schema:message"]),
+        "Duplicate current signature.",
+        "error:ssh:missing-command",
+        "sha256:candidate-duplicate",
+        "claimed",
+        now,
+        now
+      )
+    ).toThrow();
+    expect(() =>
+      db
+        .prepare(
+          `UPDATE workbench_artifact_candidates
+           SET status = 'dismissed', dismissal_reason = 'too short', dismissal_evidence_refs_json = '[]'
+           WHERE candidate_id = 'candidate:one'`
+        )
+        .run()
+    ).toThrow();
+
+    db.prepare(
+      `UPDATE workbench_artifact_candidates
+       SET status = 'dismissed',
+         dismissal_reason = 'The evidence is real but this procedure is not reusable.',
+         dismissal_evidence_refs_json = signal_evidence_refs_json
+       WHERE candidate_id = 'candidate:one'`
+    ).run();
+    insertCandidate.run(
+      "candidate:replacement",
+      JSON.stringify(["session:candidate-schema"]),
+      JSON.stringify(["message:session:candidate-schema:message"]),
+      "Changed evidence creates a new current candidate.",
+      "error:ssh:missing-command",
+      "sha256:candidate-replacement",
+      "pending",
+      now,
+      now
+    );
+    expect(
+      db.prepare(
+        `SELECT session_id AS sessionId, position
+         FROM workbench_artifact_candidate_provenance
+         WHERE candidate_id = 'candidate:replacement'
+         ORDER BY position`
+      ).all()
+    ).toEqual([{ position: 0, sessionId: "session:candidate-schema" }]);
+    expect(
+      db.prepare(
+        "SELECT origin FROM workbench_artifact_candidates WHERE candidate_id = 'candidate:replacement'"
+      ).get()
+    ).toEqual({ origin: "automatic" });
+    db.prepare(
+      `INSERT INTO workbench_artifact_candidate_scans (
+        session_id, evidence_revision, source_revision, scanned_at
+      ) VALUES ('session:candidate-schema', 'sha256:first', 0, ?)`
+    ).run(now);
+    db.prepare(
+      `INSERT INTO workbench_artifact_candidate_scans (
+        session_id, evidence_revision, source_revision, scanned_at
+      ) VALUES ('session:candidate-schema', 'sha256:second', 1, ?)`
+    ).run(now);
+    expect(
+      db
+        .prepare(
+          `SELECT evidence_revision AS evidenceRevision, source_revision AS sourceRevision
+           FROM workbench_artifact_candidate_scans
+           WHERE session_id = 'session:candidate-schema'
+           ORDER BY evidence_revision`
+        )
+        .all()
+    ).toEqual([
+      { evidenceRevision: "sha256:first", sourceRevision: 0 },
+      { evidenceRevision: "sha256:second", sourceRevision: 1 }
+    ]);
+    db.prepare(
+      `INSERT INTO workbench_artifact_candidate_signature_members (
+        kind, signature_key, session_id, evidence_revision, signal_evidence_refs_json, updated_at
+      ) VALUES ('runbook', 'error:ssh:missing-command', 'session:candidate-schema',
+        'sha256:member', '["message:session:candidate-schema:message"]', ?)`
+    ).run(now);
+    expect(() => db.prepare("DELETE FROM sessions WHERE session_id = 'session:candidate-schema'").run()).not.toThrow();
+    for (const table of [
+      "workbench_artifact_candidate_source_revisions",
+      "workbench_artifact_candidate_provenance",
+      "workbench_artifact_candidate_signature_members",
+      "workbench_artifact_candidate_scans"
+    ]) {
+      expect(db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get()).toEqual({ count: 0 });
+    }
+    db.close();
+  });
+
+  test("migration 024 backfills populated scans and requires the current detector revision", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-db-v24-detector-revision-"));
+    tempDirs.push(tempDir);
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+    migrateTestDatabaseThrough(db, 23);
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:detector-revision",
+      title: "Detector revision migration"
+    });
+    db.prepare(
+      `INSERT INTO workbench_artifact_candidate_scans (
+        session_id, evidence_revision, source_revision, scanned_at
+      ) VALUES (?, ?, ?, ?)`
+    ).run(
+      "session:detector-revision",
+      "sha256:legacy-detector",
+      0,
+      "2026-07-13T12:00:00.000Z"
+    );
+
+    expect(
+      (db.prepare("PRAGMA table_info(workbench_artifact_candidate_scans)").all() as Array<{ name: string }>).map(
+        (column) => column.name
+      )
+    ).not.toContain("detector_revision");
+
+    db.exec(readFileSync(join(migrationsDir, "024_artifact_candidate_detector_revision.sql"), "utf8"));
+    db.prepare("INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)").run(
+      24,
+      "024_artifact_candidate_detector_revision",
+      "2026-07-15T00:00:00.000Z"
+    );
+
+    expect(CURRENT_SCHEMA_VERSION).toBe(29);
+    expect(db.prepare("SELECT version, name FROM schema_migrations ORDER BY version DESC LIMIT 1").get()).toEqual({
+      name: "024_artifact_candidate_detector_revision",
+      version: 24
+    });
+    expect(
+      (db.prepare("PRAGMA table_info(workbench_artifact_candidate_scans)").all() as Array<{
+        dflt_value: string | null;
+        name: string;
+        notnull: number;
+        type: string;
+      }>).find((column) => column.name === "detector_revision")
+    ).toMatchObject({
+      dflt_value: "1",
+      name: "detector_revision",
+      notnull: 1,
+      type: "INTEGER"
+    });
+    expect(
+      db.prepare(
+        `SELECT evidence_revision AS evidenceRevision,
+                source_revision AS sourceRevision,
+                detector_revision AS detectorRevision
+         FROM workbench_artifact_candidate_scans
+         WHERE session_id = ?`
+      ).get("session:detector-revision")
+    ).toEqual({
+      detectorRevision: 1,
+      evidenceRevision: "sha256:legacy-detector",
+      sourceRevision: 0
+    });
+
+    expect(ARTIFACT_CANDIDATE_DETECTOR_REVISION).toBeGreaterThan(1);
+    expect(
+      hasWorkbenchArtifactCandidateScan(db, {
+        detectorRevision: 1,
+        sessionId: "session:detector-revision",
+        sourceRevision: 0
+      })
+    ).toBe(true);
+    expect(
+      hasWorkbenchArtifactCandidateScan(db, {
+        detectorRevision: ARTIFACT_CANDIDATE_DETECTOR_REVISION,
+        sessionId: "session:detector-revision",
+        sourceRevision: 0
+      })
+    ).toBe(false);
+
+    recordWorkbenchArtifactCandidateScan(db, {
+      detectorRevision: ARTIFACT_CANDIDATE_DETECTOR_REVISION,
+      evidenceRevision: "sha256:current-detector",
+      sessionId: "session:detector-revision",
+      sourceRevision: 0
+    });
+
+    expect(
+      hasWorkbenchArtifactCandidateScan(db, {
+        detectorRevision: ARTIFACT_CANDIDATE_DETECTOR_REVISION,
+        sessionId: "session:detector-revision",
+        sourceRevision: 0
+      })
+    ).toBe(true);
+    expect(
+      hasWorkbenchArtifactCandidateScan(db, {
+        detectorRevision: 1,
+        sessionId: "session:detector-revision",
+        sourceRevision: 0
+      })
+    ).toBe(false);
+    expect(
+      db.prepare(
+        `SELECT evidence_revision AS evidenceRevision,
+                detector_revision AS detectorRevision
+         FROM workbench_artifact_candidate_scans
+         WHERE session_id = ? AND source_revision = ?`
+      ).get("session:detector-revision", 0)
+    ).toEqual({
+      detectorRevision: ARTIFACT_CANDIDATE_DETECTOR_REVISION,
+      evidenceRevision: "sha256:current-detector"
+    });
+    db.close();
+  });
+
+  test("migration 025 records import unit scope evidence and manifest caps", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-db-v25-import-unit-scope-"));
+    tempDirs.push(tempDir);
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+    migrateTestDatabaseThrough(db, 24);
+
+    expect(
+      (db.prepare("PRAGMA table_info(import_work_units)").all() as Array<{ name: string }>).map((column) => column.name)
+    ).not.toContain("semantic_activity_at");
+
+    migrateDatabase(db);
+
+    expect(db.prepare("SELECT version, name FROM schema_migrations WHERE version = 25").get()).toEqual({
+      name: "025_import_unit_scope",
+      version: 25
+    });
+    expect(
+      (db.prepare("PRAGMA table_info(import_work_units)").all() as Array<{
+        dflt_value: string | null;
+        name: string;
+        notnull: number;
+      }>).find((column) => column.name === "timestamp_basis")
+    ).toMatchObject({ dflt_value: "'unknown'", name: "timestamp_basis", notnull: 1 });
+    expect(
+      (db.prepare("PRAGMA table_info(import_work_units)").all() as Array<{ name: string }>).map((column) => column.name)
+    ).toEqual(expect.arrayContaining(["semantic_activity_at", "scope_reason"]));
+    expect(
+      (db.prepare("PRAGMA table_info(import_manifests)").all() as Array<{ name: string }>).map((column) => column.name)
+    ).toContain("capped_units");
     db.close();
   });
 
@@ -179,8 +684,10 @@ describe("daemon database schema", () => {
     tempDirs.push(tempDir);
     const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
     migrateDatabase(db);
-    db.prepare("DELETE FROM schema_migrations WHERE version >= 20").run();
-    expect(db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 19 });
+    db.prepare("DELETE FROM schema_migrations WHERE version IN (20, 21)").run();
+    expect(db.prepare("SELECT MAX(version) AS version FROM schema_migrations WHERE version <= 21").get()).toEqual({
+      version: 19
+    });
 
     const publishedKinds = ["runbook", "adr", "incident_timeline"] as const;
     for (const kind of publishedKinds) {
@@ -346,8 +853,8 @@ describe("daemon database schema", () => {
       ).all()
     ).toEqual([
       {
-        nextAction: "enrich",
-        resolutionStatus: "compile_ready",
+        nextAction: "none",
+        resolutionStatus: "automatic_resolved",
         sessionId: "session:no-published-artifacts"
       },
       {
@@ -553,8 +1060,8 @@ describe("daemon database schema", () => {
       ).all()
     ).toEqual([
       {
-        nextAction: "enrich",
-        resolutionStatus: "compile_ready",
+        nextAction: "none",
+        resolutionStatus: "automatic_resolved",
         runbookStatus: "applied",
         sessionId: "session:already-applied"
       },
@@ -565,8 +1072,8 @@ describe("daemon database schema", () => {
         sessionId: "session:collision-new"
       },
       {
-        nextAction: "enrich",
-        resolutionStatus: "compile_ready",
+        nextAction: "none",
+        resolutionStatus: "automatic_resolved",
         runbookStatus: "applied",
         sessionId: "session:collision-old"
       },
@@ -577,8 +1084,8 @@ describe("daemon database schema", () => {
         sessionId: "session:contribution-new"
       },
       {
-        nextAction: "enrich",
-        resolutionStatus: "compile_ready",
+        nextAction: "none",
+        resolutionStatus: "automatic_resolved",
         runbookStatus: "applied",
         sessionId: "session:contribution-old"
       },

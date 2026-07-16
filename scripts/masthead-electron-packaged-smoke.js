@@ -2,12 +2,13 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { constants } from "node:fs";
-import { access, mkdtemp, readdir, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, win32 } from "node:path";
 import { FuseV1Options, getCurrentFuseWire } from "@electron/fuses";
 import { buildPackagedCliInvocation } from "./packaged-cli-command.js";
+import { verifyPackagedBundleManifest } from "./packaged-bundle-manifest.js";
 import {
   buildWindowsProcessSnapshotInvocation,
   buildWindowsTaskkillInvocation,
@@ -36,9 +37,22 @@ async function main() {
   await access(join(resourceRoot, "masthead-logo-sail.png"), constants.R_OK);
   await access(join(resources, process.platform === "win32" ? "node.exe" : "node"), constants.X_OK);
   await access(join(resources, "dist", "src", "daemon", "main.js"), constants.R_OK);
+  await access(join(resources, "dist", "src", "daemon", "productionTransitionMaintenance.js"), constants.R_OK);
   await access(join(resources, "dist", "src", "mcp", "server.js"), constants.R_OK);
   await access(join(resources, "dist", "src", "cli", "mastheadctl.js"), constants.R_OK);
   await access(join(resources, "scripts", "masthead-hook.js"), constants.R_OK);
+  await access(join(resources, "scripts", "masthead-production.js"), constants.R_OK);
+  await access(join(resources, "scripts", "masthead-production-cold-activation.js"), constants.R_OK);
+  await access(join(resourceRoot, "release-manifest.json"), constants.R_OK);
+  const release = JSON.parse(await readFile(join(resources, "release.json"), "utf8"));
+  if (!/^[a-f0-9]{40}$/u.test(release.gitSha) || typeof release.version !== "string" || !release.version) {
+    throw new Error(`Packaged release identity is invalid: ${JSON.stringify(release)}`);
+  }
+  await verifyPackagedBundleManifest({
+    bundleRoot: dirname(binary),
+    executablePath: binary,
+    resourcesPath: resourceRoot
+  });
 
   const fuseWire = await getCurrentFuseWire(binary);
   assertFuse(fuseWire, FuseV1Options.RunAsNode, false, "RunAsNode");
@@ -48,11 +62,11 @@ async function main() {
   assertFuse(fuseWire, FuseV1Options.OnlyLoadAppFromAsar, true, "OnlyLoadAppFromAsar");
   assertFuse(fuseWire, FuseV1Options.GrantFileProtocolExtraPrivileges, false, "GrantFileProtocolExtraPrivileges");
 
-  await runPackagedSmoke(binary);
+  await runPackagedSmoke(binary, release);
   console.log(`Packaged Electron smoke passed. ${binary}`);
 }
 
-async function runPackagedSmoke(binary) {
+async function runPackagedSmoke(binary, release) {
   const dataDir = await mkdtemp(join(tmpdir(), "masthead-electron-packaged-smoke-"));
   let homeDir;
   let child;
@@ -79,6 +93,8 @@ async function runPackagedSmoke(binary) {
         MASTHEAD_ELECTRON_SMOKE: "1",
         MASTHEAD_ELECTRON_SMOKE_HOLD_MS: "10000",
         MASTHEAD_ELECTRON_SMOKE_MODE: "renderer-autostart",
+        MASTHEAD_BUILD_SHA: release.gitSha,
+        MASTHEAD_BUILD_VERSION: release.version,
         MASTHEAD_PORT: String(smokePort),
         MASTHEAD_GIT_REFRESH_MS: "0"
       },
@@ -129,7 +145,7 @@ async function runPackagedSmoke(binary) {
     if ("error" in cliCheck) throw cliCheck.error;
 
     const parsed = JSON.parse(jsonLine);
-    assertPackagedSmokeResult(parsed, dataDir, smokePort);
+    assertPackagedSmokeResult(parsed, dataDir, smokePort, release);
   } catch (error) {
     primaryError = error;
   } finally {
@@ -561,7 +577,7 @@ function combineErrors(primaryError, cleanupError, message) {
   return new AggregateError([primary, cleanup], `${message} ${primary.message}`, { cause: primary });
 }
 
-function assertPackagedSmokeResult(parsed, dataDir, smokePort) {
+function assertPackagedSmokeResult(parsed, dataDir, smokePort, release) {
   if (parsed.connector?.smokeMode !== "renderer-autostart" || !parsed.connector?.message?.includes("Renderer autostart")) {
     throw new Error(`Packaged renderer autostart connector check failed: ${JSON.stringify(parsed.connector)}`);
   }
@@ -571,6 +587,12 @@ function assertPackagedSmokeResult(parsed, dataDir, smokePort) {
     parsed.connector?.baseUrl !== `http://127.0.0.1:${smokePort}`
   ) {
     throw new Error(`Packaged renderer autostart did not start the expected connector: ${JSON.stringify(parsed.connector)}`);
+  }
+  if (
+    parsed.connector?.health?.buildVersion !== release.version ||
+    parsed.connector?.health?.buildSha !== release.gitSha
+  ) {
+    throw new Error(`Packaged health identity does not match release.json: ${JSON.stringify(parsed.connector?.health)}`);
   }
   if (!parsed.renderer?.hasDesktopBridge || parsed.renderer?.hasNodeProcess || parsed.renderer?.hasRequire || parsed.renderer?.hasRawIpc) {
     throw new Error(`Packaged renderer security check failed: ${JSON.stringify(parsed.renderer)}`);

@@ -1,5 +1,8 @@
+import { createHash } from "node:crypto";
 import { stableRecordId } from "../identity.ts";
+import type { PublishedSessionDossierV1 } from "../../shared/sessionDossier.ts";
 import { type MastheadDatabase, withImmediateTransaction } from "./sqlite.ts";
+import { listCompletedV1AuthoringRunsForRecovery } from "./workbenchAuthoringRepository.ts";
 
 export type SessionArtifactKind = "session_dossier" | "runbook" | "adr" | "incident_timeline";
 export type SessionArtifactStatus = "current" | "superseded" | "invalid";
@@ -76,6 +79,84 @@ export type SearchPublishedArtifactsQuery = {
   dateTo?: string;
   limit?: number;
   offset?: number;
+};
+
+export const FAILED_V1_DOSSIER_COUNT = 1_283;
+export const FAILED_V1_RUN_COUNT = 66;
+
+export type FailedGenerationAudit = {
+  auditHash: string;
+  contractVersion: "workbench-authoring-v1";
+  dossiers: number;
+  runbooks: number;
+  adrs: number;
+  incidentTimelines: number;
+  totalArtifacts: number;
+  totalRuns: number;
+  totalSessions: number;
+  publicationWindow: { from: string; to: string };
+  generationWindow: { from: string; to: string };
+  actorId: string;
+  createdBy: string[];
+  schemaVersions: string[];
+  templateFingerprint: string;
+  generationFingerprint: string;
+  counts: {
+    byKind: Record<string, number>;
+    byRun: Record<string, number>;
+    byStatus: Record<string, number>;
+    bySession: Record<string, number>;
+  };
+};
+
+export type FailedGenerationRecoveryBackupEvidence = {
+  artifacts: number;
+  auditHash: string;
+  backupPath: string;
+  backupPreserved: true;
+  databaseId: string;
+  device: string;
+  inode: string;
+  integrityResult: "ok";
+  runs: number;
+  sessions: number;
+  sizeBytes: number;
+};
+
+export type FailedGenerationReceipt = {
+  auditHash: string;
+  artifactsInvalidated: number;
+  provenanceDeleted: number;
+  searchRowsDeleted: number;
+  sessionsReset: number;
+  claimsReleased: number;
+  activityId: string;
+  recoveryBackup: FailedGenerationRecoveryBackupEvidence;
+};
+
+export type FailedGenerationInvalidationBoundary =
+  | "search_deleted"
+  | "provenance_deleted"
+  | "artifacts_deleted"
+  | "pipeline_reset"
+  | "claims_released"
+  | "activity_recorded";
+
+type FailedGenerationRecoverySnapshot = {
+  artifacts: Array<Record<string, unknown>>;
+  claims: Array<Record<string, unknown>>;
+  pipeline: Array<Record<string, unknown>>;
+  provenance: Array<Record<string, unknown>>;
+  runs: Array<Record<string, unknown>>;
+  search: Array<Record<string, unknown>>;
+};
+
+type FailedGenerationSelection = {
+  audit: FailedGenerationAudit;
+  artifactIds: string[];
+  claimIds: string[];
+  runIds: string[];
+  sessionIds: string[];
 };
 
 type SessionArtifactRow = {
@@ -233,17 +314,65 @@ export function publishSessionArtifactInTransaction(
 
 export function indexSessionArtifactSearch(db: MastheadDatabase, artifactId: string): void {
   db.prepare("DELETE FROM session_artifact_search WHERE artifact_id = ?").run(artifactId);
+  const artifact = readArtifactById(db, artifactId);
+  if (!artifact || artifact.status !== "current" || artifact.publicationStatus !== "published") return;
+  const body =
+    artifact.schemaVersion === "canonical-session-dossier-v1"
+      ? canonicalDossierSearchText(artifact.content as PublishedSessionDossierV1)
+      : JSON.stringify(artifact.content);
   db.prepare(
     `INSERT INTO session_artifact_search (artifact_id, title, summary, highlight, project, body)
-     SELECT artifact_id,
-            COALESCE(title, ''),
-            COALESCE(summary, ''),
-            COALESCE(highlight, ''),
-            COALESCE(project_label, ''),
-            content_json
-     FROM session_artifacts
-     WHERE artifact_id = ? AND status = 'current' AND publication_status = 'published'`
-  ).run(artifactId);
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(
+    artifact.artifactId,
+    artifact.title ?? "",
+    artifact.summary ?? "",
+    artifact.highlight ?? "",
+    artifact.projectLabel ?? "",
+    body
+  );
+}
+
+export function canonicalDossierSearchText(snapshot: PublishedSessionDossierV1): string {
+  const durable = snapshot.durableEnrichment;
+  return [
+    snapshot.identity.title,
+    snapshot.identity.project,
+    snapshot.identity.branch,
+    snapshot.narrative.objective,
+    snapshot.narrative.firstUserPrompt,
+    snapshot.narrative.latestUserPrompt,
+    snapshot.narrative.finalAssistantMessage,
+    snapshot.narrative.liveSummary,
+    snapshot.narrative.outcome,
+    durable?.sessionTitle.text,
+    durable?.sessionSummary.text,
+    durable?.sessionDossier.purpose,
+    durable?.sessionDossier.outcome,
+    ...(durable?.sessionDossier.keyWork ?? []),
+    ...(durable?.sessionDossier.decisions ?? []),
+    ...(durable?.sessionDossier.blockers ?? []),
+    durable?.sessionDossier.verification.status,
+    durable?.sessionDossier.verification.summary,
+    ...(durable?.sessionDossier.verification.commands ?? []),
+    ...(durable?.sessionDossier.verification.failures ?? []),
+    durable?.sessionDossier.continuation.nextStep,
+    ...(durable?.sessionDossier.continuation.openQuestions ?? []),
+    ...(durable?.sessionDossier.continuation.constraints ?? []),
+    ...(durable?.sessionDossier.warnings ?? []),
+    ...snapshot.narrative.topics,
+    ...snapshot.narrative.technologies,
+    ...snapshot.narrative.unresolved,
+    ...snapshot.files.flatMap((file) => [file.path, file.displayPath, file.basename, file.effectKind]),
+    ...snapshot.tools.flatMap((tool) => [tool.toolName, tool.category, tool.status, tool.outputPreview]),
+    snapshot.verification.summary,
+    ...snapshot.verification.commands.flatMap((tool) => [tool.toolName, tool.status, tool.outputPreview]),
+    ...snapshot.attention.flatMap((item) => [item.title, item.detail]),
+    ...snapshot.excerpts.map((excerpt) => excerpt.text)
+  ]
+    .filter((value): value is string => typeof value === "string" && Boolean(value.trim()))
+    .join("\n")
+    .slice(0, 256_000);
 }
 
 export function getSessionArtifact(db: MastheadDatabase, artifactId: string): SessionArtifactRecord | undefined {
@@ -337,6 +466,579 @@ export function searchPublishedArtifactCapsules(
   return {
     artifacts: rows.map((row) => toCapsule(db, row)),
     total
+  };
+}
+
+/**
+ * Read-only, fail-closed identification of the one known failed V1 publication.
+ * It deliberately refuses to return a partial or merely similar V1 population.
+ */
+export function auditFailedV1Generation(db: MastheadDatabase): FailedGenerationAudit {
+  return selectFailedV1Generation(db).audit;
+}
+
+export function invalidateFailedV1Generation(
+  db: MastheadDatabase,
+  expectedAuditHash: string,
+  recoveryBackup: FailedGenerationRecoveryBackupEvidence,
+  options: { onMutationBoundary?: (boundary: FailedGenerationInvalidationBoundary) => void } = {}
+): FailedGenerationReceipt {
+  if (!/^[a-f0-9]{64}$/u.test(expectedAuditHash)) throw new Error("failed_v1_recovery_audit_hash_invalid");
+  if (!recoveryBackup) throw new Error("failed_v1_recovery_backup_evidence_required");
+  return withImmediateTransaction(db, () => {
+    const selection = selectFailedV1Generation(db);
+    if (selection.audit.auditHash !== expectedAuditHash) {
+      throw new Error(
+        `failed_v1_recovery_audit_hash_mismatch:${expectedAuditHash}:${selection.audit.auditHash}`
+      );
+    }
+    const boundRecoveryBackup = { ...recoveryBackup };
+    validateFailedGenerationRecoveryBackup(db, selection.audit, boundRecoveryBackup);
+    const now = new Date().toISOString();
+    const deleteSearch = db.prepare("DELETE FROM session_artifact_search WHERE artifact_id = ?");
+    const deleteProvenance = db.prepare("DELETE FROM session_artifact_provenance WHERE artifact_id = ?");
+    const deleteArtifact = db.prepare("DELETE FROM session_artifacts WHERE artifact_id = ?");
+    let searchRowsDeleted = 0;
+    let provenanceDeleted = 0;
+    let artifactsInvalidated = 0;
+    for (const artifactId of selection.artifactIds) searchRowsDeleted += Number(deleteSearch.run(artifactId).changes);
+    options.onMutationBoundary?.("search_deleted");
+    for (const artifactId of selection.artifactIds) provenanceDeleted += Number(deleteProvenance.run(artifactId).changes);
+    options.onMutationBoundary?.("provenance_deleted");
+    for (const artifactId of selection.artifactIds) artifactsInvalidated += Number(deleteArtifact.run(artifactId).changes);
+    options.onMutationBoundary?.("artifacts_deleted");
+
+    const resetPipeline = db.prepare(
+      `UPDATE workbench_session_state
+       SET publication_status = 'publish_path',
+           next_action = 'create_dossier',
+           session_dossier_status = 'missing',
+           bug_fix_trace_status = 'unknown',
+           runbook_status = 'unknown',
+           adr_status = 'unknown',
+           incident_timeline_status = 'unknown',
+           session_package_status = 'missing',
+           resolution_status = 'in_progress',
+           non_publication_reason = NULL,
+           published_at = NULL,
+           published_activity_id = NULL,
+           updated_at = ?
+       WHERE session_id = ?`
+    );
+    let sessionsReset = 0;
+    for (const sessionId of selection.sessionIds) sessionsReset += Number(resetPipeline.run(now, sessionId).changes);
+    options.onMutationBoundary?.("pipeline_reset");
+
+    const releaseClaim = db.prepare(
+      `UPDATE workbench_claims
+       SET released_at = ?, release_reason = 'failed_v1_generation_recovery'
+       WHERE claim_id = ? AND released_at IS NULL`
+    );
+    let claimsReleased = 0;
+    for (const claimId of selection.claimIds) claimsReleased += Number(releaseClaim.run(now, claimId).changes);
+    options.onMutationBoundary?.("claims_released");
+
+    const activitySessionId = selection.sessionIds[0]!;
+    const activityId = stableRecordId("workbench_activity", [
+      "failed_v1_generation_recovery",
+      expectedAuditHash
+    ]);
+    db.prepare(
+      `INSERT INTO workbench_activity (
+         activity_id, session_id, event_type, event_at, actor_kind, actor_id, summary,
+         details_json, related_run_id, related_claim_id
+       ) VALUES (?, ?, 'failed_v1_generation_recovered', ?, 'system', 'mastheadctl', ?, ?, NULL, NULL)`
+    ).run(
+      activityId,
+      activitySessionId,
+      now,
+      "Failed V1 artifact generation invalidated",
+      JSON.stringify({
+        artifactCount: selection.artifactIds.length,
+        auditHash: expectedAuditHash,
+        recoveryBackup: boundRecoveryBackup,
+        runIds: selection.runIds,
+        sessionCount: selection.sessionIds.length
+      })
+    );
+    options.onMutationBoundary?.("activity_recorded");
+
+    return {
+      activityId,
+      artifactsInvalidated,
+      auditHash: expectedAuditHash,
+      claimsReleased,
+      provenanceDeleted,
+      recoveryBackup: boundRecoveryBackup,
+      searchRowsDeleted,
+      sessionsReset
+    };
+  });
+}
+
+function validateFailedGenerationRecoveryBackup(
+  db: MastheadDatabase,
+  audit: FailedGenerationAudit,
+  evidence: FailedGenerationRecoveryBackupEvidence
+): void {
+  if (
+    evidence.backupPreserved !== true || evidence.integrityResult !== "ok" ||
+    typeof evidence.backupPath !== "string" || !evidence.backupPath ||
+    !/^\d+$/u.test(evidence.device) || !/^\d+$/u.test(evidence.inode) ||
+    !Number.isSafeInteger(evidence.sizeBytes) || evidence.sizeBytes <= 0
+  ) {
+    throw new Error("failed_v1_recovery_backup_evidence_invalid");
+  }
+  if (evidence.auditHash !== audit.auditHash) {
+    throw new Error("failed_v1_recovery_backup_audit_hash_mismatch");
+  }
+  if (
+    evidence.artifacts !== audit.totalArtifacts || evidence.runs !== audit.totalRuns ||
+    evidence.sessions !== audit.totalSessions
+  ) {
+    throw new Error("failed_v1_recovery_backup_population_mismatch");
+  }
+  const identity = db.prepare(
+    "SELECT setting_json AS value FROM app_settings WHERE setting_key = 'database_identity'"
+  ).get() as { value: string } | undefined;
+  if (recoveryDatabaseId(identity?.value) !== evidence.databaseId) {
+    throw new Error("failed_v1_recovery_backup_identity_mismatch");
+  }
+}
+
+function recoveryDatabaseId(value: string | undefined): string {
+  if (!value) throw new Error("failed_v1_recovery_database_identity_missing");
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (
+      typeof parsed === "object" && parsed !== null && "databaseId" in parsed &&
+      typeof parsed.databaseId === "string" && parsed.databaseId
+    ) return parsed.databaseId;
+  } catch {
+    // Converted to one stable recovery error below.
+  }
+  throw new Error("failed_v1_recovery_database_identity_invalid");
+}
+
+function selectFailedV1Generation(db: MastheadDatabase): FailedGenerationSelection {
+  const candidateRuns = listCompletedV1AuthoringRunsForRecovery(db);
+  const allV1AuthoredArtifacts = db.prepare(
+    `SELECT
+       artifact_id AS artifactId, session_id AS sessionId, artifact_kind AS artifactKind,
+       status, publication_status AS publicationStatus, content_fingerprint AS contentFingerprint,
+       created_at AS createdAt, updated_at AS updatedAt, created_by AS createdBy,
+       schema_version AS schemaVersion, published_at AS publishedAt, content_json AS contentJson,
+       validation_json AS validationJson, evidence_refs_json AS evidenceRefsJson,
+       title, summary, highlight, confidence, project_label AS projectLabel,
+       signature_key AS signatureKey, lineage_id AS lineageId, join_rationale AS joinRationale
+     FROM session_artifacts
+     WHERE created_by LIKE 'workbench_authoring:%'
+       AND schema_version IN ('session_dossier-v2', 'runbook-v2', 'adr-v2', 'incident_timeline-v2')
+       AND json_extract(validation_json, '$.contract') = 'workbench-authoring-v1'
+     ORDER BY artifact_id`
+  ).all() as Array<Record<string, unknown>>;
+  const artifactsById = new Map(
+    allV1AuthoredArtifacts.map((artifact) => [recoveryString(artifact.artifactId), artifact])
+  );
+  const allV1Provenance = db.prepare(
+    `SELECT provenance.artifact_id AS artifactId, provenance.session_id AS sessionId
+     FROM session_artifact_provenance AS provenance
+     JOIN session_artifacts AS artifacts ON artifacts.artifact_id = provenance.artifact_id
+     WHERE artifacts.created_by LIKE 'workbench_authoring:%'
+       AND artifacts.schema_version IN ('session_dossier-v2', 'runbook-v2', 'adr-v2', 'incident_timeline-v2')
+       AND json_extract(artifacts.validation_json, '$.contract') = 'workbench-authoring-v1'
+     ORDER BY provenance.artifact_id, provenance.session_id`
+  ).all() as Array<Record<string, unknown>>;
+  const provenanceByArtifactId = new Map<string, Array<Record<string, unknown>>>();
+  for (const row of allV1Provenance) {
+    const artifactId = recoveryString(row.artifactId);
+    const existing = provenanceByArtifactId.get(artifactId) ?? [];
+    existing.push(row);
+    provenanceByArtifactId.set(artifactId, existing);
+  }
+  const artifacts: Array<Record<string, unknown>> = [];
+  const provenance: Array<Record<string, unknown>> = [];
+  const selectedRuns: Array<Record<string, unknown>> = [];
+  const artifactIds = new Set<string>();
+  const sessionIds = new Set<string>();
+  const claimIds = new Set<string>();
+  const runIds: string[] = [];
+  let expectedTemplateSignature: Record<string, unknown> | undefined;
+
+  for (const run of candidateRuns) {
+    const bundle = parseRecoveryObject(run.bundleJson, `bundle:${run.runId}`);
+    const receipt = parseRecoveryObject(run.receiptJson, `receipt:${run.runId}`);
+    const packages = recoveryArray(bundle.sessionPackages);
+    const authoredArtifacts = recoveryArray(bundle.artifacts);
+    const contributions = recoveryArray(bundle.contributions);
+    const notApplicable = recoveryArray(bundle.notApplicable);
+    const receiptArtifactIds = recoveryStringArray(receipt.publishedArtifactIds);
+    const receiptSessions = recoveryStringArray(receipt.resolvedSessionIds);
+    const runSessionIds = [...new Set(run.sessionIds)].sort();
+    const packageSessionIds = packages.map((entry) => recoveryString(recoveryObject(entry).sessionId)).sort();
+    const expectedNotApplicable = runSessionIds.flatMap((sessionId) =>
+      ["adr", "incident_timeline", "runbook"].map((kind) => `${sessionId}\0${kind}`)
+    ).sort();
+    const actualNotApplicable = notApplicable.map((entry) => {
+      const decision = recoveryObject(entry);
+      return `${recoveryString(decision.sessionId)}\0${recoveryString(decision.kind)}`;
+    }).sort();
+    const receiptNotApplicable = recoveryArray(receipt.notApplicable).map((entry) => {
+      const decision = recoveryObject(entry);
+      return `${recoveryString(decision.sessionId)}\0${recoveryString(decision.kind)}`;
+    }).sort();
+    const exactRunShape =
+      bundle.bundleVersion === "workbench-authoring-v1" &&
+      receipt.runId === run.runId &&
+      (receipt.contractVersion === undefined || receipt.contractVersion === "workbench-authoring-v1") &&
+      packages.length > 0 &&
+      authoredArtifacts.length === 0 &&
+      contributions.length === 0 &&
+      recoveryArray(receipt.contributions).length === 0 &&
+      receiptArtifactIds.length === packages.length &&
+      sameRecoveryStrings(runSessionIds, packageSessionIds) &&
+      sameRecoveryStrings(runSessionIds, [...receiptSessions].sort()) &&
+      sameRecoveryStrings(expectedNotApplicable, actualNotApplicable) &&
+      sameRecoveryStrings(expectedNotApplicable, receiptNotApplicable);
+    if (!exactRunShape) continue;
+
+    const runArtifacts: Array<Record<string, unknown>> = [];
+    const runProvenance: Array<Record<string, unknown>> = [];
+    let exactMembership = true;
+    for (const packageEntry of packages) {
+      const sessionPackage = recoveryObject(packageEntry);
+      const sessionId = recoveryString(sessionPackage.sessionId);
+      const dossier = recoveryObject(sessionPackage.dossier);
+      const templateSignature = failedV1TemplateSignature(dossier);
+      if (
+        expectedTemplateSignature &&
+        stableRecoveryStringify(templateSignature) !== stableRecoveryStringify(expectedTemplateSignature)
+      ) {
+        throw new Error("failed_v1_generation_template_signature_mismatch");
+      }
+      expectedTemplateSignature ??= templateSignature;
+      const expectedFingerprint = recoveryFingerprint(dossier);
+      const artifact = receiptArtifactIds
+        .map((artifactId) => artifactsById.get(artifactId))
+        .find((row) =>
+          row?.sessionId === sessionId &&
+          row.artifactKind === "session_dossier" &&
+          row.contentFingerprint === expectedFingerprint
+        );
+      if (!artifact) {
+        exactMembership = false;
+        break;
+      }
+      const validation = parseRecoveryObject(recoveryString(artifact.validationJson), `validation:${artifact.artifactId}`);
+      const content = parseRecoveryObject(recoveryString(artifact.contentJson), `content:${artifact.artifactId}`);
+      const publishedAt = recoveryString(artifact.publishedAt);
+      if (
+        artifact.createdBy !== `workbench_authoring:${run.actorId}` ||
+        artifact.schemaVersion !== "session_dossier-v2" ||
+        artifact.status !== "current" ||
+        artifact.publicationStatus !== "published" ||
+        validation.contract !== "workbench-authoring-v1" ||
+        validation.schemaVersion !== "session_dossier-v2" ||
+        recoveryFingerprint(content) !== expectedFingerprint ||
+        stableRecoveryStringify(content) !== stableRecoveryStringify(dossier) ||
+        publishedAt < run.createdAt ||
+        publishedAt > run.completedAt ||
+        artifactIds.has(recoveryString(artifact.artifactId))
+      ) {
+        exactMembership = false;
+        break;
+      }
+      const artifactProvenance = provenanceByArtifactId.get(recoveryString(artifact.artifactId)) ?? [];
+      if (
+        artifactProvenance.length !== 1 ||
+        artifactProvenance[0]?.sessionId !== sessionId
+      ) {
+        exactMembership = false;
+        break;
+      }
+      runArtifacts.push(artifact);
+      runProvenance.push(...artifactProvenance);
+    }
+    if (!exactMembership || runArtifacts.length !== receiptArtifactIds.length) continue;
+    const foundIds = runArtifacts.map((artifact) => recoveryString(artifact.artifactId)).sort();
+    if (!sameRecoveryStrings(foundIds, [...receiptArtifactIds].sort())) continue;
+
+    artifacts.push(...runArtifacts);
+    provenance.push(...runProvenance);
+    runArtifacts.forEach((artifact) => artifactIds.add(recoveryString(artifact.artifactId)));
+    runSessionIds.forEach((sessionId) => sessionIds.add(sessionId));
+    run.claimIds.forEach((claimId) => claimIds.add(claimId));
+    runIds.push(run.runId);
+    selectedRuns.push({
+      actorId: run.actorId,
+      bundleJson: run.bundleJson,
+      claimIds: run.claimIds,
+      completedAt: run.completedAt,
+      createdAt: run.createdAt,
+      receiptJson: run.receiptJson,
+      runId: run.runId,
+      sessionIds: run.sessionIds
+    });
+  }
+
+  const unmatched = allV1AuthoredArtifacts.filter((artifact) => !artifactIds.has(recoveryString(artifact.artifactId)));
+  if (unmatched.length > 0) {
+    throw new Error(`failed_v1_generation_ambiguous_population:${unmatched.length}`);
+  }
+  if (artifacts.length !== FAILED_V1_DOSSIER_COUNT) {
+    throw new Error(`failed_v1_generation_not_exact:${artifacts.length}:${FAILED_V1_DOSSIER_COUNT}`);
+  }
+  if (
+    sessionIds.size !== FAILED_V1_DOSSIER_COUNT ||
+    claimIds.size !== FAILED_V1_DOSSIER_COUNT ||
+    runIds.length !== FAILED_V1_RUN_COUNT
+  ) {
+    throw new Error("failed_v1_generation_membership_not_exact");
+  }
+
+  const selectedArtifactIds = [...artifactIds].sort();
+  const selectedSessionIds = [...sessionIds].sort();
+  const selectedClaimIds = [...claimIds].sort();
+  const artifactPlaceholders = selectedArtifactIds.map(() => "?").join(",");
+  const sessionPlaceholders = selectedSessionIds.map(() => "?").join(",");
+  const searchRows = db.prepare(
+    `SELECT artifact_id AS artifactId, title, summary, highlight, project, body
+     FROM session_artifact_search WHERE artifact_id IN (${artifactPlaceholders})`
+  ).all(...selectedArtifactIds) as Array<Record<string, unknown>>;
+  if (
+    searchRows.length !== selectedArtifactIds.length ||
+    new Set(searchRows.map((row) => recoveryString(row.artifactId))).size !== selectedArtifactIds.length
+  ) {
+    throw new Error("failed_v1_generation_search_membership_not_exact");
+  }
+  const pipeline = db.prepare(
+    `SELECT * FROM workbench_session_state WHERE session_id IN (${sessionPlaceholders})`
+  ).all(...selectedSessionIds) as Array<Record<string, unknown>>;
+  if (pipeline.length !== selectedSessionIds.length) {
+    throw new Error("failed_v1_generation_pipeline_missing");
+  }
+  const claims = db.prepare(
+    `SELECT * FROM workbench_claims WHERE session_id IN (${sessionPlaceholders}) ORDER BY claim_id`
+  ).all(...selectedSessionIds) as Array<Record<string, unknown>>;
+  const claimsById = new Map(claims.map((claim) => [recoveryString(claim.claim_id), claim]));
+  if (
+    selectedClaimIds.some((claimId) => !claimsById.has(claimId)) ||
+    claims.some((claim) => claim.released_at === null && !claimIds.has(recoveryString(claim.claim_id)))
+  ) {
+    throw new Error("failed_v1_generation_claim_membership_not_exact");
+  }
+  const snapshot: FailedGenerationRecoverySnapshot = {
+    artifacts: artifacts.sort(compareRecoveryRows("artifactId")),
+    claims: claims.sort(compareRecoveryRows("claim_id")),
+    pipeline: pipeline.sort(compareRecoveryRows("session_id")),
+    provenance: provenance.sort(compareRecoveryRows("artifactId", "sessionId")),
+    runs: selectedRuns.sort(compareRecoveryRows("runId")),
+    search: searchRows.sort(compareRecoveryRows("artifactId"))
+  };
+  const auditHash = createHash("sha256").update(stableRecoveryStringify(snapshot)).digest("hex");
+  const byKind = countRecoveryRows(artifacts, (row) => recoveryString(row.artifactKind));
+  const byStatus = countRecoveryRows(
+    artifacts,
+    (row) => `${recoveryString(row.status)}/${recoveryString(row.publicationStatus)}`
+  );
+  const bySession = countRecoveryRows(artifacts, (row) => recoveryString(row.sessionId));
+  const byRun = Object.fromEntries(
+    selectedRuns.map((run) => [recoveryString(run.runId), recoveryArray(parseRecoveryObject(recoveryString(run.receiptJson), "receipt").publishedArtifactIds).length])
+  );
+  const publishedAt = artifacts.map((artifact) => recoveryString(artifact.publishedAt)).sort();
+  const createdBy = [...new Set(artifacts.map((artifact) => recoveryString(artifact.createdBy)))].sort();
+  const schemaVersions = [...new Set(artifacts.map((artifact) => recoveryString(artifact.schemaVersion)))].sort();
+  const actorIds = [...new Set(selectedRuns.map((run) => recoveryString(run.actorId)))];
+  if (actorIds.length !== 1 || createdBy.length !== 1 || createdBy[0] !== `workbench_authoring:${actorIds[0]}`) {
+    throw new Error("failed_v1_generation_actor_not_exact");
+  }
+  const generationWindow = validateFailedV1GenerationWindow(selectedRuns);
+  if (!expectedTemplateSignature) throw new Error("failed_v1_generation_template_signature_missing");
+  const templateFingerprint = recoveryFingerprint(expectedTemplateSignature);
+  const generationFingerprint = recoveryFingerprint({
+    actorId: actorIds[0],
+    createdBy: createdBy[0],
+    generationWindow,
+    runIds: [...runIds].sort(),
+    templateFingerprint
+  });
+  const audit: FailedGenerationAudit = {
+    actorId: actorIds[0]!,
+    adrs: byKind.adr ?? 0,
+    auditHash,
+    contractVersion: "workbench-authoring-v1",
+    counts: { byKind, byRun, bySession, byStatus },
+    createdBy,
+    dossiers: byKind.session_dossier ?? 0,
+    generationFingerprint,
+    generationWindow,
+    incidentTimelines: byKind.incident_timeline ?? 0,
+    publicationWindow: { from: publishedAt[0]!, to: publishedAt.at(-1)! },
+    runbooks: byKind.runbook ?? 0,
+    schemaVersions,
+    templateFingerprint,
+    totalArtifacts: artifacts.length,
+    totalRuns: runIds.length,
+    totalSessions: sessionIds.size
+  };
+  return {
+    artifactIds: selectedArtifactIds,
+    audit,
+    claimIds: selectedClaimIds,
+    runIds: [...runIds].sort(),
+    sessionIds: selectedSessionIds
+  };
+}
+
+function failedV1TemplateSignature(dossier: Record<string, unknown>): Record<string, unknown> {
+  const approach = recoveryStringArray(dossier.approach).map(normalizeRecoveryText);
+  const keyDecisions = recoveryStringArray(dossier.keyDecisions).map(normalizeRecoveryText);
+  const outcome = normalizeRecoveryText(recoveryString(dossier.outcome));
+  const problemStatement = normalizeRecoveryText(recoveryString(dossier.problemStatement));
+  const missingEvidence = recoveryStringArray(dossier.missingEvidence).map(normalizeRecoveryText);
+  const filesTouched = recoveryArray(dossier.filesTouched).map(recoveryObject);
+  const commandsAndTools = recoveryArray(dossier.commandsAndTools).map(recoveryObject);
+  const filesText = normalizeRecoveryText(stableRecoveryStringify(filesTouched));
+  const toolsText = normalizeRecoveryText(stableRecoveryStringify(commandsAndTools));
+  if (
+    stableRecoveryStringify(approach) !== stableRecoveryStringify([
+      "read every canonical evidence item through cursor pagination.",
+      "kept all claims single-session and limited unsupported root-cause or publication assertions."
+    ]) ||
+    stableRecoveryStringify(keyDecisions) !== stableRecoveryStringify([
+      "keep the package single-provenance and avoid weak multi-session joins."
+    ]) ||
+    outcome !== "the canonical redacted record was fully reviewed; no stronger published outcome is asserted without direct supporting evidence." ||
+    !problemStatement ||
+    stableRecoveryStringify(missingEvidence) !== stableRecoveryStringify([
+      "the redacted session record does not independently establish a published artifact or durable root cause."
+    ]) ||
+    filesText !== normalizeRecoveryText(stableRecoveryStringify([
+      {
+        label: "No canonical file effect recorded",
+        role: "No file effect was asserted in the reviewed evidence."
+      }
+    ])) ||
+    toolsText !== normalizeRecoveryText(stableRecoveryStringify([
+      {
+        label: "Masthead Workbench evidence reader",
+        purpose: "Read the session manifest to completion.",
+        status: "completed"
+      }
+    ]))
+  ) {
+    throw new Error("failed_v1_generation_template_signature_mismatch");
+  }
+  return {
+    approach,
+    commandsAndTools,
+    filesTouched,
+    keyDecisions,
+    missingEvidence,
+    outcome,
+    problemPrefix: problemStatement.slice(0, 96)
+  };
+}
+
+function validateFailedV1GenerationWindow(
+  runs: Array<Record<string, unknown>>
+): { from: string; to: string } {
+  const intervals = runs.map((run) => {
+    const from = recoveryString(run.createdAt);
+    const to = recoveryString(run.completedAt);
+    const fromMs = Date.parse(from);
+    const toMs = Date.parse(to);
+    if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs < fromMs) {
+      throw new Error("failed_v1_generation_window_invalid");
+    }
+    return { from, fromMs, to, toMs };
+  }).sort((left, right) => left.fromMs - right.fromMs || left.toMs - right.toMs);
+  const fromMs = intervals[0]!.fromMs;
+  const toMs = Math.max(...intervals.map((interval) => interval.toMs));
+  const durations = intervals.map((interval) => Math.max(1, interval.toMs - interval.fromMs));
+  const maxDuration = Math.max(...durations);
+  const totalDuration = durations.reduce((total, duration) => total + duration, 0);
+  let runningEnd = intervals[0]!.toMs;
+  let maxGap = 0;
+  for (const interval of intervals.slice(1)) {
+    maxGap = Math.max(maxGap, interval.fromMs - runningEnd);
+    runningEnd = Math.max(runningEnd, interval.toMs);
+  }
+  if (maxGap > maxDuration || toMs - fromMs > totalDuration * 2) {
+    throw new Error("failed_v1_generation_window_not_tightly_bounded");
+  }
+  return { from: new Date(fromMs).toISOString(), to: new Date(toMs).toISOString() };
+}
+
+function normalizeRecoveryText(value: string): string {
+  return value.trim().replace(/\s+/gu, " ").toLowerCase();
+}
+
+function parseRecoveryObject(json: string, label: string): Record<string, unknown> {
+  try {
+    return recoveryObject(JSON.parse(json));
+  } catch (error) {
+    throw new Error(`failed_v1_generation_invalid_json:${label}`, { cause: error });
+  }
+}
+
+function recoveryObject(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("failed_v1_generation_invalid_shape");
+  return value as Record<string, unknown>;
+}
+
+function recoveryArray(value: unknown): unknown[] {
+  if (!Array.isArray(value)) throw new Error("failed_v1_generation_invalid_shape");
+  return value;
+}
+
+function recoveryStringArray(value: unknown): string[] {
+  return recoveryArray(value).map(recoveryString);
+}
+
+function recoveryString(value: unknown): string {
+  if (typeof value !== "string" || !value) throw new Error("failed_v1_generation_invalid_shape");
+  return value;
+}
+
+function recoveryFingerprint(value: unknown): string {
+  return createHash("sha256").update(stableRecoveryStringify(value)).digest("hex");
+}
+
+function stableRecoveryStringify(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableRecoveryStringify).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${stableRecoveryStringify(entry)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+function sameRecoveryStrings(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function countRecoveryRows(
+  rows: Array<Record<string, unknown>>,
+  keyFor: (row: Record<string, unknown>) => string
+): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const row of rows) {
+    const key = keyFor(row);
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+  return Object.fromEntries(Object.entries(counts).sort(([left], [right]) => left.localeCompare(right)));
+}
+
+function compareRecoveryRows(...keys: string[]): (left: Record<string, unknown>, right: Record<string, unknown>) => number {
+  return (left, right) => {
+    for (const key of keys) {
+      const comparison = String(left[key] ?? "").localeCompare(String(right[key] ?? ""));
+      if (comparison !== 0) return comparison;
+    }
+    return 0;
   };
 }
 
@@ -507,7 +1209,9 @@ function makeCurrentInTransaction(db: MastheadDatabase, artifact: SessionArtifac
        WHERE session_id = ? AND artifact_kind = ? AND status = 'current' AND artifact_id <> ?`
     ).run(now, artifact.sessionId, artifact.artifactKind, artifact.artifactId);
   }
-  db.prepare("UPDATE session_artifacts SET status = 'current', updated_at = ? WHERE artifact_id = ?").run(now, artifact.artifactId);
+  db.prepare(
+    "UPDATE session_artifacts SET status = 'current', updated_at = ? WHERE artifact_id = ? AND status <> 'current'"
+  ).run(now, artifact.artifactId);
 }
 
 function provenanceFor(db: MastheadDatabase, artifactId: string): string[] {

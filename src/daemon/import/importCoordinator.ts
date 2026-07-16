@@ -11,6 +11,7 @@ import type { MastheadDatabase } from "../db/sqlite.ts";
 import { recordRuntimeDiagnostic } from "../diagnostics.ts";
 
 export type ImportWorkResult = {
+  completionStatus?: "succeeded_with_issues";
   discoveredCount: number;
   processedCount: number;
   importedCount: number;
@@ -302,7 +303,7 @@ async function runQueuedImportJob(
           ? result.importedCount > 0
             ? "succeeded_with_issues"
             : "failed"
-          : "succeeded",
+          : result.completionStatus ?? "succeeded",
       updatedAt: now()
     });
     recordRuntimeDiagnostic({

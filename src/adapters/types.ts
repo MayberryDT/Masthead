@@ -1,3 +1,5 @@
+import type { TranscriptUnitAdapter } from "./transcriptUnits.ts";
+
 export const RUNTIME_KINDS = [
   "cursor",
   "claude_code",
@@ -114,7 +116,7 @@ export type OpenSourceTarget = {
   uri: string;
 };
 
-export interface SessionAdapter {
+export interface SessionAdapter extends TranscriptUnitAdapter {
   readonly runtime: RuntimeKind;
   discover(context: DiscoveryContext): Promise<DiscoveredSource[]>;
   inspect(source: DiscoveredSource): Promise<SourceInventory>;

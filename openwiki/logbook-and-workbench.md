@@ -1,6 +1,6 @@
 # Logbook and Workbench (artifact-first)
 
-**Decisions:** [ADR 0011](../docs/adr/0011-artifact-first-logbook.md) (Logbook unit), [ADR 0012](../docs/adr/0012-daemon-owned-artifact-authoring.md) (authoring seam), [ADR 0009](../docs/adr/0009-logbook-only-shows-published-sessions.md) (Workbench pipeline ownership).
+**Decisions:** [ADR 0011](../docs/adr/0011-artifact-first-logbook.md) (Logbook unit), [ADR 0012](../docs/adr/0012-daemon-owned-artifact-authoring.md) (daemon seam), [ADR 0013](../docs/adr/0013-canonical-dossier-and-candidate-authoring.md) (preserved rendering/evidence findings), [ADR 0014](../docs/adr/0014-agent-led-enriched-artifact-authoring.md) (current V3 authoring), [ADR 0009](../docs/adr/0009-logbook-only-shows-published-sessions.md) (Workbench pipeline ownership).
 
 **Language:** `CONTEXT.md`.
 
@@ -31,6 +31,24 @@ jobs terminate. A metadata shell is provisional: after transcript hydration, Wor
 quality decision and can return it to the publish path. Tool-only transcripts are usable evidence;
 only complete duplicate or hook-only units are terminal noise.
 
+The adapter owns the **transcript unit** and its stable source-session identity. One Grok conversation
+directory is one unit; reasoning record ids stay evidence inside that conversation and never become
+session ids. Hermes JSON, JSONL, and SQLite evidence merges under the source session id, including
+structured tool calls and results.
+
+A fresh recent-history import admits only units whose declared activity is inside the requested
+range. An older changed unit is an incremental refresh only when Masthead already has a cursor for
+that unit. A requested unit cap is reported as deferred work, not as a completed range. Import
+receipts disclose whether each unit used semantic activity, a source-path timestamp, file modified
+time, or an unknown timestamp basis.
+
+Import health and Workbench quality answer different questions. Partial, unrecognized, or
+identity-ambiguous units need **Import repair** and do not enter Not Added. Complete sessions then
+follow the Workbench quality path: meaningful or ambiguous short conversations stay on the package
+path for review; only empty, hook-only, diagnostic-only, exact-duplicate, or manually excluded
+sessions enter Not Added. An automatic suppression is reversible when its evidence revision changes;
+a manual exclusion remains sticky.
+
 ## Logbook (locked UI)
 
 - **Row** = published artifact only (`session_dossier`, `runbook`, `adr`, `incident_timeline`).
@@ -49,15 +67,15 @@ only complete duplicate or hook-only units are terminal noise.
 | Store | `src/daemon/db/sessionArtifactRepository.ts`, `logbookArtifactRepository.ts` |
 | HTTP | `GET /logbook/artifacts`, `GET /logbook/artifacts/:artifactId` |
 
-## Workbench (package + multi-kind)
+## Workbench (agent-led enriched artifact authoring)
 
-Default automatic kind set for a seed session:
+One selection-scoped V3 path produces enriched dossiers and any useful optional artifacts:
 
-1. **Session package** (dossier capsule) — always on the package path.
-2. **Runbook**, **ADR**, **incident timeline** — when evidence supports them; else **N/A** (no Logbook row).
-
-User-visible session states: **compile-ready** vs **automatic work resolved**
-(package published + kinds published, N/A, or contributed).
+1. **Enriched dossier** — the agent writes current durable enrichment for every selected session;
+   the daemon then renders the original canonical dossier structure.
+2. **Runbook**, **ADR**, **incident timeline** — the agent may create zero or more optional artifacts
+   from selected evidence. An artifact suggestion is a nonbinding detector hint supplied privately
+   to the agent; suggestions are nonbinding and cannot require or prohibit a kind.
 
 ### Daemon-owned automatic authoring
 
@@ -66,23 +84,22 @@ them a CLI recipe. Whether that handoff is copied verbatim or the user directs
 the agent conversationally, one daemon-owned authoring module enforces the same
 quality behavior:
 
-1. discover capabilities and the active database identity;
-2. open or reuse one durable run and its claims;
-3. read every canonical redacted evidence item named by the manifest;
-4. submit one complete grounded bundle, revising structured findings without
-   creating output rows;
-5. atomically finish the accepted bundle, publishing the dossier plus every
-   supported automatic artifact and recording N/A or contribution for the rest.
+1. accept the selected sessions through **Copy Agent Prompt**, a disposable request;
+2. open a durable `workbench-authoring-v3` run for the exact selection and evidence revision;
+3. read the canonical redacted evidence and enrich every selected session;
+4. choose and submit any useful optional artifacts whose claims carry verbatim supporting excerpts;
+5. reject unsupported claims, protocol leakage, weak joins, or template duplication; and
+6. atomically publish the enriched dossiers and optional artifacts.
 
-The immutable completion report is the proof of success. Applied optional
-artifacts remain compile-ready until published; they do not count as automatic
-resolution. A finish retry returns the same report.
+The immutable completion report is the proof of success, and a finish retry returns the same
+report. V1 and V2 runs remain audit-only and are never reused by V3. Nothing enters Logbook until
+enrichment is current.
 
 ### Locked UI vocabulary
 
-- Columns include enrichment, dossier, **package**, runbook, adr, timeline, **resolution**.
-- Primary publish control: **Publish package** (dossier capsule when gates pass). Automatic kinds still need apply/publish or N/A for full resolution.
-- Handoff opens with multi-kind framing (session package always; runbook/ADR/timeline when evidence supports them). No CLI recipes in handoff body.
+- Columns include enrichment, dossier publication, and optional-artifact state.
+- Copy Agent Prompt is selection-scoped and contains no CLI recipes.
+- The agent enriches selected sessions and exercises optional-artifact judgment; detector hints are private context.
 - Apply ≠ publish.
 
 ### Code map

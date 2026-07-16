@@ -18,13 +18,12 @@ Start with agents: `openwiki/quickstart.md`, `CONTEXT.md`, and
 
 - Canonical local SQLite ownership for Masthead-owned sessions, published
   artifacts + provenance, source/connector state, import jobs, settings, and MCP
-  audit rows (schema 21 for full-body artifact search).
+  audit rows (schema 24; full-body artifact search arrived in schema 21).
 - Multi-adapter / multi-harness live connect (Sources V2) and conservative
   history adapters where coverage exists.
-- Workbench package path: transcript checks/import, quality, claims, Activity,
-  disposable agent handoffs, daemon-owned authoring runs, atomic publication,
-  and multi-kind resolution (runbook / ADR / incident timeline published, N/A,
-  or contributed).
+- Workbench package path: transcript checks/import, quality, claims, Activity, selection-scoped
+  agent handoffs, current durable enrichment, daemon-rebuilt dossiers, optional-artifact judgment,
+  V3 authoring runs, and atomic publication.
 - Logbook artifact book: `GET /logbook/artifacts` + body/provenance inspector;
   full-body search plus kind · project · date filters; no bulk enrich /
   checkboxes / summary strip.
@@ -40,9 +39,9 @@ Start with agents: `openwiki/quickstart.md`, `CONTEXT.md`, and
 - Deeper schema coverage for additional source adapters beyond the initial
   bounded scanners.
 - Transcript import breadth and exclusion policy tuning.
-- Legacy/dev native remote enrichment hooks. Masthead V1 launch authoring uses
-  user-facing Workbench handoffs plus a thin installed CLI to the daemon-owned
-  authoring module; no native remote model key is required.
+- Legacy/dev native remote enrichment hooks. Agent-led authoring uses a user-facing selection
+  handoff plus a thin installed CLI to the daemon-owned V3 authoring module; no native remote model
+  key is required.
 - Longer packaged desktop release-smoke automation.
 
 ## Install
@@ -77,26 +76,62 @@ MASTHEAD_BRIDGE_PORT=17374 npm run dev
 
 ## Artifact Authoring
 
-People select publish-path sessions in Workbench and copy a plain-language agent
-handoff. They do not see or paste a terminal recipe. A copied handoff asks the
-agent to complete unattended using the same quality policy as user-directed
-agent work.
+The user flow is:
 
-The agent discovers the active daemon and database identity from authoring
-capabilities, then follows four domain operations:
+**Select sessions → Copy Agent Prompt → give it to the coding agent → agent enriches and authors →
+Masthead validates and atomically publishes → inspect/reuse in Logbook and MCP.**
 
-1. **Open** one durable run for the exact selected session set.
-2. **Read evidence** until every item in the complete canonical redacted
-   evidence manifest has been reviewed.
-3. **Submit** one grounded artifact bundle and revise any structured findings;
-   submit creates no output rows.
-4. **Finish** once to atomically publish all valid artifacts and resolve every
-   automatic kind. Retry returns the same completion report.
+The copied prompt is a disposable request for exactly the selected sessions. Under
+`workbench-authoring-v3`, the coding agent writes current durable enrichment for every selected
+session and chooses zero or more useful runbooks, ADRs, or incident timelines. Deterministic
+analysis may privately supply suggestions, but suggestions are nonbinding: they neither require nor
+prohibit an artifact kind.
 
-Run status is a read-only recovery operation. The installed `mastheadctl` is a
-thin daemon HTTP adapter and never opens the authoring database. See
-[ADR 0012](docs/adr/0012-daemon-owned-artifact-authoring.md) and the
-[Workbench authoring reference](docs/reference/enrichment.md).
+The daemon then rebuilds the original canonical dossier structure from current enriched session
+data; agents do not replace its presentation. Every substantive optional-artifact claim supplies a
+typed `claimSupport` entry whose at-least-20-character excerpt occurs verbatim in canonical
+evidence. Unsupported authoring-process language, weak joins, and duplicate substantive content
+are rejected. Publication is atomic admission of validated enriched artifacts into Logbook, and
+nothing enters Logbook until enrichment is current.
+
+The installed CLI is thin agent-facing transport to the daemon-owned V3 authoring boundary; it is
+not the user workflow and does not open SQLite. V1 and V2 authoring rows remain readable for audit
+but cannot be reopened or mutated as V3. V3 submit stores validation findings without publication;
+finish atomically applies enrichment, publishes rebuilt dossiers and useful optional artifacts,
+updates search and pipeline state, and persists one retry-safe receipt. See
+[ADR 0014](docs/adr/0014-agent-led-enriched-artifact-authoring.md),
+[ADR 0012](docs/adr/0012-daemon-owned-artifact-authoring.md), and the
+[daemon API reference](docs/reference/daemon-api.md).
+
+### Failed V1 generation recovery
+
+These maintenance commands are the deliberate exception to the normal HTTP-only
+CLI boundary. They require an explicit database path and exclusive writer
+ownership. Audit and prepare do not mutate product rows; invalidate additionally
+requires the exact SHA-256 audit hash and `--confirm`:
+
+```bash
+mastheadctl workbench audit-v1-generation --db <path> --json
+mastheadctl workbench prepare-v1-recovery --db <path> --json
+mastheadctl workbench invalidate-v1-generation --db <path> --audit-hash <sha256> --confirm --json
+mastheadctl workbench restore-v1-recovery --db <active> --backup <sibling masthead.sqlite.backup-current> --audit-hash <sha256> --confirm --json
+```
+
+The audit fails closed unless the exact known population is present: 1,283 V1
+dossiers, zero optional artifacts, and 66 completed V1 runs. Prepare acquires the
+daemon-equivalent writer locks, creates a SQLite-consistent backup, verifies its
+database identity and integrity, and retains exactly one backup. Invalidate removes
+only the hash-matched artifacts, search rows, and provenance, resets affected
+sessions for current enrichment and V3 authoring eligibility, releases
+matching claims, and preserves V1 runs and receipts as audit history. Never run
+production invalidation before the fixture gate, temporary-copy rehearsal, and
+separately authorized 25-session human-reviewed canary pass.
+
+Restore is offline and fail-closed. It accepts only the exact sibling
+`masthead.sqlite.backup-current`, requires daemon-equivalent exclusive ownership,
+verifies identity, integrity, and the audited hash before staging, atomically
+replaces the active database, then verifies the restored active database before
+releasing ownership. The verified backup is preserved.
 
 ## Verify
 
@@ -106,6 +141,7 @@ Fast product checks:
 npm run check:product-contract
 npm run verify:no-citations
 npm run doctor
+npm run dogfood:durable-artifacts
 ```
 
 Full local gate:
@@ -123,6 +159,13 @@ and database identity, source/import readiness, Sources pipeline diagnostics,
 Logbook state, read-only MCP status/tools, and local data summary. `npm run
 verify` runs the product and surface contracts, typecheck, Vitest, build,
 endpoint matrix, and smoke suite.
+
+`npm run dogfood:durable-artifacts` remains a fixture-only audit gate for the superseded V2 flow;
+its detector precision/recall is not a V3 product requirement. Current V3 release acceptance uses
+the focused isolated corpus in
+[durable-artifact-production-canary.md](docs/acceptance/durable-artifact-production-canary.md) to
+prove enrichment-only publication, agent judgment over optional kinds, grounded claim support,
+atomic publication, and Logbook/MCP retrieval without touching production data.
 
 ## Data Path
 

@@ -1,8 +1,14 @@
 import type { ReactNode } from "react";
-import type { LogbookInspectorArtifact } from "../../app/logbook/logbookInspectorModel";
+import {
+  CANONICAL_SESSION_DOSSIER_SCHEMA,
+  isKnownLegacySessionDossierSchema,
+  isPublishedSessionDossierV1,
+  type LogbookInspectorArtifact
+} from "../../app/logbook/logbookInspectorModel";
 import { Icon } from "../icons/Icon";
 import { iconWeights } from "../icons/icon-tokens";
 import { StatusBadge } from "../primitives/StatusBadge";
+import { SessionDossierContent } from "../session-dossier/SessionDossierContent";
 
 export type { LogbookInspectorArtifact };
 
@@ -34,12 +40,8 @@ export function LogbookInspector({ artifact, error, loading = false, onClose }: 
 
       {artifact ? (
         <>
-          <div className="logbook-inspector-body">{renderArtifactBody(artifact.kind, artifact.body)}</div>
-          <ProvenanceSection
-            joinRationale={artifact.joinRationale}
-            provenanceLabel={artifact.provenanceLabel}
-            provenanceSessionIds={artifact.provenanceSessionIds}
-          />
+          <div className="logbook-inspector-body">{renderArtifactBody(artifact)}</div>
+          <ProvenanceSection joinRationale={artifact.joinRationale} provenanceLabel={artifact.provenanceLabel} provenanceSessionIds={artifact.provenanceSessionIds} />
         </>
       ) : loading ? (
         <p className="surface-status">Loading artifact detail...</p>
@@ -79,19 +81,9 @@ function ArtifactMeta({ artifact }: { artifact: LogbookInspectorArtifact }) {
   return <div className="logbook-inspector-meta">{chips}</div>;
 }
 
-function ProvenanceSection({
-  joinRationale,
-  provenanceLabel,
-  provenanceSessionIds
-}: {
-  joinRationale?: string;
-  provenanceLabel?: string;
-  provenanceSessionIds: string[];
-}) {
+function ProvenanceSection({ joinRationale, provenanceLabel, provenanceSessionIds }: { joinRationale?: string; provenanceLabel?: string; provenanceSessionIds: string[] }) {
   const count = provenanceSessionIds.length;
-  const label =
-    provenanceLabel ??
-    (count === 1 ? "1 session" : count === 0 ? "No sessions" : `${count} sessions`);
+  const label = provenanceLabel ?? (count === 1 ? "1 session" : count === 0 ? "No sessions" : `${count} sessions`);
 
   return (
     <section className="logbook-inspector-provenance" aria-label="Provenance">
@@ -116,7 +108,27 @@ function ProvenanceSection({
   );
 }
 
-function renderArtifactBody(kind: string, body: unknown): ReactNode {
+function renderArtifactBody(artifact: LogbookInspectorArtifact): ReactNode {
+  const { body, kind, schemaVersion } = artifact;
+  if (kind === "session_dossier" && schemaVersion === CANONICAL_SESSION_DOSSIER_SCHEMA) {
+    if (!isPublishedSessionDossierV1(body)) {
+      return <DossierSchemaStatus title="Invalid canonical session dossier" detail="The published body does not match the canonical dossier contract." />;
+    }
+    return (
+      <SessionDossierContent
+        compactShell
+        dossier={body}
+        transcript={artifact.provenanceTranscript}
+        transcriptError={artifact.provenanceTranscriptError}
+        transcriptLoading={artifact.provenanceTranscriptLoading}
+      />
+    );
+  }
+
+  if (kind === "session_dossier" && !isKnownLegacySessionDossierSchema(schemaVersion)) {
+    return <DossierSchemaStatus title="Unsupported session dossier schema" detail={schemaVersion ? `Schema ${schemaVersion} is not supported by this version of Masthead.` : "The artifact does not declare a supported dossier schema."} />;
+  }
+
   const record = asRecord(body);
   if (!record) {
     if (body === undefined || body === null || body === "") {
@@ -136,19 +148,14 @@ function renderArtifactBody(kind: string, body: unknown): ReactNode {
   if (kind === "session_dossier") {
     return (
       <div className="logbook-inspector-sections">
+        <p className="mono-label">Legacy session dossier</p>
         <TextSection label="Problem" value={stringField(record, "problemStatement") ?? stringField(record, "problem")} />
         <TextSection label="Objective" value={stringField(record, "objective")} />
         <TextSection label="Context" value={stringField(record, "context")} />
         <ListSection label="Approach" values={stringArrayField(record, "approach")} />
         <ListSection label="Key decisions" values={stringArrayField(record, "keyDecisions")} />
         <ObjectListSection label="Files touched" values={record.filesTouched} primary="label" secondary="role" />
-        <ObjectListSection
-          label="Commands and tools"
-          values={record.commandsAndTools}
-          primary="label"
-          secondary="purpose"
-          tertiary="status"
-        />
+        <ObjectListSection label="Commands and tools" values={record.commandsAndTools} primary="label" secondary="purpose" tertiary="status" />
         <TextSection label="Outcome" value={stringField(record, "outcome")} />
         <ListSection label="Verification" values={stringArrayField(record, "verification")} />
         <ListSection label="Risks" values={stringArrayField(record, "risksOrGaps") ?? stringArrayField(record, "risks")} />
@@ -212,6 +219,15 @@ function renderArtifactBody(kind: string, body: unknown): ReactNode {
   return <pre className="logbook-inspector-json">{prettyUnknown(body)}</pre>;
 }
 
+function DossierSchemaStatus({ detail, title }: { detail: string; title: string }) {
+  return (
+    <section className="logbook-inspector-section" role="status">
+      <p className="mono-label">{title}</p>
+      <p>{detail}</p>
+    </section>
+  );
+}
+
 function isKnownArtifactKind(kind: string): boolean {
   return kind === "session_dossier" || kind === "runbook" || kind === "adr" || kind === "incident_timeline";
 }
@@ -220,12 +236,44 @@ function CommonArtifactSections({ record }: { record: Record<string, unknown> })
   return (
     <>
       <ListSection label="Evidence" values={stringArrayField(record, "evidenceRefs")} />
+      <ClaimSupportSection values={record.claimSupport} />
       <ClaimEvidenceSection values={record.claimEvidence} />
       <ListSection label="Missing evidence" values={stringArrayField(record, "missingEvidence")} />
       <ListSection label="Provenance sessions" values={stringArrayField(record, "provenanceSessionIds")} />
       <TextSection label="Join rationale" value={stringField(record, "joinRationale")} />
       <TextSection label="Signature" value={stringField(record, "signatureKey")} />
     </>
+  );
+}
+
+function ClaimSupportSection({ values }: { values: unknown }) {
+  if (!Array.isArray(values)) return null;
+  const entries = values.flatMap((value) => {
+    const record = asRecord(value);
+    if (!record) return [];
+    const evidenceRef = stringField(record, "evidenceRef");
+    const excerpt = stringField(record, "excerpt");
+    const path = stringField(record, "path");
+    const supportKind = stringField(record, "supportKind");
+    if (!evidenceRef && !excerpt && !path && !supportKind) return [];
+    return [{ evidenceRef, excerpt, path, supportKind }];
+  });
+  if (entries.length === 0) return null;
+
+  return (
+    <section className="logbook-inspector-section">
+      <p className="mono-label">Claim support</p>
+      <ul>
+        {entries.map((entry, index) => (
+          <li key={`${entry.path ?? "claim"}:${entry.evidenceRef ?? "evidence"}:${index}`}>
+            {entry.path ? <code>{entry.path}</code> : null}
+            {entry.supportKind ? <span>{` — ${sentenceLabel(entry.supportKind)}`}</span> : null}
+            {entry.excerpt ? <p>{entry.excerpt}</p> : null}
+            {entry.evidenceRef ? <code>{entry.evidenceRef}</code> : null}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -270,7 +318,11 @@ function TimelineSection({ value }: { value: unknown }) {
       const at = stringField(record, "at");
       const summary = stringField(record, "summary");
       if (!at && !summary) return undefined;
-      return { at, evidenceRefs: stringArrayField(record, "evidenceRefs"), summary };
+      return {
+        at,
+        evidenceRefs: stringArrayField(record, "evidenceRefs"),
+        summary
+      };
     })
     .filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
   if (entries.length === 0) return null;
@@ -299,19 +351,7 @@ function TimelineSection({ value }: { value: unknown }) {
   );
 }
 
-function ObjectListSection({
-  label,
-  primary,
-  secondary,
-  tertiary,
-  values
-}: {
-  label: string;
-  primary: string;
-  secondary?: string;
-  tertiary?: string;
-  values: unknown;
-}) {
+function ObjectListSection({ label, primary, secondary, tertiary, values }: { label: string; primary: string; secondary?: string; tertiary?: string; values: unknown }) {
   if (!Array.isArray(values)) return null;
   const entries = values.flatMap((value) => {
     const record = asRecord(value);
@@ -462,6 +502,11 @@ function labelize(value: string): string {
     .filter(Boolean)
     .map((part) => part[0]!.toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function sentenceLabel(value: string): string {
+  const normalized = value.replaceAll("_", " ");
+  return normalized[0]!.toUpperCase() + normalized.slice(1);
 }
 
 function formatDateTime(value: string | undefined): string {

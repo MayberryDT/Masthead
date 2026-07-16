@@ -1,4 +1,8 @@
 import { randomUUID } from "node:crypto";
+import type {
+  WorkbenchQualityDecisionSource,
+  WorkbenchSuppressionCategory
+} from "../../shared/workbench.ts";
 import type { WorkbenchAuthoringRunDto } from "../../shared/workbenchAuthoring.ts";
 import { stableRecordId } from "../identity.ts";
 import {
@@ -69,6 +73,9 @@ export type WorkbenchSessionStateRecord = {
   sessionPackageStatus: WorkbenchSessionPackageStatus;
   resolutionStatus: WorkbenchResolutionStatus;
   nonPublicationReason?: string;
+  suppressionCategory?: WorkbenchSuppressionCategory;
+  qualityDecisionSource: WorkbenchQualityDecisionSource;
+  qualityEvidenceRevision?: string;
   publishedAt?: string;
   publishedActivityId?: string;
   lastActivityAt?: string;
@@ -140,6 +147,9 @@ type WorkbenchSessionStateRow = {
   sessionPackageStatus: WorkbenchSessionPackageStatus;
   resolutionStatus: WorkbenchResolutionStatus;
   nonPublicationReason: string | null;
+  suppressionCategory: WorkbenchSuppressionCategory | null;
+  qualityDecisionSource: WorkbenchQualityDecisionSource;
+  qualityEvidenceRevision: string | null;
   publishedAt: string | null;
   publishedActivityId: string | null;
   lastActivityAt: string | null;
@@ -162,6 +172,9 @@ const WORKBENCH_STATE_SELECT = `SELECT
   COALESCE(session_package_status, 'missing') AS sessionPackageStatus,
   COALESCE(resolution_status, 'in_progress') AS resolutionStatus,
   non_publication_reason AS nonPublicationReason,
+  suppression_category AS suppressionCategory,
+  quality_decision_source AS qualityDecisionSource,
+  quality_evidence_revision AS qualityEvidenceRevision,
   published_at AS publishedAt,
   published_activity_id AS publishedActivityId,
   last_activity_at AS lastActivityAt,
@@ -297,6 +310,20 @@ export function readWorkbenchSessionState(db: MastheadDatabase, sessionId: strin
   return row ? stateRowToRecord(db, row) : undefined;
 }
 
+export function removeAutomaticWorkbenchSessionForImportRepair(
+  db: MastheadDatabase,
+  sessionId: string
+): WorkbenchSessionStateRecord | undefined {
+  return writeStateTransition(db, () => {
+    const current = readWorkbenchSessionState(db, sessionId);
+    if (!current || current.publicationStatus === "published" || current.qualityDecisionSource === "user") {
+      return current;
+    }
+    db.prepare("DELETE FROM workbench_session_state WHERE session_id = ?").run(sessionId);
+    return undefined;
+  });
+}
+
 export function markWorkbenchPublished(
   db: MastheadDatabase,
   input: { actor: WorkbenchActor; publishedVia: string; sessionId: string }
@@ -373,12 +400,46 @@ export function publishWorkbenchSessionInTransaction(
   return { activity: result.activity, ok: true, state: result.state };
 }
 
+/**
+ * Candidate authoring publishes the canonical dossier independently of whether
+ * the session has candidates for either of the other optional artifact kinds.
+ */
+export function publishWorkbenchCandidateSessionInTransaction(
+  db: MastheadDatabase,
+  input: { actor: WorkbenchActor; sessionId: string }
+): { state: WorkbenchSessionStateRecord; activity: WorkbenchActivityRecord } {
+  const state = ensureWorkbenchSessionState(db, input.sessionId);
+  if (state.sessionDossierStatus !== "satisfied") {
+    throw new Error(`candidate_finish_dossier_required:${input.sessionId}`);
+  }
+  return markWorkbenchPublishedInTransaction(db, {
+    actor: input.actor,
+    publishedVia: "workbench_candidate_finish",
+    sessionId: input.sessionId
+  });
+}
+
 export function markWorkbenchNotAdded(
   db: MastheadDatabase,
-  input: { actor: WorkbenchActor; reason: string; sessionId: string }
+  input: {
+    actor: WorkbenchActor;
+    evidenceRevision?: string;
+    qualityDecisionSource?: WorkbenchQualityDecisionSource;
+    reason: string;
+    sessionId: string;
+    suppressionCategory?: WorkbenchSuppressionCategory;
+  }
 ): { state: WorkbenchSessionStateRecord; activity: WorkbenchActivityRecord } {
   const existing = readWorkbenchSessionState(db, input.sessionId);
-  if (existing?.publicationStatus === "not_added_to_logbook") {
+  const qualityDecisionSource = input.qualityDecisionSource ?? (input.actor.kind === "user" ? "user" : "automatic");
+  const suppressionCategory =
+    input.suppressionCategory ?? (qualityDecisionSource === "user" ? "manual_exclusion" : "confirmed_noise");
+  if (
+    existing?.publicationStatus === "not_added_to_logbook" &&
+    existing.qualityDecisionSource === qualityDecisionSource &&
+    existing.suppressionCategory === suppressionCategory &&
+    existing.qualityEvidenceRevision === input.evidenceRevision
+  ) {
     const existingReason = existing.nonPublicationReason ?? input.reason;
     const activity = readWorkbenchActivity(
       db,
@@ -404,10 +465,13 @@ export function markWorkbenchNotAdded(
       SET publication_status = 'not_added_to_logbook',
         next_action = 'none',
         non_publication_reason = ?,
+        suppression_category = ?,
+        quality_decision_source = ?,
+        quality_evidence_revision = ?,
         last_activity_at = ?,
         updated_at = ?
       WHERE session_id = ?`
-    ).run(input.reason, now, now, input.sessionId);
+    ).run(input.reason, suppressionCategory, qualityDecisionSource, input.evidenceRevision ?? null, now, now, input.sessionId);
     return { activity, state: readWorkbenchSessionState(db, input.sessionId)! };
   });
 }
@@ -419,6 +483,9 @@ export function markWorkbenchQuality(
     sessionId: string;
     status: "passed" | "failed";
     reason?: string;
+    suppressionCategory?: WorkbenchSuppressionCategory;
+    qualityDecisionSource?: WorkbenchQualityDecisionSource;
+    evidenceRevision?: string;
   }
 ): { state: WorkbenchSessionStateRecord; activity: WorkbenchActivityRecord } {
   return writeStateTransition(db, () => {
@@ -433,15 +500,21 @@ export function markWorkbenchQuality(
     }
 
     const reason = input.reason?.trim() || "quality_failed";
+    const qualityDecisionSource = input.qualityDecisionSource ?? (input.actor.kind === "user" ? "user" : "automatic");
+    const suppressionCategory =
+      input.suppressionCategory ?? (qualityDecisionSource === "user" ? "manual_exclusion" : "confirmed_noise");
     db.prepare(
       `UPDATE workbench_session_state
        SET quality_status = 'failed',
            publication_status = 'not_added_to_logbook',
            next_action = 'none',
            non_publication_reason = ?,
+           suppression_category = ?,
+           quality_decision_source = ?,
+           quality_evidence_revision = ?,
            updated_at = ?
        WHERE session_id = ?`
-    ).run(reason, now, input.sessionId);
+    ).run(reason, suppressionCategory, qualityDecisionSource, input.evidenceRevision ?? null, now, input.sessionId);
     const activity = insertWorkbenchActivity(db, {
       activityId: stableRecordId("workbench_activity", [input.sessionId, "quality_failed", now]),
       actor: input.actor,
@@ -450,6 +523,83 @@ export function markWorkbenchQuality(
       eventType: "quality_failed",
       sessionId: input.sessionId,
       summary: "Quality failed; not added to Logbook"
+    });
+    db.prepare(`UPDATE workbench_session_state SET last_activity_at = ?, updated_at = ? WHERE session_id = ?`).run(
+      now,
+      now,
+      input.sessionId
+    );
+    return { activity, state: readWorkbenchSessionState(db, input.sessionId)! };
+  });
+}
+
+export function markWorkbenchQualityForReview(
+  db: MastheadDatabase,
+  input: { actor: WorkbenchActor; evidenceRevision: string; sessionId: string }
+): { state: WorkbenchSessionStateRecord; activity: WorkbenchActivityRecord } {
+  return writeStateTransition(db, () => {
+    const now = new Date().toISOString();
+    const current = ensureWorkbenchSessionState(db, input.sessionId);
+    if (current.publicationStatus === "published") {
+      throw new Error("cannot_review_quality_on_published_session");
+    }
+    db.prepare(
+      `UPDATE workbench_session_state
+       SET quality_status = 'unchecked',
+           publication_status = 'publish_path',
+           next_action = 'review_quality',
+           non_publication_reason = NULL,
+           suppression_category = 'insufficient_evidence',
+           quality_decision_source = 'automatic',
+           quality_evidence_revision = ?,
+           updated_at = ?
+       WHERE session_id = ?`
+    ).run(input.evidenceRevision, now, input.sessionId);
+    const activity = insertWorkbenchActivity(db, {
+      activityId: stableRecordId("workbench_activity", [input.sessionId, "quality_review", input.evidenceRevision]),
+      actor: input.actor,
+      details: { evidenceRevision: input.evidenceRevision },
+      eventAt: now,
+      eventType: "quality_review_required",
+      sessionId: input.sessionId,
+      summary: "Quality needs review"
+    });
+    db.prepare(`UPDATE workbench_session_state SET last_activity_at = ?, updated_at = ? WHERE session_id = ?`).run(
+      now,
+      now,
+      input.sessionId
+    );
+    return { activity, state: readWorkbenchSessionState(db, input.sessionId)! };
+  });
+}
+
+export function reopenWorkbenchSessionForQualityReview(
+  db: MastheadDatabase,
+  input: { actor: WorkbenchActor; evidenceRevision: string; sessionId: string }
+): { state: WorkbenchSessionStateRecord; activity: WorkbenchActivityRecord } {
+  return writeStateTransition(db, () => {
+    const now = new Date().toISOString();
+    ensureWorkbenchSessionState(db, input.sessionId);
+    db.prepare(
+      `UPDATE workbench_session_state
+       SET quality_status = 'unchecked',
+           publication_status = 'publish_path',
+           next_action = 'review_quality',
+           non_publication_reason = NULL,
+           suppression_category = NULL,
+           quality_decision_source = 'automatic',
+           quality_evidence_revision = ?,
+           updated_at = ?
+       WHERE session_id = ?`
+    ).run(input.evidenceRevision, now, input.sessionId);
+    const activity = insertWorkbenchActivity(db, {
+      activityId: stableRecordId("workbench_activity", [input.sessionId, "quality_reopened", input.evidenceRevision]),
+      actor: input.actor,
+      details: { evidenceRevision: input.evidenceRevision },
+      eventAt: now,
+      eventType: "quality_reopened",
+      sessionId: input.sessionId,
+      summary: "Quality reopened after evidence changed"
     });
     db.prepare(`UPDATE workbench_session_state SET last_activity_at = ?, updated_at = ? WHERE session_id = ?`).run(
       now,
@@ -473,7 +623,12 @@ export function markWorkbenchQualityPassedInTransaction(
 
 function applyWorkbenchQualityPassedInTransaction(
   db: MastheadDatabase,
-  input: { actor: WorkbenchActor; sessionId: string }
+  input: {
+    actor: WorkbenchActor;
+    evidenceRevision?: string;
+    qualityDecisionSource?: WorkbenchQualityDecisionSource;
+    sessionId: string;
+  }
 ): { state: WorkbenchSessionStateRecord; activity: WorkbenchActivityRecord } {
   const now = new Date().toISOString();
   const current = ensureWorkbenchSessionState(db, input.sessionId);
@@ -481,18 +636,26 @@ function applyWorkbenchQualityPassedInTransaction(
   if (current.publicationStatus === "published") {
     db.prepare(
       `UPDATE workbench_session_state
-       SET quality_status = 'passed', non_publication_reason = NULL, updated_at = ?
+       SET quality_status = 'passed',
+           non_publication_reason = NULL,
+           suppression_category = NULL,
+           quality_decision_source = COALESCE(?, quality_decision_source),
+           quality_evidence_revision = COALESCE(?, quality_evidence_revision),
+           updated_at = ?
        WHERE session_id = ?`
-    ).run(now, input.sessionId);
+    ).run(input.qualityDecisionSource ?? null, input.evidenceRevision ?? null, now, input.sessionId);
   } else {
     db.prepare(
       `UPDATE workbench_session_state
        SET quality_status = 'passed',
            publication_status = 'publish_path',
            non_publication_reason = NULL,
+           suppression_category = NULL,
+           quality_decision_source = COALESCE(?, quality_decision_source),
+           quality_evidence_revision = COALESCE(?, quality_evidence_revision),
            updated_at = ?
        WHERE session_id = ?`
-    ).run(now, input.sessionId);
+    ).run(input.qualityDecisionSource ?? null, input.evidenceRevision ?? null, now, input.sessionId);
     updateWorkbenchNextAction(db, input.sessionId, now);
   }
   const activity = insertWorkbenchActivity(db, {
@@ -555,6 +718,7 @@ export function markWorkbenchSessionEnrichmentSatisfiedInTransaction(
     `UPDATE workbench_session_state
     SET session_enrichment_status = 'satisfied',
       session_package_status = CASE
+        WHEN publication_status = 'published' THEN 'published'
         WHEN session_dossier_status = 'satisfied' THEN 'applied'
         ELSE session_package_status
       END,
@@ -606,6 +770,7 @@ function applyWorkbenchArtifactAppliedInTransaction(
       `UPDATE workbench_session_state
        SET session_dossier_status = 'satisfied',
            session_package_status = CASE
+             WHEN publication_status = 'published' THEN 'published'
              WHEN session_enrichment_status = 'satisfied' THEN 'applied'
              ELSE session_package_status
            END,
@@ -891,9 +1056,7 @@ export function countWorkbenchQueue(
 ): number {
   const publicationFilter = options.publicationStatus
     ? "workbench_session_state.publication_status = ?"
-    : `(workbench_session_state.publication_status = 'publish_path'
-       OR (workbench_session_state.publication_status = 'published'
-           AND workbench_session_state.resolution_status <> 'automatic_resolved'))`;
+    : "workbench_session_state.publication_status = 'publish_path'";
   const row = db
     .prepare(
       `SELECT COUNT(*) AS count
@@ -912,9 +1075,7 @@ export function listWorkbenchQueue(
 ): WorkbenchSessionStateRecord[] {
   const publicationFilter = options.publicationStatus
     ? "workbench_session_state.publication_status = ?"
-    : `(workbench_session_state.publication_status = 'publish_path'
-       OR (workbench_session_state.publication_status = 'published'
-           AND workbench_session_state.resolution_status <> 'automatic_resolved'))`;
+    : "workbench_session_state.publication_status = 'publish_path'";
   const limit = Math.max(1, Math.min(Math.trunc(options.limit), 500));
   const offset = Math.max(0, Math.trunc(options.offset ?? 0));
   const rows = db
@@ -934,6 +1095,9 @@ export function listWorkbenchQueue(
         COALESCE(workbench_session_state.session_package_status, 'missing') AS sessionPackageStatus,
         COALESCE(workbench_session_state.resolution_status, 'in_progress') AS resolutionStatus,
         workbench_session_state.non_publication_reason AS nonPublicationReason,
+        workbench_session_state.suppression_category AS suppressionCategory,
+        workbench_session_state.quality_decision_source AS qualityDecisionSource,
+        workbench_session_state.quality_evidence_revision AS qualityEvidenceRevision,
         workbench_session_state.published_at AS publishedAt,
         workbench_session_state.published_activity_id AS publishedActivityId,
         workbench_session_state.last_activity_at AS lastActivityAt,
@@ -1122,30 +1286,17 @@ function resolutionStatusForState(state: WorkbenchSessionStateRecord): Workbench
     state.sessionDossierStatus === "satisfied";
   if (!packageReady) return "in_progress";
   const automaticResolved =
-    state.sessionPackageStatus === "published" &&
-    isOptionalKindResolved(state.runbookStatus) &&
-    isOptionalKindResolved(state.adrStatus) &&
-    isOptionalKindResolved(state.incidentTimelineStatus);
+    state.sessionPackageStatus === "published";
   if (automaticResolved) return "automatic_resolved";
   return "compile_ready";
 }
 
-function isOptionalKindResolved(status: WorkbenchOptionalKindStatus): boolean {
-  return status === "published" || status === "not_applicable" || status === "contributed";
-}
-
 function nextActionForState(state: WorkbenchSessionStateRecord): WorkbenchNextAction {
   if (state.publicationStatus === "not_added_to_logbook") return "none";
-  // Session package already published: remaining work is automatic kinds (or done).
+  // Optional artifacts are candidate-driven and have their own queue. Once the
+  // canonical dossier package is published, the session itself has no more work.
   if (state.publicationStatus === "published" || state.sessionPackageStatus === "published") {
-    if (
-      isOptionalKindResolved(state.runbookStatus) &&
-      isOptionalKindResolved(state.adrStatus) &&
-      isOptionalKindResolved(state.incidentTimelineStatus)
-    ) {
-      return "none";
-    }
-    return "enrich";
+    return "none";
   }
   if (state.transcriptStatus === "unchecked") return "check_transcript";
   if (state.transcriptStatus === "missing" || state.transcriptStatus === "permission_needed") return "import_transcript";
@@ -1325,6 +1476,9 @@ function stateRowToRecord(db: MastheadDatabase, row: WorkbenchSessionStateRow): 
     lastActivityAt: row.lastActivityAt ?? undefined,
     nextAction: row.nextAction,
     nonPublicationReason: row.nonPublicationReason ?? undefined,
+    suppressionCategory: row.suppressionCategory ?? undefined,
+    qualityDecisionSource: row.qualityDecisionSource,
+    qualityEvidenceRevision: row.qualityEvidenceRevision ?? undefined,
     publicationStatus: row.publicationStatus,
     publishedActivityId: row.publishedActivityId ?? undefined,
     publishedAt: row.publishedAt ?? undefined,

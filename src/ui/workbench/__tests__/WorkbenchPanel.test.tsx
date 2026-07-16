@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vitest";
 import type { WorkbenchActionKind } from "../../../app/workbench/useWorkbenchController";
@@ -46,7 +47,6 @@ const PIPELINE_LABELS = [
   "Precheck",
   "Accept Quality",
   "Fail Quality",
-  "Publish package",
   "Claim",
   "Release"
 ] as const;
@@ -56,7 +56,60 @@ function allow(...kinds: WorkbenchActionKind[]) {
   return (kind: WorkbenchActionKind) => allowed.has(kind);
 }
 
+function mediaRule(css: string, query: string): string {
+  const start = css.indexOf(`@media ${query}`);
+  expect(start).toBeGreaterThanOrEqual(0);
+  const next = css.indexOf("\n@media ", start + 1);
+  return css.slice(start, next === -1 ? css.length : next);
+}
+
 describe("WorkbenchPanel", () => {
+  test("separates import repair from the package path and Not Added", () => {
+    const html = renderToStaticMarkup(
+      <WorkbenchPanel
+        importHealthSummary={{
+          ok: true,
+          importJobIds: ["import-opencode"],
+          reasons: [{ reason: "schema_drift", count: 12 }],
+          repairRequired: 12
+        }}
+        notAddedSummary={{ ok: true, total: 4, reasons: [{ reason: "confirmed_noise", count: 4 }] }}
+        sessions={Array.from({ length: 102 }, (_, index) => session({ sessionId: `session:${index}` }))}
+        selectedSessionIds={new Set()}
+        loading={false}
+        onClearSelection={() => undefined}
+        onRetry={() => undefined}
+        onSelectAll={() => undefined}
+        onToggleSession={() => undefined}
+        total={102}
+      />
+    );
+    const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+
+    expect(text).toContain("Package path 102");
+    expect(text).toContain("Import repair 12");
+    expect(text).toContain("Not Added 4");
+    expect(text).not.toContain("Not Added 16");
+  });
+
+  test("keeps the responsive action row from collapsing behind queue facts", () => {
+    const css = readFileSync("src/styles/masthead.css", "utf8");
+    expect(mediaRule(css, "(max-width: 1120px)")).toMatch(
+      /\.workbench-toolbar\.observability-toolbar \.workbench-toolbar-actions\s*\{[^}]*flex:\s*0 0 auto;[^}]*min-height:\s*40px;/s
+    );
+    expect(mediaRule(css, "(max-width: 640px)")).toMatch(
+      /\.workbench-toolbar\.observability-toolbar \.workbench-toolbar-actions\s*\{[^}]*width:\s*100%;[^}]*flex-wrap:\s*wrap;/s
+    );
+  });
+  test("renders only the disposable agent handoff control", () => {
+    const html = renderToStaticMarkup(<WorkbenchPanel />);
+
+    expect(html).toContain("Copy Agent Prompt");
+    expect(html).not.toContain("Author candidate");
+    expect(html).not.toContain("Publish canonical dossiers");
+    expect(html).not.toContain("Artifact candidate");
+    expect(html).not.toContain("<select");
+  });
   test("keeps a known package-path total visible during refresh", () => {
     const html = renderToStaticMarkup(<WorkbenchPanel loading total={144} />);
 
@@ -95,7 +148,7 @@ describe("WorkbenchPanel", () => {
         sessions={[publishReady]}
         selectedSessionIds={new Set([publishReady.sessionId])}
         handoffText="Process these sessions"
-        canRun={allow("publish", "copy_agent_prompt", "claim")}
+        canRun={allow("copy_agent_prompt", "claim")}
         runAction={async () => undefined}
         loading={false}
         onClearSelection={() => undefined}
@@ -121,7 +174,7 @@ describe("WorkbenchPanel", () => {
     expect(html).toContain(">adr</th>");
     expect(html).toContain(">timeline</th>");
     expect(html).toContain(">resolution</th>");
-    expect(html).toContain("Publish package");
+    expect(html).not.toContain("Publish package");
     expect(html).toContain("Workbench Activity");
     expect(html).toContain("observability-toolbar");
     expect(html).toContain("metal-toolbar");

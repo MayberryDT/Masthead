@@ -3,16 +3,20 @@ import { SettingsToggle } from "./SettingsToggle";
 
 type Props = {
   children?: ReactNode;
+  keepRunningInTray?: boolean;
   motionDisabled?: boolean;
   onMotionDisabledChange?: (disabled: boolean) => void;
+  onKeepRunningInTrayChange?: (enabled: boolean) => void;
   onSessionEndedNotificationsEnabledChange?: (enabled: boolean) => void;
   sessionEndedNotificationsEnabled?: boolean;
 };
 
 export function SettingsSpineCard({
   children,
+  keepRunningInTray = true,
   motionDisabled = false,
   onMotionDisabledChange,
+  onKeepRunningInTrayChange,
   onSessionEndedNotificationsEnabledChange,
   sessionEndedNotificationsEnabled = true
 }: Props) {
@@ -23,6 +27,18 @@ export function SettingsSpineCard({
         <span>Local</span>
       </header>
       <div className="settings-spine-list">
+        <SpineRow
+          control={
+            <SettingsToggle
+              checked={keepRunningInTray}
+              label="Keep Masthead running in the system tray when I close the window"
+              offLabel="Quit on close"
+              onChange={onKeepRunningInTrayChange}
+              onLabel="Run in tray"
+            />
+          }
+          label="Window close"
+        />
         <SpineRow
           control={
             <SettingsToggle

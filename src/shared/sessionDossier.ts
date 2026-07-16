@@ -202,3 +202,12 @@ export type SessionDossierDto = {
   usage: SessionDossierUsage;
   artifacts: SessionDossierArtifact[];
 };
+
+export type PublishedSessionDossierV1 = Omit<SessionDossierDto, "artifacts"> & {
+  snapshotVersion: "canonical-session-dossier-v1";
+  capturedAt: string;
+};
+
+export type ReadableSessionDossier = Omit<SessionDossierDto, "artifacts"> & {
+  artifacts?: SessionDossierArtifact[];
+};

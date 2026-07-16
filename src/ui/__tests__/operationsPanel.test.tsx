@@ -330,6 +330,7 @@ describe("OperationsPanel", () => {
   });
 
   test("keeps preference, export, and raw-copy callbacks wired", async () => {
+    const onKeepRunningInTrayChange = vi.fn();
     const onMotionDisabledChange = vi.fn();
     const onSessionEndedNotificationsEnabledChange = vi.fn();
     const onExportLocalData = vi.fn();
@@ -337,8 +338,10 @@ describe("OperationsPanel", () => {
     await renderPanel(
       <OperationsPanel
         motionDisabled={false}
+        keepRunningInTray
         onExportLocalData={onExportLocalData}
         onMotionDisabledChange={onMotionDisabledChange}
+        onKeepRunningInTrayChange={onKeepRunningInTrayChange}
         onRequestPruneLocalData={onRequestPruneLocalData}
         onSessionEndedNotificationsEnabledChange={onSessionEndedNotificationsEnabledChange}
         sessionEndedNotificationsEnabled
@@ -348,12 +351,15 @@ describe("OperationsPanel", () => {
 
     const motion = container?.querySelector<HTMLInputElement>('input[aria-label="Enable motion"]');
     const notifications = container?.querySelector<HTMLInputElement>('input[aria-label="Session transition notifications"]');
+    const keepRunning = container?.querySelector<HTMLInputElement>('input[aria-label="Keep Masthead running in the system tray when I close the window"]');
     await act(async () => {
       motion?.click();
       notifications?.click();
+      keepRunning?.click();
     });
     expect(onMotionDisabledChange).toHaveBeenCalledWith(true);
     expect(onSessionEndedNotificationsEnabledChange).toHaveBeenCalledWith(false);
+    expect(onKeepRunningInTrayChange).toHaveBeenCalledWith(false);
 
     await selectCategory("Data");
     const exportButton = [...(container?.querySelectorAll<HTMLButtonElement>("button") ?? [])]

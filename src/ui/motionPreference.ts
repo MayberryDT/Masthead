@@ -1,5 +1,6 @@
 export const mastheadMotionDisabledStorageKey = "masthead:motion-disabled";
 export const mastheadSessionEndedNotificationsStorageKey = "masthead:session-ended-notifications";
+export const mastheadKeepRunningInTrayStorageKey = "masthead:keep-running-in-tray";
 
 
 export function readStoredMotionDisabled(): boolean {
@@ -63,5 +64,26 @@ export function writeStoredSessionEndedNotificationsEnabled(enabled: boolean): v
     else storage.setItem(mastheadSessionEndedNotificationsStorageKey, "0");
   } catch {
     // ignore
+  }
+}
+
+export function readStoredKeepRunningInTray(): boolean {
+  const storage = browserStorage();
+  if (!storage) return true;
+  try {
+    return storage.getItem(mastheadKeepRunningInTrayStorageKey) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+export function writeStoredKeepRunningInTray(enabled: boolean): void {
+  const storage = browserStorage();
+  if (!storage) return;
+  try {
+    if (enabled) storage.removeItem(mastheadKeepRunningInTrayStorageKey);
+    else storage.setItem(mastheadKeepRunningInTrayStorageKey, "0");
+  } catch {
+    // Local preferences should not break the app when storage is unavailable.
   }
 }

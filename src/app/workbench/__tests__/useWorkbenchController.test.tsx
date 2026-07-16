@@ -13,6 +13,7 @@ import {
 import {
   getWorkbenchAuthoringCapabilities,
   getWorkbenchActivity,
+  getWorkbenchImportHealthSummary,
   getWorkbenchNotAddedSessions,
   getWorkbenchNotAddedSummary,
   getWorkbenchSessions,
@@ -20,7 +21,6 @@ import {
   postWorkbenchClaim,
   postWorkbenchEnrollMissing,
   postWorkbenchImportTranscript,
-  postWorkbenchPublish,
   postWorkbenchQuality,
   postWorkbenchReleaseClaim
 } from "../../daemonClient";
@@ -28,6 +28,7 @@ import {
 const daemonClientMocks = vi.hoisted(() => ({
   getWorkbenchAuthoringCapabilities: vi.fn(),
   getWorkbenchActivity: vi.fn(),
+  getWorkbenchImportHealthSummary: vi.fn().mockResolvedValue({ ok: true, importJobIds: [], reasons: [], repairRequired: 0 }),
   getWorkbenchNotAddedSessions: vi.fn(),
   getWorkbenchNotAddedSummary: vi.fn(),
   getWorkbenchSessions: vi.fn(),
@@ -35,7 +36,6 @@ const daemonClientMocks = vi.hoisted(() => ({
   postWorkbenchClaim: vi.fn(),
   postWorkbenchEnrollMissing: vi.fn(),
   postWorkbenchImportTranscript: vi.fn(),
-  postWorkbenchPublish: vi.fn(),
   postWorkbenchQuality: vi.fn(),
   postWorkbenchReleaseClaim: vi.fn()
 }));
@@ -70,7 +70,6 @@ const ALL_ACTIONS: WorkbenchActionKind[] = [
   "quality_pass",
   "quality_fail",
   "quality_precheck",
-  "publish",
   "claim",
   "release",
   "copy_agent_prompt"
@@ -88,6 +87,144 @@ afterEach(async () => {
 });
 
 describe("useWorkbenchController", () => {
+  test("preserves selections across pages in one authoritative handoff", async () => {
+    vi.mocked(getWorkbenchAuthoringCapabilities).mockResolvedValue(
+      authoringCapabilities("database:test", "/home/test/.local/bin/mastheadctl")
+    );
+    vi.mocked(getWorkbenchActivity).mockResolvedValue(activityResponse());
+    vi.mocked(getWorkbenchNotAddedSummary).mockResolvedValue(notAddedSummary());
+    vi.mocked(getWorkbenchSessions).mockImplementation(async (_base, options = {}) => {
+      const pageSessions = options.offset === 100
+        ? [session("session:page-2", "Second page")]
+        : [session("session:page-1", "First page")];
+      return { ...response(pageSessions), offset: options.offset ?? 0, total: 101 };
+    });
+
+    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
+    await waitFor(() => latest().sessions[0]?.sessionId === "session:page-1");
+    await act(async () => {
+      latest().selectPage();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      latest().setPage(1);
+      await Promise.resolve();
+    });
+    await waitFor(() => latest().sessions[0]?.sessionId === "session:page-2");
+    await act(async () => {
+      latest().selectPage();
+      await Promise.resolve();
+    });
+
+    expect(Array.from(latest().selectedSessionIds)).toEqual(["session:page-1", "session:page-2"]);
+    expect(machineRequest().sessionIds).toEqual(["session:page-1", "session:page-2"]);
+    expect(latest().canRun("copy_agent_prompt")).toBe(true);
+  });
+
+  test("reconciles off-page compile readiness across refreshes without clearing selection", async () => {
+    let firstPageReady = true;
+    vi.mocked(getWorkbenchAuthoringCapabilities).mockResolvedValue(
+      authoringCapabilities("database:test", "/home/test/.local/bin/mastheadctl")
+    );
+    vi.mocked(getWorkbenchActivity).mockResolvedValue(activityResponse());
+    vi.mocked(getWorkbenchNotAddedSummary).mockResolvedValue(notAddedSummary());
+    vi.mocked(getWorkbenchSessions).mockImplementation(async (_base, options = {}) => {
+      if (options.offset === 100) {
+        return { ...response([session("session:page-2", "Second page")]), offset: 100, total: 101 };
+      }
+      const firstPage = session("session:page-1", "First page", firstPageReady
+        ? {}
+        : { qualityStatus: "unchecked" });
+      return { ...response([firstPage]), limit: options.limit ?? 100, offset: options.offset ?? 0, total: 101 };
+    });
+
+    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
+    await waitFor(() => latest().sessions[0]?.sessionId === "session:page-1");
+    await act(async () => {
+      latest().selectPage();
+      latest().setPage(1);
+      await Promise.resolve();
+    });
+    await waitFor(() => latest().sessions[0]?.sessionId === "session:page-2");
+    await act(async () => {
+      latest().selectPage();
+      await Promise.resolve();
+    });
+    expect(latest().canRun("copy_agent_prompt")).toBe(true);
+
+    firstPageReady = false;
+    await rerenderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 2 });
+    await waitFor(() => latest().loading === false);
+
+    expect(Array.from(latest().selectedSessionIds)).toEqual(["session:page-1", "session:page-2"]);
+    expect(latest().canRun("copy_agent_prompt")).toBe(false);
+    expect(latest().handoffText).toBe("");
+
+    firstPageReady = true;
+    await rerenderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 3 });
+    await waitFor(() => latest().loading === false);
+
+    expect(Array.from(latest().selectedSessionIds)).toEqual(["session:page-1", "session:page-2"]);
+    expect(latest().canRun("copy_agent_prompt")).toBe(true);
+    expect(machineRequest().sessionIds).toEqual(["session:page-1", "session:page-2"]);
+  });
+
+  test("requires V3 capabilities and a compile-ready selection for Copy Agent Prompt", async () => {
+    mockWorkbenchResponse([
+      session("session:ready", "Ready", { nextAction: "enrich", qualityStatus: "passed", transcriptStatus: "imported" }),
+      session("session:available", "Available", { qualityStatus: "passed", transcriptStatus: "available" }),
+      session("session:not-ready", "Not ready", { qualityStatus: "unchecked", transcriptStatus: "unchecked" })
+    ]);
+
+    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
+    await waitFor(() => latest().sessions.length === 3);
+
+    expect(latest().canRun("copy_agent_prompt")).toBe(false);
+    await select("session:not-ready");
+    expect(latest().canRun("copy_agent_prompt")).toBe(false);
+    expect(latest().handoffText).toBe("");
+    await act(async () => {
+      latest().toggleSession("session:ready");
+      await Promise.resolve();
+    });
+    expect(latest().canRun("copy_agent_prompt")).toBe(false);
+    expect(latest().handoffText).toBe("");
+    await act(async () => {
+      latest().toggleSession("session:not-ready");
+      await Promise.resolve();
+    });
+    expect(latest().canRun("copy_agent_prompt")).toBe(true);
+    expect(latest().handoffText).toContain('"bundleVersion":"workbench-authoring-v3"');
+    expect(latest().handoffText).toContain('"sessionIds":["session:ready"]');
+    await act(async () => {
+      latest().toggleSession("session:available");
+      await Promise.resolve();
+    });
+    expect(latest().canRun("copy_agent_prompt")).toBe(true);
+    expect(machineRequest().sessionIds).toEqual(["session:ready", "session:available"]);
+  });
+
+  test("keeps Copy Agent Prompt disabled for legacy authoring capabilities", async () => {
+    mockWorkbenchResponse([session("session:ready", "Ready")]);
+    vi.mocked(getWorkbenchAuthoringCapabilities).mockResolvedValue({
+      bundleVersion: "workbench-authoring-v1",
+      capability: "artifact_authoring",
+      command: "/home/test/.local/bin/mastheadctl",
+      databaseId: "database:test",
+      evidencePolicy: "all_canonical_redacted_evidence",
+      operations: ["open", "status", "evidence", "submit", "finish"],
+      protocol: "masthead.workbench.authoring/v1",
+      transport: "daemon_http"
+    });
+
+    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
+    await waitFor(() => latest().sessions.length === 1);
+    await select("session:ready");
+
+    expect(latest().canRun("copy_agent_prompt")).toBe(false);
+    expect(latest().handoffText).toBe("");
+  });
   test("loads missing sessions only when Workbench is active and live", async () => {
     mockWorkbenchResponse([session("session:abc", "Workbench import review")]);
     await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
@@ -116,7 +253,7 @@ describe("useWorkbenchController", () => {
     expect(latest().sessions).toEqual([]);
   });
 
-  test("prunes selected ids when refresh drops sessions", async () => {
+  test("preserves selected ids when a refresh page does not contain them", async () => {
     vi.mocked(getWorkbenchSessions)
       .mockResolvedValueOnce(response([session("session:abc", "First session"), session("session:def", "Second session")]))
       .mockResolvedValueOnce(response([session("session:def", "Second session")]));
@@ -137,7 +274,7 @@ describe("useWorkbenchController", () => {
     await waitFor(() => (latest()?.sessions.length ?? 0) === 1);
 
     expect(latest().sessions.map((item) => item.sessionId)).toEqual(["session:def"]);
-    expect(Array.from(latest().selectedSessionIds)).toEqual(["session:def"]);
+    expect(Array.from(latest().selectedSessionIds).sort()).toEqual(["session:abc", "session:def"]);
   });
 
   test("supports toggle, select all visible, and clear selection while keeping selected metadata sanitized", async () => {
@@ -203,7 +340,7 @@ describe("useWorkbenchController", () => {
     expect(latest().canRun("copy_agent_prompt")).toBe(true);
   });
 
-  test("selectAll includes off-page session IDs in the authoritative handoff", async () => {
+  test("selectAll rejects an off-page mixed-readiness selection from the authoritative handoff", async () => {
     vi.mocked(getWorkbenchAuthoringCapabilities).mockResolvedValue(
       authoringCapabilities("database:test", "/home/test/.local/bin/mastheadctl")
     );
@@ -211,9 +348,18 @@ describe("useWorkbenchController", () => {
     vi.mocked(getWorkbenchNotAddedSummary).mockResolvedValue(notAddedSummary());
     vi.mocked(getWorkbenchSessions).mockImplementation(async (_base, options = {}) => {
       if (options.limit === 500) {
-        return { ...response([session("session:a", "First page"), session("session:b", "Second page")]), limit: 500 };
+        return {
+          ...response([
+            session("session:a", "First page", { qualityStatus: "unchecked", transcriptStatus: "unchecked" }),
+            session("session:b", "Second page")
+          ]),
+          limit: 500
+        };
       }
-      return { ...response([session("session:a", "First page")]), total: 2 };
+      return {
+        ...response([session("session:a", "First page", { qualityStatus: "unchecked", transcriptStatus: "unchecked" })]),
+        total: 2
+      };
     });
 
     await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
@@ -223,8 +369,8 @@ describe("useWorkbenchController", () => {
     });
 
     expect(Array.from(latest().selectedSessionIds).sort()).toEqual(["session:a", "session:b"]);
-    expect(machineRequest().sessionIds).toEqual(["session:a", "session:b"]);
-    expect(latest().canRun("copy_agent_prompt")).toBe(true);
+    expect(latest().handoffText).toBe("");
+    expect(latest().canRun("copy_agent_prompt")).toBe(false);
   });
 
   test("retries after a failed load", async () => {
@@ -289,11 +435,6 @@ describe("useWorkbenchController", () => {
         transcriptStatus: "imported",
         qualityStatus: "unchecked"
       }),
-      session("session:publish", "Publish me", {
-        nextAction: "publish",
-        transcriptStatus: "imported",
-        qualityStatus: "passed"
-      }),
       session("session:claimed", "Claimed me", {
         nextAction: "enrich",
         transcriptStatus: "imported",
@@ -312,7 +453,7 @@ describe("useWorkbenchController", () => {
     ]);
 
     await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
-    await waitFor(() => (latest()?.sessions.length ?? 0) === 6);
+    await waitFor(() => (latest()?.sessions.length ?? 0) === 5);
 
     expect(latest().canRun("enroll_missing")).toBe(true);
     for (const kind of SELECTION_ACTIONS) {
@@ -324,37 +465,28 @@ describe("useWorkbenchController", () => {
     expect(latest().canRun("check_transcript")).toBe(true);
     expect(latest().canRun("import_transcript")).toBe(false);
     expect(latest().canRun("quality_pass")).toBe(false);
-    expect(latest().canRun("publish")).toBe(false);
     expect(latest().canRun("claim")).toBe(true);
     expect(latest().canRun("release")).toBe(false);
-    expect(latest().canRun("copy_agent_prompt")).toBe(true);
+    expect(latest().canRun("copy_agent_prompt")).toBe(false);
 
     await select("session:import");
     expect(latest().canRun("import_transcript")).toBe(true);
     expect(latest().canRun("check_transcript")).toBe(true);
-    expect(latest().canRun("publish")).toBe(false);
 
     await select("session:quality");
     expect(latest().canRun("quality_pass")).toBe(true);
     expect(latest().canRun("quality_fail")).toBe(true);
     expect(latest().canRun("quality_precheck")).toBe(true);
 
-    await select("session:publish");
-    expect(latest().canRun("publish")).toBe(true);
-    expect(latest().canRun("claim")).toBe(true);
-    expect(latest().canRun("release")).toBe(false);
-
     await select("session:claimed");
     expect(latest().canRun("claim")).toBe(false);
     expect(latest().canRun("release")).toBe(true);
-    expect(latest().canRun("publish")).toBe(false);
     expect(latest().canRun("copy_agent_prompt")).toBe(true);
 
     await select("session:enrich");
     expect(latest().canRun("check_transcript")).toBe(false);
     expect(latest().canRun("import_transcript")).toBe(false);
     expect(latest().canRun("quality_pass")).toBe(false);
-    expect(latest().canRun("publish")).toBe(false);
     expect(latest().canRun("claim")).toBe(true);
     expect(latest().canRun("copy_agent_prompt")).toBe(true);
 
@@ -470,16 +602,11 @@ describe("useWorkbenchController", () => {
     expect(latest().actionBusy).toBe(false);
   });
 
-  test("runs quality, publish, claim, and release against selected sessions", async () => {
+  test("runs quality, claim, and release against selected sessions", async () => {
     mockWorkbenchResponse([
       session("session:quality", "Quality", {
         nextAction: "review_quality",
         qualityStatus: "unchecked",
-        transcriptStatus: "imported"
-      }),
-      session("session:publish", "Publish", {
-        nextAction: "publish",
-        qualityStatus: "passed",
         transcriptStatus: "imported"
       }),
       session("session:open", "Open claim", {
@@ -499,12 +626,11 @@ describe("useWorkbenchController", () => {
       })
     ]);
     vi.mocked(postWorkbenchQuality).mockResolvedValue({ ok: true });
-    vi.mocked(postWorkbenchPublish).mockResolvedValue({ ok: true });
     vi.mocked(postWorkbenchClaim).mockResolvedValue({ ok: true });
     vi.mocked(postWorkbenchReleaseClaim).mockResolvedValue({ ok: true });
 
     await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
-    await waitFor(() => (latest()?.sessions.length ?? 0) === 4);
+    await waitFor(() => (latest()?.sessions.length ?? 0) === 3);
 
     await select("session:quality");
     await act(async () => {
@@ -526,12 +652,6 @@ describe("useWorkbenchController", () => {
       await latest().runAction("quality_precheck");
     });
     expect(postWorkbenchQuality).toHaveBeenCalledWith(baseUrl, "session:quality", { mode: "precheck" });
-
-    await select("session:publish");
-    await act(async () => {
-      await latest().runAction("publish");
-    });
-    expect(postWorkbenchPublish).toHaveBeenCalledWith(baseUrl, "session:publish");
 
     await select("session:open");
     await act(async () => {
@@ -563,7 +683,7 @@ describe("useWorkbenchController", () => {
       await latest().runAction("copy_agent_prompt");
     });
 
-    expect(latest().lastActionSummary).toBe("Agent prompt ready to copy");
+    expect(latest().lastActionSummary).toBe("Agent prompt copied for 1 sessions");
     expect(postWorkbenchCheckTranscript).not.toHaveBeenCalled();
     expect(getWorkbenchSessions).toHaveBeenCalledTimes(loadsBefore);
   });
@@ -750,6 +870,9 @@ function latest(): UseWorkbenchControllerResult {
 async function select(sessionId: string): Promise<void> {
   await act(async () => {
     latest().clearSelection();
+    await Promise.resolve();
+  });
+  await act(async () => {
     latest().toggleSession(sessionId);
     await Promise.resolve();
   });
@@ -761,10 +884,10 @@ function session(sessionId: string, title: string, overrides: Partial<WorkbenchQ
     latestActivity: undefined,
     nextAction: "check_transcript",
     publicationStatus: "publish_path",
-    qualityStatus: "unchecked",
+    qualityStatus: "passed",
     sessionDossierStatus: "missing",
     sessionEnrichmentStatus: "missing",
-    transcriptStatus: "unchecked",
+    transcriptStatus: "imported",
     lastActivityAt: "2026-07-07T12:00:00.000Z",
     lifecycle: "ended",
     project: "Masthead",
@@ -802,18 +925,21 @@ function mockWorkbenchResponse(sessions: WorkbenchQueueSessionDto[]): void {
   vi.mocked(getWorkbenchSessions).mockResolvedValue(response(sessions));
   vi.mocked(getWorkbenchActivity).mockResolvedValue(activityResponse());
   vi.mocked(getWorkbenchNotAddedSummary).mockResolvedValue(notAddedSummary());
+  vi.mocked(getWorkbenchImportHealthSummary).mockResolvedValue({ ok: true, importJobIds: [], reasons: [], repairRequired: 0 });
 }
 
 function authoringCapabilities(databaseId: string, command: string): WorkbenchAuthoringCapabilitiesDto {
   return {
-    bundleVersion: "workbench-authoring-v1" as const,
-    capability: "artifact_authoring" as const,
+    bundleVersion: "workbench-authoring-v3",
+    capability: "artifact_authoring",
     command,
     databaseId,
-    evidencePolicy: "all_canonical_redacted_evidence" as const,
-    operations: ["open", "status", "evidence", "submit", "finish"],
-    protocol: "masthead.workbench.authoring/v1" as const,
-    transport: "daemon_http" as const
+    evidencePolicy: "selected_session_canonical_evidence",
+    maxSessionsPerRun: 12,
+    operations: ["suggestions", "open", "status", "evidence", "context", "submit", "finish"],
+    protocol: "masthead.workbench.authoring/v1",
+    suggestionsAreBinding: false,
+    transport: "daemon_http"
   };
 }
 

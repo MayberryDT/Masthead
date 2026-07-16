@@ -1,9 +1,12 @@
+import { createHash } from "node:crypto";
 import type { AdapterRecord, DiscoveredSource, IngestCursor, RuntimeKind } from "../../adapters/types.ts";
+import type { ParsedTranscriptUnit, TranscriptUnitPlan } from "../../adapters/transcriptUnits.ts";
 import { upsertCursor } from "../db/cursorRepository.ts";
 import { indexCanonicalSessionSearch } from "../db/searchRepository.ts";
 import { getImportWorkUnit, recordImportFailureGroup, updateImportWorkUnit } from "../db/importLedgerRepository.ts";
-import { listImportImpactSessionIds, recordImportSessionImpact } from "../db/importSessionImpactRepository.ts";
+import { recordImportSessionImpact } from "../db/importSessionImpactRepository.ts";
 import { ingestAdapterRecord } from "../db/sessionRepository.ts";
+import { recordSessionImportHealth, sessionImportRequiresRepair } from "../db/sessionImportHealthRepository.ts";
 import { sourceRecordIsExcluded } from "../db/sourceRepository.ts";
 import { sourcePolicyExplicitlyEnabled } from "../db/sourcePolicyRepository.ts";
 import { type MastheadDatabase, withImmediateTransaction } from "../db/sqlite.ts";
@@ -24,11 +27,12 @@ export async function runImportWorkUnit(input: {
   hostId: string;
   hostname?: string;
   now?: () => string;
-  adapterBackfill: (source: DiscoveredSource) => AsyncIterable<AdapterRecord>;
+  adapterBackfill?: (source: DiscoveredSource) => AsyncIterable<AdapterRecord>;
+  parseTranscriptUnit?: (unit: TranscriptUnitPlan, cursor?: IngestCursor) => Promise<ParsedTranscriptUnit>;
   approvedSourceIds?: string[];
   indexSession?: (sessionId: string) => void;
   onSessionImported?: (sessionId: string) => void;
-  onSessionHydrated?: (sessionId: string) => void;
+  onSessionHydrated?: (sessionId: string, options: { holdForRepair: boolean }) => void;
   onCheckpoint?: (checkpoint: ImportWorkUnitCheckpoint) => void;
 }): Promise<{ imported: number; failed: number; processed: number; sessionIds: string[] }> {
   const now = input.now ?? (() => new Date().toISOString());
@@ -73,7 +77,7 @@ export async function runImportWorkUnit(input: {
   let failed = unit.failedRecords;
   let recordsSinceYield = 0;
   let recordsSinceCheckpoint = 0;
-  let latestCursorAfter = cursorValue(unit.cursorAfter);
+  let latestCursorAfter = cursorValue(unit.cursorAfter ?? unit.cursorBefore);
   const sessionIds = new Set<string>();
   const pendingImpacts = new Map<string, { impactKind: "enriched" | "transcript_added" | "created" | "updated"; recordCount: number; sessionId: string }>();
   const pendingFailures = new Map<string, {
@@ -91,6 +95,16 @@ export async function runImportWorkUnit(input: {
     schemaVersion: unit.schemaVersion,
     sourceId: unit.sourceId,
     sourceKind: unit.sourceKind
+  };
+  const transcriptUnit: TranscriptUnitPlan = {
+    fileSizeBytes: unit.fileSizeBytes,
+    modifiedAt: unit.modifiedAt,
+    runtime: unit.runtime,
+    semanticActivityAt: unit.semanticActivityAt,
+    source,
+    sourceSessionId: unit.sourceSessionId,
+    timestampBasis: unit.timestampBasis,
+    unitId: unit.workUnitId
   };
 
   const flushCheckpoint = async (force = false): Promise<void> => {
@@ -138,7 +152,14 @@ export async function runImportWorkUnit(input: {
   };
 
   try {
-    for await (const record of input.adapterBackfill(source)) {
+    const parsedUnit = input.parseTranscriptUnit
+      ? await input.parseTranscriptUnit(transcriptUnit, latestCursorAfter ? { cursorId: "", ...latestCursorAfter } : undefined)
+      : undefined;
+    const records = parsedUnit
+      ? recordsFromParsedUnit(parsedUnit)
+      : input.adapterBackfill?.(source);
+    if (!records) throw new Error("Import work unit runner requires a transcript parser or adapter backfill.");
+    for await (const record of records) {
       processed += 1;
       recordsSinceYield += 1;
       recordsSinceCheckpoint += 1;
@@ -176,30 +197,41 @@ export async function runImportWorkUnit(input: {
       if (result.sessionId) {
         imported += 1;
         sessionIds.add(result.sessionId);
-        const impactKind = unit.unitKind === "enrichment_session"
-          ? "enriched"
+        const impactKinds = unit.unitKind === "enrichment_session"
+          ? ["enriched" as const]
           : unit.unitKind === "transcript_file"
-            ? "transcript_added"
-            : result.created
-              ? "created"
-              : "updated";
-        const impactKey = `${result.sessionId}\0${impactKind}`;
-        const pending = pendingImpacts.get(impactKey);
-        pendingImpacts.set(impactKey, { impactKind, recordCount: (pending?.recordCount ?? 0) + 1, sessionId: result.sessionId });
+            ? ["transcript_added" as const, ...(result.created ? ["created" as const] : [])]
+            : [result.created ? "created" as const : "updated" as const];
+        for (const impactKind of impactKinds) {
+          const impactKey = `${result.sessionId}\0${impactKind}`;
+          const pending = pendingImpacts.get(impactKey);
+          pendingImpacts.set(impactKey, {
+            impactKind,
+            recordCount: (pending?.recordCount ?? 0) + 1,
+            sessionId: result.sessionId
+          });
+        }
         if (result.recordInserted) input.onSessionImported?.(result.sessionId);
       }
       await flushCheckpoint();
       recordsSinceYield = await yieldToRequestHandling(recordsSinceYield);
     }
     await flushCheckpoint(true);
-    for (const sessionId of listImportImpactSessionIds(input.db, unit.importJobId, unit.sourceId)) sessionIds.add(sessionId);
+    const healthSessionId = parsedUnit
+      ? sessionIdForParsedUnit(input.db, parsedUnit, unit.runtime, input.hostId, sessionIds)
+      : undefined;
+    const health = unit.unitKind === "transcript_file" && parsedUnit
+      ? recordHealthForParsedUnit(input.db, parsedUnit, healthSessionId, unit, now())
+      : undefined;
     for (const sessionId of sessionIds) {
       if (input.indexSession) {
         input.indexSession(sessionId);
       } else {
         indexCanonicalSessionSearch(input.db, sessionId);
       }
-      input.onSessionHydrated?.(sessionId);
+      const holdForRepair = health?.status === "repair_required" ||
+        sessionImportRequiresRepair(input.db, unit.importJobId, sessionId);
+      input.onSessionHydrated?.(sessionId, { holdForRepair });
     }
 
     updateImportWorkUnit(input.db, unit.workUnitId, {
@@ -208,7 +240,11 @@ export async function runImportWorkUnit(input: {
       heartbeatAt: now(),
       importedRecords: imported,
       processedRecords: processed,
-      status: failed > 0 ? (imported > 0 ? "succeeded_with_issues" : "failed") : "succeeded"
+      status: health?.status === "repair_required"
+        ? "succeeded_with_issues"
+        : failed > 0
+          ? (imported > 0 ? "succeeded_with_issues" : "failed")
+          : "succeeded"
     });
     return { failed, imported, processed, sessionIds: [...sessionIds] };
   } catch (error) {
@@ -235,6 +271,74 @@ export async function runImportWorkUnit(input: {
     });
     return { failed: Math.max(1, failed), imported, processed, sessionIds: [...sessionIds] };
   }
+}
+
+async function* recordsFromParsedUnit(unit: ParsedTranscriptUnit): AsyncIterable<AdapterRecord> {
+  yield* unit.records;
+}
+
+function recordHealthForParsedUnit(
+  db: MastheadDatabase,
+  parsedUnit: ParsedTranscriptUnit,
+  sessionId: string | undefined,
+  unit: NonNullable<ReturnType<typeof getImportWorkUnit>>,
+  updatedAt: string
+) {
+  const incrementalNoop = Boolean(unit.cursorAfter ?? unit.cursorBefore) &&
+    parsedUnit.completeness === "complete" &&
+    parsedUnit.records.length === 0 &&
+    parsedUnit.diagnostics.length === 0;
+  const reason = incrementalNoop ? undefined : importHealthReason(parsedUnit);
+  return recordSessionImportHealth(db, {
+    diagnostics: parsedUnit.diagnostics.map(({ code, message, severity }) => ({ code, message, severity })),
+    evidenceRevision: importEvidenceRevision(parsedUnit),
+    importJobId: unit.importJobId,
+    ...(reason ? { reason } : {}),
+    ...(sessionId ? { sessionId } : {}),
+    status: reason ? "repair_required" : "complete",
+    updatedAt,
+    workUnitId: unit.workUnitId
+  });
+}
+
+function importHealthReason(unit: ParsedTranscriptUnit): string | undefined {
+  if (unit.sourceSessionIds.length === 0) return "missing_identity";
+  if (unit.sourceSessionIds.length > 1) return "ambiguous_identity";
+  if (unit.completeness === "partial") return "partial_parse";
+  if (unit.completeness === "unrecognized") return "unrecognized_schema";
+  return undefined;
+}
+
+function sessionIdForParsedUnit(
+  db: MastheadDatabase,
+  unit: ParsedTranscriptUnit,
+  runtime: RuntimeKind,
+  hostId: string,
+  affectedSessionIds: Set<string>
+): string | undefined {
+  if (unit.sourceSessionIds.length !== 1) return undefined;
+  const rows = db.prepare(
+    `SELECT sessions.session_id AS sessionId
+     FROM sessions
+     JOIN runtimes ON runtimes.runtime_id = sessions.runtime_id
+     WHERE sessions.source_session_id = ?
+       AND runtimes.runtime_kind = ?
+       AND sessions.host_id = ?
+       AND sessions.deleted_at IS NULL`
+  ).all(unit.sourceSessionIds[0], runtime, hostId) as Array<{ sessionId: string }>;
+  for (const row of rows) affectedSessionIds.add(row.sessionId);
+  return rows.length === 1 ? rows[0].sessionId : undefined;
+}
+
+function importEvidenceRevision(unit: ParsedTranscriptUnit): string {
+  const evidence = JSON.stringify({
+    completeness: unit.completeness,
+    diagnostics: unit.diagnostics.map(({ code, message, severity }) => ({ code, message, severity })),
+    records: unit.records.map((record) => record.payloadHash),
+    sourceSessionIds: unit.sourceSessionIds,
+    unitId: unit.unit.unitId
+  });
+  return `sha256:${createHash("sha256").update(evidence).digest("hex")}`;
 }
 
 async function yieldToRequestHandling(recordsSinceYield: number): Promise<number> {

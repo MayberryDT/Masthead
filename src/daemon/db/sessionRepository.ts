@@ -4,11 +4,10 @@ import type { AdapterRecord } from "../../adapters/types.ts";
 import { redactJsonValue, redactText } from "../../core/redaction.ts";
 import type { LiveBoardProjection, NormalizedEvent } from "../../core/types.ts";
 import { canonicalSessionId, runtimeIdFor } from "../../shared/sessionIdentity.ts";
-import { runCaptureQualityPrecheck } from "../../workbench/qualityPrecheck.ts";
+import { reconcileImportedTranscript } from "../../workbench/transcriptQualityReconciler.ts";
 import { upsertSessionSource } from "./sessionSourceRepository.ts";
 import type { MastheadDatabase } from "./sqlite.ts";
 import { deriveTranscriptFileEffects } from "./transcriptEffects.ts";
-import { enrollWorkbenchSession } from "./workbenchPipelineRepository.ts";
 
 export { canonicalSessionId, runtimeIdFor } from "../../shared/sessionIdentity.ts";
 
@@ -652,8 +651,10 @@ function afterSessionMaterialized(
   sessionId: string,
   actorId: "live_ingest"
 ): void {
-  if (!runCaptureQualityPrecheck(db, sessionId).ok) return;
-  enrollWorkbenchSession(db, { actor: { kind: "system", id: actorId }, sessionId });
+  reconcileImportedTranscript(db, sessionId, {
+    actor: { kind: "system", id: actorId },
+    finalizeNoise: false
+  });
 }
 
 function predictedCanonicalSessionId(record: AdapterRecord, context: AdapterIngestionContext): string | undefined {

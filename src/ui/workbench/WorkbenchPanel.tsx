@@ -20,6 +20,7 @@ type WorkbenchPanelProps = Partial<
     | "notAddedOpen"
     | "notAddedSessions"
     | "notAddedSummary"
+    | "importHealthSummary"
     | "page"
     | "pageSize"
     | "runAction"
@@ -35,6 +36,7 @@ type WorkbenchPanelProps = Partial<
   onSelectAll?: () => void;
   onSelectPage?: () => void;
   onToggleSession?: (sessionId: string) => void;
+  onOpenImportReceipt?: (importJobId: string) => void;
 };
 
 const EMPTY_SELECTION = new Set<string>();
@@ -46,19 +48,17 @@ const defaultCanRun: UseWorkbenchControllerResult["canRun"] = () => false;
 
 const TOOLTIPS = {
   copyAgentPrompt:
-    "Copy a plain-language prompt for your coding agent to compile and publish artifacts from the selected sessions (session package always; runbook, ADR, and incident timeline when evidence supports them).",
+    "Copy a plain-language request for your coding agent to enrich the selected sessions and publish only justified artifacts.",
   selectAll: "Select every package-path session across all pages (not just this page).",
   clear: "Clear the current selection.",
   pipeline:
-    "Expand pipeline operations to the right: enroll, transcript, quality, package publish, and claims.",
+    "Expand pipeline operations to the right: enroll, transcript, quality, and claims.",
   enrollMissing: "Add captured sessions that are not yet on the Workbench package path.",
   checkTranscript: "Run a lightweight transcript availability check on selected sessions.",
   importTranscript: "Import transcript content for selected sessions (requires source permission).",
   precheck: "Run the cheap capture quality precheck and apply pass/fail automatically.",
   acceptQuality: "Mark quality as passed so selected sessions can move toward enrichment.",
   failQuality: "Fail quality and remove sessions from the publish path (Not Added).",
-  publish:
-    "Publish the session package (dossier capsule) for selected sessions when package gates are satisfied. Automatic kinds still need apply/publish or N/A for full resolution.",
   claim: "Place a short-lived claim so agents avoid duplicate work on selected sessions.",
   release: "Release active claims on selected sessions.",
   pagePrevious: "Show the previous page of package-path sessions.",
@@ -81,7 +81,6 @@ const PIPELINE_ITEMS: PipelineItem[] = [
   { kind: "quality_precheck", label: "Precheck", tooltip: TOOLTIPS.precheck },
   { kind: "quality_pass", label: "Accept Quality", tooltip: TOOLTIPS.acceptQuality },
   { kind: "quality_fail", label: "Fail Quality", tooltip: TOOLTIPS.failQuality, quiet: true },
-  { kind: "publish", label: "Publish package", tooltip: TOOLTIPS.publish },
   { kind: "claim", label: "Claim", tooltip: TOOLTIPS.claim },
   { kind: "release", label: "Release", tooltip: TOOLTIPS.release }
 ];
@@ -99,11 +98,13 @@ export function WorkbenchPanel({
   notAddedOpen = false,
   notAddedSessions = EMPTY_NOT_ADDED,
   notAddedSummary,
+  importHealthSummary,
   onClearSelection,
   onRetry,
   onSelectAll,
   onSelectPage,
   onToggleSession,
+  onOpenImportReceipt,
   page = 0,
   pageSize = 100,
   runAction,
@@ -188,12 +189,13 @@ export function WorkbenchPanel({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [pipelineExpanded, pipelineClosing]);
 
-  const run = (kind: WorkbenchActionKind) => {
+  const run = async (kind: WorkbenchActionKind) => {
     if (!canRun(kind) || actionBusy) return;
     if (kind === "copy_agent_prompt") {
-      void copyTextToClipboard(handoffText);
+      const copied = await copyTextToClipboard(handoffText);
+      if (!copied) return;
     }
-    void runAction?.(kind);
+    await runAction?.(kind);
   };
 
   const toggleNotAdded = () => {
@@ -223,7 +225,7 @@ export function WorkbenchPanel({
           <AppButton
             className="workbench-copy-agent"
             variant="primary"
-            onClick={() => run("copy_agent_prompt")}
+            onClick={() => void run("copy_agent_prompt")}
             disabled={!canRun("copy_agent_prompt")}
             title={TOOLTIPS.copyAgentPrompt}
           >
@@ -280,7 +282,7 @@ export function WorkbenchPanel({
                   disabled={!canRun(item.kind) || actionBusy || !pipelineExpanded || pipelineClosing}
                   title={item.tooltip}
                   tabIndex={pipelineExpanded && !pipelineClosing ? 0 : -1}
-                  onClick={() => run(item.kind)}
+                  onClick={() => void run(item.kind)}
                 >
                   {item.label}
                 </AppButton>
@@ -298,6 +300,12 @@ export function WorkbenchPanel({
             <dt>Selected</dt>
             <dd>{selectionCount}</dd>
           </div>
+          {importHealthSummary ? (
+            <div className={importHealthSummary.repairRequired > 0 ? "is-warning" : undefined} title="Import units held outside the package path until their evidence is repaired">
+              <dt>Import repair</dt>
+              <dd>{importHealthSummary.repairRequired}</dd>
+            </div>
+          ) : null}
           {notAddedLabel != null ? (
             <div className={notAddedOpen ? "is-active" : undefined} title={TOOLTIPS.notAdded}>
               <dt>Not Added</dt>
@@ -317,6 +325,25 @@ export function WorkbenchPanel({
           ) : null}
         </dl>
       </div>
+
+      {importHealthSummary && importHealthSummary.repairRequired > 0 ? (
+        <section className="workbench-import-repair-panel" aria-label="Import repair">
+          <div>
+            <p className="mono-label">Import repair — outside the package path</p>
+            <p>
+              {importHealthSummary.repairRequired} import repair issue{importHealthSummary.repairRequired === 1 ? "" : "s"} remain outside the package path.
+              Repair units are not selectable sessions and are not counted as Not Added.
+            </p>
+          </div>
+          <div className="workbench-import-repair-receipts">
+            {importHealthSummary.importJobIds.map((importJobId) => (
+              <AppButton variant="quiet" key={importJobId} onClick={() => onOpenImportReceipt?.(importJobId)} disabled={!onOpenImportReceipt}>
+                Open import receipt
+              </AppButton>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {toastMessage ? (
         <div className={`workbench-toast is-${toastTone}`} role="status" aria-live="polite" aria-atomic="true">
@@ -627,11 +654,11 @@ function formatStatus(value: string, fallback: string): string {
   return fallback.replace(/_/g, " ");
 }
 
-async function copyTextToClipboard(text: string): Promise<void> {
+async function copyTextToClipboard(text: string): Promise<boolean> {
   if (navigator.clipboard?.writeText) {
     try {
       await navigator.clipboard.writeText(text);
-      return;
+      return true;
     } catch {
       // Fall back for desktop shells that do not expose async clipboard writes.
     }
@@ -645,6 +672,7 @@ async function copyTextToClipboard(text: string): Promise<void> {
   textarea.style.left = "-9999px";
   document.body.append(textarea);
   textarea.select();
-  document.execCommand("copy");
+  const copied = document.execCommand("copy");
   textarea.remove();
+  return copied;
 }

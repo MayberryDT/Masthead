@@ -74,6 +74,8 @@ export function authoringEvidenceRevision(db: MastheadDatabase, sessionIds: stri
           itemId: item.itemId,
           kind: item.kind,
           label: item.label,
+          lowValue: item.lowValue,
+          narrativeText: item.narrativeText,
           observedAt: item.observedAt,
           role: item.role,
           sourceRef: item.sourceRef,

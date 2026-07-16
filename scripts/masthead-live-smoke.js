@@ -72,9 +72,12 @@ try {
   assert(events.events?.length === RELEASE_LIVE_RUNTIMES.length + 2, `events endpoint should return ${RELEASE_LIVE_RUNTIMES.length + 2} accepted events`);
 
   const workbench = await getJson(server.baseUrl, "/workbench/sessions?limit=50");
+  const shallowLiveSession = workbench.sessions?.find((session) => session.title === "Live smoke approval");
   assert(
-    !workbench.sessions?.some((session) => session.title === "Live smoke approval"),
-    "shallow live smoke session bypassed the artifact candidate gate"
+    shallowLiveSession?.publicationStatus === "publish_path" &&
+      shallowLiveSession?.nextAction === "review_quality" &&
+      shallowLiveSession?.qualityStatus === "unchecked",
+    "shallow live smoke session did not remain on the Workbench quality-review path"
   );
 
   const logbook = await getJson(server.baseUrl, "/logbook/artifacts?q=Live%20smoke");

@@ -48,7 +48,7 @@ export function SourcesConnectOnboarding({
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [discoverStarted, setDiscoverStarted] = useState(false);
   const [enableRunning, setEnableRunning] = useState(false);
-  const [connectionStates, setConnectionStates] = useState<Record<string, "enabling" | "verifying" | "verified" | "needs_action" | "failed">>({});
+  const [connectionStates, setConnectionStates] = useState<Record<string, "enabling" | "verifying" | "verified" | "failed">>({});
   const [discoverAttempted, setDiscoverAttempted] = useState(false);
   const [historyChoice, setHistoryChoice] = useState<HistoryChoice>("everything");
   const [importRunning, setImportRunning] = useState(false);
@@ -66,9 +66,6 @@ export function SourcesConnectOnboarding({
   );
   const activeStage = stageForStep(step);
   const discoveryComplete = discoverAttempted && !discoverStarted && !busy && snapshot !== undefined;
-  const hasPendingActivation = selectedConnectors.some(
-    (connector) => connectionStates[connector.runtime] === "needs_action"
-  );
 
   useEffect(() => {
     if (!open) {
@@ -118,7 +115,7 @@ export function SourcesConnectOnboarding({
     let failed = false;
     try {
       for (const target of selectedConnectors) {
-        const alreadyInstalled = connectionStates[target.runtime] === "needs_action" || connectionStates[target.runtime] === "verified";
+        const alreadyInstalled = connectionStates[target.runtime] === "verified";
         if (!alreadyInstalled) {
           setConnectionStates((current) => ({ ...current, [target.runtime]: "enabling" }));
           await onEnable(target.runtime);
@@ -126,17 +123,12 @@ export function SourcesConnectOnboarding({
         setConnectionStates((current) => ({ ...current, [target.runtime]: "verifying" }));
         const verification = await onTest(target.runtime);
         const verified = typeof verification === "boolean" ? verification : verification.verified;
-        const needsAction = typeof verification === "boolean" ? false : verification.needsAction;
         if (!verified) {
           failed = true;
           setConnectionStates((current) => ({ ...current, [target.runtime]: "failed" }));
           continue;
         }
-        setConnectionStates((current) => ({
-          ...current,
-          [target.runtime]: needsAction ? "needs_action" : "verified"
-        }));
-        if (needsAction) failed = true;
+        setConnectionStates((current) => ({ ...current, [target.runtime]: "verified" }));
       }
     } catch {
       failed = true;
@@ -280,7 +272,7 @@ export function SourcesConnectOnboarding({
               disabled={busy || enableRunning || selected.size === 0}
               onClick={() => void handleConnectSelected()}
             >
-              {enableRunning ? "Connecting…" : hasPendingActivation ? "Check connections" : "Connect selected"}
+              {enableRunning ? "Connecting…" : "Connect selected"}
             </AppButton>
           </div>
         </div>
@@ -389,11 +381,10 @@ export function SourcesConnectOnboarding({
   );
 }
 
-function connectionStateLabel(state: "enabling" | "verifying" | "verified" | "needs_action" | "failed"): string {
+function connectionStateLabel(state: "enabling" | "verifying" | "verified" | "failed"): string {
   if (state === "enabling") return "Installing connector…";
   if (state === "verifying") return "Executing connector command…";
   if (state === "verified") return "Connector command verified";
-  if (state === "needs_action") return "Connector command verified — host action still required";
   return "Verification failed — repair the connector and try again";
 }
 

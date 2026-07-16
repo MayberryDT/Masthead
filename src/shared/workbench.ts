@@ -10,6 +10,41 @@ export type WorkbenchMissingSessionDto = {
 
 export type WorkbenchPublicationStatus = "publish_path" | "published" | "not_added_to_logbook";
 
+export type CaptureQualityDisposition =
+  | {
+      disposition: "keep";
+      reason: "meaningful_conversation" | "substantial_tool_work" | "durable_file_effect";
+    }
+  | { disposition: "review"; reason: "insufficient_evidence" }
+  | { disposition: "suppress"; reason: "empty" | "hook_only" | "diagnostic_only" | "exact_duplicate" };
+
+export type WorkbenchSuppressionCategory = "confirmed_noise" | "insufficient_evidence" | "manual_exclusion";
+export type WorkbenchQualityDecisionSource = "automatic" | "user";
+
+export type SessionImportHealthStatus = "complete" | "partial" | "repair_required";
+
+export type SessionImportHealthDiagnosticDto = {
+  code: string;
+  message: string;
+  severity: "info" | "warning" | "error";
+};
+
+export type SessionImportHealthSummaryDto = {
+  total: number;
+  complete: number;
+  partial: number;
+  repairRequired: number;
+  reasons: Array<{ reason: string; count: number }>;
+  diagnostics: Array<SessionImportHealthDiagnosticDto & { count: number }>;
+};
+
+export type WorkbenchImportHealthSummaryDto = {
+  ok: true;
+  repairRequired: number;
+  reasons: Array<{ reason: string; count: number }>;
+  importJobIds: string[];
+};
+
 export type WorkbenchNextAction =
   | "check_transcript"
   | "import_transcript"

@@ -1,12 +1,92 @@
 import { describe, expect, test } from "vitest";
 import type { SessionArtifactRecord } from "../../../daemon/db/sessionArtifactRepository.ts";
-import type { WorkbenchAuthoringBundle } from "../../../shared/workbenchAuthoring.ts";
+import type {
+  WorkbenchAuthoringBundle,
+  WorkbenchAuthoringBundleV2,
+  WorkbenchAuthoringBundleV3,
+  WorkbenchClaimSupport
+} from "../../../shared/workbenchAuthoring.ts";
+import type { DurableSessionEnrichment } from "../../../shared/sessionEnrichment.ts";
+import {
+  isWorkbenchAuthoringCapabilitiesDto,
+  WORKBENCH_AUTHORING_OPERATIONS
+} from "../../../shared/workbenchAuthoring.ts";
 import { getWorkbenchSchema } from "../../schemas.ts";
 import type { WorkbenchAuthoringValidationInput, WorkbenchValidationEvidence } from "../../types.ts";
-import { getAuthoringBundleSchema, getWorkbenchAuthoringOutputSchema } from "../authoringSchemas.ts";
-import { validateAuthoringBundle } from "../authoringValidation.ts";
+import {
+  getAuthoringBundleSchema,
+  getAuthoringBundleV2Schema,
+  getWorkbenchAuthoringOutputSchema,
+  parseAuthoringBundleV2
+} from "../authoringSchemas.ts";
+import {
+  validateAuthoringBundle,
+  validateAuthoringBundleV2,
+  validateAuthoringBundleV3
+} from "../authoringValidation.ts";
+
+describe("Workbench authoring V3 capabilities", () => {
+  test("advertises selection-scoped authoring while preserving the transport protocol", () => {
+    const capabilities = {
+      bundleVersion: "workbench-authoring-v3",
+      capability: "artifact_authoring",
+      command: "/opt/masthead/mastheadctl",
+      databaseId: "database:test",
+      evidencePolicy: "selected_session_canonical_evidence",
+      maxSessionsPerRun: 12,
+      operations: ["suggestions", "open", "status", "evidence", "context", "submit", "finish"],
+      protocol: "masthead.workbench.authoring/v1",
+      suggestionsAreBinding: false,
+      transport: "daemon_http"
+    };
+
+    expect(WORKBENCH_AUTHORING_OPERATIONS).toEqual(capabilities.operations);
+    expect(isWorkbenchAuthoringCapabilitiesDto(capabilities)).toBe(true);
+    expect(isWorkbenchAuthoringCapabilitiesDto({
+      ...capabilities,
+      bundleVersion: "workbench-authoring-v2"
+    })).toBe(false);
+  });
+});
 
 describe("Workbench authoring V2 schemas", () => {
+  test("accepts exactly one candidate-scoped optional artifact", () => {
+    expect(parseAuthoringBundleV2(validV2Bundle())).toEqual(validV2Bundle());
+    expect(getAuthoringBundleV2Schema()).toMatchObject({
+      additionalProperties: false,
+      properties: {
+        artifact: { oneOf: expect.any(Array) },
+        bundleVersion: { const: "workbench-authoring-v2" },
+        candidateId: { type: "string" },
+        evidenceRevision: { type: "string" },
+        runId: { type: "string" }
+      },
+      required: ["bundleVersion", "runId", "candidateId", "evidenceRevision", "artifact"],
+      title: "WorkbenchAuthoringBundleV2",
+      type: "object"
+    });
+  });
+
+  test("V2 bundles cannot contain an agent-authored dossier or V1 resolution fields", () => {
+    for (const field of [
+      "sessionPackages",
+      "dossier",
+      "enrichments",
+      "notApplicable",
+      "contributions",
+      "artifacts"
+    ] as const) {
+      const bundle = { ...validV2Bundle(), [field]: [] };
+      expect(() => parseAuthoringBundleV2(bundle)).toThrow(`unexpected_authoring_bundle_property:${field}`);
+    }
+  });
+
+  test("V1 bundles are not accepted by the V2 parser", () => {
+    expect(() => parseAuthoringBundleV2(validAuthoringBundle())).toThrow(
+      "unsupported_authoring_bundle_version"
+    );
+  });
+
   test("adds claim evidence without mutating the V1 registry", () => {
     const v1 = getWorkbenchSchema("session_enrichment");
     const v2 = getWorkbenchAuthoringOutputSchema("session_enrichment");
@@ -61,7 +141,118 @@ describe("Workbench authoring V2 schemas", () => {
   });
 });
 
+function validV2Bundle(): WorkbenchAuthoringBundleV2 {
+  const artifact = validRunbookDraft();
+  const { claimEvidence: _legacyClaimEvidence, ...output } = artifact.output;
+  return {
+    artifact: {
+      ...artifact,
+      output: {
+        ...output,
+        claimSupport: [
+          {
+            evidenceRef: "message:a:1",
+            excerpt: "Canonical evidence supports the authored Workbench claim in this fixture.",
+            path: "problemSignature.symptoms[0]",
+            supportKind: "problem"
+          },
+          {
+            evidenceRef: "message:a:1",
+            excerpt: "Canonical evidence supports the authored Workbench claim in this fixture.",
+            path: "problemSignature.errorStrings[0]",
+            supportKind: "problem"
+          },
+          {
+            evidenceRef: "message:a:1",
+            excerpt: "Canonical evidence supports the authored Workbench claim in this fixture.",
+            path: "problemSignature.affectedScope",
+            supportKind: "problem"
+          },
+          {
+            evidenceRef: "message:a:1",
+            excerpt: "Canonical evidence supports the authored Workbench claim in this fixture.",
+            path: "preconditions[0]",
+            supportKind: "problem"
+          },
+          {
+            evidenceRef: "message:a:1",
+            excerpt: "Canonical evidence supports the authored Workbench claim in this fixture.",
+            path: "reproSteps[0]",
+            supportKind: "problem"
+          },
+          {
+            evidenceRef: "message:a:1",
+            excerpt: "Canonical evidence supports the authored Workbench claim in this fixture.",
+            path: "fixSteps[0]",
+            supportKind: "change"
+          },
+          {
+            evidenceRef: "message:a:1",
+            excerpt: "Changed validation behavior. Canonical evidence supports the authored Workbench claim in this fixture.",
+            path: "commands[0]",
+            supportKind: "change"
+          },
+          {
+            evidenceRef: "message:a:1",
+            excerpt: "Changed validation behavior. Canonical evidence supports the authored Workbench claim in this fixture.",
+            path: "changedFiles[0]",
+            supportKind: "change"
+          },
+          {
+            evidenceRef: "message:a:1",
+            excerpt: "Canonical evidence supports the authored Workbench claim in this fixture.",
+            path: "environmentRequirements[0]",
+            supportKind: "problem"
+          },
+          {
+            evidenceRef: "message:a:1",
+            excerpt: "Canonical evidence supports the authored Workbench claim in this fixture.",
+            path: "rootCause",
+            supportKind: "root_cause"
+          },
+          {
+            evidenceRef: "message:a:1",
+            excerpt: "Canonical evidence supports the authored Workbench claim in this fixture.",
+            path: "preventionNotes[0]",
+            supportKind: "remediation"
+          },
+          {
+            evidenceRef: "tool_result:a:2",
+            excerpt: "Focused authoring validation tests passed successfully.",
+            path: "validationChecks[0]",
+            supportKind: "verification"
+          }
+        ]
+      }
+    },
+    bundleVersion: "workbench-authoring-v2",
+    candidateId: "candidate:runbook:oauth",
+    evidenceRevision: "sha256:evidence",
+    runId: "authoring:run"
+  };
+}
+
 describe("validateAuthoringBundle", () => {
+  test("rejects unsupported authoring-protocol language through the V2 bundle boundary", () => {
+    const bundle = validV2Bundle();
+    bundle.artifact.output.fixSteps = ["Read every canonical evidence item through cursor pagination."];
+    const evidence = validValidationInput(validAuthoringBundle()).evidenceByRef;
+
+    const result = validateAuthoringBundleV2({
+      bundle,
+      coverageWarningsBySession: new Map(),
+      evidenceByRef: evidence,
+      publishedArtifacts: [],
+      selectedSessionIds: ["session:a"]
+    });
+
+    expect(result).toMatchObject({ ok: false });
+    expect(result.findings).toContainEqual(expect.objectContaining({
+      code: "unsupported_authoring_protocol_language",
+      path: "artifact.output.fixSteps[0]"
+    }));
+  });
+
   test("accepts a grounded bundle that resolves every automatic kind", () => {
     expect(validateAuthoringBundle(validValidationInput(validAuthoringBundle()))).toEqual({
       findings: [],
@@ -83,8 +274,8 @@ describe("validateAuthoringBundle", () => {
       bundle,
       coverageWarningsBySession: new Map(),
       evidenceByRef: new Map([
-        ["message:a:1", { exitCode: undefined, kind: "message", sessionId: "session:a", status: undefined }],
-        ["tool_result:a:2", { exitCode: 0, kind: "tool_result", sessionId: "session:a", status: "completed" }]
+        ["message:a:1", validationEvidence("session:a", "message")],
+        ["tool_result:a:2", validationEvidence("session:a", "tool_result", { exitCode: 0, status: "completed" })]
       ]),
       publishedArtifacts: [],
       selectedSessionIds: ["session:a"]
@@ -256,12 +447,10 @@ describe("validateAuthoringBundle", () => {
     bundle.notApplicable = bundle.notApplicable.filter((decision) => decision.kind !== "runbook");
     bundle.artifacts.push(validRunbookDraft());
     const input = validValidationInput(bundle);
-    input.evidenceByRef.set("tool_result:a:2", {
+    input.evidenceByRef.set("tool_result:a:2", validationEvidence("session:a", "tool_result", {
       exitCode: 1,
-      kind: "tool_result",
-      sessionId: "session:a",
       status: "failed"
-    });
+    }));
 
     const result = validateAuthoringBundle(input);
 
@@ -501,7 +690,7 @@ describe("validateAuthoringBundle", () => {
     ) as WorkbenchAuthoringBundle;
     const input = validValidationInput(bundle);
     input.evidenceByRef.delete(originalRef);
-    input.evidenceByRef.set(canonicalRef, { kind: "message", sessionId });
+    input.evidenceByRef.set(canonicalRef, validationEvidence(sessionId, "message"));
 
     const result = validateAuthoringBundle(input);
 
@@ -518,6 +707,68 @@ describe("validateAuthoringBundle", () => {
     expect(result.findings).toContainEqual(
       expect.objectContaining({ code: "unexpected_property", path: "constructor" })
     );
+  });
+});
+
+describe("validateAuthoringBundleV3", () => {
+  test("accepts one grounded enrichment per selected session with no optional artifacts", () => {
+    expect(validateV3(validEnrichmentOnlyBundle())).toEqual({ findings: [], ok: true });
+  });
+
+  test("requires exactly one enrichment per selected session and none outside the run", () => {
+    const missing = validEnrichmentOnlyBundle();
+    missing.sessionEnrichments = [];
+    expect(codes(validateV3(missing))).toContain("missing_session_enrichment");
+
+    const duplicate = validEnrichmentOnlyBundle();
+    duplicate.sessionEnrichments.push(structuredClone(duplicate.sessionEnrichments[0]!));
+    expect(codes(validateV3(duplicate))).toContain("duplicate_session_enrichment");
+
+    const unexpected = validEnrichmentOnlyBundle();
+    unexpected.sessionEnrichments.push({
+      enrichment: durableEnrichment("session:b"),
+      sessionId: "session:b"
+    });
+    expect(codes(validateV3(unexpected))).toContain("unexpected_session_enrichment");
+  });
+
+  test("rejects enrichment evidence that is unknown or belongs to another session", () => {
+    const unknown = validEnrichmentOnlyBundle();
+    unknown.sessionEnrichments[0]!.enrichment.sessionSummary.evidenceRefs[0]!.id = "missing:evidence";
+    expect(codes(validateV3(unknown))).toContain("unknown_evidence_ref");
+
+    const outside = validEnrichmentOnlyBundle();
+    outside.sessionEnrichments[0]!.enrichment.sessionDossier.evidenceRefs[0]!.id = "message:b:1";
+    expect(codes(validateV3(outside, ["session:a"], true))).toContain("evidence_outside_provenance");
+  });
+
+  test("accepts an agent-selected optional artifact without a suggestion or candidate ID", () => {
+    const bundle = validEnrichmentOnlyBundle();
+    bundle.artifacts = [validV2Bundle().artifact];
+    bundle.artifacts[0]!.output.preconditions = ["A failing validation fixture exists."];
+
+    expect(validateV3(bundle)).toEqual({ findings: [], ok: true });
+  });
+
+  test("retains claim support, join, and protocol leakage quality gates", () => {
+    const unsupported = validEnrichmentOnlyBundle();
+    unsupported.artifacts = [validV2Bundle().artifact];
+    const supports = unsupported.artifacts[0]!.output.claimSupport as WorkbenchClaimSupport[];
+    supports[0]!.excerpt = "This excerpt is not present in canonical evidence.";
+    expect(codes(validateV3(unsupported))).toContain("unsupported_claim_excerpt");
+
+    const weakJoin = validEnrichmentOnlyBundle(["session:a", "session:b"]);
+    const joined = validV2Bundle().artifact;
+    joined.provenanceSessionIds = ["session:a", "session:b"];
+    joined.output.provenanceSessionIds = ["session:a", "session:b"];
+    joined.output.joinRationale = "same project";
+    weakJoin.artifacts = [joined];
+    expect(codes(validateV3(weakJoin, ["session:a", "session:b"]))).toContain("weak_join");
+
+    const leakage = validEnrichmentOnlyBundle();
+    leakage.artifacts = [validV2Bundle().artifact];
+    leakage.artifacts[0]!.output.fixSteps = ["Read every canonical evidence item through cursor pagination."];
+    expect(codes(validateV3(leakage))).toContain("authoring_protocol_leakage");
   });
 });
 
@@ -673,13 +924,115 @@ function validValidationInput(
     coverageWarningsBySession: new Map<string, string[]>(),
     evidenceByRef: new Map<string, WorkbenchValidationEvidence>(
       sessionIds.flatMap((sessionId) => [
-        [messageRef(sessionId), { kind: "message" as const, sessionId }],
-        [toolRef(sessionId), { exitCode: 0, kind: "tool_result" as const, sessionId, status: "completed" }]
+        [messageRef(sessionId), validationEvidence(sessionId, "message")],
+        [toolRef(sessionId), validationEvidence(sessionId, "tool_result", { exitCode: 0, status: "completed" })]
       ])
     ),
     publishedArtifacts: [] as SessionArtifactRecord[],
     selectedSessionIds: sessionIds
   };
+}
+
+function validationEvidence(
+  sessionId: string,
+  kind: WorkbenchValidationEvidence["kind"],
+  overrides: Partial<WorkbenchValidationEvidence> = {}
+): WorkbenchValidationEvidence {
+  return {
+    kind,
+    lowValue: false,
+    observedAt: "2026-07-10T12:00:00.000Z",
+    role: kind === "message" ? "assistant" : "tool",
+    sessionId,
+    text: kind === "tool_result"
+      ? "Focused authoring validation tests passed successfully."
+      : "Changed validation behavior. Canonical evidence supports the authored Workbench claim in this fixture.",
+    ...overrides
+  };
+}
+
+function validEnrichmentOnlyBundle(
+  sessionIds: string[] = ["session:a"]
+): WorkbenchAuthoringBundleV3 {
+  return {
+    artifacts: [],
+    bundleVersion: "workbench-authoring-v3",
+    evidenceRevision: "sha256:evidence",
+    runId: "authoring:v3",
+    sessionEnrichments: sessionIds.map((sessionId) => ({
+      enrichment: durableEnrichment(sessionId),
+      sessionId
+    }))
+  };
+}
+
+function durableEnrichment(sessionId: string): DurableSessionEnrichment {
+  const message = evidenceRef(messageRef(sessionId), "event");
+  const verification = evidenceRef(toolRef(sessionId), "command");
+  return {
+    sessionDossier: {
+      blockers: [],
+      continuation: { constraints: [], openQuestions: [] },
+      decisions: ["Use selection-scoped authoring without candidate gates."],
+      evidenceRefs: [message],
+      keyWork: ["Validated the enrichment-first V3 authoring contract."],
+      outcome: "The V3 authoring bundle passed focused validation.",
+      verification: {
+        commands: ["npx vitest run"],
+        evidenceRefs: [verification],
+        failures: [],
+        status: "passed",
+        summary: "Focused authoring validation tests passed."
+      },
+      warnings: []
+    },
+    sessionSummary: {
+      confidence: "high",
+      evidenceRefs: [message, verification],
+      state: "completed",
+      text: "Validated grounded durable enrichment and optional artifacts for the selected session."
+    },
+    sessionTitle: {
+      basis: "dominant_work",
+      confidence: "high",
+      evidenceRefs: [message],
+      text: "Validate enrichment-first authoring"
+    },
+    version: "session-capsule-v4"
+  };
+}
+
+function evidenceRef(id: string, kind: "event" | "command") {
+  return {
+    id,
+    kind,
+    observedAt: "2026-07-10T12:00:00.000Z",
+    source: "canonical"
+  } as const;
+}
+
+function validateV3(
+  bundle: WorkbenchAuthoringBundleV3,
+  sessionIds: string[] = ["session:a"],
+  includeSessionB = false
+) {
+  const evidenceSessionIds = includeSessionB ? [...sessionIds, "session:b"] : sessionIds;
+  return validateAuthoringBundleV3({
+    bundle,
+    coverageWarningsBySession: new Map(),
+    evidenceByRef: new Map<string, WorkbenchValidationEvidence>(
+      evidenceSessionIds.flatMap((sessionId) => [
+        [messageRef(sessionId), validationEvidence(sessionId, "message")],
+        [toolRef(sessionId), validationEvidence(sessionId, "tool_result", { exitCode: 0, status: "completed" })]
+      ])
+    ),
+    publishedArtifacts: [],
+    selectedSessionIds: sessionIds
+  });
+}
+
+function codes(result: ReturnType<typeof validateAuthoringBundleV3>): string[] {
+  return result.findings.map((finding) => finding.code);
 }
 
 function notApplicable(

@@ -4,9 +4,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { AppShell } from "../AppShell";
 import {
+  mastheadKeepRunningInTrayStorageKey,
   mastheadMotionDisabledStorageKey,
   prefersReducedMotion,
+  readStoredKeepRunningInTray,
   readStoredMotionDisabled,
+  writeStoredKeepRunningInTray,
   writeStoredMotionDisabled
 } from "../motionPreference";
 
@@ -30,6 +33,18 @@ describe("motion preference", () => {
 
     expect(localStorage.getItem(mastheadMotionDisabledStorageKey)).toBeNull();
     expect(readStoredMotionDisabled()).toBe(false);
+  });
+
+  test("keeps running in the tray by default and persists an explicit quit-on-close choice", () => {
+    expect(readStoredKeepRunningInTray()).toBe(true);
+
+    writeStoredKeepRunningInTray(false);
+    expect(localStorage.getItem(mastheadKeepRunningInTrayStorageKey)).toBe("0");
+    expect(readStoredKeepRunningInTray()).toBe(false);
+
+    writeStoredKeepRunningInTray(true);
+    expect(localStorage.getItem(mastheadKeepRunningInTrayStorageKey)).toBeNull();
+    expect(readStoredKeepRunningInTray()).toBe(true);
   });
 
   test("treats shell motion off as reduced motion", () => {

@@ -309,13 +309,15 @@ function compatibleHealth(dataDirectory: string, databasePath = `${dataDirectory
 
 function authoringCapabilities(command: string) {
   return {
-    bundleVersion: "workbench-authoring-v1",
+    bundleVersion: "workbench-authoring-v3",
     capability: "artifact_authoring",
     command,
     databaseId: "database:test",
-    evidencePolicy: "all_canonical_redacted_evidence",
-    operations: ["open", "status", "evidence", "submit", "finish"],
+    evidencePolicy: "selected_session_canonical_evidence",
+    maxSessionsPerRun: 12,
+    operations: ["suggestions", "open", "status", "evidence", "context", "submit", "finish"],
     protocol: "masthead.workbench.authoring/v1",
+    suggestionsAreBinding: false,
     transport: "daemon_http"
   };
 }

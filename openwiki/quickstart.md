@@ -19,7 +19,9 @@ Masthead is not primarily a chat client, live monitoring console, or task manage
 
 Ownership in one line each:
 
-- **Workbench** owns transcript import, cleanup, enrichment, compile handoffs, and **per-artifact** publication into Logbook (session package always; runbook / ADR / incident timeline when evidence supports them, else N/A).
+- **Workbench** owns transcript import, cleanup, selection-scoped agent enrichment, daemon-rebuilt
+  dossier publication, and optional-artifact authoring. **Copy Agent Prompt** copies a disposable
+  request for selected sessions; the agent may choose zero or more optional artifacts.
 - **Logbook** is an **artifact book**: capsule list + body inspector + provenance. No bulk enrich, checkboxes, or session-library chrome.
 - **Sources** owns discovering local harnesses and enabling live connectors — not import jobs or per-session Workbench work. Contract: [sources.md](sources.md) → `docs/reference/sources-v2.md`.
 - **Now** is shallow live presence only.
@@ -29,7 +31,7 @@ Vocabulary and cutover: `CONTEXT.md`, [ADR 0011](../docs/adr/0011-artifact-first
 ## Major domains
 
 - [Architecture](architecture.md) — how `src/app`, `src/daemon`, `src/core`, `src/enrichment`, `src/mcp`, and `src/electron` fit together.
-- [Logbook and Workbench](logbook-and-workbench.md) — artifact Logbook UI/API, package publish, multi-kind resolution.
+- [Logbook and Workbench](logbook-and-workbench.md) — artifact Logbook UI/API, enriched canonical dossiers, and agent-led optional artifacts.
 - [Sources V2](sources.md) — discover harnesses, enable live connectors, activation, first-run connect.
 - [Data and integrations](data-and-integrations.md) — canonical storage, data paths, MCP boundary, enrichment.
 
@@ -50,12 +52,15 @@ These are the main existing docs this wiki synthesizes:
 - `design.md` — master design source (Logbook section refined by ADR 0011).
 - `prd.md` — product scope; **read with ADR 0011 supersession note** for Logbook unit of search.
 - `docs/adr/0011-artifact-first-logbook.md` — Logbook is an artifact book.
+- `docs/adr/0013-canonical-dossier-and-candidate-authoring.md` — preserved original-rendering and evidence findings; its V2 authoring flow is superseded.
+- `docs/adr/0014-agent-led-enriched-artifact-authoring.md` — current selection-scoped V3 authoring contract.
 - `docs/adr/0009-logbook-only-shows-published-sessions.md` — Workbench pipeline ownership (Logbook unit refined by 0011).
 - `docs/architecture/data-paths.md` — runtime data directory and store ownership.
 - `docs/reference/daemon-api.md` — daemon HTTP API.
 - `docs/reference/mcp-tools.md` — MCP tools (prefer `search_artifacts` / `get_artifact`).
 - `docs/reference/sources-v2.md` — Sources V2 live-connect contract (current).
 - `docs/reference/artifact-first-logbook-cutover.md` — wipe/rebuild published artifact state.
+- `docs/reference/production-cold-activation.md` — explicit offline-only boundary for pre-manifest legacy production installs.
 - `docs/superpowers/plans/` — **implementation history only**, not current visual/product SoT.
 
 ## Run and verify
@@ -74,7 +79,8 @@ Useful scripts from `package.json`:
 
 `npm run install:electron-dev-launcher` **must be run from the checkout you intend to run**. The desktop entry and systemd unit hardwire that path. After switching branches/worktrees/main, reinstall the launcher or Masthead Dev will keep serving a stale tree.
 
-Dogfood Logbook may be **empty after artifact cutover** until Workbench republishes packages — that is expected, not a broken connection.
+Dogfood Logbook may be **empty after artifact cutover** until Workbench completes V3 enrichment and
+publication — that is expected, not a broken connection.
 
 ## Where to go next
 
@@ -91,4 +97,6 @@ Dogfood Logbook may be **empty after artifact cutover** until Workbench republis
 - Do not read or document `.env` files or secrets.
 - Keep the `src/core`/`src/daemon` boundary clear: core is transformation logic; daemon owns runtime state and persistence.
 - Logbook has **no** bulk enrich UI; bulk/session-library chrome is deleted. Workbench owns compile and publish.
+- An enriched dossier means the original canonical dossier structure rendered after current durable enrichment; agents never author its body.
+- `workbench-authoring-v3` uses selected sessions. Artifact suggestions are nonbinding, optional authoring may produce zero or more artifacts, and finish publishes atomically.
 - For new source or setup behavior, check both `src/daemon/sources/` and renderer Sources controllers; onboarding spans both layers.

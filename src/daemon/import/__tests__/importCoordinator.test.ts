@@ -250,11 +250,30 @@ describe("import coordinator", () => {
     db.close();
   });
 
-  test("marks a job failed when every processed record failed", async () => {
+  test("preserves receipt-detected issues when record processing itself was clean", async () => {
     const db = await openTestDatabase();
     seedSource(db);
 
     const job = queueImportJob(db, { importKind: "transcript", sourceId: "opencode-sessions", now: fixedNow }, async () => ({
+      discoveredCount: 20,
+      failureCount: 0,
+      completionStatus: "succeeded_with_issues",
+      importedCount: 20,
+      processedCount: 20,
+      queuedCount: 0
+    }));
+
+    await waitForJobStatus(db, job.importJobId, "succeeded_with_issues");
+    expect(getImportJob(db, job.importJobId)?.status).toBe("succeeded_with_issues");
+    db.close();
+  });
+
+  test("keeps a job failed when every record failed even if completion also detected issues", async () => {
+    const db = await openTestDatabase();
+    seedSource(db);
+
+    const job = queueImportJob(db, { importKind: "transcript", sourceId: "opencode-sessions", now: fixedNow }, async () => ({
+      completionStatus: "succeeded_with_issues",
       discoveredCount: 3,
       failureCount: 3,
       importedCount: 0,

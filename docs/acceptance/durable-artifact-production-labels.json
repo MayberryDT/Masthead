@@ -1,0 +1,871 @@
+{
+  "receiptVersion": 1,
+  "sourceDatabaseId": "a203fcdd-e720-4230-8146-967df054a2c4",
+  "sampleReceiptSha256": "574e6edc2a03d0966f4de2f100acc5dc3bb19506b06c0d469596e51c782b933d",
+  "createdBeforeDiscovery": true,
+  "sample": {
+    "S1": "session:c6fe4163237638c31c7281de8c751d8c",
+    "S2": "session:75070ddba5f638e51f93ebf69f38c70b",
+    "S3": "session:e9dfe470a25feca41360192db0ca39f2",
+    "S4": "session:24049722ea8903c18ad66d4d64f7504f",
+    "S5": "session:8a2437e1e402c203fa941b815f44db64",
+    "O1": "session:04065938f10a644f4ed91bb9224bb613",
+    "O2": "session:353310a00116949c8beb79747f379c0e",
+    "O3": "session:d112ad5a0d600e7127cad67d9d04e501",
+    "O4": "session:b5ba406a4a442465ebf67b1f37449ccb",
+    "O5": "session:91bc4e6dc57de8583a4d129c7026ac26",
+    "T1": "session:45aa864c1f7ea43aa933c51a9b44410f",
+    "T2": "session:46e33cad9a5397933cccfce31addb850",
+    "T3": "session:a8802265cd0ea83ac48fb2fb6c727fb5",
+    "T4": "session:540476847ffcc4e6d22460471bf0c696",
+    "T5": "session:5662177018e13506528c4794c33fb027",
+    "F1": "session:8d3ada7fa7adbbec1f9383ef2b12e832",
+    "F2": "session:3be28d785e021fc1235362519f616603",
+    "F3": "session:7a0f90fb2ae887ee7e28fd9c7eddc301",
+    "F4": "session:00a3355a298a08635b90ffcd7ded3a74",
+    "F5": "session:b2d4e11e83ed11ac375b370bfeb5d9a9",
+    "D1": "session:5f1db8586f2425e57fef8212e46d9d2d",
+    "D2": "session:56128985d68f2e5bcce3ab07af7f2a7f",
+    "D3": "session:8504d543a399cc79929c8f1def3ded68",
+    "D4": "session:631440164376bc8384b1637e80373b60",
+    "D5": "session:241bb3d2390e71919f7917fb17e6dab0"
+  },
+  "rows": [
+    {
+      "sessionId": "session:c6fe4163237638c31c7281de8c751d8c",
+      "kind": "runbook",
+      "expectedCandidate": false,
+      "expectedSignatureKey": null,
+      "evidenceRefs": [],
+      "rationale": "The response proposes transient notification hints and passes only a syntax check; it explicitly leaves end-to-end notification behavior for a later user test, so no verified reusable procedure is established.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:c6fe4163237638c31c7281de8c751d8c",
+      "kind": "adr",
+      "expectedCandidate": false,
+      "expectedSignatureKey": null,
+      "evidenceRefs": [],
+      "rationale": "No durable architecture choice with evaluated alternatives and tradeoffs is settled; the response is a narrow, still-unverified patch attempt.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:c6fe4163237638c31c7281de8c751d8c",
+      "kind": "incident_timeline",
+      "expectedCandidate": false,
+      "expectedSignatureKey": null,
+      "evidenceRefs": [],
+      "rationale": "A sticky-notification symptom is described, but the two-message exchange does not contain a verified ordered investigation, impact assessment, remediation, and recovery sequence.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:75070ddba5f638e51f93ebf69f38c70b",
+      "kind": "runbook",
+      "expectedCandidate": false,
+      "expectedSignatureKey": null,
+      "evidenceRefs": [],
+      "rationale": "This is an options-oriented network-management answer; no option is executed or verified as a repeatable procedure on the affected machine.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:75070ddba5f638e51f93ebf69f38c70b",
+      "kind": "adr",
+      "expectedCandidate": false,
+      "expectedSignatureKey": null,
+      "evidenceRefs": [],
+      "rationale": "Several NetworkManager alternatives are listed, but the user does not select one and the session records no durable decision.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:75070ddba5f638e51f93ebf69f38c70b",
+      "kind": "incident_timeline",
+      "expectedCandidate": false,
+      "expectedSignatureKey": null,
+      "evidenceRefs": [],
+      "rationale": "The user reports captive-portal and suspend problems, but the session contains advice rather than an ordered response and confirmed remediation timeline.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:e9dfe470a25feca41360192db0ca39f2",
+      "kind": "runbook",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "runbook:jarvis-onepassword-runtime-token-repair",
+      "evidenceRefs": [
+        "message:message:437c72d2e42d956d7443639f0e4f07d306f492749395deae8819d3093c2c2730",
+        "message:message:2ef17129a6800c32e26e88c1173349ea0f67b2589c8be310a283fa87c7f84a0c"
+      ],
+      "rationale": "The canonical messages establish a reusable, verified procedure: identify the writable upstream secret, back it up, replace only the malformed token from a known-good source without disclosure, recreate the service, and verify 1Password access.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:e9dfe470a25feca41360192db0ca39f2",
+      "kind": "adr",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "adr:jarvis-canonical-runtime-secret-source",
+      "evidenceRefs": [
+        "message:message:437c72d2e42d956d7443639f0e4f07d306f492749395deae8819d3093c2c2730",
+        "message:message:2ef17129a6800c32e26e88c1173349ea0f67b2589c8be310a283fa87c7f84a0c"
+      ],
+      "rationale": "The session settles the durable source-of-truth boundary: repair the writable host source and treat container paths as read-only bind translations, rejecting in-place mounted-file edits and an unnecessary compose-path change.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:e9dfe470a25feca41360192db0ca39f2",
+      "kind": "incident_timeline",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "incident:jarvis-onepassword-malformed-service-account-token",
+      "evidenceRefs": [
+        "message:message:437c72d2e42d956d7443639f0e4f07d306f492749395deae8819d3093c2c2730",
+        "message:message:2ef17129a6800c32e26e88c1173349ea0f67b2589c8be310a283fa87c7f84a0c"
+      ],
+      "rationale": "The evidence records a real authentication outage, the exact decode failure, root-cause confirmation of a literal suffix, backup and source repair, container recreation, and successful post-fix vault verification in order.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:24049722ea8903c18ad66d4d64f7504f",
+      "kind": "runbook",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "runbook:openclaw-fitbit-daily-cron-repair-and-verification",
+      "evidenceRefs": [
+        "message:message:450256f95145257c350b6fe34a4173590845997a5ac0d4909ad20ab6fd99e54a",
+        "message:message:d78f9ea66cfcfd2bc4f9e509b6e2dba3380177b7c65057f968089bf6f18543d4"
+      ],
+      "rationale": "The handoff and completion report provide a repeatable sequence for repairing local device scope, correcting the Fitbit runner, creating the scheduled isolated job, and proving execution plus delivery with a manual run.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:24049722ea8903c18ad66d4d64f7504f",
+      "kind": "adr",
+      "expectedCandidate": false,
+      "expectedSignatureKey": null,
+      "evidenceRefs": [],
+      "rationale": "The session fixes an operational blockage and configures a job, but it does not preserve a durable alternatives-and-tradeoffs decision beyond that incident-specific repair.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:24049722ea8903c18ad66d4d64f7504f",
+      "kind": "incident_timeline",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "incident:openclaw-cli-device-scope-drift-blocked-cron-rpc",
+      "evidenceRefs": [
+        "message:message:450256f95145257c350b6fe34a4173590845997a5ac0d4909ad20ab6fd99e54a",
+        "message:message:d78f9ea66cfcfd2bc4f9e509b6e2dba3380177b7c65057f968089bf6f18543d4"
+      ],
+      "rationale": "A real `pairing required` failure blocked local cron and gateway RPC; the evidence orders diagnosis of scope drift, device re-approval, script repair, job creation, and a successfully delivered verification run.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:8a2437e1e402c203fa941b815f44db64",
+      "kind": "runbook",
+      "expectedCandidate": false,
+      "expectedSignatureKey": null,
+      "evidenceRefs": [],
+      "rationale": "This is a one-time architectural migration across Nova OS, not a stable recurring operational procedure with a bounded operator trigger and repeatable steps.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:8a2437e1e402c203fa941b815f44db64",
+      "kind": "adr",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "adr:nova-os-direct-live-workspace-over-git-mirror",
+      "evidenceRefs": [
+        "message:message:acfb4b1601825fe7bbace8755d58c643a246ca9709f81c75ee190d88590384ff",
+        "message:message:8f1fb32e4c98fb46806d9c14872f0ea2c25aaf38c7cd8d55c2c406a9dc30929d"
+      ],
+      "rationale": "The session explicitly rejects the live-workspace-to-Git-mirror deployment chain and adopts direct local filesystem or SSH-backed live workspace reads and writes, with the tradeoff and verification recorded.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:8a2437e1e402c203fa941b815f44db64",
+      "kind": "incident_timeline",
+      "expectedCandidate": false,
+      "expectedSignatureKey": null,
+      "evidenceRefs": [],
+      "rationale": "The mirror design is criticized for stale state and failure points, but no specific incident with an ordered detection-to-recovery history is documented.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:04065938f10a644f4ed91bb9224bb613",
+      "kind": "runbook",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "runbook:jarvis-hermes-gateway-restart-and-health-check",
+      "evidenceRefs": [
+        "message:message:51a9bdc2ac22b2b682db8133a6e339a6cc93fd10894553aa21ada160b11ce663",
+        "message:message:5abce70e9acbde6dafae139a07c332d95ea1ac47f0233f443102bf5536ed7928"
+      ],
+      "rationale": "The session captures the reusable host, container, restart command, process check, health check, and fast access path for restarting the Jarvis Hermes gateway, and reports successful verification.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:04065938f10a644f4ed91bb9224bb613",
+      "kind": "adr",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "adr:jarvis-hermes-smart-approvals",
+      "evidenceRefs": [
+        "message:message:63320a4433b6d89b776aca058a8184b426e4d1e4cca9c36a0c14c85bedc4faf8",
+        "message:message:8027cff6e374157926b6943bd33b3efc5b6189fae86559c49927ff5eef340ffb",
+        "message:message:5bf63d54876735b0212d947900b9f71a2d0db7399d381cb4d1adde8bab361d7a",
+        "message:message:2d3b14e2d61c9a0e262e2ad5b0ff0640145a9171a966e4743ef7215ee925f7fe"
+      ],
+      "rationale": "Manual, session-only YOLO, persistent off, and smart approval modes are compared with security tradeoffs; the user selects smart and the live config plus restart are verified.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:04065938f10a644f4ed91bb9224bb613",
+      "kind": "incident_timeline",
+      "expectedCandidate": false,
+      "expectedSignatureKey": null,
+      "evidenceRefs": [],
+      "rationale": "Approval friction motivates a configuration decision, but the mixed multi-topic conversation does not establish a single incident with material impact and a bounded ordered recovery timeline.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:353310a00116949c8beb79747f379c0e",
+      "kind": "runbook",
+      "expectedCandidate": false,
+      "expectedSignatureKey": null,
+      "evidenceRefs": [],
+      "rationale": "The agent admits that its source-file audit was a placeholder and never completes a verified inspection procedure.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:353310a00116949c8beb79747f379c0e",
+      "kind": "adr",
+      "expectedCandidate": false,
+      "expectedSignatureKey": null,
+      "evidenceRefs": [],
+      "rationale": "No durable decision is reached; the session ends by asking the user to narrow scope after an unperformed audit.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:353310a00116949c8beb79747f379c0e",
+      "kind": "incident_timeline",
+      "expectedCandidate": false,
+      "expectedSignatureKey": null,
+      "evidenceRefs": [],
+      "rationale": "The exchange exposes poor agent behavior, but it contains no ordered technical incident response or remediation sequence.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:d112ad5a0d600e7127cad67d9d04e501",
+      "kind": "runbook",
+      "expectedCandidate": false,
+      "expectedSignatureKey": null,
+      "evidenceRefs": [],
+      "rationale": "The session is creative-writing iteration and contains no operational procedure.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:d112ad5a0d600e7127cad67d9d04e501",
+      "kind": "adr",
+      "expectedCandidate": false,
+      "expectedSignatureKey": null,
+      "evidenceRefs": [],
+      "rationale": "A preference for a funnier story is not a durable architecture or product decision with reusable tradeoffs.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:d112ad5a0d600e7127cad67d9d04e501",
+      "kind": "incident_timeline",
+      "expectedCandidate": false,
+      "expectedSignatureKey": null,
+      "evidenceRefs": [],
+      "rationale": "No real-world failure, impact, response, or remediation occurs.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:b5ba406a4a442465ebf67b1f37449ccb",
+      "kind": "runbook",
+      "expectedCandidate": false,
+      "expectedSignatureKey": null,
+      "evidenceRefs": [],
+      "rationale": "The session creates a one-off interview workbook and aborts during visual redesign; it does not establish a reusable verified procedure.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:b5ba406a4a442465ebf67b1f37449ccb",
+      "kind": "adr",
+      "expectedCandidate": false,
+      "expectedSignatureKey": null,
+      "evidenceRefs": [],
+      "rationale": "Choosing a workbook format for one personal document is session-specific, and the later premium redesign is interrupted before a durable decision is completed.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:b5ba406a4a442465ebf67b1f37449ccb",
+      "kind": "incident_timeline",
+      "expectedCandidate": false,
+      "expectedSignatureKey": null,
+      "evidenceRefs": [],
+      "rationale": "No incident response history is present; the final turn is an intentional interruption of design work.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:91bc4e6dc57de8583a4d129c7026ac26",
+      "kind": "runbook",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "runbook:align-container-uid-gid-with-host-mounted-paths",
+      "evidenceRefs": [
+        "message:message:e3fa09960ed1fa1ca32031bdd2d6219c9fae4ed902b3795386269dfcde48e90e",
+        "message:message:d4d1a62f9bfae3956429bb10356e9fc87a31ea90cb24b68b05079beb5a149b50",
+        "message:message:8acfc855a89b13eccc6c5a9b7e6703da7f05fb08f2559f2fb1690b4022ec77fd"
+      ],
+      "rationale": "The evidence supports a repeatable procedure to diagnose mount traversal ownership, set the supported container UID/GID mapping, recreate the service, and verify effective identity plus read/write access on both mount paths.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:91bc4e6dc57de8583a4d129c7026ac26",
+      "kind": "adr",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "adr:jarvis-run-as-host-uid-gid-1000",
+      "evidenceRefs": [
+        "message:message:00a157be4e559d11c4f7313bfc842c8ec55390dc9d82e5150470f64530f2ef9f",
+        "message:message:d4d1a62f9bfae3956429bb10356e9fc87a31ea90cb24b68b05079beb5a149b50",
+        "message:message:8acfc855a89b13eccc6c5a9b7e6703da7f05fb08f2559f2fb1690b4022ec77fd"
+      ],
+      "rationale": "The session compares a narrow ACL, host-identity alignment, helper, and delegation constraints; the user deliberately chooses the broader but coherent UID/GID 1000 alignment and the outcome is verified.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:91bc4e6dc57de8583a4d129c7026ac26",
+      "kind": "incident_timeline",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "incident:jarvis-mission-control-permission-denied-uid-mismatch",
+      "evidenceRefs": [
+        "message:message:e3fa09960ed1fa1ca32031bdd2d6219c9fae4ed902b3795386269dfcde48e90e",
+        "message:message:4dd7e3ac83519b4ff7fd8fec5d0b2897289f73c97470135351423345f3d53732",
+        "message:message:8acfc855a89b13eccc6c5a9b7e6703da7f05fb08f2559f2fb1690b4022ec77fd"
+      ],
+      "rationale": "The user-facing Mission Control edit failure is traced through path mode and runtime identity, an initially incomplete sandbox diagnosis is corrected, UID/GID is remapped, and direct access is restored and verified.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:45aa864c1f7ea43aa933c51a9b44410f",
+      "kind": "runbook",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "runbook:masthead-production-electron-build-install-and-launch-verify",
+      "evidenceRefs": [
+        "message:message:669a4385182396f033d02415cead85c2b8ac6a72da5c8c90a05c5e28280dfb0a",
+        "message:message:188f3de69b687322878f417c38d21b21095cda69ed65479574fb9acc53c3d9b6"
+      ],
+      "rationale": "The delegation and completion receipt establish a reusable production procedure: build the Electron desktop bundle, rotate current/previous targets, preserve the dev entry, launch through the installed menu path, and verify process, health, packaged content, tests, and contracts.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:45aa864c1f7ea43aa933c51a9b44410f",
+      "kind": "adr",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "adr:masthead-shell-first-collector-autostart-and-source-onboarding",
+      "evidenceRefs": [
+        "message:message:155744bf2626f013a100f395ad973b86ae1894006afea762dbe57424f21ca451",
+        "message:message:f3024e3a81decb8afa231ce8458bfcc9e2f386fdb19e699bf438c74929c1ef11",
+        "message:message:97caebe722ee27372ccacb011e9eb4010842caa535fb341abd2c67f23cd95794",
+        "message:message:188f3de69b687322878f417c38d21b21095cda69ed65479574fb9acc53c3d9b6"
+      ],
+      "rationale": "The session settles durable product behavior after hands-on comparison: show the shell immediately while the collector starts, expose only detected sources, preserve onboarding on setup, then hand progress to Sources instead of retaining a final waiting phase.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:45aa864c1f7ea43aa933c51a9b44410f",
+      "kind": "incident_timeline",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "incident:masthead-production-collector-offline-and-onboarding-regressions",
+      "evidenceRefs": [
+        "message:message:f5f41d1ef1ec653f2a95ec7accc6929dd0f01a117a744fa62ee218c825e9751c",
+        "message:message:f3024e3a81decb8afa231ce8458bfcc9e2f386fdb19e699bf438c74929c1ef11",
+        "message:message:97caebe722ee27372ccacb011e9eb4010842caa535fb341abd2c67f23cd95794",
+        "message:message:188f3de69b687322878f417c38d21b21095cda69ed65479574fb9acc53c3d9b6"
+      ],
+      "rationale": "The installed production app opened without its collector, then exposed onboarding and source-state regressions; the session records successive diagnosis, behavioral corrections, rebuilds, installation, health checks, packaged-content checks, and final merge verification.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:46e33cad9a5397933cccfce31addb850",
+      "kind": "runbook",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "runbook:cloudflare-web-analytics-beacon-csp-deploy-verification",
+      "evidenceRefs": [
+        "message:message:7d8103018e712db8d735091f251f939d55edcb025fd16db5dda32a1b9cb4b0ce",
+        "message:message:769fa1a6df5a291882ba8bbd7d0c618662b086452a353e901f9101b14cde3304"
+      ],
+      "rationale": "The evidence records the reusable deployment checks for Cloudflare Web Analytics: install the beacon, permit its script host in CSP, deploy, inspect production HTML and headers without leaking the token, verify coverage in Halla Operator, and clean generated artifacts.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:46e33cad9a5397933cccfce31addb850",
+      "kind": "adr",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "adr:halla-operator-centralized-site-analytics-with-cloudflare",
+      "evidenceRefs": [
+        "message:message:7d9f4e3e36e90dca85fbfbf456e879b5d1a76431bbd678db3c7c9ae7ad1a786e",
+        "message:message:7d8103018e712db8d735091f251f939d55edcb025fd16db5dda32a1b9cb4b0ce",
+        "message:message:769fa1a6df5a291882ba8bbd7d0c618662b086452a353e901f9101b14cde3304"
+      ],
+      "rationale": "The user explicitly compares Cloudflare analytics with the existing Umami approach, chooses Cloudflare coverage and Pip measurement, and the session completes the centralized Halla Operator representation plus production integration.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:46e33cad9a5397933cccfce31addb850",
+      "kind": "incident_timeline",
+      "expectedCandidate": false,
+      "expectedSignatureKey": null,
+      "evidenceRefs": [],
+      "rationale": "This is a feature and analytics rollout with an initially incomplete implementation, not a bounded service incident with a distinct impact and recovery timeline.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:a8802265cd0ea83ac48fb2fb6c727fb5",
+      "kind": "runbook",
+      "expectedCandidate": false,
+      "expectedSignatureKey": null,
+      "evidenceRefs": [],
+      "rationale": "The session produces an optimized recovery plan and delegates implementation, but it does not execute and verify the recovery procedure itself.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:a8802265cd0ea83ac48fb2fb6c727fb5",
+      "kind": "adr",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "adr:executioner-production-recovery-diagnostic-gates-before-deploy",
+      "evidenceRefs": [
+        "message:message:4fc19a620ba5558f235f82a44de008eb63982b86018fe26ccd41f40be1089662",
+        "message:message:df3656d3f413cfa52be4aa797a9d0d1c34f054cafa4ac58a686cbe775e57558e"
+      ],
+      "rationale": "The optimized plan deliberately replaces a linear live-fix path with diagnostic gates that distinguish deploy, config, and request drift; it also requires rollback capture, preserves internal JWT validation, and separates blockers from warning cleanup.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:a8802265cd0ea83ac48fb2fb6c727fb5",
+      "kind": "incident_timeline",
+      "expectedCandidate": false,
+      "expectedSignatureKey": null,
+      "evidenceRefs": [],
+      "rationale": "The audit identifies an inactive backend and provider error, but this session stops at planning and handoff without an ordered remediation and confirmed recovery.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:540476847ffcc4e6d22460471bf0c696",
+      "kind": "runbook",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "runbook:openwhispr-patched-autopaste-xdotool-recovery",
+      "evidenceRefs": [
+        "message:message:1323ce4be4043fe9b75c3c9ea71d16eb2551cf0a1c8677f6ea329b945067a39e",
+        "message:message:ba32aeb4d89cae1b63f5b527655816ba266dfc5c2e5a995c00423ff5c436f464",
+        "message:message:c471d6f97fe90c36b839a6c2153df7a68f9dbbbc6a3000bf3482e9fb54891778"
+      ],
+      "rationale": "The session establishes a repeatable recovery: create a user-owned patched OpenWhispr copy, disable the crashing bundled fast-paste helper, force the xdotool fallback, repoint startup/menu, restore auto-paste, and verify services, settings, process paths, and crash logs headlessly.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:540476847ffcc4e6d22460471bf0c696",
+      "kind": "adr",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "adr:openwhispr-xdotool-fallback-over-clipboard-only",
+      "evidenceRefs": [
+        "message:message:ba32aeb4d89cae1b63f5b527655816ba266dfc5c2e5a995c00423ff5c436f464",
+        "message:message:4d1257196a9b3a585af49d8eaadbe6359c9bb154d172f5bcea92ee64ce51ccb9",
+        "message:message:c471d6f97fe90c36b839a6c2153df7a68f9dbbbc6a3000bf3482e9fb54891778"
+      ],
+      "rationale": "Clipboard-only manual paste is explicitly rejected; the durable choice is automatic insertion through the app's xdotool fallback, isolated in a patched user-owned install and verified without intrusive UI tests.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:540476847ffcc4e6d22460471bf0c696",
+      "kind": "incident_timeline",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "incident:openwhispr-fast-paste-crash-and-system-instability",
+      "evidenceRefs": [
+        "message:message:1323ce4be4043fe9b75c3c9ea71d16eb2551cf0a1c8677f6ea329b945067a39e",
+        "message:message:4d1257196a9b3a585af49d8eaadbe6359c9bb154d172f5bcea92ee64ce51ccb9",
+        "message:message:c471d6f97fe90c36b839a6c2153df7a68f9dbbbc6a3000bf3482e9fb54891778"
+      ],
+      "rationale": "A dictation attempt crashes OpenWhispr, the browser, and the desktop session with data loss; the evidence records rejected workarounds, isolation of the fast-paste path, patched fallback deployment, and clean post-launch process and crash checks.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:5662177018e13506528c4794c33fb027",
+      "kind": "runbook",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "runbook:jarvis-delegation-deploy-governor-watchdog-operations",
+      "evidenceRefs": [
+        "message:message:f8081588b30ffe805de899ea4043653983420be3c2551cb865f0b041c28a96f5",
+        "message:message:29315c89fe0ba0d94eb6bf0181ca00f4e6c037a42dcc30c5bc4b561eb0983b8e"
+      ],
+      "rationale": "The final verified system supplies reusable operations for governed builder deploys, status and health checks, stale delegated-job detection, notification reconciliation, cron cadence, end-user soak checks, and backup locations.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:5662177018e13506528c4794c33fb027",
+      "kind": "adr",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "adr:jarvis-governed-auto-deploy-with-oauth-preserved",
+      "evidenceRefs": [
+        "message:message:f8081588b30ffe805de899ea4043653983420be3c2551cb865f0b041c28a96f5",
+        "message:message:9ab380a5d35eda7fed9c456be809be0b638bfeb374a81c33ad981b23d7866180",
+        "message:message:29315c89fe0ba0d94eb6bf0181ca00f4e6c037a42dcc30c5bc4b561eb0983b8e"
+      ],
+      "rationale": "The session resolves competing needs for automatic live deployment, concurrent builder safety, clean repositories, notifications, and preserved Jarvis OAuth by adopting a single deploy governor with guarded deploy-only checkout and watchdog reconciliation.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:5662177018e13506528c4794c33fb027",
+      "kind": "incident_timeline",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "incident:jarvis-delegation-stalls-notification-and-deploy-failures",
+      "evidenceRefs": [
+        "message:message:7c379b6c360a65bf08385de3a1a1283f38b3e84fafac394a9c33d0a150f482ac",
+        "message:message:85b2d9887989737265bccd0dd4ef90aa3419bab604bd1754d566a6acd574c3f8",
+        "message:message:4bc93948b10a574d1b35a1481ec6ee7902ebfcf43b1b42be7fde6e54a0c9f25b",
+        "message:message:29315c89fe0ba0d94eb6bf0181ca00f4e6c037a42dcc30c5bc4b561eb0983b8e"
+      ],
+      "rationale": "The client meeting and live tests establish recurring stalled delegates, missing updates, dirty work, stuck notifications, and deploy-confirmation impact; the session orders hardening, soak tests, fixes, watchdog installation, reconciliation, and a final green health result.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:8d3ada7fa7adbbec1f9383ef2b12e832",
+      "kind": "runbook",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "runbook:fixed-demo-browser-verifier-contract-stabilization",
+      "evidenceRefs": [
+        "message:message:2b54d056db64c72493b3c5d3573e335c8a53818c45931557f4896df2ae5fbf2b",
+        "message:message:0b537ed4092668ba2c876912e848965931c86eb9c192815b0a57989ce6222a6f"
+      ],
+      "rationale": "The session records a reusable verifier-maintenance process: classify stale expectations versus runtime defects, preserve gameplay, use existing smoke fixtures only where the live fixed demo lacks the old state, align the dependent chain, and run the required browser, random-AI, syntax, and type checks.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:8d3ada7fa7adbbec1f9383ef2b12e832",
+      "kind": "adr",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "adr:fix-stale-verifiers-not-gameplay-runtime",
+      "evidenceRefs": [
+        "message:message:2b54d056db64c72493b3c5d3573e335c8a53818c45931557f4896df2ae5fbf2b",
+        "message:message:e53a349a293d897770968c051a714ad0bbbef06acdaab0a45fa0cd9f33dc14f0",
+        "message:message:0b537ed4092668ba2c876912e848965931c86eb9c192815b0a57989ce6222a6f"
+      ],
+      "rationale": "The durable decision is to update stale verifier contracts and use existing fixture hooks after proving the current fixed-demo runtime is intentional, rather than altering gameplay balance or runtime behavior to satisfy obsolete assertions.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:8d3ada7fa7adbbec1f9383ef2b12e832",
+      "kind": "incident_timeline",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "incident:fixed-demo-browser-verifier-chain-failures",
+      "evidenceRefs": [
+        "message:message:2b54d056db64c72493b3c5d3573e335c8a53818c45931557f4896df2ae5fbf2b",
+        "message:message:e53a349a293d897770968c051a714ad0bbbef06acdaab0a45fa0cd9f33dc14f0",
+        "message:message:0b537ed4092668ba2c876912e848965931c86eb9c192815b0a57989ce6222a6f"
+      ],
+      "rationale": "A required browser-demo verifier fails against an already-advanced economy state; the session traces successive stale assumptions through harvest, training, visibility, and victory legs, applies verifier-side remediation, and ends with the full chain and typecheck passing.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:3be28d785e021fc1235362519f616603",
+      "kind": "runbook",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "runbook:masthead-blocked-status-classification-diagnosis-and-verification",
+      "evidenceRefs": [
+        "message:message:a569f87ba534e1f5a6b42189f3bbee34106fdea780d7b4b4feaf2bdc6445bea3",
+        "message:message:2859fae56369374d3e5bbdf6a29d0e6ff65147df6660aa41a22aec19f174f52e",
+        "message:message:cf8fe3e68d9aaf21759296c6b72c41ca4b37b94faf2d586ddd69573415152cb8"
+      ],
+      "rationale": "The evidence supports a reusable diagnostic flow for a status-color invariant: separate lifecycle classification from tone mapping, inspect shared predicates and conflict freshness, fix the common source, enforce focused tests, and perform rendered browser verification.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:3be28d785e021fc1235362519f616603",
+      "kind": "adr",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "adr:masthead-blocked-means-intervention-required",
+      "evidenceRefs": [
+        "message:message:2859fae56369374d3e5bbdf6a29d0e6ff65147df6660aa41a22aec19f174f52e",
+        "message:message:cf8fe3e68d9aaf21759296c6b72c41ca4b37b94faf2d586ddd69573415152cb8"
+      ],
+      "rationale": "The session establishes the durable status contract that red/blocked means intervention is required; conflict, failure, risk, and stale verification remain attention signals but do not become blocked unless waiting for user or approval.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:3be28d785e021fc1235362519f616603",
+      "kind": "incident_timeline",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "incident:masthead-false-red-blocked-session-cards",
+      "evidenceRefs": [
+        "message:message:a569f87ba534e1f5a6b42189f3bbee34106fdea780d7b4b4feaf2bdc6445bea3",
+        "message:message:2859fae56369374d3e5bbdf6a29d0e6ff65147df6660aa41a22aec19f174f52e",
+        "message:message:cf8fe3e68d9aaf21759296c6b72c41ca4b37b94faf2d586ddd69573415152cb8"
+      ],
+      "rationale": "The Board first shows active sessions as red, then completed work as falsely blocked; the session traces UI predicate and stale/same-worktree conflict causes, applies shared classification and conflict fixes, catches an inspector regression in review, and verifies tests plus the rendered Board.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:7a0f90fb2ae887ee7e28fd9c7eddc301",
+      "kind": "runbook",
+      "expectedCandidate": false,
+      "expectedSignatureKey": null,
+      "evidenceRefs": [],
+      "rationale": "Several recovery attempts and UI checks occur, but the session is aborted before a stable, end-to-end verified procedure is established.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:7a0f90fb2ae887ee7e28fd9c7eddc301",
+      "kind": "adr",
+      "expectedCandidate": false,
+      "expectedSignatureKey": null,
+      "evidenceRefs": [],
+      "rationale": "The work consists of iterative recovery attempts and cache-busting, not a settled durable decision with alternatives and tradeoffs.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:7a0f90fb2ae887ee7e28fd9c7eddc301",
+      "kind": "incident_timeline",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "incident:codex-desktop-sidebar-layout-and-stylesheet-cache-regression",
+      "evidenceRefs": [
+        "message:message:8bbdbb72fa241557267997422bad4c10a68d7e3b9855c104e8976f9ad2f0c7a2",
+        "message:message:9d27d8bf34d6ffef0d6ddc0f9fa55f544eca926935210add3d357a877537a6e9",
+        "message:message:22f5798541db671b2bd22d3f86e3a6e1aa59fa6c847e8a91def0de1a0df093e6",
+        "message:message:09f9bd66b8f1332f8150671265281121f3f39cb7c818ffee0dac888bc468fe50"
+      ],
+      "rationale": "The app is repeatedly reported unreadable and unusable; ordered investigation isolates fixed-height sidebar overflow, broadens the CSS override, finds a cached stylesheet on normal launch, and applies cache-busting before the user aborts, yielding a useful incomplete incident history.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:00a3355a298a08635b90ffcd7ded3a74",
+      "kind": "runbook",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "runbook:enable-global-codex-no-approval-full-access-mode",
+      "evidenceRefs": [
+        "message:message:978aa9d3e38520320cba731cfabea76792dcbaa4cc3abcb1df5e0c13041fedca",
+        "message:message:cf81aa8f43beb8235c05e933873c5411319ed8f7bb001a5cb096e16f95cacd04",
+        "message:message:1b62ff99fd95c2d14c0670997b12d394f1be3f11e510746f572494d89d226d20"
+      ],
+      "rationale": "The session records exact persistent configuration changes for no approvals and full filesystem access, updates the desktop mode, verifies the effective startup context, and states the restart requirement for existing sessions; the resulting runbook must retain the severe safety warning.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:00a3355a298a08635b90ffcd7ded3a74",
+      "kind": "adr",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "adr:codex-global-no-approval-danger-full-access-default",
+      "evidenceRefs": [
+        "message:message:978aa9d3e38520320cba731cfabea76792dcbaa4cc3abcb1df5e0c13041fedca",
+        "message:message:cf81aa8f43beb8235c05e933873c5411319ed8f7bb001a5cb096e16f95cacd04",
+        "message:message:1b62ff99fd95c2d14c0670997b12d394f1be3f11e510746f572494d89d226d20"
+      ],
+      "rationale": "The user explicitly rejects per-session and guarded alternatives and chooses a permanent global no-approval, danger-full-access default so unattended work will not pause; the high-risk tradeoff and effective configuration are explicit.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:00a3355a298a08635b90ffcd7ded3a74",
+      "kind": "incident_timeline",
+      "expectedCandidate": false,
+      "expectedSignatureKey": null,
+      "evidenceRefs": [],
+      "rationale": "The session contains product direction changes and a dangerous global configuration choice, but no single ordered incident response with a confirmed recovery boundary.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:b2d4e11e83ed11ac375b370bfeb5d9a9",
+      "kind": "runbook",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "runbook:masthead-website-cloudflare-custom-domain-deploy",
+      "evidenceRefs": [
+        "message:message:cdaed9323bd4a939dfd9229cec4caef5e481dc694d64640fa9ece304e9952b56",
+        "message:message:27f17ebae3e4986ca57dbca2219fe19539e79e2d13a38a1a517545088271f7bc",
+        "message:message:303bc79b9ad56a2d9bea56a07dddfd3b62cb338cd44f18390053ccd21cb002f4"
+      ],
+      "rationale": "The session establishes a verified deployment procedure for the Masthead site: run identity/type/build checks, deploy the Worker, source-control custom domains, bind apex and www to the correct worker, push the intended commit, and verify the public page in a browser.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:b2d4e11e83ed11ac375b370bfeb5d9a9",
+      "kind": "adr",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "adr:serve-masthead-coming-soon-on-production-worker",
+      "evidenceRefs": [
+        "message:message:cdaed9323bd4a939dfd9229cec4caef5e481dc694d64640fa9ece304e9952b56",
+        "message:message:27f17ebae3e4986ca57dbca2219fe19539e79e2d13a38a1a517545088271f7bc",
+        "message:message:303bc79b9ad56a2d9bea56a07dddfd3b62cb338cd44f18390053ccd21cb002f4"
+      ],
+      "rationale": "The durable choice is to replace the broken unreleased production site with a minimal coming-soon page on the `masthead-website` Worker and its custom domains; the session distinguishes that from workers.dev, the old preview worker, and not-yet-configured GitHub Builds.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:b2d4e11e83ed11ac375b370bfeb5d9a9",
+      "kind": "incident_timeline",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "incident:usemasthead-production-served-old-broken-site",
+      "evidenceRefs": [
+        "message:message:cdaed9323bd4a939dfd9229cec4caef5e481dc694d64640fa9ece304e9952b56",
+        "message:message:27f17ebae3e4986ca57dbca2219fe19539e79e2d13a38a1a517545088271f7bc",
+        "message:message:ea9502ccf2aa78af598ef447792ca59823752b6e65e8daa9743a2af50179a8bc",
+        "message:message:303bc79b9ad56a2d9bea56a07dddfd3b62cb338cd44f18390053ccd21cb002f4"
+      ],
+      "rationale": "The production domain is reported blank or stale; an initial workers.dev deployment does not fix the public site, the domain binding is diagnosed, apex and www are moved to the correct Worker, and the live coming-soon page is verified.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:5f1db8586f2425e57fef8212e46d9d2d",
+      "kind": "runbook",
+      "expectedCandidate": false,
+      "expectedSignatureKey": null,
+      "evidenceRefs": [],
+      "rationale": "This is product-direction research and records no recurring operational procedure with executed verification steps.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:5f1db8586f2425e57fef8212e46d9d2d",
+      "kind": "adr",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "adr:masthead-workbench-first-screen-raw-missing-enrichment-sessions",
+      "evidenceRefs": [
+        "message:message:7978d74afbfc51cc804025f356223b170db3b68ac06b36b515f4a96f96ea4f21",
+        "message:message:2f4a117934fa7502369901c85b53ca0281dc5be387ab59bb0b33425d4ba95525",
+        "message:message:64b25f95082b6cde0a8c157cf18f713fd1f807876d790d92b0f0209984866628"
+      ],
+      "rationale": "The decision trail rejects ranking, recommendation buckets, task-board framing, evidence-first detail, and artifact prediction for unenriched data; it settles a simple raw missing-enrichment session list with minimal row facts and handoff action.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:5f1db8586f2425e57fef8212e46d9d2d",
+      "kind": "incident_timeline",
+      "expectedCandidate": false,
+      "expectedSignatureKey": null,
+      "evidenceRefs": [],
+      "rationale": "No operational incident or recovery sequence occurs; the session is a sequence of product research memos.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:56128985d68f2e5bcce3ab07af7f2a7f",
+      "kind": "runbook",
+      "expectedCandidate": false,
+      "expectedSignatureKey": null,
+      "evidenceRefs": [],
+      "rationale": "The session resolves and records a system contract, but does not present a recurring operator procedure with a trigger and verified steps.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:56128985d68f2e5bcce3ab07af7f2a7f",
+      "kind": "adr",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "adr:sextant-grounded-agent-and-generated-view-contract",
+      "evidenceRefs": [
+        "message:message:e2446a3013f1abc6fcd371f692f062531387c446400005707fc40c3dfec8cf65",
+        "message:message:c54c15df23a4a70a606a2cd6d2a1e221c424687ad8282848ab574c739eab87eb",
+        "message:message:6ab584856246f7a8827a4d4e8858428c266e45e087c173d4ce2789008dae7893",
+        "message:message:8f9331051a4de609ba019363bdcbad849d6afb0564bae76627c7ae1c5c665954"
+      ],
+      "rationale": "The session systematically settles authority, grounding, truth validation, operation envelopes, presentation fallbacks, provenance, replay, prior-result exclusion, safe text, and schema evolution; the user confirms the complete contract and it is published and verified across project surfaces.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:56128985d68f2e5bcce3ab07af7f2a7f",
+      "kind": "incident_timeline",
+      "expectedCandidate": false,
+      "expectedSignatureKey": null,
+      "evidenceRefs": [],
+      "rationale": "This is a design-contract closeout, not a failure-impact-remediation event.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:8504d543a399cc79929c8f1def3ded68",
+      "kind": "runbook",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "runbook:generate-ten-comparable-ui-direction-html-prototypes",
+      "evidenceRefs": [
+        "message:message:4d1124f4930f64ceb548bae62bdcc47312b2851e48777d6660b58e4b7de34bd0",
+        "message:message:256e82abd0af5029a08ce0231d76e9a3555b11e8673baff8c90ad3c3f05407bf"
+      ],
+      "rationale": "The finalized skill workflow is a repeatable, validated procedure: preserve the strict creative brief, implement ten comparable standalone HTML directions with common data, keep durable prototypes in the workspace, visually verify them, and return a clickable result.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:8504d543a399cc79929c8f1def3ded68",
+      "kind": "adr",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "adr:ui-design-direction-ten-prototype-output-contract",
+      "evidenceRefs": [
+        "message:message:5c1281674537ff1e35560e9c73c6d183335b2049cf4309868bf761f2046f69d6",
+        "message:message:a98090aa9478e49ea0a49921f889f0c99c3f48401c083887f9b7dedf663ce5d9",
+        "message:message:4d1124f4930f64ceb548bae62bdcc47312b2851e48777d6660b58e4b7de34bd0",
+        "message:message:256e82abd0af5029a08ce0231d76e9a3555b11e8673baff8c90ad3c3f05407bf"
+      ],
+      "rationale": "The session resolves output count, fair-comparison data, standalone technology, browser verification, result linking, workspace placement, and exact preservation of the original visual brief, explicitly replacing the old three-theme text-only flow.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:8504d543a399cc79929c8f1def3ded68",
+      "kind": "incident_timeline",
+      "expectedCandidate": false,
+      "expectedSignatureKey": null,
+      "evidenceRefs": [],
+      "rationale": "The skill draft is iteratively improved, but there is no real incident with operational impact and recovery.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:631440164376bc8384b1637e80373b60",
+      "kind": "runbook",
+      "expectedCandidate": false,
+      "expectedSignatureKey": null,
+      "evidenceRefs": [],
+      "rationale": "The conversation develops product and architecture direction but does not execute a recurring verified operational procedure.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:631440164376bc8384b1637e80373b60",
+      "kind": "adr",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "adr:decree-of-war-fresh-app-command-staff-control-contract",
+      "evidenceRefs": [
+        "message:message:a248272cc150f9948d9544274561df6e3d69c7d2c99827bc0f193fa2e038adda",
+        "message:message:c864d2ae656916934cda06e863d78b2708dc68daf64a27784bcef8f8e201b404",
+        "message:message:921f6ef61cefe7d8fd717c73b52a23a37bf8bbef6ea2bfe0d789895e28a14c92"
+      ],
+      "rationale": "The session preserves the natural-language-only command-staff control model while explicitly rejecting the old Stratagus web spike as an implementation base; the settled direction is a fresh app that may mine old build lessons without polishing the deprecated spike forward.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:631440164376bc8384b1637e80373b60",
+      "kind": "incident_timeline",
+      "expectedCandidate": false,
+      "expectedSignatureKey": null,
+      "evidenceRefs": [],
+      "rationale": "The rejected prototype informs an architecture choice, but the session does not document a bounded incident response and recovery timeline.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:241bb3d2390e71919f7917fb17e6dab0",
+      "kind": "runbook",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "runbook:open-daily-static-html-report-in-default-browser",
+      "evidenceRefs": [
+        "message:message:7cc1d8a3ebe89d3f3dacd74b028edef1a587d4e00936091aceaa5df056c214fe",
+        "message:message:d17e5e659b680bdc218586513a3cc9c51a6c6d887f62012dad92266642a179d1"
+      ],
+      "rationale": "The final setup provides a reusable verified procedure for a scheduled report: render `reports/latest.html`, invoke the opener script, use the desktop's default browser, retain the file path as fallback, and verify that no report server remains.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:241bb3d2390e71919f7917fb17e6dab0",
+      "kind": "adr",
+      "expectedCandidate": true,
+      "expectedSignatureKey": "adr:direct-default-browser-open-over-local-report-server",
+      "evidenceRefs": [
+        "message:message:e447db640e4f16248007d0b89c78e0221ed16cf5b5472139c0fc6e4f81096232",
+        "message:message:7cc1d8a3ebe89d3f3dacd74b028edef1a587d4e00936091aceaa5df056c214fe",
+        "message:message:d17e5e659b680bdc218586513a3cc9c51a6c6d887f62012dad92266642a179d1"
+      ],
+      "rationale": "The session evaluates a file link, a local HTTP server, and a direct desktop opener; because the server can disappear before use and Codex file links open poorly, it settles on opening the static report directly in the configured default browser with no server.",
+      "reviewer": "codex-subagent:label_review"
+    },
+    {
+      "sessionId": "session:241bb3d2390e71919f7917fb17e6dab0",
+      "kind": "incident_timeline",
+      "expectedCandidate": false,
+      "expectedSignatureKey": null,
+      "evidenceRefs": [],
+      "rationale": "This is an iterative delivery-experience decision for a daily report, not an operational incident with a material outage and recovery boundary.",
+      "reviewer": "codex-subagent:label_review"
+    }
+  ]
+}

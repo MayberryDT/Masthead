@@ -2,6 +2,7 @@
 import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { runWorkbenchCli } from "./workbench.ts";
+import { importRepairHelp, runImportRepairCli } from "./importRepair.ts";
 import { errorResult, textResult, type CliResult } from "./output.ts";
 
 export type MastheadCliOptions = {
@@ -12,6 +13,7 @@ export async function runMastheadCli(args: string[], options: MastheadCliOptions
   const command = args[0];
   if (!command || command === "--help" || command === "help") return textResult(topLevelHelp());
   if (command === "workbench") return runWorkbenchCli(args.slice(1), options);
+  if (command === "import") return runImportRepairCli(args.slice(1), options);
   return errorResult("unknown_command", `Unknown command: ${command}`, args.includes("--json"));
 }
 
@@ -21,10 +23,12 @@ function topLevelHelp(): string {
     "",
     "Commands:",
     "  mastheadctl workbench    Agent-authored local enrichment and artifacts",
+    "  mastheadctl import repair Preview or apply provenance-scoped import repair",
     "",
     "Try:",
     "  mastheadctl workbench capabilities --json",
-    "  mastheadctl workbench open --database-id <id> --session <id> --json"
+    "  mastheadctl workbench open --database-id <id> --session <id> --json",
+    `  ${importRepairHelp().trim()}`
   ].join("\n") + "\n";
 }
 

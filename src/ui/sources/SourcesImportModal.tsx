@@ -2,19 +2,26 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { canImportHarness, harnessForRuntime } from "../../adapters/harnessCatalog";
 import type { RuntimeKind } from "../../adapters/types";
 import type { AdapterStatus, SourcesImportPreview } from "../../app/daemonClient";
-import type { ImportScopeDto } from "../../shared/sourceImport";
+import type { ImportCompletionReportDto, ImportScopeDto } from "../../shared/sourceImport";
 import type { SourcesSetupRunInput } from "../../shared/sourcesSetup";
 import { AppButton } from "../primitives/AppButton";
 import { HarnessImportCard } from "./HarnessImportCard";
+import { ImportCompletionReport } from "./ImportCompletionReport";
 
 type Props = {
   adapters: AdapterStatus[];
   busy?: boolean;
   open: boolean;
   previews?: SourcesImportPreview[];
+  completionReports?: ImportCompletionReportDto[];
   onClose: () => void;
   onPreviewImport?: (input: SourcesSetupRunInput) => Promise<SourcesImportPreview[]> | SourcesImportPreview[];
   onRunSetup?: (input: SourcesSetupRunInput) => Promise<unknown> | unknown;
+  onPreviewRepair?: (importJobId: string) => void;
+  receiptError?: string;
+  receiptJobId?: string;
+  receiptLoading?: boolean;
+  receiptOnly?: boolean;
 };
 
 type ScopeChoice = "recent" | "full";
@@ -22,11 +29,17 @@ type ScopeChoice = "recent" | "full";
 export function SourcesImportModal({
   adapters,
   busy = false,
+  completionReports = [],
   onClose,
   onPreviewImport,
+  onPreviewRepair,
   onRunSetup,
   open,
-  previews: externalPreviews
+  previews: externalPreviews,
+  receiptError,
+  receiptJobId,
+  receiptLoading = false,
+  receiptOnly = false
 }: Props) {
   const modalRef = useRef<HTMLElement>(null);
   const closeTimeoutRef = useRef<number | undefined>(undefined);
@@ -176,7 +189,7 @@ export function SourcesImportModal({
         className={modalClassName}
         role="dialog"
         aria-modal="true"
-        aria-label="Import history"
+        aria-label={receiptOnly ? "Import receipt" : "Import history"}
         onAnimationEnd={() => {
           if (modalState === "open") setModalSettled(true);
         }}
@@ -186,11 +199,13 @@ export function SourcesImportModal({
         <header className="modal-head sources-import-head">
           <div className="modal-title-row">
             <div>
-              <div className="modal-session-meta" aria-label="Import selection">
-                <span>{importableChoices.length} harnesses</span>
-                <span>{selectedRuntimes.length} selected</span>
+              <div className="modal-session-meta" aria-label={receiptOnly ? "Import receipt selection" : "Import selection"}>
+                {receiptOnly ? <span>{receiptJobId ?? "Receipt"}</span> : <>
+                  <span>{importableChoices.length} harnesses</span>
+                  <span>{selectedRuntimes.length} selected</span>
+                </>}
               </div>
-              <h2>Import history</h2>
+              <h2>{receiptOnly ? "Import receipt" : "Import history"}</h2>
             </div>
             <div className="modal-head-actions">
               <AppButton type="button" variant="quiet" onClick={requestClose}>Close</AppButton>
@@ -199,6 +214,15 @@ export function SourcesImportModal({
         </header>
         <div className="modal-scroll-frame sources-import-scroll">
           <div className="modal-content sources-import-content">
+            {receiptOnly ? (
+              <section className="sources-import-panel" aria-label="Requested import receipt">
+                {receiptLoading ? <p className="sources-import-empty" role="status">Loading import receipt {receiptJobId}…</p> : null}
+                {receiptError ? <p className="surface-status status-error" role="alert">{receiptError}</p> : null}
+                {completionReports.map((report) => (
+                  <ImportCompletionReport report={report} onPreviewRepair={onPreviewRepair} key={report.importJobId} />
+                ))}
+              </section>
+            ) : <>
             <section className="sources-import-panel">
               <div className="sources-import-section-head">
                 <h3>Harnesses</h3>
@@ -261,13 +285,26 @@ export function SourcesImportModal({
               </div>
             </section>
 
+            {completionReports.length > 0 ? (
+              <section className="sources-import-panel" aria-label="Recent import receipts">
+                <div className="sources-import-section-head">
+                  <h3>Recent import receipts</h3>
+                  <span>{completionReports.length} harness{completionReports.length === 1 ? "" : "es"}</span>
+                </div>
+                {completionReports.map((report) => (
+                  <ImportCompletionReport report={report} onPreviewRepair={onPreviewRepair} key={report.importJobId} />
+                ))}
+              </section>
+            ) : null}
+
+            </>}
           </div>
         </div>
-        <footer className="sources-import-footer">
+        {!receiptOnly ? <footer className="sources-import-footer">
           <AppButton type="button" variant="primary" onClick={() => void runImport()} disabled={busy || selectedRuntimes.length === 0}>
             Import data
           </AppButton>
-        </footer>
+        </footer> : null}
       </section>
     </div>
   );

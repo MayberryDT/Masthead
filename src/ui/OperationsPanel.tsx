@@ -39,6 +39,7 @@ type Props = {
   deletionScopeKind?: DeletionScopeKind;
   deletionScopeTarget?: string;
   localDataStatus?: LocalDataStatus;
+  keepRunningInTray?: boolean;
   motionDisabled?: boolean;
   sessionEndedNotificationsEnabled?: boolean;
   onSessionEndedNotificationsEnabledChange?: (enabled: boolean) => void;
@@ -53,6 +54,7 @@ type Props = {
   onDeletionScopeKindChange?: (kind: DeletionScopeKind) => void;
   onDeletionScopeTargetChange?: (target: string) => void;
   onExportLocalData?: () => void;
+  onKeepRunningInTrayChange?: (enabled: boolean) => void;
   onMotionDisabledChange?: (disabled: boolean) => void;
   onReloadSettings?: () => void;
   onRequestPruneLocalData?: () => void;
@@ -69,6 +71,7 @@ export function OperationsPanel({
   deletionScopeKind = "project",
   deletionScopeTarget = "",
   localDataStatus = { action: "none", state: "idle" },
+  keepRunningInTray,
   motionDisabled,
   sessionEndedNotificationsEnabled,
   onSessionEndedNotificationsEnabledChange,
@@ -81,6 +84,7 @@ export function OperationsPanel({
   onDeletionScopeKindChange,
   onDeletionScopeTargetChange,
   onExportLocalData,
+  onKeepRunningInTrayChange,
   onMotionDisabledChange,
   onReloadSettings,
   onRequestDeleteLocalData,
@@ -169,8 +173,10 @@ export function OperationsPanel({
       {showSettingsSections ? (
         <div className="settings-workspace">
           <SettingsSpineCard
+            keepRunningInTray={keepRunningInTray}
             motionDisabled={motionDisabled}
             onMotionDisabledChange={onMotionDisabledChange}
+            onKeepRunningInTrayChange={onKeepRunningInTrayChange}
             onSessionEndedNotificationsEnabledChange={onSessionEndedNotificationsEnabledChange}
             sessionEndedNotificationsEnabled={sessionEndedNotificationsEnabled}
           >

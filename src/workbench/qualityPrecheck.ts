@@ -1,65 +1,75 @@
-import { getTranscriptCoverage } from "../daemon/db/sessionTranscriptRepository.ts";
+import {
+  getTranscriptCoverage
+} from "../daemon/db/sessionTranscriptRepository.ts";
+import {
+  canonicalSessionTranscriptFingerprint,
+  refreshSessionTranscriptFingerprint
+} from "../daemon/db/sessionTranscriptFingerprintIndex.ts";
 import type { MastheadDatabase } from "../daemon/db/sqlite.ts";
+import type { CaptureQualityDisposition } from "../shared/workbench.ts";
 
-export type CaptureQualityFailureReason =
-  | "no_messages"
-  | "hook_only"
-  | "metadata_only"
-  | "duplicate_noise"
-  | "low_evidence"
-  | "missing_identity";
-export type CaptureQualityPassReason = "meaningful_message" | "usable_transcript";
-
-export type CaptureQualityPrecheckResult =
-  | {
-      ok: true;
-      reason: CaptureQualityPassReason;
-      sessionId: string;
-    }
-  | {
-      ok: false;
-      reason: CaptureQualityFailureReason;
-      sessionId: string;
-    };
-
-type SessionIdentityRow = {
-  sessionId: string;
-};
+export type { CaptureQualityDisposition } from "../shared/workbench.ts";
+export type CaptureQualityPrecheckResult = CaptureQualityDisposition & { sessionId: string };
 
 export function runCaptureQualityPrecheck(db: MastheadDatabase, sessionId: string): CaptureQualityPrecheckResult {
-  const session = db
-    .prepare(
-      `SELECT session_id AS sessionId
-      FROM sessions
-      WHERE session_id = ? AND deleted_at IS NULL`
-    )
-    .get(sessionId) as SessionIdentityRow | undefined;
-  if (!session) return { ok: false, reason: "missing_identity", sessionId };
-
   const coverage = getTranscriptCoverage(db, sessionId);
-  const nonMessageItems =
-    coverage.toolCalls + coverage.toolResults + coverage.fileEffects + coverage.runtimeSignals + coverage.checkpoints;
-  const totalTranscriptItems = coverage.messages + nonMessageItems;
+  const totalEvidence =
+    coverage.messages +
+    coverage.toolCalls +
+    coverage.toolResults +
+    coverage.fileEffects +
+    coverage.runtimeSignals +
+    coverage.checkpoints;
 
-  if (totalTranscriptItems === 0) return { ok: false, reason: "metadata_only", sessionId };
-  if (coverage.messages === 0 && coverage.lowValueItems >= totalTranscriptItems) return { ok: false, reason: "hook_only", sessionId };
-  if (coverage.messages === 0) {
-    const meaningfulNonMessageItems = Math.max(0, nonMessageItems - coverage.lowValueItems);
-    const hasDurableWorkEvidence = coverage.fileEffects > 0 || coverage.checkpoints > 0 || meaningfulNonMessageItems >= 4;
-    return hasDurableWorkEvidence
-      ? { ok: true, reason: "usable_transcript", sessionId }
-      : { ok: false, reason: "no_messages", sessionId };
+  if (totalEvidence === 0) return result(sessionId, "suppress", "empty");
+  if (coverage.messages === 0 && coverage.lowValueItems >= totalEvidence) {
+    return result(sessionId, "suppress", "hook_only");
   }
-  if (coverage.lowValueItems >= totalTranscriptItems) return { ok: false, reason: "duplicate_noise", sessionId };
-  if (!coverage.hasUsableTranscript) return { ok: false, reason: "duplicate_noise", sessionId };
+  if (
+    coverage.messages === 0 &&
+    coverage.fileEffects === 0 &&
+    coverage.toolCalls + coverage.toolResults === 0 &&
+    coverage.checkpoints === 0 &&
+    coverage.runtimeSignals > 0
+  ) {
+    return result(sessionId, "suppress", "diagnostic_only");
+  }
+  if (hasExactCanonicalDuplicate(db, sessionId)) return result(sessionId, "suppress", "exact_duplicate");
+  if (coverage.fileEffects > 0) return result(sessionId, "keep", "durable_file_effect");
+  if (coverage.toolCalls + coverage.toolResults >= 4 && coverage.userMessages >= 1) {
+    return result(sessionId, "keep", "substantial_tool_work");
+  }
+  if (coverage.userMessages >= 1 && coverage.assistantMessages >= 1) {
+    return result(sessionId, "keep", "meaningful_conversation");
+  }
+  return result(sessionId, "review", "insufficient_evidence");
+}
 
-  const hasGroundedConversation =
-    coverage.userMessages >= 2 &&
-    coverage.assistantMessages >= 2 &&
-    (coverage.fileEffects > 0 || coverage.checkpoints > 0 || coverage.toolCalls + coverage.toolResults >= 4);
-  const hasSubstantialConversation =
-    coverage.userMessages >= 3 && coverage.assistantMessages >= 3 && coverage.messages >= 20;
-  return hasGroundedConversation || hasSubstantialConversation
-    ? { ok: true, reason: "meaningful_message", sessionId }
-    : { ok: false, reason: "low_evidence", sessionId };
+function result<D extends CaptureQualityDisposition["disposition"]>(
+  sessionId: string,
+  disposition: D,
+  reason: Extract<CaptureQualityDisposition, { disposition: D }>["reason"]
+): CaptureQualityPrecheckResult {
+  return { disposition, reason, sessionId } as CaptureQualityPrecheckResult;
+}
+
+function hasExactCanonicalDuplicate(db: MastheadDatabase, sessionId: string): boolean {
+  const current = db
+    .prepare("SELECT created_at AS createdAt FROM sessions WHERE session_id = ? AND deleted_at IS NULL")
+    .get(sessionId) as { createdAt: string } | undefined;
+  if (!current) return false;
+  const fingerprint = refreshSessionTranscriptFingerprint(db, sessionId);
+  const match = db.prepare(
+    `SELECT fingerprints.session_id AS sessionId
+     FROM session_transcript_fingerprints AS fingerprints
+     JOIN sessions AS candidates ON candidates.session_id = fingerprints.session_id
+     WHERE fingerprints.fingerprint = ?
+       AND candidates.deleted_at IS NULL
+       AND candidates.session_id <> ?
+       AND (candidates.created_at < ? OR (candidates.created_at = ? AND candidates.session_id < ?))
+     ORDER BY candidates.created_at, candidates.session_id
+     LIMIT 1`
+  ).get(fingerprint, sessionId, current.createdAt, current.createdAt, sessionId) as { sessionId: string } | undefined;
+  if (!match) return false;
+  return canonicalSessionTranscriptFingerprint(db, match.sessionId) === fingerprint;
 }

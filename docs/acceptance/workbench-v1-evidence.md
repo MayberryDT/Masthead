@@ -1,8 +1,14 @@
-# Workbench Authoring Acceptance Evidence
+# Historical: Workbench V1 Authoring Acceptance Evidence
 
-Masthead’s live V1 authoring path is daemon-owned. Workbench gives the user a
-plain-language handoff; the installed CLI transports agent requests to the
-active daemon; one durable run owns complete evidence, bundle validation,
+> **Superseded:** This page preserves acceptance evidence for the retired
+> `workbench-authoring-v1` bundle and per-session resolution model. It is not a
+> current runbook or product contract. Use [ADR 0013](../adr/0013-canonical-dossier-and-candidate-authoring.md),
+> the [current product release gate](product-release-gate.md), and the
+> [durable artifact gate](durable-artifact-gate.md) for current behavior.
+
+The historical V1 authoring path was daemon-owned. Workbench gave the user a
+plain-language handoff; the installed CLI transported agent requests to the
+active daemon; one durable run owned complete evidence, bundle validation,
 atomic publication, and the completion report.
 
 ## Contract evidence

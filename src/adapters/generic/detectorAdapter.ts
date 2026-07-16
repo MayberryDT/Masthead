@@ -9,6 +9,18 @@ export function createDetectorAdapter(harness: HarnessCatalogEntry): SessionAdap
     runtime: harness.runtime,
     discover: (context) => discoverDetectedSources(harness, context),
     inspect: inspectDetectorSource,
+    async planTranscriptUnits() {
+      return [];
+    },
+    async parseTranscriptUnit(unit) {
+      return {
+        unit,
+        completeness: "unrecognized",
+        records: [],
+        diagnostics: [detectorDiagnostic(unit.source)],
+        sourceSessionIds: []
+      };
+    },
     async *backfill(_source: DiscoveredSource, _cursor?: IngestCursor) {
       return;
     },

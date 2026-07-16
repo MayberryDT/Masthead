@@ -1,176 +1,70 @@
 import { expect, test } from "vitest";
-import type { WorkbenchQueueSessionDto } from "../../../shared/workbench";
 import { buildWorkbenchHandoff } from "../workbenchHandoff";
 
-const forbiddenTokenParts = [
-  ["mast", "head", "ctl"],
-  ["np", "m", " run"],
-  ["out", "put", ".json"],
-  ["sch", "ema", ".json"],
-  ["app", "ly", ".sh"]
-] as const;
-
-function forbiddenToken(index: number): string {
-  return forbiddenTokenParts[index].join("");
-}
-
-test("builds an agent handoff for automatic artifact completion without CLI recipes", () => {
-  const text = buildWorkbenchHandoff({
-    authoringCommand: "/home/test/.local/bin/mastheadctl",
-    databaseId: "database:test",
-    sessionIds: ["session:abc"],
-    sessions: [
-      session({
-        lifecycle: "ended",
-        lastActivityAt: "2026-07-08T12:00:00.000Z",
-        project: "Masthead",
-        runtime: "codex",
-        sessionId: "session:abc",
-        title: "Raw import session"
-      })
-    ]
-  });
-
-  expect(text.startsWith("Complete this Masthead Workbench authoring request end to end")).toBe(true);
-  expect(text).toContain("masthead.workbench.authoring/v1");
-  expect(text).toContain("complete this request end to end without pausing for routine approval");
-  expect(text).toContain("use all available canonical redacted session evidence");
-  expect(text).toContain("evidence manifest");
-  expect(text).toContain("complete cursor pagination");
-  expect(text).not.toContain("evidence packet");
-  expect(text).toContain("produce the strongest justified artifacts");
-  expect(text).toContain('"sessionIds":["session:abc"]');
-  expect(text).toContain('"databaseId":"database:test"');
-  expect(text).toContain('"command":"/home/test/.local/bin/mastheadctl"');
-  expect(text).toContain("session package always");
-  expect(text).toContain("Logbook stores published artifacts only");
-  expect(text).toContain("Masthead is running locally");
-  expect(text).toContain("report results only after completion");
-  expect(text).toContain("session package");
-  expect(text).toContain("runbook");
-  expect(text).toContain("adr");
-  expect(text).toContain("incident timeline");
-  expect(text).toContain("strong join key");
-  expect(text).toContain("session:abc");
-  expect(text).toContain("Raw import session");
-  expect(text).toContain("Apply is not publish");
-  expect(text).not.toMatch(/permission/i);
-  expect(text).not.toContain("be conservative");
-  expect(text).not.toContain("--db");
-  expect(text).not.toContain("node dist/daemon");
-});
-
-test("sanitizes forbidden substrings from selected session metadata in handoff text", () => {
-  const text = buildWorkbenchHandoff({
-    authoringCommand: "/home/test/.local/bin/mastheadctl",
-    databaseId: "database:test",
-    sessionIds: [`session:${forbiddenToken(0)}-${forbiddenToken(2)}`],
-    sessions: [
-      session({
-        lifecycle: "ended",
-        lastActivityAt: "2026-07-08T12:00:00.000Z",
-        project: `${forbiddenToken(3)} ${forbiddenToken(4)} follow-up`,
-        runtime: "codex",
-        sessionId: `session:${forbiddenToken(0)}-${forbiddenToken(2)}`,
-        title: `${forbiddenToken(1)} import review`
-      })
-    ]
-  });
-
-  expect(text).toContain("Selected session metadata available on the current Workbench page");
-  expect(text).toContain("Session:");
-  expect(text).toContain("project:");
-  const selectedSection = text.slice(text.indexOf("Selected session metadata"));
-  expect(selectedSection).not.toContain(forbiddenToken(1));
-  expect(selectedSection).not.toContain(forbiddenToken(2));
-  expect(selectedSection).not.toContain(forbiddenToken(3));
-  expect(selectedSection).not.toContain(forbiddenToken(4));
-});
-
-test("sanitizes forbidden substrings case-insensitively", () => {
-  const text = buildWorkbenchHandoff({
-    authoringCommand: "/home/test/.local/bin/mastheadctl",
-    databaseId: "database:test",
-    sessionIds: ["session:abc"],
-    sessions: [
-      session({
-        lifecycle: "ended",
-        lastActivityAt: "2026-07-08T12:00:00.000Z",
-        project: "Masthead",
-        runtime: "codex",
-        sessionId: "session:abc",
-        title: `${forbiddenToken(1).toUpperCase()} import review`
-      })
-    ]
-  });
-  const selectedSection = text.slice(text.indexOf("Selected session metadata"));
-  expect(selectedSection).not.toMatch(new RegExp(forbiddenToken(1), "i"));
-});
-
-test("uses sorted deduplicated authoritative IDs when metadata covers only some selections", () => {
-  const text = buildWorkbenchHandoff({
-    authoringCommand: "/home/test/.local/bin/mastheadctl",
-    databaseId: "database:test",
-    sessionIds: ["session:z", "session:a", "session:z"],
-    sessions: [
-      session({
-        lifecycle: "ended",
-        lastActivityAt: "2026-07-08T12:00:00.000Z",
-        runtime: "codex",
-        sessionId: "session:a",
-        title: "Visible metadata"
-      })
-    ]
-  });
-
-  expect(text).toContain('"sessionIds":["session:a","session:z"]');
-  expect(text).toContain("machine request sessionIds is authoritative");
-  expect(text).toContain("Visible metadata");
-  expect(text).not.toContain("Session: session:z");
-});
-
-test("omits stale or duplicate metadata rows outside the authoritative selection", () => {
-  const selected = session({
-    lifecycle: "ended",
-    lastActivityAt: "2026-07-08T12:00:00.000Z",
+test("builds a V3 selection-scoped disposable handoff", () => {
+  const sessions = Array.from({ length: 13 }, (_, index) => ({
+    bugFixTraceStatus: "unknown" as const,
+    lastActivityAt: "2026-07-14T12:00:00.000Z",
+    lifecycle: "ended" as const,
+    nextAction: "enrich" as const,
+    publicationStatus: "publish_path" as const,
+    qualityStatus: "passed" as const,
     runtime: "codex",
-    sessionId: "session:b",
-    title: "Current selection"
-  });
+    sessionDossierStatus: "missing" as const,
+    sessionEnrichmentStatus: "missing" as const,
+    sessionId: `session:${index + 1}`,
+    title: `Compile ready ${index + 1}`,
+    transcriptStatus: "imported" as const
+  }));
+  const sessionIds = sessions.map((session) => session.sessionId);
   const text = buildWorkbenchHandoff({
     authoringCommand: "/home/test/.local/bin/mastheadctl",
     databaseId: "database:test",
-    sessionIds: ["session:b"],
-    sessions: [
-      session({
-        lifecycle: "ended",
-        lastActivityAt: "2026-07-08T12:00:00.000Z",
-        runtime: "codex",
-        sessionId: "session:a",
-        title: "Stale deferred selection"
-      }),
-      selected,
-      selected
-    ]
+    sessionIds,
+    sessions
   });
+  const machineLine = text.split("\n").find((line) => line.startsWith("{"));
+  const request = JSON.parse(machineLine ?? "{}") as Record<string, unknown>;
 
-  const metadata = text.slice(text.indexOf("Selected session metadata"));
-  expect(metadata).not.toContain("Stale deferred selection");
-  expect(metadata.match(/Current selection/g)).toHaveLength(1);
+  expect(text).toContain("Complete this Masthead Workbench request for every selected session.");
+  expect(text).toContain("Enrich each session before publishing its dossier.");
+  expect(text).toContain("Create only the runbooks, ADRs, or incident timelines");
+  expect(text).toContain("partition them into bounded runs");
+  expect(text).toContain("completing every selected session exactly once");
+  expect(request).toMatchObject({
+    protocol: "masthead.workbench.authoring/v1",
+    bundleVersion: "workbench-authoring-v3",
+    databaseId: "database:test",
+    sessionIds,
+    maxSessionsPerRun: 12,
+    authoringTool: { command: "/home/test/.local/bin/mastheadctl" }
+  });
 });
 
-function session(input: Partial<WorkbenchQueueSessionDto> & Pick<WorkbenchQueueSessionDto, "sessionId" | "title" | "runtime" | "lifecycle" | "lastActivityAt">): WorkbenchQueueSessionDto {
-  return {
-    bugFixTraceStatus: "unknown",
-    nextAction: "check_transcript",
-    publicationStatus: "publish_path",
-    qualityStatus: "unchecked",
-    runbookStatus: "unknown",
-    adrStatus: "unknown",
-    incidentTimelineStatus: "unknown",
-    sessionDossierStatus: "missing",
-    sessionEnrichmentStatus: "missing",
-    transcriptStatus: "unchecked",
-    ...input
-  };
-}
+test("sanitizes visible metadata without changing authoritative session IDs", () => {
+  const text = buildWorkbenchHandoff({
+    authoringCommand: "/home/test/.local/bin/mastheadctl",
+    databaseId: "database:test",
+    sessionIds: ["session:npm run"],
+    sessions: [{
+      bugFixTraceStatus: "unknown",
+      lastActivityAt: "2026-07-14T12:00:00.000Z",
+      lifecycle: "ended",
+      nextAction: "enrich",
+      publicationStatus: "publish_path",
+      qualityStatus: "passed",
+      runtime: "codex",
+      sessionDossierStatus: "missing",
+      sessionEnrichmentStatus: "missing",
+      sessionId: "session:npm run",
+      title: "Use schema.json then apply.sh",
+      transcriptStatus: "imported"
+    }]
+  });
+  const visible = text.slice(0, text.indexOf("Machine request:")) + text.slice(text.indexOf("Selected session metadata"));
+
+  expect(visible).not.toContain("npm run");
+  expect(visible).not.toContain("schema.json");
+  expect(visible).not.toContain("apply.sh");
+  expect(text).toContain('"sessionIds":["session:npm run"]');
+});

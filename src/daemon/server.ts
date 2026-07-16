@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
-import { copyFile, mkdir, readFile, readdir, realpath, rm, stat } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { mkdir, readFile, readdir, realpath, rm, stat } from "node:fs/promises";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { AdapterMaturity } from "../adapters/capabilities.ts";
 import { adapterRecordFromLiveHook, liveHookSourceForRuntime } from "../adapters/live/hookAdapter.ts";
 import { LIVE_CONNECTOR_RUNTIMES } from "../adapters/liveRuntimes.ts";
@@ -32,6 +32,7 @@ import type { PruneLocalDataResult, RetentionPolicy } from "../core/retention.ts
 import { liveStateReportFromHookPayload, type LiveHookDiagnostic } from "../core/liveHookAdapter.ts";
 import type { GitSnapshot, LiveBoardProjection, NormalizedEvent, SessionCardView } from "../core/types.ts";
 import type { DaemonConfig } from "./config.ts";
+import { createVerifiedMigrationBackupInsideDaemonStartup } from "./databaseBackup.ts";
 import {
   applyDefaultRetention,
   deleteAllMastheadData,
@@ -41,6 +42,7 @@ import {
   type DeleteMastheadDataScope
 } from "./db/dataLifecycleRepository.ts";
 import {
+  createImportJob,
   getImportJob,
   listImportJobPage,
   listImportJobs,
@@ -50,7 +52,6 @@ import {
   type ImportJobListStatus
 } from "./db/importJobRepository.ts";
 import { getImportManifestSummary, getImportWorkUnit, listAllImportWorkUnits, listImportFailureGroups, listImportWorkUnits } from "./db/importLedgerRepository.ts";
-import { listImportImpactSessionIds } from "./db/importSessionImpactRepository.ts";
 import { listMcpAuditRows } from "./db/mcpQueryRepository.ts";
 import { liveProjectionEnrichments } from "./db/enrichmentViewRepository.ts";
 import { liveProjectionTranscriptFacts } from "./db/liveTranscriptFactsRepository.ts";
@@ -59,6 +60,7 @@ import { upsertFileEffectsFromGitSnapshot } from "./db/gitSnapshotEffectsReposit
 import { createRawEventRepository, type RawEventRepository, type RawEventSource } from "./db/rawEventRepository.ts";
 import { getSessionDossier } from "./db/sessionDossierRepository.ts";
 import { getSessionTranscript, type SessionTranscriptKindFilter } from "./db/sessionTranscriptRepository.ts";
+import { initializeSessionTranscriptFingerprintIndex } from "./db/sessionTranscriptFingerprintIndex.ts";
 import {
   claimWorkbenchSessions,
   countWorkbenchQueue,
@@ -66,7 +68,8 @@ import {
   listWorkbenchActivity,
   listWorkbenchQueue,
   markWorkbenchQuality,
-  publishWorkbenchSession,
+  markWorkbenchQualityForReview,
+  readWorkbenchSessionState,
   recordWorkbenchActivity,
   releaseWorkbenchClaim,
   type WorkbenchActivityRecord,
@@ -87,6 +90,7 @@ import {
 import { getSessionDetail, getSessionExcerpts, listProjects, querySessions, type SessionQuery } from "./db/sessionQueryRepository.ts";
 import { getOrCreateDatabaseIdentity, hasPendingMigrations, migrateDatabase } from "./db/schema.ts";
 import { canonicalSessionId, createSessionRepository, ingestAdapterRecord, runtimeIdFor, type SessionRepository } from "./db/sessionRepository.ts";
+import { readSessionImportHealth, summarizeCurrentSessionImportHealth } from "./db/sessionImportHealthRepository.ts";
 import { saveSourceScanRun, saveSourceSetupState } from "./db/sourceSetupRepository.ts";
 import { getSessionUsageSummaries, getUsageStats, type UsageWindow } from "./db/usageStatsRepository.ts";
 import {
@@ -99,6 +103,7 @@ import { legacyCandidatesFromDirectory, maybeCopyLegacySqliteBeforeOpen } from "
 import { migrateLegacyJournalOnce } from "./legacyJournalMigration.ts";
 import { runLegacyWorkbenchPublicationBackfill } from "../workbench/legacyPublicationBackfill.ts";
 import { runCaptureQualityPrecheck } from "../workbench/qualityPrecheck.ts";
+import { authoringEvidenceRevision } from "../workbench/authoring/evidenceCatalog.ts";
 import { addSourceExclusion, sourceIsExcluded, sourceRecordIsExcluded } from "./db/sourceRepository.ts";
 import { setSourcePolicy, sourcePolicyExplicitlyEnabled, type SourcePolicyKind } from "./db/sourcePolicyRepository.ts";
 import {
@@ -110,10 +115,12 @@ import {
   type ImportJobControls,
   type ImportWorkResult
 } from "./import/importCoordinator.ts";
-import { buildImportCompletionReport } from "./import/importCompletionReport.ts";
+import { buildImportCompletionReport, settleImportSessionClassifications } from "./import/importCompletionReport.ts";
 import { buildImportManifestPlan, createManifestForJob } from "./import/importManifestService.ts";
+import { planTranscriptImportUnits, transcriptPlanForWorkUnit } from "./import/transcriptImportPlanner.ts";
 import { countImportedRecord, emptyImportResult } from "./import/importWorker.ts";
 import { runImportWorkUnit } from "./import/importWorkUnitRunner.ts";
+import { applyImportRepair, previewImportRepair } from "./import/importRepair.ts";
 import { reconcileImportedTranscript } from "../workbench/transcriptQualityReconciler.ts";
 import { getAdapterStatuses, getSourceStatuses } from "./import/sourceStatusService.ts";
 import { recordRequestDiagnostic, recordRuntimeDiagnostic, runtimeDiagnosticsSnapshot } from "./diagnostics.ts";
@@ -124,6 +131,7 @@ import { buildSourcesSetupState, scanResultToOnboardingScan } from "./sources/so
 import { clearConnectorActivation, setConnectorActivation } from "./sources/connectorActivationStore.ts";
 import { discoverHarnessConnectors, listHarnessConnectors, withHistoryDiscovery } from "./sources/harnessConnectorService.ts";
 import type { ImportScopeDto, ImportWorkUnitStatus } from "../shared/sourceImport.ts";
+import type { ImportRepairJobPlan, ImportRepairSourceMapping } from "../shared/importRepair.ts";
 import type { SessionDossierDto, SessionDossierManualEnrichmentJob } from "../shared/sessionDossier.ts";
 import type {
   WorkbenchActivityDto,
@@ -225,6 +233,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       }
       migrateDatabase(database);
       if (pendingMigrations && !config.skipMigrationQuickCheck) quickCheckMastheadDatabase(database);
+      initializeSessionTranscriptFingerprintIndex(database);
       runLegacyWorkbenchPublicationBackfill(database);
       const databaseIdentity = getOrCreateDatabaseIdentity(database);
       const interruptedImportJobIds = recoverInterruptedImportJobs(database);
@@ -1083,6 +1092,62 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     return (await discoverAllSourcesAndPersist()).find((source) => source.sourceId === sourceId);
   }
 
+  async function repairSourceMappings(importJobIds: string[]): Promise<{
+    mappings: ImportRepairSourceMapping[];
+    discoveredBySourceId: Map<string, DiscoveredSource>;
+  }> {
+    const jobIds = [...new Set(importJobIds)].sort();
+    const jobs = jobIds.map((importJobId) => getImportJob(database, importJobId)).filter((job): job is ImportJobDto => Boolean(job));
+    const sourceIds = [...new Set(jobs.map((job) => job.sourceId))].sort();
+    const snapshot = await discoverSourceSnapshot({ homeDir: config.codexHomeDir, now: new Date().toISOString(), exclusions: [] });
+    const discoveredBySourceId = new Map<string, DiscoveredSource>();
+    const preliminaryMappings = sourceIds.map((sourceId): ImportRepairSourceMapping => {
+      const stored = database.prepare(`SELECT adapter, source_kind AS sourceKind, schema_version AS schemaVersion,
+          runtime_version AS runtimeVersion
+        FROM ingest_sources WHERE source_id = ?`)
+        .get(sourceId) as {
+          adapter: RuntimeKind;
+          runtimeVersion: string | null;
+          schemaVersion: string | null;
+          sourceKind: DiscoveredSource["sourceKind"];
+        } | undefined;
+      const exact = snapshot.sources.find((source) => source.sourceId === sourceId);
+      const compatible = exact || !stored ? [] : snapshot.sources.filter((source) =>
+        source.runtime === stored.adapter &&
+        source.sourceKind === stored.sourceKind &&
+        metadataMatchesWhenAvailable(stored.schemaVersion, source.schemaVersion) &&
+        metadataMatchesWhenAvailable(stored.runtimeVersion, source.runtimeVersion)
+      );
+      if (!exact && compatible.length > 1) return { available: false, reason: "ambiguous_candidates", sourceId };
+      const discovered = exact ?? compatible[0];
+      if (!discovered) return { available: false, reason: "source_not_discovered", sourceId };
+      const adapter = adapterForRuntime(discovered.runtime);
+      if (!adapter) return { available: false, reason: "adapter_unavailable", sourceId };
+      if (stored && discovered.runtime !== stored.adapter) return { available: false, reason: "runtime_mismatch", sourceId };
+      discoveredBySourceId.set(sourceId, discovered);
+      return {
+        adapterRuntime: adapter.runtime,
+        available: true,
+        correctedSourceId: discovered.sourceId,
+        sourceId
+      };
+    });
+    const correctedCounts = new Map<string, number>();
+    for (const mapping of preliminaryMappings) {
+      if (mapping.available && mapping.correctedSourceId) {
+        correctedCounts.set(mapping.correctedSourceId, (correctedCounts.get(mapping.correctedSourceId) ?? 0) + 1);
+      }
+    }
+    const mappings = preliminaryMappings.map((mapping): ImportRepairSourceMapping => {
+      if (mapping.correctedSourceId && (correctedCounts.get(mapping.correctedSourceId) ?? 0) > 1) {
+        discoveredBySourceId.delete(mapping.sourceId);
+        return { available: false, reason: "ambiguous_many_to_one", sourceId: mapping.sourceId };
+      }
+      return mapping;
+    });
+    return { discoveredBySourceId, mappings };
+  }
+
   async function importMetadataSources(sources: DiscoveredSource[], controls?: ImportJobControls): Promise<ImportWorkResult> {
     const result = emptyImportResult();
     for (const source of sources) {
@@ -1257,6 +1322,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       await Promise.all(sources.map((source) => transcriptSources(source)))
     ).flat().filter((source) => !source.path || !sourceIsExcluded(database, { sourceId: source.sourceId, sourcePath: source.path }));
     const cursors = readCursorsForSources(transcriptFiles);
+    const manifestTranscriptUnits = await planTranscriptImportUnits(transcriptFiles);
     controls.updateProgress({
       currentPath: sources[0]?.path ?? sources[0]?.sourceId ?? runtime,
       heartbeatAt: new Date().toISOString(),
@@ -1275,7 +1341,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           runtime,
           scope,
           sourceId: sources[0]?.sourceId,
-          sources: transcriptFiles
+          sources: transcriptFiles,
+          transcriptUnits: manifestTranscriptUnits
         });
     controls.updateProgress({
       stage: "transcript",
@@ -1306,7 +1373,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         processed: checkpointBaseUnits.reduce((total, candidate) => total + candidate.processedRecords, 0)
       };
       const unitResult = await runImportWorkUnit({
-        adapterBackfill: (source) => adapter.backfill(source, source.path ? readCursor(database, source.sourceId, source.path) : undefined),
         approvedSourceIds: sources.map((source) => source.sourceId),
         db: database,
         hostId: `host:${config.host}`,
@@ -1322,13 +1388,21 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           totalWorkUnits: manifest.units.length
         }),
         onSessionImported: undefined,
-        onSessionHydrated: (sessionId) => reconcileImportedTranscript(database, sessionId),
+        onSessionHydrated: (sessionId, options) => reconcileImportedTranscript(database, sessionId, {
+          finalizeNoise: false,
+          holdForRepair: options.holdForRepair
+        }),
+        parseTranscriptUnit: async (_fallbackPlan, cursor) => {
+          return adapter.parseTranscriptUnit(transcriptPlanForWorkUnit(manifestTranscriptUnits, unit), cursor);
+        },
         runtimeKind: unit.runtime,
         workUnitId: unit.workUnitId,
         indexSession: queueSessionSearchIndex
       });
       if (queueEnrichmentForImport && unitResult.failed === 0) {
-        for (const sessionId of unitResult.sessionIds) queueSessionEnrichment(sessionId);
+        for (const sessionId of unitResult.sessionIds) {
+          if (sessionImportIsCompleteOrUntracked(sessionId)) queueSessionEnrichment(sessionId);
+        }
       }
       const completedUnit = getImportWorkUnit(database, unit.workUnitId);
       if (unit.sourcePath && completedUnit && ["succeeded", "succeeded_with_issues"].includes(completedUnit.status)) {
@@ -1361,14 +1435,10 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     const failedUnits = finalUnits.filter((unit) => unit.status === "failed").length;
     const skippedUnits = finalUnits.filter((unit) => unit.status === "skipped").length;
     const remainingUnits = finalUnits.filter((unit) => ["queued", "running"].includes(unit.status)).length;
-    if (failedUnits === 0 && remainingUnits === 0) {
-      for (const sessionId of listImportImpactSessionIds(database, controls.importJobId)) {
-        reconcileImportedTranscript(database, sessionId, { finalizeNoise: true });
-      }
-    }
-    const report = buildImportCompletionReport(database, {
+    const generatedAt = new Date().toISOString();
+    const buildReport = () => buildImportCompletionReport(database, {
       failedUnits,
-      generatedAt: new Date().toISOString(),
+      generatedAt,
       importJobId: controls.importJobId,
       recordsFailed: result.failureCount,
       recordsImported: result.importedCount,
@@ -1386,6 +1456,14 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           : "succeeded",
       transcriptsImported: result.importedCount
     });
+    const preliminaryReport = buildReport();
+    settleImportSessionClassifications(database, {
+      anomalies: preliminaryReport.anomalies,
+      finalizeNoise: failedUnits === 0 && remainingUnits === 0,
+      importJobId: controls.importJobId
+    });
+    const report = buildReport();
+    if (report.status === "succeeded_with_issues") result.completionStatus = report.status;
     updateImportJob(database, controls.importJobId, {
       completionReport: report,
       summary: {
@@ -1395,6 +1473,11 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       updatedAt: new Date().toISOString()
     });
     return result;
+  }
+
+  function sessionImportIsCompleteOrUntracked(sessionId: string): boolean {
+    const health = readSessionImportHealth(database, sessionId);
+    return !health || health.status === "complete";
   }
 
   function runImportWorkerForSource(
@@ -2125,6 +2208,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           const adapterScan = scan.adapters.find((adapter) => adapter.runtime === runtime);
           const sources = sourcesForBodySelection(body, adapterScan?.sources ?? []);
           const transcriptFiles = (await Promise.all(sources.map((source) => transcriptSources(source)))).flat();
+          const transcriptUnits = await planTranscriptImportUnits(transcriptFiles);
           const summary = await buildImportManifestPlan({
             cursors: readCursorsForSources(transcriptFiles),
             generatedAt,
@@ -2133,7 +2217,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
             runtime,
             scope,
             sourceId: sources[0]?.sourceId,
-            sources: transcriptFiles
+            sources: transcriptFiles,
+            transcriptUnits
           });
           summary.summary.estimatedRecords = adapterScan && adapterScan.discoveredSessions > 0 ? adapterScan.discoveredSessions : undefined;
           previews.push({ runtime, summary: summary.summary });
@@ -2573,6 +2658,14 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/workbench/import-health-summary") {
+      sendJson(request, response, config.allowedOrigins, 200, {
+        ok: true,
+        ...summarizeCurrentSessionImportHealth(database)
+      });
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/workbench/not-added") {
       if (url.searchParams.get("includeDetails") !== "true") {
         sendJson(request, response, config.allowedOrigins, 400, {
@@ -2604,17 +2697,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         generatedAt: new Date().toISOString()
       };
       sendJson(request, response, config.allowedOrigins, 200, responseBody);
-      return;
-    }
-
-    const workbenchPublishMatch = url.pathname.match(/^\/workbench\/sessions\/([^/]+)\/publish$/);
-    if (request.method === "POST" && workbenchPublishMatch?.[1]) {
-      request.resume();
-      const result = publishWorkbenchSession(database, {
-        actor: { kind: "agent", id: "workbench_api" },
-        sessionId: decodeURIComponent(workbenchPublishMatch[1])
-      });
-      sendJson(request, response, config.allowedOrigins, result.ok ? 200 : 409, result);
       return;
     }
 
@@ -2662,14 +2744,36 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       try {
         if (body.mode === "precheck") {
           const precheck = runCaptureQualityPrecheck(database, sessionId);
-          const result = markWorkbenchQuality(database, {
-            actor,
-            reason: precheck.reason,
-            sessionId,
-            status: precheck.ok ? "passed" : "failed"
-          });
+          const currentState = readWorkbenchSessionState(database, sessionId);
+          if (
+            currentState?.publicationStatus === "not_added_to_logbook" &&
+            currentState.qualityDecisionSource === "user"
+          ) {
+            sendJson(request, response, config.allowedOrigins, 200, {
+              ok: precheck.disposition !== "suppress",
+              precheck,
+              state: currentState
+            });
+            return;
+          }
+          const result =
+            precheck.disposition === "review"
+              ? markWorkbenchQualityForReview(database, {
+                  actor,
+                  evidenceRevision: authoringEvidenceRevision(database, [sessionId]),
+                  sessionId
+                })
+              : markWorkbenchQuality(database, {
+                  actor,
+                  evidenceRevision: authoringEvidenceRevision(database, [sessionId]),
+                  qualityDecisionSource: "automatic",
+                  reason: precheck.reason,
+                  sessionId,
+                  status: precheck.disposition === "keep" ? "passed" : "failed",
+                  suppressionCategory: precheck.disposition === "suppress" ? "confirmed_noise" : undefined
+                });
           sendJson(request, response, config.allowedOrigins, 200, {
-            ok: precheck.ok,
+            ok: precheck.disposition !== "suppress",
             activity: result.activity,
             precheck,
             state: result.state
@@ -2995,6 +3099,69 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         ok: true,
         imports: page.jobs
       });
+      return;
+    }
+
+    if (request.method === "POST" && (url.pathname === "/imports/repair/preview" || url.pathname === "/imports/repair/apply")) {
+      try {
+        const body = JSON.parse(await readBody(request)) as { importJobIds?: unknown; planHash?: unknown; databasePath?: unknown; db?: unknown };
+        if (body.databasePath !== undefined || body.db !== undefined) throw new Error("database path is not accepted");
+        if (!Array.isArray(body.importJobIds) || !body.importJobIds.every((value) => typeof value === "string")) {
+          throw new Error("importJobIds must be an array of strings");
+        }
+        const viability = await repairSourceMappings(body.importJobIds);
+        if (url.pathname.endsWith("/preview")) {
+          const preview = previewImportRepair(database, { importJobIds: body.importJobIds, sourceMappings: viability.mappings });
+          sendJson(request, response, config.allowedOrigins, 200, { ok: true, preview });
+          return;
+        }
+        if (typeof body.planHash !== "string" || !/^[a-f0-9]{64}$/.test(body.planHash)) throw new Error("valid planHash is required");
+        const staged = new Map<string, { plan: ImportRepairJobPlan; source: DiscoveredSource }>();
+        const receipt = applyImportRepair(database, {
+          importJobIds: body.importJobIds,
+          planHash: body.planHash,
+          sourceMappings: viability.mappings,
+          stageReimports: (jobPlans) => jobPlans.map((plan, index) => {
+            const source = viability.discoveredBySourceId.get(plan.originalSourceId)!;
+            const updatedAt = new Date(Date.now() + index).toISOString();
+            database.prepare(`INSERT INTO ingest_sources(source_id, adapter, source_kind, source_path, endpoint, schema_version,
+                runtime_version, confidence, discovered_at, last_seen_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT(source_id) DO UPDATE SET
+                adapter = excluded.adapter,
+                source_kind = excluded.source_kind,
+                source_path = excluded.source_path,
+                endpoint = excluded.endpoint,
+                schema_version = excluded.schema_version,
+                runtime_version = excluded.runtime_version,
+                confidence = excluded.confidence,
+                last_seen_at = excluded.last_seen_at`)
+              .run(source.sourceId, source.runtime, source.sourceKind, source.path ?? null, source.endpoint ?? null,
+                source.schemaVersion ?? null, source.runtimeVersion ?? null, source.confidence, updatedAt, updatedAt);
+            const job = createImportJob(database, { importKind: plan.importKind, sourceId: plan.correctedSourceId!, updatedAt });
+            updateImportJob(database, job.importJobId, { scope: plan.scope, updatedAt });
+            staged.set(job.importJobId, { plan, source });
+            return job.importJobId;
+          })
+        });
+        const jobs: ImportJobDto[] = [];
+        for (const importJobId of receipt.reimportJobIds) {
+          const spec = staged.get(importJobId)!;
+          jobs.push(resumeImportJob(database, importJobId, (controls) =>
+            runImportWorkerForSource(spec.plan.importKind, spec.source, controls, spec.plan.scope ?? defaultTranscriptImportScope())
+          ));
+        }
+        sendJson(request, response, config.allowedOrigins, 202, {
+          jobs,
+          ok: true,
+          receipt,
+          reimportJobIds: receipt.reimportJobIds
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const conflict = message.includes("repair plan changed") || message.includes("published artifacts block repair");
+        sendJson(request, response, config.allowedOrigins, conflict ? 409 : 400, { ok: false, error: message });
+      }
       return;
     }
 
@@ -3588,6 +3755,10 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   }
 }
 
+function metadataMatchesWhenAvailable(stored: string | null, discovered: string | undefined): boolean {
+  return !stored || !discovered || stored === discovered;
+}
+
 function closeDatabase(database: MastheadDatabase): void {
   try {
     database.close();
@@ -3621,21 +3792,7 @@ async function backupDatabaseBeforeMigration(databasePath: string): Promise<void
     return;
   }
 
-  const directory = dirname(databasePath);
-  const prefix = `${basename(databasePath)}.backup-`;
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  await copyFile(databasePath, join(directory, `${prefix}${timestamp}`));
-
-  const backups = await Promise.all(
-    (await readdir(directory))
-      .filter((entry) => entry.startsWith(prefix))
-      .map(async (entry) => ({
-        entry,
-        mtimeMs: (await stat(join(directory, entry))).mtimeMs
-      }))
-  );
-  const staleBackups = backups.sort((a, b) => b.mtimeMs - a.mtimeMs).slice(3);
-  await Promise.all(staleBackups.map((backup) => rm(join(directory, backup.entry), { force: true })));
+  await createVerifiedMigrationBackupInsideDaemonStartup(databasePath);
 }
 
 

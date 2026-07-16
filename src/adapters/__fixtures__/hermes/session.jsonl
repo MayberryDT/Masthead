@@ -1,0 +1,6 @@
+{"role":"session_meta","timestamp":"2026-07-10T10:00:00.000Z","model":"gpt-5"}
+{"role":"user","timestamp":"2026-07-10T10:00:01.000Z","content":"Repair the parser."}
+{"role":"assistant","timestamp":"2026-07-10T10:00:02.000Z","content":"I will inspect the adapter."}
+{"role":"tool","timestamp":"2026-07-10T10:00:03.000Z","tool_call_id":"tool_fixture_001","name":"read_file","arguments":{"path":"src/adapters/hermes/adapter.ts"}}
+{"role":"tool","timestamp":"2026-07-10T10:00:04.000Z","tool_call_id":"tool_fixture_001","content":"export const hermesAdapter = createLocalAdapter(options)","status":"success"}
+{"role":"assistant","timestamp":"2026-07-10T10:00:05.000Z","content":"The tool evidence is now structured."}

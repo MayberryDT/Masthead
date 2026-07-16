@@ -25,4 +25,11 @@ describe("adapter registry", () => {
     expect(scanAdapters.find((adapter) => adapter.runtime === "codex")).toBeDefined();
     expect(adapterForRuntime("codex")).toBeDefined();
   });
+
+  test("every transcript-import adapter exposes the transcript-unit interface", () => {
+    for (const adapter of scanAdapters) {
+      expect(adapter.planTranscriptUnits, adapter.runtime).toBeTypeOf("function");
+      expect(adapter.parseTranscriptUnit, adapter.runtime).toBeTypeOf("function");
+    }
+  });
 });

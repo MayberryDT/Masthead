@@ -110,10 +110,64 @@ const migrations = [
     version: 21,
     name: "021_artifact_body_search",
     path: resolve(currentDir, "migrations/021_artifact_body_search.sql")
+  },
+  {
+    version: 22,
+    name: "022_workbench_authoring_v2",
+    path: resolve(currentDir, "migrations/022_workbench_authoring_v2.sql")
+  },
+  {
+    version: 23,
+    name: "023_workbench_artifact_candidates",
+    path: resolve(currentDir, "migrations/023_workbench_artifact_candidates.sql")
+  },
+  {
+    version: 24,
+    name: "024_artifact_candidate_detector_revision",
+    path: resolve(currentDir, "migrations/024_artifact_candidate_detector_revision.sql")
+  },
+  {
+    version: 25,
+    name: "025_import_unit_scope",
+    path: resolve(currentDir, "migrations/025_import_unit_scope.sql")
+  },
+  {
+    version: 26,
+    name: "026_session_import_health",
+    path: resolve(currentDir, "migrations/026_session_import_health.sql")
+  },
+  {
+    version: 27,
+    name: "027_workbench_suppression_provenance",
+    path: resolve(currentDir, "migrations/027_workbench_suppression_provenance.sql")
+  },
+  {
+    version: 28,
+    name: "028_session_transcript_fingerprints",
+    path: resolve(currentDir, "migrations/028_session_transcript_fingerprints.sql")
+  },
+  {
+    version: 29,
+    name: "029_import_repair_replacements",
+    path: resolve(currentDir, "migrations/029_import_repair_replacements.sql")
   }
 ];
 
 export const CURRENT_SCHEMA_VERSION = migrations[migrations.length - 1]?.version ?? 0;
+
+export function validateCurrentDatabaseSchema(db: MastheadDatabase): void {
+  const applied = db.prepare("SELECT version, name FROM schema_migrations ORDER BY version").all() as Array<{
+    name: string;
+    version: number;
+  }>;
+  if (
+    applied.length !== migrations.length ||
+    applied.some((row, index) => row.version !== migrations[index]?.version || row.name !== migrations[index]?.name)
+  ) {
+    throw new Error("Database schema migration ledger does not exactly match the current target schema.");
+  }
+  validateCriticalTables(db);
+}
 
 const criticalTables = [
   "raw_events",
@@ -137,6 +191,9 @@ const criticalTables = [
   "import_work_units",
   "import_failure_groups",
   "import_session_impacts",
+  "session_import_health",
+  "import_repair_replacements",
+  "session_transcript_fingerprints",
   "legacy_migrations",
   "board_headline_frames",
   "board_headline_generations",
@@ -149,7 +206,12 @@ const criticalTables = [
   "workbench_activity",
   "workbench_claims",
   "workbench_authoring_runs",
-  "workbench_authoring_run_sessions"
+  "workbench_authoring_run_sessions",
+  "workbench_artifact_candidates",
+  "workbench_artifact_candidate_provenance",
+  "workbench_artifact_candidate_signature_members",
+  "workbench_artifact_candidate_source_revisions",
+  "workbench_artifact_candidate_scans"
 ];
 
 export function migrateDatabase(db: MastheadDatabase): void {

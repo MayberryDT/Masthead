@@ -53,6 +53,7 @@ describe("ImportProgressPanel", () => {
             sourceKind: "jsonl",
             sourcePath: "/tmp/session.jsonl",
             status: "succeeded",
+            timestampBasis: "file_modified",
             unitKind: "transcript_file",
             workUnitId: "unit-1"
           }

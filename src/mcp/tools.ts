@@ -189,7 +189,11 @@ function transcriptKind(role: "user" | "assistant" | "tool" | "all" | undefined)
 }
 
 function boundTranscriptItem(item: SessionTranscriptItem, maxBytes: number): SessionTranscriptItem {
-  return { ...item, text: boundText(item.text, maxBytes) };
+  return {
+    ...item,
+    ...(item.narrativeText === undefined ? {} : { narrativeText: boundText(item.narrativeText, maxBytes) }),
+    text: boundText(item.text, maxBytes)
+  };
 }
 
 function boundText(text: string, maxBytes: number): string {

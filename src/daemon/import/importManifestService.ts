@@ -1,6 +1,7 @@
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { DiscoveredSource, IngestCursor, RuntimeKind } from "../../adapters/types.ts";
+import type { TranscriptUnitPlan } from "../../adapters/transcriptUnits.ts";
 import type { ImportJobKind, ImportScopeDto, ImportWorkUnitDto, ImportWorkUnitStatus } from "../../shared/sourceImport.ts";
 import {
   createImportManifest,
@@ -8,6 +9,7 @@ import {
   type CreateImportWorkUnitInput
 } from "../db/importLedgerRepository.ts";
 import type { MastheadDatabase } from "../db/sqlite.ts";
+import { decideImportUnitScope } from "./importScope.ts";
 
 export type PlannedImportWorkUnit = Omit<CreateImportWorkUnitInput, "importJobId" | "manifestId"> & {
   status: ImportWorkUnitStatus;
@@ -24,6 +26,7 @@ export type ImportManifestPlan = {
     generatedAt: string;
     totalUnits: number;
     includedUnits: number;
+    cappedUnits: number;
     excludedUnits: number;
     totalBytes: number;
     estimatedRecords?: number;
@@ -40,12 +43,22 @@ export async function buildImportManifestPlan(input: {
   generatedAt: string;
   sources: DiscoveredSource[];
   cursors?: Map<string, IngestCursor>;
+  transcriptUnits?: TranscriptUnitPlan[];
 }): Promise<ImportManifestPlan> {
-  const candidates = await candidateUnits(input.sources, input.importKind, input.scope, input.generatedAt, input.cursors ?? new Map());
+  const candidates = await candidateUnits(
+    input.sources,
+    input.importKind,
+    input.scope,
+    input.generatedAt,
+    input.cursors ?? new Map(),
+    input.transcriptUnits
+  );
   const totalBytes = candidates.reduce((sum, unit) => sum + (unit.fileSizeBytes ?? 0), 0);
   const includedUnits = candidates.filter((unit) => unit.status !== "skipped").length;
+  const cappedUnits = candidates.filter((unit) => unit.scopeReason === "deferred_by_unit_limit").length;
   return {
     summary: {
+      cappedUnits,
       excludedUnits: candidates.length - includedUnits,
       generatedAt: input.generatedAt,
       importJobId: input.importJobId,
@@ -73,10 +86,12 @@ export async function createManifestForJob(
     generatedAt: string;
     sources: DiscoveredSource[];
     cursors?: Map<string, IngestCursor>;
+    transcriptUnits?: TranscriptUnitPlan[];
   }
 ): Promise<{ summary: ImportManifestPlan["summary"]; units: ImportWorkUnitDto[] }> {
   const plan = await buildImportManifestPlan(input);
   const summary = createImportManifest(db, {
+    cappedUnits: plan.summary.cappedUnits,
     excludedUnits: plan.summary.excludedUnits,
     generatedAt: plan.summary.generatedAt,
     importJobId: plan.summary.importJobId,
@@ -103,9 +118,12 @@ async function candidateUnits(
   importKind: ImportJobKind,
   scope: ImportScopeDto,
   generatedAt: string,
-  cursors: Map<string, IngestCursor>
+  cursors: Map<string, IngestCursor>,
+  transcriptUnits?: TranscriptUnitPlan[]
 ): Promise<PlannedImportWorkUnit[]> {
-  const discovered = (await Promise.all(sources.flatMap((source) => unitsForSource(source, importKind, scope, generatedAt, cursors)))).flat();
+  const discovered = importKind === "transcript" && transcriptUnits !== undefined
+    ? transcriptUnits.map((unit) => plannedTranscriptUnit(unit, scope, generatedAt, cursors))
+    : (await Promise.all(sources.flatMap((source) => unitsForSource(source, importKind, scope, generatedAt, cursors)))).flat();
   const units = Array.from(
     new Map(
       discovered.map((unit) => [
@@ -116,15 +134,53 @@ async function candidateUnits(
   );
   const included = units
     .filter((unit) => unit.status !== "skipped")
-    .toSorted((a, b) => String(b.modifiedAt ?? "").localeCompare(String(a.modifiedAt ?? "")));
+    .toSorted((a, b) => activityAt(b).localeCompare(activityAt(a)));
   const excluded = units.filter((unit) => unit.status === "skipped");
   const appliesBoundedPage = scope.mode === "transcript_recent" && typeof scope.unitLimit === "number" && scope.unitLimit >= 0;
   const limited = appliesBoundedPage ? included.slice(0, scope.unitLimit) : included;
   const limitedIds = new Set(limited.map((unit) => `${unit.sourceId}\0${unit.sourcePath ?? ""}\0${unit.sourceSessionId ?? ""}`));
   const capped = included
     .filter((unit) => !limitedIds.has(`${unit.sourceId}\0${unit.sourcePath ?? ""}\0${unit.sourceSessionId ?? ""}`))
-    .map((unit) => ({ ...unit, status: "skipped" as const, statusReason: "Deferred by the selected recent-history range." }));
+    .map((unit) => ({
+      ...unit,
+      scopeReason: "deferred_by_unit_limit" as const,
+      status: "skipped" as const,
+      statusReason: "Deferred by the selected recent-history range."
+    }));
   return [...limited, ...capped, ...excluded].toSorted((a, b) => String(a.sourcePath ?? a.sourceId).localeCompare(String(b.sourcePath ?? b.sourceId)));
+}
+
+function plannedTranscriptUnit(
+  unit: TranscriptUnitPlan,
+  scope: ImportScopeDto,
+  generatedAt: string,
+  cursors: Map<string, IngestCursor>
+): PlannedImportWorkUnit {
+  const cursor = cursorForSource(cursors, unit.source, unit.source.path);
+  const scopeDecision = decideImportUnitScope({ cursor, generatedAt, scope, unit });
+  return {
+    confidence: unit.source.confidence,
+    cursorBefore: cursor,
+    estimatedRecords: undefined,
+    fileSizeBytes: unit.fileSizeBytes,
+    modifiedAt: unit.modifiedAt,
+    runtime: unit.runtime,
+    schemaVersion: unit.source.schemaVersion,
+    scopeReason: scopeDecision.reason,
+    semanticActivityAt: unit.semanticActivityAt,
+    sourceId: unit.source.sourceId,
+    sourceKind: unit.source.sourceKind,
+    sourcePath: unit.source.path,
+    sourceSessionId: unit.sourceSessionId,
+    status: scopeDecision.include ? "queued" : "skipped",
+    statusReason: scopeDecision.include ? undefined : "Outside selected import age.",
+    timestampBasis: unit.timestampBasis,
+    unitKind: "transcript_file"
+  };
+}
+
+function activityAt(unit: Pick<PlannedImportWorkUnit, "modifiedAt" | "semanticActivityAt">): string {
+  return String(unit.semanticActivityAt ?? unit.modifiedAt ?? "");
 }
 
 async function unitsForSource(
@@ -140,20 +196,23 @@ async function unitsForSource(
       const info = path ? await stat(path) : undefined;
       const modifiedAt = info?.mtime.toISOString();
       const cursor = cursorForSource(cursors, source, path);
-      const included = includeUnit({ cursor, generatedAt, info, modifiedAt, scope });
+      const scopeDecision = decideImportUnitScope({ cursor, generatedAt, scope, unit: { modifiedAt } });
       return {
         confidence: source.confidence,
         cursorBefore: cursor,
         estimatedRecords: undefined,
         fileSizeBytes: info?.size,
         modifiedAt,
+        scopeReason: scopeDecision.reason,
+        semanticActivityAt: undefined,
         runtime: source.runtime,
         schemaVersion: source.schemaVersion,
         sourceId: source.sourceId,
         sourceKind: source.sourceKind,
         sourcePath: path,
-        status: included ? "queued" : "skipped",
-        statusReason: included ? undefined : "Outside selected import age.",
+        status: scopeDecision.include ? "queued" : "skipped",
+        statusReason: scopeDecision.include ? undefined : "Outside selected import age.",
+        timestampBasis: info ? "file_modified" : "unknown",
         unitKind: importKind === "metadata" ? "metadata_source" : importKind === "enrichment" ? "enrichment_session" : "transcript_file"
       };
     })
@@ -179,23 +238,6 @@ async function jsonlFiles(directory: string): Promise<string[]> {
     }
   }
   return files;
-}
-
-function includeUnit(input: {
-  cursor: IngestCursor | undefined;
-  generatedAt: string;
-  info: Awaited<ReturnType<typeof stat>> | undefined;
-  modifiedAt: string | undefined;
-  scope: ImportScopeDto;
-}): boolean {
-  if (input.scope.mode === "metadata_all" || input.scope.mode === "transcript_full" || input.scope.mode === "enrichment_missing") return true;
-  const modifiedTime = input.modifiedAt ? new Date(input.modifiedAt).getTime() : 0;
-  const cutoff = Date.parse(input.generatedAt) - (input.scope.days ?? 30) * 24 * 60 * 60 * 1000;
-  if (Number.isFinite(modifiedTime) && modifiedTime >= cutoff) return true;
-  if (!input.scope.includeChangedSinceCursor) return false;
-  if (!input.cursor) return true;
-  if (input.info && input.info.size > input.cursor.byteOffset) return true;
-  return Boolean(input.modifiedAt && input.cursor.modifiedAt && input.modifiedAt !== input.cursor.modifiedAt);
 }
 
 function cursorForSource(cursors: Map<string, IngestCursor>, source: DiscoveredSource, path?: string): IngestCursor | undefined {

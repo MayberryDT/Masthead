@@ -3,7 +3,9 @@ import type { SessionTranscriptItem } from "../shared/sessionTranscript.ts";
 import type {
   WorkbenchAuthoringBundle,
   WorkbenchAuthoringFinding,
-  WorkbenchClaimEvidence
+  WorkbenchClaimEvidence,
+  WorkbenchClaimSupport,
+  WorkbenchStoredAuthoringBundle
 } from "../shared/workbenchAuthoring.ts";
 
 export type WorkbenchOutputKind =
@@ -42,17 +44,28 @@ export type WorkbenchGroundedOutput = {
 
 export type SessionEnrichmentOutputV2 = SessionEnrichmentOutput & WorkbenchGroundedOutput;
 
-export type WorkbenchAuthoringOutputV2 = Record<string, unknown> & WorkbenchGroundedOutput;
+export type WorkbenchAuthoringOutputV2 = Record<string, unknown> &
+  Omit<WorkbenchGroundedOutput, "claimEvidence"> & {
+    claimSupport: WorkbenchClaimSupport[];
+  };
 
 export type WorkbenchValidationEvidence = {
   sessionId: string;
   kind: SessionTranscriptItem["kind"];
+  role: SessionTranscriptItem["role"];
+  text: string;
+  observedAt: string;
+  label?: string;
+  toolName?: string;
   status?: string;
   exitCode?: number;
+  lowValue: boolean;
 };
 
-export type WorkbenchAuthoringValidationInput = {
-  bundle: WorkbenchAuthoringBundle;
+export type WorkbenchAuthoringValidationInput<
+  TBundle extends WorkbenchStoredAuthoringBundle = WorkbenchAuthoringBundle
+> = {
+  bundle: TBundle;
   selectedSessionIds: string[];
   evidenceByRef: Map<string, WorkbenchValidationEvidence>;
   coverageWarningsBySession: Map<string, string[]>;
@@ -85,6 +98,9 @@ export type WorkbenchAuthoringFindingCode =
   | "missing_required"
   | "missing_session_package"
   | "missing_sparse_evidence_note"
+  | "missing_claim_support"
+  | "missing_required_support_kind"
+  | "missing_root_cause_support"
   | "not_applicable_without_evidence"
   | "provenance_session_not_selected"
   | "seed_missing_from_provenance"
@@ -94,6 +110,16 @@ export type WorkbenchAuthoringFindingCode =
   | "unexpected_property"
   | "unexpected_session_package"
   | "unknown_evidence_ref"
+  | "unsupported_authoring_protocol_language"
+  | "unsupported_claim_excerpt"
+  | "invalid_support_kind_evidence"
+  | "invalid_timeline_order"
+  | "invalid_timeline_support"
+  | "duplicate_human_content"
+  | "duplicate_session_enrichment"
+  | "missing_session_enrichment"
+  | "unexpected_session_enrichment"
+  | "authoring_protocol_leakage"
   | "unresolved_automatic_kind"
   | "weak_join"
   | "weak_not_applicable_reason";

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { act } from "react";
+import { act, useState } from "react";
 import { readFileSync } from "node:fs";
 import { createRoot } from "react-dom/client";
 import { describe, expect, test, vi } from "vitest";
@@ -9,10 +9,118 @@ import type { SourcesOnboardingScanDto, SourcesSetupDto } from "../../../shared/
 import type { SourceScanResult } from "../../../daemon/sources/sourceScanService";
 import { scanResultToOnboardingScan } from "../../../daemon/sources/sourceSetupService";
 import { SourcesPanel } from "../../SourcesPanel";
+import { WorkbenchPanel } from "../../workbench/WorkbenchPanel";
+import type { ImportCompletionReportDto } from "../../../shared/sourceImport";
 
 const noop = () => undefined;
 
 describe("SourcesPanel import controls", () => {
+  test("closing a pending exact receipt invalidates its request while a later intent still loads", async () => {
+    document.documentElement.style.setProperty("--modal-close-dur", "1ms");
+    const firstLoad = deferred<ImportCompletionReportDto | undefined>();
+    const onLoadImportReport = vi.fn((importJobId: string) =>
+      importJobId === "job-first"
+        ? firstLoad.promise
+        : Promise.resolve(completionReport("job-later", "cursor", 2))
+    );
+    const onConsumed = vi.fn();
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<AsyncReceiptHarness onConsumed={onConsumed} onLoadImportReport={onLoadImportReport} />);
+    });
+    expect(container.textContent).toContain("Loading import receipt job-first");
+
+    await act(async () => {
+      buttonByText(container, "Close").click();
+      await new Promise((resolve) => window.setTimeout(resolve, 60));
+    });
+    expect(onConsumed).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      firstLoad.resolve(completionReport("job-first", "opencode", 9));
+      await firstLoad.promise;
+    });
+
+    expect(container.querySelector('[aria-label="Import receipt"]')).toBeNull();
+    expect(container.textContent).not.toContain("9 sessions need import repair");
+
+    await act(async () => buttonByText(container, "Open later receipt").click());
+    expect(container.querySelector('[aria-label="cursor import report"]')).not.toBeNull();
+    expect(container.textContent).toContain("2 sessions need import repair");
+
+    document.documentElement.style.removeProperty("--modal-close-dur");
+    await act(async () => root.unmount());
+  });
+
+  test("keeps an exact receipt load error visible before consuming the intent", async () => {
+    const onConsumed = vi.fn();
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <SourcesPanel
+          adapters={[]}
+          busy={false}
+          importReceiptIntent={{ importJobId: "job-missing" }}
+          imports={[]}
+          onExcludePath={noop}
+          onImportReceiptIntentConsumed={onConsumed}
+          onLoadImportReport={async () => { throw new Error("receipt endpoint unavailable"); }}
+          onRefresh={noop}
+          sources={[]}
+        />
+      );
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("job-missing");
+    expect(container.textContent).toContain("receipt endpoint unavailable");
+    expect(onConsumed).toHaveBeenCalledTimes(1);
+    await act(async () => root.unmount());
+  });
+
+  test("opens the exact terminal receipt requested from Workbench and consumes the navigation intent", async () => {
+    const reports = [completionReport("job-opencode", "opencode", 12), completionReport("job-cursor", "cursor", 3)];
+    const imports = reports.map((report) => importJob({
+      completionReport: report,
+      importJobId: report.importJobId,
+      sourceId: `${report.runtime}:history`,
+      status: "succeeded_with_issues"
+    }));
+    const visibleImports = [imports[0]];
+    const onLoadImportReport = vi.fn(async (importJobId: string) => reports.find((report) => report.importJobId === importJobId));
+    const onPreviewImportRepair = vi.fn();
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <ReceiptNavigationHarness
+          importJobIds={imports.map((job) => job.importJobId)}
+          onLoadImportReport={onLoadImportReport}
+          onPreviewImportRepair={onPreviewImportRepair}
+          visibleImports={visibleImports}
+        />
+      );
+    });
+    await act(async () => {
+      const buttons = Array.from(container.querySelectorAll("button")).filter((button) => button.textContent === "Open import receipt");
+      (buttons[1] as HTMLButtonElement).click();
+    });
+
+    expect(container.textContent).toContain("job-cursor");
+    expect(container.textContent).toContain("3 sessions need import repair");
+    expect(container.textContent).not.toContain("12 sessions need import repair");
+    expect(container.querySelector('[aria-label="cursor import report"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="opencode import report"]')).toBeNull();
+    expect(onLoadImportReport).toHaveBeenCalledWith("job-cursor");
+    await act(async () => buttonByText(container, "Preview import repair").click());
+    expect(onPreviewImportRepair).toHaveBeenCalledWith("job-cursor");
+    await act(async () => root.unmount());
+  });
+
   test("opens import history modal from the connected-source dashboard", async () => {
     const onPreviewImport = vi.fn(async () => []);
     const container = document.createElement("div");
@@ -900,10 +1008,97 @@ function importJob(overrides: Partial<ImportJob> = {}): ImportJob {
   };
 }
 
+function ReceiptNavigationHarness({ importJobIds, onLoadImportReport, onPreviewImportRepair, visibleImports }: {
+  importJobIds: string[];
+  onLoadImportReport: (importJobId: string) => Promise<ImportCompletionReportDto | undefined>;
+  onPreviewImportRepair: (importJobId: string) => void;
+  visibleImports: ImportJob[];
+}) {
+  const [surface, setSurface] = useState<"workbench" | "sources">("workbench");
+  const [receiptIntent, setReceiptIntent] = useState<{ importJobId: string }>();
+  if (surface === "workbench") {
+    return (
+      <WorkbenchPanel
+        importHealthSummary={{ ok: true, importJobIds, reasons: [], repairRequired: importJobIds.length }}
+        onOpenImportReceipt={(importJobId) => {
+          setReceiptIntent({ importJobId });
+          setSurface("sources");
+        }}
+      />
+    );
+  }
+  return (
+    <SourcesPanel
+      adapters={[opencodeAdapter()]}
+      busy={false}
+      importFilterRuntime="opencode"
+      importReceiptIntent={receiptIntent}
+      imports={visibleImports}
+      importTotal={99}
+      onExcludePath={noop}
+      onImportReceiptIntentConsumed={() => setReceiptIntent(undefined)}
+      onLoadImportReport={onLoadImportReport}
+      onPreviewImportRepair={onPreviewImportRepair}
+      onRefresh={noop}
+      sources={[]}
+    />
+  );
+}
+
+function AsyncReceiptHarness({ onConsumed, onLoadImportReport }: {
+  onConsumed: () => void;
+  onLoadImportReport: (importJobId: string) => Promise<ImportCompletionReportDto | undefined>;
+}) {
+  const [receiptIntent, setReceiptIntent] = useState<{ importJobId: string } | undefined>({ importJobId: "job-first" });
+  return (
+    <>
+      <button type="button" onClick={() => setReceiptIntent({ importJobId: "job-later" })}>Open later receipt</button>
+      <SourcesPanel
+        adapters={[]}
+        busy={false}
+        importReceiptIntent={receiptIntent}
+        imports={[]}
+        onExcludePath={noop}
+        onImportReceiptIntentConsumed={() => {
+          onConsumed();
+          setReceiptIntent(undefined);
+        }}
+        onLoadImportReport={onLoadImportReport}
+        onRefresh={noop}
+        sources={[]}
+      />
+    </>
+  );
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, reject, resolve };
+}
+
+function completionReport(importJobId: string, runtime: ImportCompletionReportDto["runtime"], repair: number): ImportCompletionReportDto {
+  return {
+    anomalies: [], cappedUnits: 0, dossierReadySessions: 0, enrichedSessions: 0, failedUnits: 0,
+    generatedAt: runtime === "cursor" ? "2026-07-15T13:00:00.000Z" : "2026-07-15T12:00:00.000Z",
+    importJobId, logbookSearchableSessions: 0, mcpVisibleSessions: 0, nextActions: ["repair_import"],
+    outOfRangeSessions: 0, recordsFailed: 0, recordsImported: 20, recordsRecognized: 20, recordsRejected: 0,
+    recordsSkipped: 0, runtime, sessionsCreated: 20, sessionsDiscovered: 20, sessionsFinalized: 20,
+    sessionsOnPackagePath: 20 - repair, sessionsRepairRequired: repair, sessionsSuppressed: 0, sessionsUpdated: 0,
+    skippedUnits: 0, status: "succeeded_with_issues", timestampBasis: { file_modified: 0, semantic: 20, source_path: 0, unknown: 0 },
+    transcriptsImported: 20
+  };
+}
+
 function previewForRuntime(runtime: SourcesImportPreview["summary"]["runtime"], includedUnits: number, excludedUnits: number, totalBytes: number, estimatedRecords: number): SourcesImportPreview {
   return {
     runtime,
     summary: {
+      cappedUnits: 0,
       excludedUnits,
       generatedAt: "2026-07-01T00:00:00.000Z",
       importJobId: `preview:${runtime}`,

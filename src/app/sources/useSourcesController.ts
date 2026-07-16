@@ -5,6 +5,7 @@ import {
   cancelImport,
   connectSources,
   getLiveHookSettings,
+  getImportReport,
   getSourcesSetup,
   importAdapterMetadata,
   installRuntimeHooks,
@@ -13,6 +14,7 @@ import {
   listImports,
   listSources,
   previewSourcesImport,
+  previewImportRepair as requestImportRepairPreview,
   repairSources,
   retryImport,
   runSourcesSetup,
@@ -362,6 +364,24 @@ export function useSourcesController({ activeProjectionUrl, activeSurface, isLiv
     return previewSourcesImport(activeProjectionUrl, input);
   }, [activeProjectionUrl]);
 
+  const loadImportReport = useCallback(async (importJobId: string) => {
+    return getImportReport(activeProjectionUrl, importJobId);
+  }, [activeProjectionUrl]);
+
+  const previewImportRepair = useCallback(async (importJobId: string) => {
+    try {
+      const preview = await requestImportRepairPreview([importJobId], activeProjectionUrl);
+      setStatus(
+        `Import repair preview: ${preview.pseudoSessionsToRemove.length} pseudo session${preview.pseudoSessionsToRemove.length === 1 ? "" : "s"} to remove, ` +
+        `${preview.sessionsToReparse.length} session${preview.sessionsToReparse.length === 1 ? "" : "s"} to reparse.`
+      );
+      return preview;
+    } catch (error) {
+      setStatus(`Import repair preview failed: ${error instanceof Error ? error.message : String(error)}`);
+      return undefined;
+    }
+  }, [activeProjectionUrl]);
+
   const syncAll = useCallback(async () => {
     setBusy(true);
     setStatus("Syncing connected sources...");
@@ -466,10 +486,12 @@ export function useSourcesController({ activeProjectionUrl, activeSurface, isLiv
     importPage,
     imports,
     lastRefreshAt,
+    loadImportReport,
     loadAdapterSources,
     openImportJobsForRuntime,
     pollActiveImports,
     previewImport,
+    previewImportRepair,
     refreshSources,
     repair,
     retry,

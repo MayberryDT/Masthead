@@ -140,6 +140,7 @@ describe("Masthead worktree connector planning", () => {
     "/projects",
     "/adapters",
     "/imports",
+    "/imports/job-1/report",
     "/data/summary",
     "/knowledge-flow/summary",
     "/logbook/summary",
@@ -153,15 +154,22 @@ describe("Masthead worktree connector planning", () => {
     "/workbench/sessions",
     "/workbench/activity",
     "/workbench/not-added-summary",
+    "/workbench/import-health-summary",
     "/workbench/not-added",
     "/workbench/authoring/capabilities",
     "/workbench/authoring/runs/authoring%3Arun",
-    "/workbench/authoring/runs/authoring%3Arun/evidence"
+    "/workbench/authoring/runs/authoring%3Arun/evidence",
+    "/workbench/authoring/runs/authoring%3Arun/context"
   ])("forwards canonical read endpoint %s", async (pathname) => {
     expect(isAllowedReadOnlyBridgeRequest("GET", pathname)).toBe(true);
   });
 
-  test.each(["/mcp/launch-config/validate", "/mcp/test-connection", "/settings/llm-provider/models"])("forwards read-only POST endpoint %s", async (pathname) => {
+  test.each([
+    "/mcp/launch-config/validate",
+    "/mcp/test-connection",
+    "/settings/llm-provider/models",
+    "/workbench/authoring/suggestions"
+  ])("forwards read-only POST endpoint %s", async (pathname) => {
     expect(isAllowedReadOnlyBridgeRequest("POST", pathname)).toBe(true);
   });
 
@@ -178,7 +186,10 @@ describe("Masthead worktree connector planning", () => {
   });
 
   test("still blocks mutations", () => {
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/imports/repair/preview")).toBe(true);
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/imports/repair/apply")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/imports")).toBe(false);
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/imports/job-1/report")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/data/delete")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/runs")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/runs/authoring%3Arun/submit")).toBe(false);

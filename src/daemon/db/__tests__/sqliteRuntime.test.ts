@@ -7,7 +7,8 @@ import {
   checkpointMastheadDatabase,
   openMastheadDatabase,
   optimizeMastheadDatabase,
-  quickCheckMastheadDatabase
+  quickCheckMastheadDatabase,
+  withImmediateTransaction
 } from "../sqlite.ts";
 
 const tempDirs: string[] = [];
@@ -63,6 +64,28 @@ describe("SQLite runtime metadata", () => {
       const row = db.prepare("SELECT value FROM records WHERE id = 1").get() as { value: string };
       expect(row.value).toBe("launch-ready");
     } finally {
+      db.close();
+    }
+  });
+
+  test("joins a caller-owned transaction without committing it", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-sqlite-nested-transaction-"));
+    tempDirs.push(tempDir);
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+
+    try {
+      db.exec("CREATE TABLE records(id INTEGER PRIMARY KEY, value TEXT NOT NULL);");
+      db.exec("BEGIN IMMEDIATE;");
+
+      withImmediateTransaction(db, () => {
+        db.prepare("INSERT INTO records(value) VALUES (?)").run("caller-owned");
+      });
+
+      expect(db.isTransaction).toBe(true);
+      db.exec("ROLLBACK;");
+      expect(db.prepare("SELECT COUNT(*) AS count FROM records").get()).toEqual({ count: 0 });
+    } finally {
+      if (db.isTransaction) db.exec("ROLLBACK;");
       db.close();
     }
   });

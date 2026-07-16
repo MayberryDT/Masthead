@@ -3,11 +3,16 @@ import type { MastheadDatabase } from "../daemon/db/sqlite.ts";
 import {
   ensureWorkbenchSessionState,
   markWorkbenchQuality,
+  markWorkbenchQualityForReview,
   markWorkbenchTranscriptStatus,
   readWorkbenchSessionState,
+  removeAutomaticWorkbenchSessionForImportRepair,
+  reopenWorkbenchSessionForQualityReview,
+  type WorkbenchActor,
   type WorkbenchSessionStateRecord
 } from "../daemon/db/workbenchPipelineRepository.ts";
 import { runCaptureQualityPrecheck, type CaptureQualityPrecheckResult } from "./qualityPrecheck.ts";
+import { authoringEvidenceRevision } from "./authoring/evidenceCatalog.ts";
 
 export type TranscriptQualityReconciliationResult = {
   quality: CaptureQualityPrecheckResult;
@@ -17,15 +22,20 @@ export type TranscriptQualityReconciliationResult = {
 export function reconcileImportedTranscript(
   db: MastheadDatabase,
   sessionId: string,
-  options: { finalizeNoise?: boolean } = {}
+  options: { actor?: WorkbenchActor; finalizeNoise?: boolean; holdForRepair?: boolean } = {}
 ): TranscriptQualityReconciliationResult {
-  const actor = { kind: "system" as const, id: "transcript_import" };
+  const actor = options.actor ?? { kind: "system" as const, id: "transcript_import" };
   const finalizeNoise = options.finalizeNoise ?? true;
   const quality = runCaptureQualityPrecheck(db, sessionId);
   let state = readWorkbenchSessionState(db, sessionId);
-  if (!state && !quality.ok && !finalizeNoise) return { quality };
-  if (!state && quality.reason === "missing_identity") return { quality };
+  const sessionExists = Boolean(
+    db.prepare("SELECT 1 AS found FROM sessions WHERE session_id = ? AND deleted_at IS NULL").get(sessionId)
+  );
+  if (!sessionExists) return { quality };
+  if (!state && options.holdForRepair) return { quality };
+  if (!state && quality.disposition === "suppress" && !finalizeNoise && !options.holdForRepair) return { quality };
   state ??= ensureWorkbenchSessionState(db, sessionId);
+  if (options.holdForRepair && state.publicationStatus === "published") return { quality, state };
 
   const coverage = getTranscriptCoverage(db, sessionId);
   const totalEvidence =
@@ -47,13 +57,57 @@ export function reconcileImportedTranscript(
     }).state;
   }
 
-  if (quality.ok) {
+  const currentEvidenceRevision = authoringEvidenceRevision(db, [sessionId]);
+  if (
+    state.publicationStatus === "not_added_to_logbook" &&
+    state.qualityDecisionSource === "automatic" &&
+    state.qualityEvidenceRevision !== currentEvidenceRevision
+  ) {
+    state = reopenWorkbenchSessionForQualityReview(db, {
+      actor,
+      evidenceRevision: currentEvidenceRevision,
+      sessionId
+    }).state;
+  }
+
+  if (state.publicationStatus === "not_added_to_logbook" && state.qualityDecisionSource === "user") {
+    return { quality, state };
+  }
+
+  if (options.holdForRepair) {
+    state = removeAutomaticWorkbenchSessionForImportRepair(db, sessionId);
+    return { quality, state };
+  }
+
+  if (quality.disposition === "keep") {
     if (state.qualityStatus !== "passed" || state.publicationStatus === "not_added_to_logbook") {
-      state = markWorkbenchQuality(db, { actor, sessionId, status: "passed" }).state;
+      state = markWorkbenchQuality(db, {
+        actor,
+        evidenceRevision: currentEvidenceRevision,
+        qualityDecisionSource: "automatic",
+        sessionId,
+        status: "passed"
+      }).state;
+    }
+  } else if (quality.disposition === "review") {
+    if (
+      state.nextAction !== "review_quality" ||
+      state.suppressionCategory !== "insufficient_evidence" ||
+      state.qualityEvidenceRevision !== currentEvidenceRevision
+    ) {
+      state = markWorkbenchQualityForReview(db, { actor, evidenceRevision: currentEvidenceRevision, sessionId }).state;
     }
   } else if (finalizeNoise) {
     if (state.qualityStatus !== "failed" || state.nonPublicationReason !== quality.reason) {
-      state = markWorkbenchQuality(db, { actor, reason: quality.reason, sessionId, status: "failed" }).state;
+      state = markWorkbenchQuality(db, {
+        actor,
+        evidenceRevision: currentEvidenceRevision,
+        qualityDecisionSource: "automatic",
+        reason: quality.reason,
+        sessionId,
+        status: "failed",
+        suppressionCategory: "confirmed_noise"
+      }).state;
     }
   }
 

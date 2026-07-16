@@ -90,7 +90,7 @@ describe("harnessConnectorService", () => {
 
   test("codex with trust_hooks activation is needs_action", async () => {
     const { db, config, tempDir } = await openTestFixture();
-    pinCodexHooks(tempDir);
+    await pinCodexHooks(tempDir);
 
     await installLiveConnector(config, "codex");
 
@@ -112,7 +112,7 @@ describe("harnessConnectorService", () => {
 
   test("codex installed with cleared activation is ready", async () => {
     const { db, config, tempDir } = await openTestFixture();
-    pinCodexHooks(tempDir);
+    await pinCodexHooks(tempDir);
 
     await installLiveConnector(config, "codex");
     await clearConnectorActivation(dirname(config.databasePath), "codex");
@@ -146,7 +146,7 @@ describe("harnessConnectorService", () => {
 
   test("auto-clears activation when lastLiveEventAt is after setAt", async () => {
     const { db, config, tempDir } = await openTestFixture();
-    pinCodexHooks(tempDir);
+    await pinCodexHooks(tempDir);
 
     await installLiveConnector(config, "codex");
     const dataDirectory = dirname(config.databasePath);
@@ -251,7 +251,9 @@ function configFor(homeDir: string, databasePath: string): DaemonConfig {
   };
 }
 
-function pinCodexHooks(tempDir: string): void {
+async function pinCodexHooks(tempDir: string): Promise<void> {
+  await mkdir(join(tempDir, ".codex"), { recursive: true });
+  await writeFile(join(tempDir, ".codex", "config.toml"), 'model = "gpt-5"\n', "utf8");
   originalEnv.MASTHEAD_CODEX_HOOKS = process.env.MASTHEAD_CODEX_HOOKS;
   process.env.MASTHEAD_CODEX_HOOKS = join(tempDir, ".codex", "hooks.json");
 }

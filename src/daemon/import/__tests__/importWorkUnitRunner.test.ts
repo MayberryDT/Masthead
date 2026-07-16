@@ -2,13 +2,16 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import type { AdapterRecord, DiscoveredSource } from "../../../adapters/types.ts";
+import type { AdapterRecord, DiscoveredSource, IngestCursor } from "../../../adapters/types.ts";
+import type { TranscriptUnitPlan } from "../../../adapters/transcriptUnits.ts";
 import {
   createImportManifest,
   createImportWorkUnit,
   listImportFailureGroups,
-  listImportWorkUnits
+  listImportWorkUnits,
+  updateImportWorkUnit
 } from "../../db/importLedgerRepository.ts";
+import { summarizeImportSessionImpacts } from "../../db/importSessionImpactRepository.ts";
 import { migrateDatabase } from "../../db/schema.ts";
 import { addSourceExclusion } from "../../db/sourceRepository.ts";
 import { readCursor } from "../../db/cursorRepository.ts";
@@ -68,6 +71,13 @@ describe("import work unit runner", () => {
       hostname: "test",
       now: () => "2026-07-01T00:00:05.000Z",
       onSessionHydrated: (sessionId) => hydratedSessionIds.push(sessionId),
+      parseTranscriptUnit: async (unit) => ({
+        completeness: "complete",
+        diagnostics: [],
+        records,
+        sourceSessionIds: ["s1"],
+        unit
+      }),
       runtimeKind: "opencode",
       workUnitId: unitId
     });
@@ -80,6 +90,13 @@ describe("import work unit runner", () => {
     expect(db.prepare("SELECT COUNT(*) AS count FROM sessions").get()).toEqual({ count: 1 });
     expect(hydratedSessionIds).toHaveLength(1);
     expect(hydratedSessionIds[0]).toMatch(/^session:/);
+    expect(summarizeImportSessionImpacts(db, "import-1")).toMatchObject({
+      sessionsCreated: 1,
+      transcriptSessions: 1
+    });
+    expect(
+      db.prepare("SELECT status, reason FROM session_import_health WHERE session_id = ?").get(hydratedSessionIds[0])
+    ).toEqual({ reason: null, status: "complete" });
   });
 
   test("adds a filtered session to Not Added as soon as its hydration unit completes", async () => {
@@ -112,16 +129,153 @@ describe("import work unit runner", () => {
       hostId: "host:test",
       hostname: "test",
       now: () => "2026-07-01T00:00:05.000Z",
-      onSessionHydrated: (sessionId) => reconcileImportedTranscript(db, sessionId),
+      onSessionHydrated: (sessionId, options) => reconcileImportedTranscript(db, sessionId, options),
       runtimeKind: "opencode",
       workUnitId: unitId
     });
 
     expect(result.sessionIds).toHaveLength(1);
     expect(readWorkbenchSessionState(db, result.sessionIds[0])).toMatchObject({
-      nonPublicationReason: "low_evidence",
-      publicationStatus: "not_added_to_logbook",
-      qualityStatus: "failed"
+      nextAction: "review_quality",
+      publicationStatus: "publish_path",
+      qualityStatus: "unchecked"
+    });
+  });
+
+  test("partial transcript units require import repair and never enter Not Added", async () => {
+    const sourcePath = join(tempDir, "partial-thread.jsonl");
+    const unitId = seedWorkUnit(db, sourcePath);
+    const record: AdapterRecord = {
+      diagnostics: [],
+      normalized: {
+        confidence: "authoritative",
+        kind: "message",
+        sourceRef: { sourceKind: "jsonl", sourcePath },
+        value: {
+          observedAt: "2026-07-01T00:00:00.000Z",
+          role: "user",
+          sessionId: "partial-session",
+          text: "Recoverable message"
+        }
+      },
+      observedAt: "2026-07-01T00:00:00.000Z",
+      payload: { role: "user", text: "Recoverable message" },
+      payloadHash: "partial-hash",
+      source: sourceForPath(sourcePath),
+      sourceRecordKey: `${sourcePath}:1`
+    };
+
+    const result = await runImportWorkUnit({
+      adapterBackfill: async function* () {
+        yield record;
+      },
+      db,
+      hostId: "host:test",
+      hostname: "test",
+      now: () => "2026-07-01T00:00:05.000Z",
+      onSessionHydrated: (sessionId, options) => reconcileImportedTranscript(db, sessionId, options),
+      parseTranscriptUnit: async (unit) => ({
+        completeness: "partial",
+        diagnostics: [{
+          code: "recoverable_parse_gap",
+          message: "Some transcript rows were not recognized.",
+          observedAt: "2026-07-01T00:00:00.000Z",
+          severity: "warning"
+        }],
+        records: [record],
+        sourceSessionIds: ["partial-session"],
+        unit
+      }),
+      runtimeKind: "opencode",
+      workUnitId: unitId
+    });
+
+    expect(result.sessionIds).toHaveLength(1);
+    const sessionId = result.sessionIds[0];
+    expect(readWorkbenchSessionState(db, sessionId)).toBeUndefined();
+    expect(
+      db.prepare("SELECT status, reason FROM session_import_health WHERE session_id = ?").get(sessionId)
+    ).toEqual({ reason: "partial_parse", status: "repair_required" });
+  });
+
+  test("a complete unit cannot clear an earlier partial unit for the same import and canonical session", async () => {
+    const partial = await runParsedMessageUnit({ completeness: "partial", sourceSessionId: "merged-order", unitLabel: "partial-first" });
+    const complete = await runParsedMessageUnit({ completeness: "complete", sourceSessionId: "merged-order", unitLabel: "complete-second" });
+
+    expect(partial.sessionIds[0]).toBe(complete.sessionIds[0]);
+    expect(importHealthForWorkUnit(db, partial.workUnitId)).toMatchObject({
+      reason: "partial_parse",
+      status: "repair_required"
+    });
+    expect(readWorkbenchSessionState(db, partial.sessionIds[0])).toBeUndefined();
+  });
+
+  test("a later partial unit removes provisional package enrollment for the same import and canonical session", async () => {
+    const complete = await runParsedMessageUnit({ completeness: "complete", sourceSessionId: "merged-reopen", unitLabel: "complete-first" });
+    expect(readWorkbenchSessionState(db, complete.sessionIds[0])).toBeDefined();
+    const partial = await runParsedMessageUnit({ completeness: "partial", sourceSessionId: "merged-reopen", unitLabel: "partial-second" });
+
+    expect(complete.sessionIds[0]).toBe(partial.sessionIds[0]);
+    expect(importHealthForWorkUnit(db, partial.workUnitId)).toMatchObject({
+      reason: "partial_parse",
+      status: "repair_required"
+    });
+    expect(readWorkbenchSessionState(db, partial.sessionIds[0])).toBeUndefined();
+  });
+
+  test.each([
+    { completeness: "partial" as const, expectedReason: "missing_identity", sourceSessionIds: [] },
+    { completeness: "partial" as const, expectedReason: "ambiguous_identity", sourceSessionIds: ["identity-a", "identity-b"] },
+    { completeness: "unrecognized" as const, expectedReason: "unrecognized_schema", sourceSessionIds: ["identity-unrecognized"] }
+  ])("uses $expectedReason precedence for parsed unit health", async ({ completeness, expectedReason, sourceSessionIds }) => {
+    const result = await runParsedMessageUnit({
+      completeness,
+      parsedSourceSessionIds: sourceSessionIds,
+      sourceSessionId: `precedence-${expectedReason}`
+    });
+
+    expect(importHealthForWorkUnit(db, result.workUnitId)).toMatchObject({
+      reason: expectedReason,
+      status: "repair_required"
+    });
+    expect(readWorkbenchSessionState(db, result.sessionIds[0])).toBeUndefined();
+  });
+
+  test("records empty unidentified units as repair-visible import health", async () => {
+    const sourcePath = join(tempDir, "empty-unrecognized.jsonl");
+    const unitId = seedWorkUnit(db, sourcePath);
+
+    await runImportWorkUnit({
+      db,
+      hostId: "host:test",
+      hostname: "test",
+      now: () => "2026-07-01T00:00:05.000Z",
+      parseTranscriptUnit: async (unit) => ({
+        completeness: "unrecognized",
+        diagnostics: [{
+          code: "schema_unrecognized",
+          message: "No transcript records were recognized.",
+          observedAt: "2026-07-01T00:00:00.000Z",
+          severity: "error"
+        }],
+        records: [],
+        sourceSessionIds: [],
+        unit
+      }),
+      runtimeKind: "opencode",
+      workUnitId: unitId
+    });
+
+    expect(importHealthForWorkUnit(db, unitId)).toMatchObject({
+      reason: "missing_identity",
+      sessionId: null,
+      status: "repair_required"
+    });
+    expect(JSON.parse(String(importHealthForWorkUnit(db, unitId)?.diagnosticsJson))).toEqual([
+      expect.objectContaining({ code: "schema_unrecognized" })
+    ]);
+    expect(listImportWorkUnits(db, { importJobId: "import-1" }).find((unit) => unit.workUnitId === unitId)).toMatchObject({
+      status: "succeeded_with_issues"
     });
   });
 
@@ -380,6 +534,67 @@ describe("import work unit runner", () => {
     });
   });
 
+  test("hydrates incremental parsing from the latest durable cursor", async () => {
+    const sourcePath = join(tempDir, "incremental.jsonl");
+    const cursorBefore: IngestCursor = {
+      byteOffset: 120,
+      cursorId: "planned-cursor",
+      sourceId: "opencode-sessions:thread.jsonl",
+      sourcePath
+    };
+    const unitId = seedWorkUnit(db, sourcePath, { cursorBefore });
+    const observedCursors: Array<IngestCursor | undefined> = [];
+    const parseTranscriptUnit = async (unit: TranscriptUnitPlan, cursor?: IngestCursor) => {
+      observedCursors.push(cursor);
+      return {
+        completeness: "complete" as const,
+        diagnostics: [],
+        records: [],
+        sourceSessionIds: [],
+        unit
+      };
+    };
+
+    await runImportWorkUnit({
+      db,
+      hostId: "host:test",
+      parseTranscriptUnit,
+      runtimeKind: "opencode",
+      workUnitId: unitId
+    });
+
+    const cursorAfter: IngestCursor = {
+      byteOffset: 240,
+      cursorId: "checkpoint-cursor",
+      sourceId: "opencode-sessions:thread.jsonl",
+      sourcePath
+    };
+    updateImportWorkUnit(db, unitId, {
+      cursorAfter,
+      finishedAt: null,
+      status: "queued"
+    });
+    await runImportWorkUnit({
+      db,
+      hostId: "host:test",
+      parseTranscriptUnit,
+      runtimeKind: "opencode",
+      workUnitId: unitId
+    });
+
+    expect(observedCursors).toHaveLength(2);
+    expect(observedCursors[0]).toMatchObject({
+      byteOffset: cursorBefore.byteOffset,
+      sourceId: cursorBefore.sourceId,
+      sourcePath: cursorBefore.sourcePath
+    });
+    expect(observedCursors[1]).toMatchObject({
+      byteOffset: cursorAfter.byteOffset,
+      sourceId: cursorAfter.sourceId,
+      sourcePath: cursorAfter.sourcePath
+    });
+  });
+
   test("groups diagnostic records and marks the unit failed", async () => {
     const sourcePath = join(tempDir, "bad.jsonl");
     const unitId = seedWorkUnit(db, sourcePath);
@@ -477,7 +692,70 @@ describe("import work unit runner", () => {
       statusReason: "transcript_permission_required"
     });
   });
+
+  async function runParsedMessageUnit(input: {
+    completeness: "complete" | "partial" | "unrecognized";
+    parsedSourceSessionIds?: string[];
+    sourceSessionId: string;
+    unitLabel?: string;
+  }) {
+    const sourcePath = join(tempDir, `${input.unitLabel ?? input.sourceSessionId}.jsonl`);
+    const unitId = seedWorkUnit(db, sourcePath);
+    const record: AdapterRecord = {
+      diagnostics: [],
+      normalized: {
+        confidence: "authoritative",
+        kind: "message",
+        sourceRef: { sourceKind: "jsonl", sourcePath },
+        value: {
+          observedAt: "2026-07-01T00:00:00.000Z",
+          role: "user",
+          sessionId: input.sourceSessionId,
+          text: "Short request"
+        }
+      },
+      observedAt: "2026-07-01T00:00:00.000Z",
+      payload: { role: "user", text: "Short request" },
+      payloadHash: `hash-${input.sourceSessionId}`,
+      source: sourceForPath(sourcePath),
+      sourceRecordKey: `${sourcePath}:1`
+    };
+    const result = await runImportWorkUnit({
+      db,
+      hostId: "host:test",
+      hostname: "test",
+      now: () => "2026-07-01T00:00:05.000Z",
+      onSessionHydrated: (sessionId, options) => reconcileImportedTranscript(db, sessionId, options),
+      parseTranscriptUnit: async (unit) => ({
+        completeness: input.completeness,
+        diagnostics: input.completeness === "complete" ? [] : [{
+          code: `${input.completeness}_parse`,
+          message: `${input.completeness} transcript unit.`,
+          observedAt: "2026-07-01T00:00:00.000Z",
+          severity: input.completeness === "unrecognized" ? "error" : "warning"
+        }],
+        records: [record],
+        sourceSessionIds: input.parsedSourceSessionIds ?? [input.sourceSessionId],
+        unit
+      }),
+      runtimeKind: "opencode",
+      workUnitId: unitId
+    });
+    return { ...result, workUnitId: unitId };
+  }
 });
+
+function importHealthForSession(db: MastheadDatabase, sessionId: string | undefined): Record<string, unknown> | undefined {
+  if (!sessionId) return undefined;
+  return db.prepare("SELECT * FROM session_import_health WHERE session_id = ?").get(sessionId) as Record<string, unknown> | undefined;
+}
+
+function importHealthForWorkUnit(db: MastheadDatabase, workUnitId: string): Record<string, unknown> | undefined {
+  return db.prepare(
+    `SELECT session_id AS sessionId, status, reason, diagnostics_json AS diagnosticsJson
+     FROM session_import_health WHERE work_unit_id = ?`
+  ).get(workUnitId) as Record<string, unknown> | undefined;
+}
 
 function seedSourceAndImportJob(db: MastheadDatabase, sourcePath: string): void {
   db.prepare(
@@ -495,7 +773,12 @@ function seedSourceAndImportJob(db: MastheadDatabase, sourcePath: string): void 
 function seedWorkUnit(
   db: MastheadDatabase,
   sourcePath: string,
-  overrides: { confidence?: "authoritative" | "inferred" | "heuristic"; runtime?: "opencode" | "cursor"; sourceKind?: "jsonl" | "sqlite" } = {}
+  overrides: {
+    confidence?: "authoritative" | "inferred" | "heuristic";
+    cursorBefore?: IngestCursor;
+    runtime?: "opencode" | "cursor";
+    sourceKind?: "jsonl" | "sqlite";
+  } = {}
 ): string {
   const manifest = createImportManifest(db, {
     excludedUnits: 0,
@@ -511,6 +794,7 @@ function seedWorkUnit(
   });
   return createImportWorkUnit(db, {
     confidence: overrides.confidence ?? "authoritative",
+    cursorBefore: overrides.cursorBefore,
     importJobId: "import-1",
     manifestId: manifest.manifestId,
     runtime: overrides.runtime ?? "opencode",

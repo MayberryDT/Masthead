@@ -1,5 +1,9 @@
 import { readFile } from "node:fs/promises";
-import type { WorkbenchAuthoringBundle } from "../shared/workbenchAuthoring.ts";
+import type {
+  WorkbenchAuthoringBundle,
+  WorkbenchAuthoringBundleV2,
+  WorkbenchAuthoringBundleV3
+} from "../shared/workbenchAuthoring.ts";
 import { MastheadAuthoringClient, MastheadAuthoringClientError } from "./authoringClient.ts";
 import { errorResult, jsonResult, textResult, type CliResult } from "./output.ts";
 
@@ -7,7 +11,13 @@ export type WorkbenchCliOptions = {
   env?: NodeJS.ProcessEnv;
 };
 
-const authoringCommands = new Set(["capabilities", "open", "status", "evidence", "submit", "finish"]);
+const authoringCommands = new Set(["capabilities", "suggestions", "open", "status", "context", "evidence", "submit", "finish"]);
+const recoveryCommands = new Set([
+  "audit-v1-generation",
+  "prepare-v1-recovery",
+  "invalidate-v1-generation",
+  "restore-v1-recovery"
+]);
 const evidenceKinds = new Set(["all", "user", "assistant", "tools", "checkpoints", "files", "signals"]);
 
 export async function runWorkbenchAuthoringCli(args: string[], options: WorkbenchCliOptions = {}): Promise<CliResult> {
@@ -19,6 +29,15 @@ export async function runWorkbenchAuthoringCli(args: string[], options: Workbenc
     const { runWipePublishedMaintenance } = await import("./workbenchMaintenance.ts");
     return runWipePublishedMaintenance(args, options, json);
   }
+  if (recoveryCommands.has(command)) {
+    const { runFailedV1RecoveryMaintenance } = await import("./workbenchMaintenance.ts");
+    return runFailedV1RecoveryMaintenance(
+      command as "audit-v1-generation" | "prepare-v1-recovery" | "invalidate-v1-generation" | "restore-v1-recovery",
+      args,
+      options,
+      json
+    );
+  }
   if (!authoringCommands.has(command)) {
     return errorResult("unknown_command", `Unknown workbench command: ${command}`, json);
   }
@@ -29,12 +48,17 @@ export async function runWorkbenchAuthoringCli(args: string[], options: Workbenc
       return jsonResult({ ok: true, ...(await client.capabilities()) });
     }
 
+    if (command === "suggestions") {
+      const sessionIds = requiredSessionIds(args, json);
+      if (!Array.isArray(sessionIds)) return sessionIds;
+      return jsonResult({ ok: true, suggestions: await client.suggestions(sessionIds) });
+    }
+
     if (command === "open") {
       const databaseId = requiredOption(args, "--database-id", json);
       if (isCliResult(databaseId)) return databaseId;
-      if (optionHasMissingValue(args, "--session")) return missingOptionValue("--session", json);
-      const sessionIds = optionValues(args, "--session");
-      if (sessionIds.length === 0) return missingArgument("--session", json);
+      const sessionIds = requiredSessionIds(args, json);
+      if (!Array.isArray(sessionIds)) return sessionIds;
       const capabilities = await client.capabilities();
       if (databaseId !== capabilities.databaseId) {
         return errorResult(
@@ -56,6 +80,7 @@ export async function runWorkbenchAuthoringCli(args: string[], options: Workbenc
     const runId = requiredOption(args, "--run", json);
     if (isCliResult(runId)) return runId;
     if (command === "status") return jsonResult(await client.status(runId));
+    if (command === "context") return jsonResult(await client.context(runId));
 
     if (command === "evidence") {
       const sessionId = requiredOption(args, "--session", json);
@@ -87,7 +112,7 @@ export async function runWorkbenchAuthoringCli(args: string[], options: Workbenc
     if (command === "submit") {
       const file = requiredOption(args, "--file", json);
       if (isCliResult(file)) return file;
-      let bundle: WorkbenchAuthoringBundle;
+      let bundle: WorkbenchAuthoringBundle | WorkbenchAuthoringBundleV2 | WorkbenchAuthoringBundleV3;
       try {
         bundle = JSON.parse(await readFile(file, "utf8")) as WorkbenchAuthoringBundle;
       } catch (error) {
@@ -113,13 +138,19 @@ export function workbenchHelp(): string {
     "",
     "Daemon-owned artifact authoring:",
     "  mastheadctl workbench capabilities --json",
+    "  mastheadctl workbench suggestions --session <id> [--session <id>] --json",
     "  mastheadctl workbench open --database-id <id> --session <id> [--session <id>] --json",
     "  mastheadctl workbench status --run <run-id> --json",
+    "  mastheadctl workbench context --run <run-id> --json",
     "  mastheadctl workbench evidence --run <run-id> --session <id> [--cursor <cursor>] [--limit 100] [--order asc|desc] [--kind all|user|assistant|tools|checkpoints|files|signals] [--query <text>] --json",
     "  mastheadctl workbench submit --run <run-id> --file <bundle.json> --json",
     "  mastheadctl workbench finish --run <run-id> --json",
     "",
     "Maintenance:",
+    "  mastheadctl workbench audit-v1-generation --db <path> --json",
+    "  mastheadctl workbench prepare-v1-recovery --db <path> --json",
+    "  mastheadctl workbench invalidate-v1-generation --db <path> --audit-hash <sha256> --confirm --json",
+    "  mastheadctl workbench restore-v1-recovery --db <active> --backup <sibling masthead.sqlite.backup-current> --audit-hash <sha256> --confirm --json",
     "  mastheadctl workbench wipe-published --db <path> --confirm --json",
     "",
     "The daemon owns evidence, validation, claims, publication, and database identity checks."
@@ -129,6 +160,16 @@ export function workbenchHelp(): string {
 function requiredOption(args: string[], option: string, json: boolean): string | CliResult {
   if (optionHasMissingValue(args, option)) return missingOptionValue(option, json);
   return optionValue(args, option) ?? missingArgument(option, json);
+}
+
+function requiredSessionIds(args: string[], json: boolean): string[] | CliResult {
+  if (optionHasMissingValue(args, "--session")) return missingOptionValue("--session", json);
+  const sessionIds = optionValues(args, "--session");
+  if (sessionIds.length === 0) return missingArgument("--session", json);
+  if (sessionIds.length > 12) {
+    return errorResult("invalid_argument", "--session may be repeated at most 12 times", json);
+  }
+  return [...new Set(sessionIds)];
 }
 
 function missingArgument(option: string, json: boolean): CliResult {
@@ -165,7 +206,7 @@ function optionValues(args: string[], option: string): string[] {
       if (value) values.push(value);
     }
   }
-  return [...new Set(values)];
+  return values;
 }
 
 function optionHasMissingValue(args: string[], option: string): boolean {

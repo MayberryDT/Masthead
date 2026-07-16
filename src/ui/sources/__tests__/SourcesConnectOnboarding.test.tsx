@@ -89,13 +89,11 @@ describe("SourcesConnectOnboarding", () => {
     container.remove();
   });
 
-  test("keeps import history locked until selected connectors emit a real host event", async () => {
-    const codexChecks = { count: 0 };
+  test("accepts verified connector commands without waiting for a first live host event", async () => {
     const onEnable = vi.fn(async () => undefined);
     const onTest = vi.fn(async (runtime: string) => {
       if (runtime !== "codex") return { verified: true, needsAction: false };
-      codexChecks.count += 1;
-      return { verified: true, needsAction: codexChecks.count === 1 };
+      return { verified: true, needsAction: true };
     });
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -119,14 +117,10 @@ describe("SourcesConnectOnboarding", () => {
     const connect = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Connect selected");
     await act(async () => { connect?.click(); await Promise.resolve(); await Promise.resolve(); });
 
-    expect(container.textContent).toContain("host action still required");
-    expect(container.textContent).toContain("Check connections");
-    expect(container.textContent).toContain("Connect found harnesses");
-    expect(container.textContent).not.toContain("Import local history");
-    const check = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Check connections");
-    await act(async () => { check?.click(); await Promise.resolve(); await Promise.resolve(); });
-    expect(onEnable).toHaveBeenCalledTimes(2);
+    expect(container.textContent).not.toContain("Needs action");
+    expect(container.textContent).not.toContain("host action still required");
     expect(container.textContent).toContain("Import local history");
+    expect(onEnable).toHaveBeenCalledTimes(2);
     await act(async () => root.unmount());
     container.remove();
   });

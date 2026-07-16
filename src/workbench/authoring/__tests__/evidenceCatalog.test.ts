@@ -187,6 +187,31 @@ describe("authoring evidence catalog", () => {
     db.close();
   });
 
+  test("changes revision when source runtime changes the narrative projection", async () => {
+    const db = await testDb();
+    seedOneMessageSession(db, "session:projection-revision");
+    db.prepare("UPDATE messages SET text_redacted = ? WHERE session_id = ?").run(
+      "<skill>Internal authoring instructions only.</skill>",
+      "session:projection-revision"
+    );
+    db.prepare(
+      "UPDATE runtimes SET runtime_kind = 'codex' WHERE runtime_id = (SELECT runtime_id FROM sessions WHERE session_id = ?)"
+    ).run("session:projection-revision");
+
+    const codexRevision = authoringEvidenceRevision(db, ["session:projection-revision"]);
+    expect(getAuthoringEvidencePage(db, { sessionId: "session:projection-revision" }).items[0]).toMatchObject({
+      lowValue: true,
+      narrativeText: ""
+    });
+
+    db.prepare(
+      "UPDATE runtimes SET runtime_kind = 'opencode' WHERE runtime_id = (SELECT runtime_id FROM sessions WHERE session_id = ?)"
+    ).run("session:projection-revision");
+
+    expect(authoringEvidenceRevision(db, ["session:projection-revision"])).not.toBe(codexRevision);
+    db.close();
+  });
+
   test("exposes every redacted canonical content field and revises for each field change", async () => {
     const db = await testDb();
     seedMixedSession(db, "session:complete-canonical-fields");
