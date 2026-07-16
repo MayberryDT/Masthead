@@ -36,7 +36,7 @@
     "probe": "node scripts/masthead-endpoint-matrix.js",
     "probe:local": "node scripts/masthead-endpoint-matrix.js http://127.0.0.1:17373",
     "typecheck": "tsc --noEmit",
-    "test": "npm run build:daemon && vitest",
+    "test": "npm run build:daemon && NODE_OPTIONS=--max-old-space-size=4096 vitest",
     "check:product-contract": "node scripts/masthead-product-contract.js",
     "check:surface-contract": "node scripts/masthead-surface-contract.js",
     "check:endpoint-matrix": "npm run build:daemon && node scripts/masthead-endpoint-matrix-smoke.js",
