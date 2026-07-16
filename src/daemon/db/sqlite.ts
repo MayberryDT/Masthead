@@ -6,6 +6,7 @@ export type MastheadDatabase = DatabaseSync;
 export type WalCheckpointMode = "PASSIVE" | "FULL" | "RESTART" | "TRUNCATE";
 
 export function withImmediateTransaction<T>(db: MastheadDatabase, callback: () => T): T {
+  if (db.isTransaction) return callback();
   db.exec("BEGIN IMMEDIATE;");
   try {
     const result = callback();
