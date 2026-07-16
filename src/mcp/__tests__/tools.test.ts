@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import type { NormalizedEvent } from "../../core/types.ts";
 import { migrateDatabase } from "../../daemon/db/schema.ts";
+import { logMcpQuery } from "../../daemon/db/mcpAuditRepository.ts";
 import { createSessionRepository } from "../../daemon/db/sessionRepository.ts";
 import { applySessionArtifact, publishSessionArtifact } from "../../daemon/db/sessionArtifactRepository.ts";
 import { publishSessionToLogbook, seedSession } from "../../daemon/db/__tests__/sessionTestHelpers.ts";
@@ -30,6 +31,23 @@ afterEach(async () => {
 });
 
 describe("Masthead MCP tools", () => {
+  test("logs repeated same-millisecond queries as distinct audit events", async () => {
+    const db = await openDb();
+    const query = {
+      requestedAt: "2026-07-16T12:00:00.000Z",
+      resultCount: 0,
+      sessionIds: [],
+      status: "succeeded" as const,
+      toolName: "search_artifacts"
+    };
+
+    logMcpQuery(db, query);
+    logMcpQuery(db, query);
+
+    expect(db.prepare("SELECT COUNT(*) AS count FROM mcp_query_log").get()).toEqual({ count: 2 });
+    db.close();
+  });
+
   test("searches sessions compactly and logs the read-only query", async () => {
     const db = await openDb();
     const repository = createSessionRepository(db, {

@@ -9,7 +9,7 @@ import type {
   WorkbenchAuthoringBundleV3
 } from "../../shared/workbenchAuthoring.ts";
 import type { DaemonConfig } from "../config.ts";
-import { seedSession } from "../db/__tests__/sessionTestHelpers.ts";
+import { markSessionCompileReady, seedSession } from "../db/__tests__/sessionTestHelpers.ts";
 import { getOrCreateDatabaseIdentity } from "../db/schema.ts";
 import { createMastheadDaemon, type MastheadDaemon } from "../server.ts";
 import type { MastheadDatabase } from "../db/sqlite.ts";
@@ -452,6 +452,7 @@ function seedAuthoringSession(daemon: MastheadDaemon, sessionId: string): void {
     sessionId,
     title: `Authoring ${sessionId}`
   });
+  markSessionCompileReady(daemon.database, sessionId);
 }
 
 function openLegacyRun(daemon: MastheadDaemon, sessionId: string, actorId: string) {

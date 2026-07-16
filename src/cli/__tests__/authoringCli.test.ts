@@ -9,7 +9,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { createMastheadDaemon, type MastheadDaemon } from "../../daemon/server.ts";
 import { acquireDatabaseWriterLock, acquireLegacyDataDirectoryGuard } from "../../core/daemonOwnership.ts";
 import type { DaemonConfig } from "../../daemon/config.ts";
-import { seedSession } from "../../daemon/db/__tests__/sessionTestHelpers.ts";
+import { markSessionCompileReady, seedSession } from "../../daemon/db/__tests__/sessionTestHelpers.ts";
 import { migrateTestDatabaseThrough } from "../../daemon/db/__tests__/schemaTestHelpers.ts";
 import { getOrCreateDatabaseIdentity } from "../../daemon/db/schema.ts";
 import { openMastheadDatabase } from "../../daemon/db/sqlite.ts";
@@ -141,6 +141,7 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
       sessionId: "session:cli-v3",
       title: "CLI V3 lifecycle"
     });
+    markSessionCompileReady(daemon.database, "session:cli-v3");
     const env = { MASTHEAD_DAEMON_URL: baseUrl };
     const opened = await runMastheadCli([
       "workbench", "open",

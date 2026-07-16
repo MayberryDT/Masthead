@@ -1,4 +1,4 @@
-import { stableRecordId } from "../identity.ts";
+import { randomUUID } from "node:crypto";
 import type { MastheadDatabase } from "./sqlite.ts";
 
 export type McpQueryLogInput = {
@@ -24,7 +24,7 @@ export function logMcpQuery(db: MastheadDatabase, input: McpQueryLogInput): void
       failure_message
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
-    stableRecordId("mcp_query", [input.toolName, input.requestedAt, input.sessionIds.join(",")]),
+    `mcp_query:${randomUUID()}`,
     input.toolName,
     input.requestedAt,
     input.resultCount,
