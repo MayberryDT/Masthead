@@ -35,6 +35,21 @@ describe("Masthead daemon startup", () => {
 
     expect((await postRaw(baseUrl, "/imports/repair/preview", { importJobIds: ["missing"] })).status).toBe(400);
     expect((await postRaw(baseUrl, "/imports/repair/apply", { importJobIds: ["job:repair"], planHash: "wrong" })).status).toBe(400);
+    for (const [route, forbidden] of [
+      ["/imports/repair/preview", { databasePath: "/tmp/other.sqlite" }],
+      ["/imports/repair/preview", { db: "other" }],
+      ["/imports/repair/apply", { databasePath: "/tmp/other.sqlite" }],
+      ["/imports/repair/apply", { db: "other" }]
+    ] as const) {
+      const changes = databaseChanges(daemon);
+      const rejected = await postRaw(baseUrl, route, {
+        importJobIds: ["job:repair"],
+        planHash: "0".repeat(64),
+        ...forbidden
+      });
+      expect(rejected.status).toBe(400);
+      expect(databaseChanges(daemon)).toBe(changes);
+    }
     const before = databaseChanges(daemon);
     const previewResponse = await postRaw(baseUrl, "/imports/repair/preview", { importJobIds: ["job:repair"] });
     expect(previewResponse.status).toBe(200);

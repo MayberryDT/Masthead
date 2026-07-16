@@ -75,6 +75,18 @@ export function readSessionImportHealth(
   );
 }
 
+export function sessionImportRequiresRepair(
+  db: MastheadDatabase,
+  importJobId: string,
+  sessionId: string
+): boolean {
+  return Boolean(db.prepare(
+    `SELECT 1 AS found FROM session_import_health
+     WHERE import_job_id = ? AND session_id = ? AND status = 'repair_required'
+     LIMIT 1`
+  ).get(importJobId, sessionId));
+}
+
 export function summarizeSessionImportHealth(
   db: MastheadDatabase,
   importJobId: string

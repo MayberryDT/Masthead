@@ -31,6 +31,7 @@ export function reconcileImportedTranscript(
     db.prepare("SELECT 1 AS found FROM sessions WHERE session_id = ? AND deleted_at IS NULL").get(sessionId)
   );
   if (!sessionExists) return { quality };
+  if (!state && options.holdForRepair) return { quality };
   if (!state && quality.disposition === "suppress" && !finalizeNoise && !options.holdForRepair) return { quality };
   state ??= ensureWorkbenchSessionState(db, sessionId);
   if (options.holdForRepair && state.publicationStatus === "published") return { quality, state };

@@ -6,7 +6,7 @@ import { indexCanonicalSessionSearch } from "../db/searchRepository.ts";
 import { getImportWorkUnit, recordImportFailureGroup, updateImportWorkUnit } from "../db/importLedgerRepository.ts";
 import { recordImportSessionImpact } from "../db/importSessionImpactRepository.ts";
 import { ingestAdapterRecord } from "../db/sessionRepository.ts";
-import { recordSessionImportHealth } from "../db/sessionImportHealthRepository.ts";
+import { recordSessionImportHealth, sessionImportRequiresRepair } from "../db/sessionImportHealthRepository.ts";
 import { sourceRecordIsExcluded } from "../db/sourceRepository.ts";
 import { sourcePolicyExplicitlyEnabled } from "../db/sourcePolicyRepository.ts";
 import { type MastheadDatabase, withImmediateTransaction } from "../db/sqlite.ts";
@@ -32,7 +32,7 @@ export async function runImportWorkUnit(input: {
   approvedSourceIds?: string[];
   indexSession?: (sessionId: string) => void;
   onSessionImported?: (sessionId: string) => void;
-  onSessionHydrated?: (sessionId: string) => void;
+  onSessionHydrated?: (sessionId: string, options: { holdForRepair: boolean }) => void;
   onCheckpoint?: (checkpoint: ImportWorkUnitCheckpoint) => void;
 }): Promise<{ imported: number; failed: number; processed: number; sessionIds: string[] }> {
   const now = input.now ?? (() => new Date().toISOString());
@@ -229,7 +229,9 @@ export async function runImportWorkUnit(input: {
       } else {
         indexCanonicalSessionSearch(input.db, sessionId);
       }
-      if (!health || health.status === "complete") input.onSessionHydrated?.(sessionId);
+      const holdForRepair = health?.status === "repair_required" ||
+        sessionImportRequiresRepair(input.db, unit.importJobId, sessionId);
+      input.onSessionHydrated?.(sessionId, { holdForRepair });
     }
 
     updateImportWorkUnit(input.db, unit.workUnitId, {

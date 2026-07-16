@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
-import { getOrCreateDatabaseIdentity, migrateDatabase } from "../db/schema.ts";
+import { CURRENT_SCHEMA_VERSION, getOrCreateDatabaseIdentity, migrateDatabase } from "../db/schema.ts";
 import {
   prepareProductionTransition,
   productionTransitionJournalPath,
@@ -72,7 +72,7 @@ describe("offline production transition maintenance", () => {
       oldBundle,
       state: "ready_to_activate"
     });
-    expect(receipt).toMatchObject({ sourceSchemaVersion: 21, targetSchemaVersion: 24 });
+    expect(receipt).toMatchObject({ sourceSchemaVersion: 21, targetSchemaVersion: CURRENT_SCHEMA_VERSION });
     expect(receipt.snapshot.sha256).toMatch(/^[a-f0-9]{64}$/u);
     expect(JSON.parse(await readFile(productionTransitionJournalPath(databasePath), "utf8"))).toEqual(receipt);
     const { readdir } = await import("node:fs/promises");

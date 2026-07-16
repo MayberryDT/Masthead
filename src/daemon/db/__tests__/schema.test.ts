@@ -153,7 +153,7 @@ describe("daemon database schema", () => {
     migrateDatabase(db);
     migrateDatabase(db);
 
-    expect(CURRENT_SCHEMA_VERSION).toBe(27);
+    expect(CURRENT_SCHEMA_VERSION).toBe(28);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'virtual') ORDER BY name").all() as Array<{ name: string }>;
     expect(tables.map((row) => row.name)).toEqual(
@@ -195,6 +195,7 @@ describe("daemon database schema", () => {
         "import_failure_groups",
         "import_session_impacts",
         "session_import_health",
+        "session_transcript_fingerprints",
         "legacy_migrations",
         "board_headline_frames",
         "board_headline_generations",
@@ -243,7 +244,8 @@ describe("daemon database schema", () => {
       { version: 24, name: "024_artifact_candidate_detector_revision" },
       { version: 25, name: "025_import_unit_scope" },
       { version: 26, name: "026_session_import_health" },
-      { version: 27, name: "027_workbench_suppression_provenance" }
+      { version: 27, name: "027_workbench_suppression_provenance" },
+      { version: 28, name: "028_session_transcript_fingerprints" }
     ]);
     expect(
       (db.prepare("PRAGMA table_info(workbench_artifact_candidate_scans)").all() as Array<{ name: string }>).map(
@@ -268,6 +270,7 @@ describe("daemon database schema", () => {
         "idx_workbench_candidate_provenance_session",
         "idx_workbench_signature_members_session",
         "idx_workbench_candidate_scans_session_time",
+        "idx_session_transcript_fingerprints_lookup",
         "idx_session_import_health_status"
       ])
     );
@@ -517,7 +520,7 @@ describe("daemon database schema", () => {
       "2026-07-15T00:00:00.000Z"
     );
 
-    expect(CURRENT_SCHEMA_VERSION).toBe(27);
+    expect(CURRENT_SCHEMA_VERSION).toBe(28);
     expect(db.prepare("SELECT version, name FROM schema_migrations ORDER BY version DESC LIMIT 1").get()).toEqual({
       name: "024_artifact_candidate_detector_revision",
       version: 24

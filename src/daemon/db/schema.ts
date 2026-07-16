@@ -140,6 +140,11 @@ const migrations = [
     version: 27,
     name: "027_workbench_suppression_provenance",
     path: resolve(currentDir, "migrations/027_workbench_suppression_provenance.sql")
+  },
+  {
+    version: 28,
+    name: "028_session_transcript_fingerprints",
+    path: resolve(currentDir, "migrations/028_session_transcript_fingerprints.sql")
   }
 ];
 
@@ -182,6 +187,7 @@ const criticalTables = [
   "import_failure_groups",
   "import_session_impacts",
   "session_import_health",
+  "session_transcript_fingerprints",
   "legacy_migrations",
   "board_headline_frames",
   "board_headline_generations",

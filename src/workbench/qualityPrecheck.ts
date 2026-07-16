@@ -56,18 +56,41 @@ function hasExactCanonicalDuplicate(db: MastheadDatabase, sessionId: string): bo
     .prepare("SELECT created_at AS createdAt FROM sessions WHERE session_id = ? AND deleted_at IS NULL")
     .get(sessionId) as { createdAt: string } | undefined;
   if (!current) return false;
-  const candidates = db
-    .prepare(
-      `SELECT session_id AS sessionId
-       FROM sessions
-       WHERE deleted_at IS NULL
-         AND session_id <> ?
-         AND (created_at < ? OR (created_at = ? AND session_id < ?))`
-    )
-    .all(sessionId, current.createdAt, current.createdAt, sessionId) as Array<{ sessionId: string }>;
-  if (candidates.length === 0) return false;
   const fingerprint = canonicalEvidenceFingerprint(db, sessionId);
-  return candidates.some((candidate) => canonicalEvidenceFingerprint(db, candidate.sessionId) === fingerprint);
+  persistCanonicalEvidenceFingerprint(db, sessionId, fingerprint);
+  const missing = db.prepare(
+    `SELECT candidates.session_id AS sessionId
+     FROM sessions AS candidates
+     LEFT JOIN session_transcript_fingerprints AS fingerprints
+       ON fingerprints.session_id = candidates.session_id
+     WHERE candidates.deleted_at IS NULL
+       AND candidates.session_id <> ?
+       AND (candidates.created_at < ? OR (candidates.created_at = ? AND candidates.session_id < ?))
+       AND fingerprints.session_id IS NULL`
+  ).all(sessionId, current.createdAt, current.createdAt, sessionId) as Array<{ sessionId: string }>;
+  for (const candidate of missing) {
+    persistCanonicalEvidenceFingerprint(db, candidate.sessionId, canonicalEvidenceFingerprint(db, candidate.sessionId));
+  }
+  const match = db.prepare(
+    `SELECT fingerprints.session_id AS sessionId
+     FROM session_transcript_fingerprints AS fingerprints
+     JOIN sessions AS candidates ON candidates.session_id = fingerprints.session_id
+     WHERE fingerprints.fingerprint = ?
+       AND candidates.deleted_at IS NULL
+       AND candidates.session_id <> ?
+       AND (candidates.created_at < ? OR (candidates.created_at = ? AND candidates.session_id < ?))
+     ORDER BY candidates.created_at, candidates.session_id
+     LIMIT 1`
+  ).get(fingerprint, sessionId, current.createdAt, current.createdAt, sessionId);
+  return Boolean(match);
+}
+
+function persistCanonicalEvidenceFingerprint(db: MastheadDatabase, sessionId: string, fingerprint: string): void {
+  db.prepare(
+    `INSERT INTO session_transcript_fingerprints(session_id, fingerprint, updated_at)
+     VALUES (?, ?, ?)
+     ON CONFLICT(session_id) DO UPDATE SET fingerprint = excluded.fingerprint, updated_at = excluded.updated_at`
+  ).run(sessionId, fingerprint, new Date().toISOString());
 }
 
 function canonicalEvidenceFingerprint(db: MastheadDatabase, sessionId: string): string {

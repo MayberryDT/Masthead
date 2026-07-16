@@ -226,7 +226,7 @@ describe("import completion report", () => {
 
     expect(report).toMatchObject({
       nextActions: expect.arrayContaining(["repair_import"]),
-      sessionsOnPackagePath: 2,
+      sessionsOnPackagePath: 1,
       sessionsSuppressed: 0,
       status: "succeeded_with_issues"
     });
@@ -276,6 +276,54 @@ describe("import completion report", () => {
       publicationStatus: "not_added_to_logbook",
       qualityDecisionSource: "automatic",
       qualityStatus: "failed"
+    });
+    expect(buildImportCompletionReport(db, reportInput())).toMatchObject({
+      sessionsOnPackagePath: 0,
+      sessionsSuppressed: 1
+    });
+    db.prepare(
+      `UPDATE workbench_session_state
+       SET quality_decision_source = 'user', suppression_category = 'manual_exclusion'
+       WHERE session_id = 'session:1'`
+    ).run();
+    expect(buildImportCompletionReport(db, reportInput())).toMatchObject({
+      sessionsOnPackagePath: 0,
+      sessionsSuppressed: 0
+    });
+    db.close();
+  });
+
+  test("settles classification from health rows in the current import job only", async () => {
+    const { db } = await seededReportDatabase("masthead-import-report-current-health-");
+    removeCanonicalEvidence(db, "session:1");
+    recordImportSessionImpact(db, {
+      importJobId: "import-1",
+      impactKind: "transcript_added",
+      observedAt: "2026-07-01T00:02:00.000Z",
+      runtime: "opencode",
+      sessionId: "session:1",
+      sourceId: "opencode-sessions"
+    });
+    recordSessionImportHealth(db, {
+      evidenceRevision: "sha256:current-complete",
+      importJobId: "import-1",
+      sessionId: "session:1",
+      status: "complete",
+      updatedAt: "2026-07-01T00:02:00.000Z",
+      workUnitId: "unit:1"
+    });
+    seedHistoricalRepairHealth(db);
+
+    settleImportSessionClassifications(db, {
+      anomalies: [],
+      finalizeNoise: true,
+      importJobId: "import-1"
+    });
+
+    expect(readWorkbenchSessionState(db, "session:1")).toMatchObject({
+      publicationStatus: "not_added_to_logbook",
+      qualityDecisionSource: "automatic",
+      suppressionCategory: "confirmed_noise"
     });
     db.close();
   });
@@ -410,6 +458,33 @@ function seedImportWorkUnit(db: MastheadDatabase): void {
       confidence, unit_kind, status, timestamp_basis, processed_records, imported_records
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run("unit:1", "manifest:1", "import-1", "opencode-sessions", "opencode", "jsonl", "authoritative", "transcript_file", "succeeded_with_issues", "unknown", 4, 4);
+}
+
+function seedHistoricalRepairHealth(db: MastheadDatabase): void {
+  db.prepare(
+    "INSERT INTO import_jobs (import_job_id, source_id, import_kind, status, updated_at) VALUES (?, ?, ?, ?, ?)"
+  ).run("import-old", "opencode-sessions", "transcript", "succeeded_with_issues", "2026-07-02T00:00:00.000Z");
+  db.prepare(
+    `INSERT INTO import_manifests (
+      manifest_id, import_job_id, source_id, runtime_kind, import_kind, scope_json,
+      generated_at, total_units, included_units, capped_units, excluded_units, total_bytes
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run("manifest:old", "import-old", "opencode-sessions", "opencode", "transcript", "{}", "2026-07-02T00:00:00.000Z", 1, 1, 0, 0, 1);
+  db.prepare(
+    `INSERT INTO import_work_units (
+      work_unit_id, manifest_id, import_job_id, source_id, runtime_kind, source_kind,
+      confidence, unit_kind, status, timestamp_basis, processed_records, imported_records
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run("unit:old", "manifest:old", "import-old", "opencode-sessions", "opencode", "jsonl", "authoritative", "transcript_file", "succeeded_with_issues", "unknown", 1, 1);
+  recordSessionImportHealth(db, {
+    evidenceRevision: "sha256:historical-repair",
+    importJobId: "import-old",
+    reason: "partial_parse",
+    sessionId: "session:1",
+    status: "repair_required",
+    updatedAt: "2026-07-02T00:01:00.000Z",
+    workUnitId: "unit:old"
+  });
 }
 
 async function seededReportDatabase(prefix: string): Promise<{ db: MastheadDatabase }> {

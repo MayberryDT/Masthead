@@ -1386,7 +1386,10 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           totalWorkUnits: manifest.units.length
         }),
         onSessionImported: undefined,
-        onSessionHydrated: (sessionId) => reconcileImportedTranscript(database, sessionId, { finalizeNoise: false }),
+        onSessionHydrated: (sessionId, options) => reconcileImportedTranscript(database, sessionId, {
+          finalizeNoise: false,
+          holdForRepair: options.holdForRepair
+        }),
         parseTranscriptUnit: async (_fallbackPlan, cursor) => {
           return adapter.parseTranscriptUnit(transcriptPlanForWorkUnit(manifestTranscriptUnits, unit), cursor);
         },

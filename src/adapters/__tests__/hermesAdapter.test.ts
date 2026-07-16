@@ -184,6 +184,121 @@ describe("Hermes adapter", () => {
     db.close();
   });
 
+  test("plans and parses one SQLite unit per Hermes session with correctly scoped tools", async () => {
+    const tempDir = await makeTempDir();
+    const sqlitePath = join(tempDir, "state.db");
+    const sqlite = new DatabaseSync(sqlitePath);
+    sqlite.exec(
+      "CREATE TABLE sessions (session_id TEXT, started_at REAL, ended_at REAL);" +
+      "CREATE TABLE messages (session_id TEXT, role TEXT, content TEXT, tool_calls TEXT, tool_call_id TEXT, timestamp REAL);"
+    );
+    const insertSession = sqlite.prepare("INSERT INTO sessions VALUES (?, ?, ?)");
+    const insertMessage = sqlite.prepare("INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?)");
+    insertSession.run("hermes-a", 1_783_677_600, 1_783_677_603);
+    insertSession.run("hermes-b", 1_783_677_700, 1_783_677_703);
+    insertMessage.run("hermes-a", "user", "First prompt", null, null, 1_783_677_601);
+    insertMessage.run("hermes-a", "assistant", "First tool", JSON.stringify([{ id: "call-a", function: { name: "read_file", arguments: "{}" } }]), null, 1_783_677_602);
+    insertMessage.run("hermes-a", "tool", "First result", null, "call-a", 1_783_677_603);
+    insertMessage.run("hermes-b", "user", "Second prompt", null, null, 1_783_677_701);
+    insertMessage.run("hermes-b", "assistant", "Second tool", JSON.stringify([{ id: "call-b", function: { name: "write_file", arguments: "{}" } }]), null, 1_783_677_702);
+    insertMessage.run("hermes-b", "tool", "Second result", null, "call-b", 1_783_677_703);
+    sqlite.close();
+
+    const units = await hermesAdapter.planTranscriptUnits(sqliteSource(sqlitePath));
+    const parsed = await Promise.all(units.map((unit) => hermesAdapter.parseTranscriptUnit(unit)));
+
+    expect(units.map((unit) => unit.sourceSessionId)).toEqual(["hermes-a", "hermes-b"]);
+    expect(units.map((unit) => unit.semanticActivityAt)).toEqual([
+      "2026-07-10T10:00:03.000Z",
+      "2026-07-10T10:01:43.000Z"
+    ]);
+    expect(parsed.map((unit) => unit.sourceSessionIds)).toEqual([["hermes-a"], ["hermes-b"]]);
+    expect(parsed.map((unit) => unit.completeness)).toEqual(["complete", "complete"]);
+    expect(parsed.map((unit) => unit.records.filter((record) => record.normalized.kind === "tool_call").map(normalizedValue))).toEqual([
+      [expect.objectContaining({ callId: "call-a", sessionId: "hermes-a", toolName: "read_file" })],
+      [expect.objectContaining({ callId: "call-b", sessionId: "hermes-b", toolName: "write_file" })]
+    ]);
+    expect(parsed.map((unit) => unit.records.filter((record) => record.normalized.kind === "tool_result").map(normalizedValue))).toEqual([
+      [expect.objectContaining({ callId: "call-a", output: "First result", sessionId: "hermes-a" })],
+      [expect.objectContaining({ callId: "call-b", output: "Second result", sessionId: "hermes-b" })]
+    ]);
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+    migrateDatabase(db);
+    for (const parsedUnit of parsed) {
+      for (const record of parsedUnit.records) {
+        ingestAdapterRecord(db, record, { hostId: "host:test", hostname: "masthead-test", runtimeKind: "hermes" });
+      }
+    }
+    expect(db.prepare("SELECT source_session_id AS sourceSessionId FROM sessions ORDER BY source_session_id").all()).toEqual([
+      { sourceSessionId: "hermes-a" },
+      { sourceSessionId: "hermes-b" }
+    ]);
+    expect(db.prepare(
+      `SELECT sessions.source_session_id AS sourceSessionId, tool_calls.tool_name AS toolName
+       FROM tool_calls JOIN sessions ON sessions.session_id = tool_calls.session_id
+       ORDER BY sessions.source_session_id`
+    ).all()).toEqual([
+      { sourceSessionId: "hermes-a", toolName: "read_file" },
+      { sourceSessionId: "hermes-b", toolName: "write_file" }
+    ]);
+    db.close();
+  });
+
+  test("reports malformed and unknown JSONL rows instead of silently skipping them", async () => {
+    const tempDir = await makeTempDir();
+    const path = join(tempDir, "20260710_100000_diagnostics.jsonl");
+    await writeFile(path, [
+      JSON.stringify({ role: "user", content: "Valid prompt", timestamp: "2026-07-10T10:00:00.000Z" }),
+      "{not-json",
+      JSON.stringify(["not", "an", "object"]),
+      JSON.stringify({ role: "mystery", content: "Schema drift", timestamp: "2026-07-10T10:00:01.000Z" })
+    ].join("\n") + "\n", "utf8");
+
+    const [unit] = await hermesAdapter.planTranscriptUnits(source(path));
+    const parsed = await hermesAdapter.parseTranscriptUnit(unit);
+
+    expect(parsed.records).toHaveLength(1);
+    expect(parsed.completeness).toBe("partial");
+    expect(parsed.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
+      "hermes_invalid_json",
+      "hermes_non_object_row",
+      "hermes_unknown_role"
+    ]);
+  });
+
+  test.each([
+    {
+      code: "hermes_invalid_json",
+      contents: "{not-json\n",
+      filename: "unidentified.json"
+    },
+    {
+      code: "hermes_missing_identity",
+      contents: `${JSON.stringify({ role: "user", content: "No identity" })}\n`,
+      filename: "unidentified.jsonl"
+    },
+    {
+      code: "hermes_unknown_shape",
+      contents: `${JSON.stringify({ session_id: "shape-session", role: "assistant" })}\n`,
+      filename: "unknown-shape.jsonl"
+    },
+    {
+      code: "hermes_unknown_shape",
+      contents: `${JSON.stringify({ session_id: "malformed-tool-session", role: "assistant", tool_calls: [{}] })}\n`,
+      filename: "malformed-tool-shape.jsonl"
+    }
+  ])("marks $code input as repair-visible parser health", async ({ code, contents, filename }) => {
+    const tempDir = await makeTempDir();
+    const path = join(tempDir, filename);
+    await writeFile(path, contents, "utf8");
+
+    const [unit] = await hermesAdapter.planTranscriptUnits(source(path));
+    const parsed = await hermesAdapter.parseTranscriptUnit(unit);
+
+    expect(parsed.completeness).not.toBe("complete");
+    expect(parsed.diagnostics).toContainEqual(expect.objectContaining({ code }));
+  });
+
   test("imports Hermes SQLite rows beyond the 5,000-row page boundary", async () => {
     const tempDir = await makeTempDir();
     const sqlitePath = join(tempDir, "state.db");

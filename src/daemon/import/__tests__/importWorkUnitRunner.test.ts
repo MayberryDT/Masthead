@@ -127,7 +127,7 @@ describe("import work unit runner", () => {
       hostId: "host:test",
       hostname: "test",
       now: () => "2026-07-01T00:00:05.000Z",
-      onSessionHydrated: (sessionId) => reconcileImportedTranscript(db, sessionId),
+      onSessionHydrated: (sessionId, options) => reconcileImportedTranscript(db, sessionId, options),
       runtimeKind: "opencode",
       workUnitId: unitId
     });
@@ -171,7 +171,7 @@ describe("import work unit runner", () => {
       hostId: "host:test",
       hostname: "test",
       now: () => "2026-07-01T00:00:05.000Z",
-      onSessionHydrated: (sessionId) => reconcileImportedTranscript(db, sessionId),
+      onSessionHydrated: (sessionId, options) => reconcileImportedTranscript(db, sessionId, options),
       parseTranscriptUnit: async (unit) => ({
         completeness: "partial",
         diagnostics: [{
@@ -196,29 +196,33 @@ describe("import work unit runner", () => {
     ).toEqual({ reason: "partial_parse", status: "repair_required" });
   });
 
-  test("a later complete unit does not overwrite or reconcile an earlier partial unit", async () => {
-    const partial = await runParsedMessageUnit({ completeness: "partial", sourceSessionId: "order-partial-first" });
-    const complete = await runParsedMessageUnit({ completeness: "complete", sourceSessionId: "order-complete-second" });
+  test("a complete unit cannot clear an earlier partial unit for the same import and canonical session", async () => {
+    const partial = await runParsedMessageUnit({ completeness: "partial", sourceSessionId: "merged-order", unitLabel: "partial-first" });
+    const complete = await runParsedMessageUnit({ completeness: "complete", sourceSessionId: "merged-order", unitLabel: "complete-second" });
 
-    expect(importHealthForSession(db, partial.sessionIds[0])).toMatchObject({
+    expect(partial.sessionIds[0]).toBe(complete.sessionIds[0]);
+    expect(importHealthForWorkUnit(db, partial.workUnitId)).toMatchObject({
       reason: "partial_parse",
       status: "repair_required"
     });
     expect(readWorkbenchSessionState(db, partial.sessionIds[0])).toBeUndefined();
-    expect(importHealthForSession(db, complete.sessionIds[0])).toMatchObject({ status: "complete" });
-    expect(readWorkbenchSessionState(db, complete.sessionIds[0])).toBeDefined();
   });
 
-  test("a later partial unit does not overwrite an earlier complete unit", async () => {
-    const complete = await runParsedMessageUnit({ completeness: "complete", sourceSessionId: "order-complete-first" });
-    const partial = await runParsedMessageUnit({ completeness: "partial", sourceSessionId: "order-partial-second" });
+  test("a later partial unit reopens provisional package enrollment for the same import and canonical session", async () => {
+    const complete = await runParsedMessageUnit({ completeness: "complete", sourceSessionId: "merged-reopen", unitLabel: "complete-first" });
+    expect(readWorkbenchSessionState(db, complete.sessionIds[0])).toBeDefined();
+    const partial = await runParsedMessageUnit({ completeness: "partial", sourceSessionId: "merged-reopen", unitLabel: "partial-second" });
 
-    expect(importHealthForSession(db, complete.sessionIds[0])).toMatchObject({ status: "complete" });
-    expect(importHealthForSession(db, partial.sessionIds[0])).toMatchObject({
+    expect(complete.sessionIds[0]).toBe(partial.sessionIds[0]);
+    expect(importHealthForWorkUnit(db, partial.workUnitId)).toMatchObject({
       reason: "partial_parse",
       status: "repair_required"
     });
-    expect(readWorkbenchSessionState(db, partial.sessionIds[0])).toBeUndefined();
+    expect(readWorkbenchSessionState(db, partial.sessionIds[0])).toMatchObject({
+      nextAction: "review_quality",
+      publicationStatus: "publish_path",
+      qualityStatus: "unchecked"
+    });
   });
 
   test.each([
@@ -634,8 +638,9 @@ describe("import work unit runner", () => {
     completeness: "complete" | "partial" | "unrecognized";
     parsedSourceSessionIds?: string[];
     sourceSessionId: string;
+    unitLabel?: string;
   }) {
-    const sourcePath = join(tempDir, `${input.sourceSessionId}.jsonl`);
+    const sourcePath = join(tempDir, `${input.unitLabel ?? input.sourceSessionId}.jsonl`);
     const unitId = seedWorkUnit(db, sourcePath);
     const record: AdapterRecord = {
       diagnostics: [],
@@ -661,7 +666,7 @@ describe("import work unit runner", () => {
       hostId: "host:test",
       hostname: "test",
       now: () => "2026-07-01T00:00:05.000Z",
-      onSessionHydrated: (sessionId) => reconcileImportedTranscript(db, sessionId),
+      onSessionHydrated: (sessionId, options) => reconcileImportedTranscript(db, sessionId, options),
       parseTranscriptUnit: async (unit) => ({
         completeness: input.completeness,
         diagnostics: input.completeness === "complete" ? [] : [{

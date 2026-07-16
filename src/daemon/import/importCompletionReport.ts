@@ -9,7 +9,7 @@ import { getImportManifestSummary, listAllImportWorkUnits } from "../db/importLe
 import { listImportImpactSessionIds, summarizeImportSessionImpacts } from "../db/importSessionImpactRepository.ts";
 import {
   countRepairRequiredSessions,
-  readSessionImportHealth,
+  sessionImportRequiresRepair,
   summarizeSessionImportHealth
 } from "../db/sessionImportHealthRepository.ts";
 import type { MastheadDatabase } from "../db/sqlite.ts";
@@ -130,11 +130,10 @@ export function settleImportSessionClassifications(
   const holdForRepair = input.anomalies.some((anomaly) => anomaly.severity === "error");
   if (!holdForRepair && !input.finalizeNoise) return;
   for (const sessionId of listImportImpactSessionIds(db, input.importJobId)) {
-    const health = readSessionImportHealth(db, sessionId);
-    if (!holdForRepair && health && health.status !== "complete") continue;
+    const sessionHoldForRepair = holdForRepair || sessionImportRequiresRepair(db, input.importJobId, sessionId);
     reconcileImportedTranscript(db, sessionId, {
-      finalizeNoise: input.finalizeNoise && !holdForRepair,
-      holdForRepair
+      finalizeNoise: input.finalizeNoise && !sessionHoldForRepair,
+      holdForRepair: sessionHoldForRepair
     });
   }
 }
@@ -182,7 +181,9 @@ function summarizeImportEvidence(
       SUM(CASE WHEN messages.role = 'tool' THEN 1 ELSE 0 END) AS toolRoleMessages,
       (SELECT COUNT(*) FROM tool_calls WHERE tool_calls.session_id = sessions.session_id) +
         (SELECT COUNT(*) FROM tool_results WHERE tool_results.session_id = sessions.session_id) AS structuredToolItems,
-      workbench_session_state.publication_status AS publicationStatus
+      workbench_session_state.publication_status AS publicationStatus,
+      workbench_session_state.quality_decision_source AS qualityDecisionSource,
+      workbench_session_state.suppression_category AS suppressionCategory
     FROM (
       SELECT session_id, MAX(CASE WHEN impact_kind = 'created' THEN 1 ELSE 0 END) AS was_created
       FROM import_session_impacts
@@ -198,8 +199,10 @@ function summarizeImportEvidence(
     lastActivityAt: string;
     messageCount: number;
     publicationStatus: string | null;
+    qualityDecisionSource: string | null;
     sessionId: string;
     structuredToolItems: number;
+    suppressionCategory: string | null;
     toolRoleMessages: number;
     wasCreated: number;
   }>;
@@ -215,8 +218,12 @@ function summarizeImportEvidence(
       : sessions.filter((session) => session.wasCreated === 1 && new Date(session.lastActivityAt).getTime() < scopeStart).length,
     recordsRecognized: Math.max(0, recordsProcessed - recordsRejected),
     recordsRejected,
-    sessionsOnPackagePath: sessions.filter((session) => session.publicationStatus !== null && session.publicationStatus !== "not_added_to_logbook").length,
-    sessionsSuppressed: sessions.filter((session) => session.publicationStatus === "not_added_to_logbook").length,
+    sessionsOnPackagePath: sessions.filter((session) => session.publicationStatus === "publish_path").length,
+    sessionsSuppressed: sessions.filter((session) =>
+      session.publicationStatus === "not_added_to_logbook" &&
+      session.qualityDecisionSource === "automatic" &&
+      session.suppressionCategory === "confirmed_noise"
+    ).length,
     sessionsWithUserOrAssistant: sessions.filter((session) => session.conversationMessages > 0).length,
     structuredToolItems: sessions.reduce((total, session) => total + session.structuredToolItems, 0),
     timestampBasis,

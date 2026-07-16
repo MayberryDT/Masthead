@@ -30,39 +30,53 @@ export async function planHermesTranscriptUnits(source: DiscoveredSource): Promi
   const info = await stat(source.path).catch(() => undefined);
   if (!info) return [{ runtime: "hermes", source, timestampBasis: "unknown", unitId: source.path }];
   const content = await readHermesRows(source);
-  const sourceSessionId = sourceSessionIdFromRows(content.rows) ?? source.sourceSessionId ?? sessionIdFromHermesFilename(source.path);
-  const latestMessageAt = newestTimestamp(
-    content.rows.filter(({ row }) => isMessageRole(readString(row, ["role", "type"]))).map(({ row }) => observedAt(row))
-  );
   const pathActivityAt = timestampFromHermesFilename(source.path);
-  const semanticActivityAt = content.lastUpdated ?? latestMessageAt ?? content.startedAt ?? pathActivityAt;
+  const discoveredSessionIds = distinctSourceSessionIds(content.rows);
+  const sourceSessionIds = discoveredSessionIds.length > 0
+    ? discoveredSessionIds
+    : [source.sourceSessionId ?? sessionIdFromHermesFilename(source.path)].filter((value): value is string => Boolean(value));
+  const plannedSessionIds: Array<string | undefined> = sourceSessionIds.length > 0 ? sourceSessionIds : [undefined];
 
-  return [
-    {
+  return plannedSessionIds.map((sourceSessionId) => {
+    const sessionRows = sourceSessionId ? rowsForSession(content.rows, sourceSessionId, source.sourceKind !== "sqlite") : content.rows;
+    const latestMessageAt = newestTimestamp(
+      sessionRows.filter(({ row }) => isMessageRole(readString(row, ["role", "type"]))).map(({ row }) => observedAt(row))
+    );
+    const sessionLastUpdated = newestTimestamp(sessionRows.map(({ row }) => readTimestamp(row, ["last_updated", "ended_at"])));
+    const sessionStartedAt = newestTimestamp(sessionRows.map(({ row }) => readTimestamp(row, ["started_at", "session_start"])));
+    const semanticActivityAt = source.sourceKind === "sqlite"
+      ? sessionLastUpdated ?? latestMessageAt ?? sessionStartedAt ?? content.lastUpdated ?? content.startedAt ?? pathActivityAt
+      : content.lastUpdated ?? latestMessageAt ?? content.startedAt ?? pathActivityAt;
+    return {
       fileSizeBytes: info.size,
       modifiedAt: info.mtime.toISOString(),
       runtime: "hermes",
       semanticActivityAt,
       source: sourceSessionId ? { ...source, sourceSessionId } : source,
       sourceSessionId,
-      timestampBasis: content.lastUpdated || latestMessageAt || content.startedAt ? "semantic" : pathActivityAt ? "source_path" : "file_modified",
+      timestampBasis: sessionLastUpdated || latestMessageAt || sessionStartedAt || content.lastUpdated || content.startedAt ? "semantic" : pathActivityAt ? "source_path" : "file_modified",
       unitId: `hermes:${sourceSessionId ?? source.path}`
-    }
-  ];
+    };
+  });
 }
 
 export async function parseHermesTranscriptUnit(unit: TranscriptUnitPlan, cursor?: IngestCursor): Promise<ParsedTranscriptUnit> {
   const source = unit.sourceSessionId ? { ...unit.source, sourceSessionId: unit.sourceSessionId } : unit.source;
   const content = await readHermesRows(source, cursor);
+  const scopedRows = unit.sourceSessionId
+    ? rowsForSession(content.rows, unit.sourceSessionId, source.sourceKind !== "sqlite")
+    : content.rows;
+  const shapeDiagnostics = transcriptShapeDiagnostics(scopedRows, unit.sourceSessionId ?? sessionIdFromHermesFilename(source.path));
   const records = deduplicateRecords(
-    content.rows.flatMap((entry) => recordFromRow(source, unit.sourceSessionId, entry))
+    scopedRows.flatMap((entry) => recordFromRow(source, unit.sourceSessionId, entry))
   );
   const parsed = parsedTranscriptUnit({ ...unit, source }, records);
-  if (!content.diagnostics?.length) return parsed;
+  const diagnostics = [...(content.diagnostics ?? []), ...shapeDiagnostics];
+  if (!diagnostics.length) return parsed;
   return {
     ...parsed,
-    completeness: content.diagnostics.some((diagnostic) => diagnostic.severity === "error") ? "unrecognized" : "partial",
-    diagnostics: [...parsed.diagnostics, ...content.diagnostics]
+    completeness: records.length === 0 && diagnostics.some((diagnostic) => diagnostic.severity === "error") ? "unrecognized" : "partial",
+    diagnostics: [...parsed.diagnostics, ...diagnostics]
   };
 }
 
@@ -85,8 +99,8 @@ async function readHermesRows(source: DiscoveredSource, cursor?: IngestCursor): 
   if (source.path.endsWith(".json") && !source.path.endsWith(".jsonl")) {
     try {
       return rowsFromJsonValue(JSON.parse(await readFile(source.path, "utf8")), `${source.path}:document`);
-    } catch {
-      return { rows: [] };
+    } catch (error) {
+      return { diagnostics: [parseDiagnostic("hermes_invalid_json", `${source.path}:document`, error, "error")], rows: [] };
     }
   }
   return readJsonlRows(source, cursor);
@@ -96,16 +110,21 @@ async function readJsonlRows(source: DiscoveredSource, cursor?: IngestCursor): P
   if (!source.path) return { rows: [] };
   const info = await stat(source.path);
   const resumeOffset = cursor?.sourcePath === source.path && cursor.byteOffset <= info.size ? cursor.byteOffset : 0;
+  const diagnostics: AdapterDiagnostic[] = [];
   const rows: HermesRow[] = [];
   let lastUpdated: string | undefined;
   for await (const line of streamJsonlLines(source.path, resumeOffset)) {
     let value: unknown;
     try {
       value = JSON.parse(line.raw);
-    } catch {
+    } catch (error) {
+      diagnostics.push(parseDiagnostic("hermes_invalid_json", `${source.path}:${line.lineNumber}`, error));
       continue;
     }
-    if (!isRecord(value)) continue;
+    if (!isRecord(value) || Array.isArray(value)) {
+      diagnostics.push(parseDiagnostic("hermes_non_object_row", `${source.path}:${line.lineNumber}`));
+      continue;
+    }
     lastUpdated = newestTimestamp([lastUpdated, readTimestamp(value, ["last_updated"])]);
     rows.push({
       cursorAfter: {
@@ -120,7 +139,7 @@ async function readJsonlRows(source: DiscoveredSource, cursor?: IngestCursor): P
       row: value
     });
   }
-  return { lastUpdated, rows };
+  return { diagnostics, lastUpdated, rows };
 }
 
 async function readSqliteRows(path: string): Promise<HermesRows> {
@@ -144,6 +163,7 @@ async function readSqliteRows(path: string): Promise<HermesRows> {
         for (const [index, rawRow] of values.entries()) {
           const value = sqliteJsonValue(rawRow) ?? rawRow;
           const parsed = rowsFromJsonValue(value, `${path}:${table}:${offset + index}`);
+          diagnostics.push(...(parsed.diagnostics ?? []));
           rows.push(...parsed.rows);
           lastUpdated = newestTimestamp([lastUpdated, parsed.lastUpdated]);
           startedAt = newestTimestamp([startedAt, parsed.startedAt]);
@@ -191,14 +211,21 @@ function sqliteJsonValue(row: Record<string, unknown>): unknown {
 }
 
 function rowsFromJsonValue(value: unknown, locator: string): HermesRows {
-  if (!isRecord(value)) return { rows: [] };
+  if (!isRecord(value) || Array.isArray(value)) return { diagnostics: [parseDiagnostic("hermes_non_object_row", locator)], rows: [] };
   const inheritedSessionId = readString(value, ["session_id", "sessionId", "conversation_id", "conversationId"]);
   const lastUpdated = newestTimestamp([readTimestamp(value, ["last_updated"]), readTimestamp(value, ["ended_at"])]);
   const startedAt = readTimestamp(value, ["started_at"]);
   if (Array.isArray(value.messages)) {
+    const diagnostics: AdapterDiagnostic[] = [];
+    const rows: HermesRow[] = [];
+    for (const [index, row] of value.messages.entries()) {
+      if (isRecord(row)) rows.push({ inheritedSessionId, locator: `${locator}:message:${index}`, row });
+      else diagnostics.push(parseDiagnostic("hermes_non_object_row", `${locator}:message:${index}`));
+    }
     return {
+      diagnostics,
       lastUpdated,
-      rows: value.messages.filter(isRecord).map((row, index) => ({ inheritedSessionId, locator: `${locator}:message:${index}`, row })),
+      rows,
       startedAt
     };
   }
@@ -313,12 +340,61 @@ function deduplicateRecords(records: AdapterRecord[]): AdapterRecord[] {
   return [...deduplicated.values()];
 }
 
-function sourceSessionIdFromRows(rows: HermesRow[]): string | undefined {
-  for (const { inheritedSessionId, row } of rows) {
+function distinctSourceSessionIds(rows: HermesRow[]): string[] {
+  return [...new Set(rows.flatMap(({ inheritedSessionId, row }) => {
     const sourceSessionId = readString(row, ["session_id", "sessionId", "conversation_id", "conversationId"]) ?? inheritedSessionId;
-    if (sourceSessionId) return sourceSessionId;
+    return sourceSessionId ? [sourceSessionId] : [];
+  }))].toSorted();
+}
+
+function rowsForSession(rows: HermesRow[], sourceSessionId: string, includeUnidentified = false): HermesRow[] {
+  return rows.filter(({ inheritedSessionId, row }) => {
+    const rowSessionId = readString(row, ["session_id", "sessionId", "conversation_id", "conversationId"]) ?? inheritedSessionId;
+    return rowSessionId === sourceSessionId || (includeUnidentified && !rowSessionId);
+  });
+}
+
+function transcriptShapeDiagnostics(rows: HermesRow[], fallbackSessionId: string | undefined): AdapterDiagnostic[] {
+  const diagnostics: AdapterDiagnostic[] = [];
+  for (const entry of rows) {
+    const role = readString(entry.row, ["role", "type"]);
+    if (entry.locator.includes(":sessions:") || role === "session_meta") continue;
+    const sourceSessionId = readString(entry.row, ["session_id", "sessionId", "conversation_id", "conversationId"])
+      ?? entry.inheritedSessionId
+      ?? fallbackSessionId;
+    if (!sourceSessionId) diagnostics.push(parseDiagnostic("hermes_missing_identity", entry.locator));
+    if (!role) {
+      diagnostics.push(parseDiagnostic("hermes_unknown_shape", entry.locator));
+      continue;
+    }
+    if (!isMessageRole(role)) {
+      diagnostics.push(parseDiagnostic("hermes_unknown_role", entry.locator));
+      continue;
+    }
+    if (sourceSessionId && recordFromRow(
+      { confidence: "heuristic", runtime: "hermes", schemaVersion: "diagnostic", sourceId: "diagnostic", sourceKind: "sqlite" },
+      sourceSessionId,
+      entry
+    ).length === 0) {
+      diagnostics.push(parseDiagnostic("hermes_unknown_shape", entry.locator));
+    }
   }
-  return undefined;
+  return diagnostics;
+}
+
+function parseDiagnostic(
+  code: string,
+  locator: string,
+  error?: unknown,
+  severity: AdapterDiagnostic["severity"] = "warning"
+): AdapterDiagnostic {
+  return {
+    code,
+    ...(error ? { details: error instanceof Error ? error.message : String(error) } : {}),
+    message: `Hermes transcript row could not be normalized: ${locator}.`,
+    observedAt: new Date(0).toISOString(),
+    severity
+  };
 }
 
 function observedAt(row: Record<string, unknown>): string | undefined {

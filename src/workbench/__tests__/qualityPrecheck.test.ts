@@ -112,6 +112,53 @@ describe("Workbench capture quality precheck", () => {
     });
   });
 
+  test("keeps exact-duplicate candidate lookup indexed across a medium corpus", async () => {
+    const db = await testDb();
+    const sessionIds = Array.from({ length: 60 }, (_, index) => `session:duplicate-corpus-${String(index).padStart(2, "0")}`);
+    for (const sessionId of sessionIds) {
+      seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId, title: sessionId });
+      runCaptureQualityPrecheck(db, sessionId);
+    }
+
+    let queryCount = 0;
+    const countedDb = new Proxy(db, {
+      get(target, property) {
+        if (property === "prepare") {
+          return (sql: string) => {
+            queryCount += 1;
+            return target.prepare(sql);
+          };
+        }
+        const value = Reflect.get(target, property, target) as unknown;
+        return typeof value === "function" ? value.bind(target) : value;
+      }
+    }) as MastheadDatabase;
+    expect(runCaptureQualityPrecheck(countedDb, sessionIds.at(-1)!)).toMatchObject({
+      disposition: "suppress",
+      reason: "exact_duplicate"
+    });
+    expect(queryCount).toBeLessThanOrEqual(20);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM session_transcript_fingerprints").get()).toEqual({ count: 60 });
+    expect(db.prepare(
+      "EXPLAIN QUERY PLAN SELECT session_id FROM session_transcript_fingerprints WHERE fingerprint = ?"
+    ).all("missing")).toContainEqual(expect.objectContaining({ detail: expect.stringContaining("idx_session_transcript_fingerprints_lookup") }));
+  });
+
+  test("invalidates a persisted duplicate fingerprint when canonical transcript evidence changes", async () => {
+    const db = await testDb();
+    seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:a-original", title: "Original" });
+    seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:z-later", title: "Later" });
+    expect(runCaptureQualityPrecheck(db, "session:z-later")).toMatchObject({ reason: "exact_duplicate" });
+
+    db.prepare("UPDATE messages SET text_redacted = ?, text_hash = ? WHERE session_id = ?")
+      .run("Changed canonical evidence", "changed-hash", "session:a-original");
+
+    expect(runCaptureQualityPrecheck(db, "session:z-later")).toMatchObject({
+      disposition: "keep",
+      reason: "durable_file_effect"
+    });
+  });
+
   test("keeps a grounded multi-turn session with a durable file effect", async () => {
     const db = await testDb();
     seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:good", title: "Good work" });
