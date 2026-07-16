@@ -284,7 +284,11 @@ function recordHealthForParsedUnit(
   unit: NonNullable<ReturnType<typeof getImportWorkUnit>>,
   updatedAt: string
 ) {
-  const reason = importHealthReason(parsedUnit);
+  const incrementalNoop = Boolean(unit.cursorAfter ?? unit.cursorBefore) &&
+    parsedUnit.completeness === "complete" &&
+    parsedUnit.records.length === 0 &&
+    parsedUnit.diagnostics.length === 0;
+  const reason = incrementalNoop ? undefined : importHealthReason(parsedUnit);
   return recordSessionImportHealth(db, {
     diagnostics: parsedUnit.diagnostics.map(({ code, message, severity }) => ({ code, message, severity })),
     evidenceRevision: importEvidenceRevision(parsedUnit),
