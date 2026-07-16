@@ -88,4 +88,33 @@ describe("ImportCompletionReport", () => {
     expect(html).toContain("2");
     expect(html).toContain("retry failed units");
   });
+
+  test("shows a sessionless repair-required unit as repairable rather than Not Added", () => {
+    const onPreviewRepair = () => undefined;
+    const html = renderToStaticMarkup(
+      <ImportCompletionReport
+        onPreviewRepair={onPreviewRepair}
+        report={{
+          anomalies: [], cappedUnits: 0, dossierReadySessions: 0, enrichedSessions: 0, failedUnits: 0,
+          generatedAt: "2026-07-15T12:00:00.000Z", importHealth: {
+            complete: 0, diagnostics: [], partial: 0,
+            reasons: [{ count: 1, reason: "missing_session_identity" }], repairRequired: 1, total: 1
+          }, importJobId: "job-sessionless-repair", logbookSearchableSessions: 0, mcpVisibleSessions: 0,
+          nextActions: ["repair_import"], outOfRangeSessions: 0, recordsFailed: 1, recordsImported: 0,
+          recordsRecognized: 0, recordsRejected: 1, recordsSkipped: 0, runtime: "opencode", sessionsCreated: 0,
+          sessionsDiscovered: 0, sessionsFinalized: 0, sessionsOnPackagePath: 0, sessionsRepairRequired: 0,
+          sessionsSuppressed: 0, sessionsUpdated: 0, skippedUnits: 0, status: "succeeded_with_issues",
+          timestampBasis: { file_modified: 0, semantic: 0, source_path: 0, unknown: 1 }, transcriptsImported: 0
+        }}
+      />
+    );
+    const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+
+    expect(html).toContain('class="import-completion-report needs-repair"');
+    expect(text).toContain("Needs import repair");
+    expect(text).toContain("1 repair unit needs import repair");
+    expect(text).toContain("Preview import repair");
+    expect(text).not.toContain("Not Added");
+    expect(text).not.toContain("1 sessions need import repair");
+  });
 });

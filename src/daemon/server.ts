@@ -60,6 +60,7 @@ import { upsertFileEffectsFromGitSnapshot } from "./db/gitSnapshotEffectsReposit
 import { createRawEventRepository, type RawEventRepository, type RawEventSource } from "./db/rawEventRepository.ts";
 import { getSessionDossier } from "./db/sessionDossierRepository.ts";
 import { getSessionTranscript, type SessionTranscriptKindFilter } from "./db/sessionTranscriptRepository.ts";
+import { initializeSessionTranscriptFingerprintIndex } from "./db/sessionTranscriptFingerprintIndex.ts";
 import {
   claimWorkbenchSessions,
   countWorkbenchQueue,
@@ -232,6 +233,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       }
       migrateDatabase(database);
       if (pendingMigrations && !config.skipMigrationQuickCheck) quickCheckMastheadDatabase(database);
+      initializeSessionTranscriptFingerprintIndex(database);
       runLegacyWorkbenchPublicationBackfill(database);
       const databaseIdentity = getOrCreateDatabaseIdentity(database);
       const interruptedImportJobIds = recoverInterruptedImportJobs(database);

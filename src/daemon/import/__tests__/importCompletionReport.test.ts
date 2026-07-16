@@ -191,6 +191,32 @@ describe("import completion report", () => {
     db.close();
   });
 
+  test("reports a sessionless repair-required work unit without inflating session counts", async () => {
+    const { db } = await seededReportDatabase("masthead-import-report-sessionless-repair-");
+    recordSessionImportHealth(db, {
+      diagnostics: [{
+        code: "missing_session_identity",
+        message: "The source unit did not contain a canonical session identity.",
+        severity: "error"
+      }],
+      evidenceRevision: "sha256:missing-identity",
+      importJobId: "import-1",
+      reason: "missing_session_identity",
+      status: "repair_required",
+      updatedAt: "2026-07-01T00:02:00.000Z",
+      workUnitId: "unit:1"
+    });
+
+    expect(buildImportCompletionReport(db, reportInput())).toMatchObject({
+      importHealth: { repairRequired: 1 },
+      nextActions: expect.arrayContaining(["repair_import"]),
+      sessionsFinalized: 0,
+      sessionsRepairRequired: 0,
+      status: "succeeded_with_issues"
+    });
+    db.close();
+  });
+
   test("holds pathological import sessions on the review path instead of automatic Not Added", async () => {
     const { db } = await seededReportDatabase("masthead-import-report-pathological-");
     cloneImportSession(db, "session:published", "s-published");

@@ -7,7 +7,8 @@ type Props = {
 };
 
 export function ImportCompletionReport({ report, onPreviewRepair }: Props) {
-  const needsRepair = report.sessionsRepairRequired > 0 || report.anomalies.some((anomaly) => anomaly.severity === "error");
+  const repairUnits = Math.max(report.importHealth?.repairRequired ?? 0, report.sessionsRepairRequired);
+  const needsRepair = repairUnits > 0 || report.anomalies.some((anomaly) => anomaly.severity === "error");
   const badge = importStatusBadge(report.status, needsRepair);
   const importedUnits = report.sourceUnitsHydrated ?? report.recordsRecognized;
   const otherDeferredUnits = Math.max(0, (report.sourceUnitsDeferred ?? report.cappedUnits) - report.cappedUnits);
@@ -31,12 +32,19 @@ export function ImportCompletionReport({ report, onPreviewRepair }: Props) {
         <ReportMetric label="Rejected records" value={report.recordsRejected} tone={report.recordsRejected ? "warning" : "neutral"} />
         <ReportMetric label="Canonical sessions" value={report.sessionsFinalized} />
         <ReportMetric label="Package path" value={report.sessionsOnPackagePath} />
-        <ReportMetric label="Import repair" value={report.sessionsRepairRequired} tone={report.sessionsRepairRequired ? "warning" : "neutral"} />
+        <ReportMetric label="Import repair units" value={repairUnits} tone={repairUnits ? "warning" : "neutral"} />
         <ReportMetric label="Confirmed noise" value={report.sessionsSuppressed} />
         <ReportMetric label="Deferred by cap" value={report.cappedUnits} />
       </dl>
       <div className="import-report-evidence">
-        {report.sessionsRepairRequired > 0 ? <p>{report.sessionsRepairRequired.toLocaleString()} sessions need import repair</p> : null}
+        {report.sessionsRepairRequired > 0 ? (
+          <p>
+            {report.sessionsRepairRequired.toLocaleString()} {report.sessionsRepairRequired === 1 ? "session needs" : "sessions need"} import repair
+            {` · ${repairUnits.toLocaleString()} repair ${repairUnits === 1 ? "unit" : "units"}`}
+          </p>
+        ) : repairUnits > 0 ? (
+          <p>{repairUnits.toLocaleString()} repair {repairUnits === 1 ? "unit needs" : "units need"} import repair</p>
+        ) : null}
         {report.recordsRejected > 0 ? <p>Parser rejected {report.recordsRejected.toLocaleString()} source records</p> : null}
         <p>Timestamp basis: {timestampBasisLabel(report.timestampBasis)}</p>
       </div>

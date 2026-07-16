@@ -62,7 +62,7 @@ export function buildImportCompletionReport(
     : input.status;
   const nextActions: ImportCompletionReportDto["nextActions"] = [];
   if (input.failedUnits > 0) nextActions.push("retry_failed_units");
-  if (hasErrorAnomaly) nextActions.push("repair_import");
+  if (importHealth.repairRequired > 0 || hasErrorAnomaly) nextActions.push("repair_import");
   if (status === "succeeded" || status === "succeeded_with_issues") {
     nextActions.push("open_logbook", "import_full_archive");
   }

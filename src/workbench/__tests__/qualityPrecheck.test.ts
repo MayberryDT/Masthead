@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { seedSession } from "../../daemon/db/__tests__/sessionTestHelpers.ts";
+import { initializeSessionTranscriptFingerprintIndex } from "../../daemon/db/sessionTranscriptFingerprintIndex.ts";
 import { migrateDatabase } from "../../daemon/db/schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../../daemon/db/sqlite.ts";
 import { runCaptureQualityPrecheck } from "../qualityPrecheck.ts";
@@ -105,6 +106,7 @@ describe("Workbench capture quality precheck", () => {
       sessionId: "session:duplicate-b",
       title: "Duplicate"
     });
+    runCaptureQualityPrecheck(db, "session:duplicate-a");
 
     expect(runCaptureQualityPrecheck(db, "session:duplicate-b")).toMatchObject({
       disposition: "suppress",
@@ -117,8 +119,8 @@ describe("Workbench capture quality precheck", () => {
     const sessionIds = Array.from({ length: 60 }, (_, index) => `session:duplicate-corpus-${String(index).padStart(2, "0")}`);
     for (const sessionId of sessionIds) {
       seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId, title: sessionId });
-      runCaptureQualityPrecheck(db, sessionId);
     }
+    initializeSessionTranscriptFingerprintIndex(db);
 
     let queryCount = 0;
     const countedDb = new Proxy(db, {
@@ -148,10 +150,15 @@ describe("Workbench capture quality precheck", () => {
     const db = await testDb();
     seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:a-original", title: "Original" });
     seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:z-later", title: "Later" });
+    runCaptureQualityPrecheck(db, "session:a-original");
     expect(runCaptureQualityPrecheck(db, "session:z-later")).toMatchObject({ reason: "exact_duplicate" });
 
     db.prepare("UPDATE messages SET text_redacted = ?, text_hash = ? WHERE session_id = ?")
       .run("Changed canonical evidence", "changed-hash", "session:a-original");
+    expect(db.prepare("SELECT session_id FROM session_transcript_fingerprints WHERE session_id = ?").get("session:a-original")).toBeUndefined();
+    runCaptureQualityPrecheck(db, "session:a-original");
+    expect(db.prepare("SELECT session_id FROM session_transcript_fingerprints WHERE session_id = ?").get("session:a-original"))
+      .toEqual({ session_id: "session:a-original" });
 
     expect(runCaptureQualityPrecheck(db, "session:z-later")).toMatchObject({
       disposition: "keep",
