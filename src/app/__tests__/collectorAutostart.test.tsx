@@ -19,6 +19,7 @@ describe("collector autostart", () => {
   test("keeps connected secondary surfaces online after desktop bridge autostart", async () => {
     const requestedUrls: string[] = [];
     const invoke = vi.fn(async (command: string) => {
+      if (command === "set_keep_running_in_tray_command") return { ok: true };
       expect(command).toBe("start_live_connector_command");
       return {
         ok: true,
@@ -61,7 +62,7 @@ describe("collector autostart", () => {
     });
 
     await act(async () => {
-      await waitFor(() => invoke.mock.calls.length === 1);
+      await waitFor(() => commandCallCount(invoke.mock.calls, "start_live_connector_command") === 1);
       await flushTimers();
       await flushTimers();
     });
@@ -148,6 +149,7 @@ describe("collector autostart", () => {
   test("does not report projection failure when startup load is superseded by a later successful request", async () => {
     const projectionRequests: Array<ReturnType<typeof deferred<unknown>>> = [];
     const invoke = vi.fn(async (command: string) => {
+      if (command === "set_keep_running_in_tray_command") return { ok: true };
       expect(command).toBe("start_live_connector_command");
       return {
         ok: true,
@@ -195,7 +197,7 @@ describe("collector autostart", () => {
     });
 
     await act(async () => {
-      await waitFor(() => invoke.mock.calls.length === 1);
+      await waitFor(() => commandCallCount(invoke.mock.calls, "start_live_connector_command") === 1);
     });
     await waitFor(() => projectionRequests.length >= 1);
     await act(async () => {
@@ -220,7 +222,7 @@ describe("collector autostart", () => {
       await flushTimers();
     });
 
-    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(commandCallCount(invoke.mock.calls, "start_live_connector_command")).toBe(1);
     expect(container.textContent).not.toContain("Live projection did not load");
     expect(container.textContent).not.toContain("Collector started, but live projection did not load.");
 
@@ -238,6 +240,7 @@ describe("collector autostart", () => {
       projectionUrl: string;
     }>();
     const invoke = vi.fn(async (command: string) => {
+      if (command === "set_keep_running_in_tray_command") return { ok: true };
       expect(command).toBe("start_live_connector_command");
       return connectorStart.promise;
     });
@@ -253,7 +256,9 @@ describe("collector autostart", () => {
       vi.fn(async (url: string | URL | Request) => {
         const requestUrl = String(url);
         const { pathname } = new URL(requestUrl);
-        if (pathname === "/health" && !invoke.mock.calls.length) return new Response("offline", { status: 503 });
+        if (pathname === "/health" && commandCallCount(invoke.mock.calls, "start_live_connector_command") === 0) {
+          return new Response("offline", { status: 503 });
+        }
         return jsonResponse(responseForUrl(requestUrl));
       })
     );
@@ -279,7 +284,7 @@ describe("collector autostart", () => {
       await flushTimers();
     });
 
-    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(commandCallCount(invoke.mock.calls, "start_live_connector_command")).toBe(1);
     expect(container.textContent).toContain("Collector startup");
     expect(container.textContent).toContain("Starting local collector after app launch");
     expect(container.textContent).toContain("Desktop bridge");
@@ -302,6 +307,7 @@ describe("collector autostart", () => {
 
   test("renders Masthead before starting the collector through the desktop bridge", async () => {
     const invoke = vi.fn(async (command: string) => {
+      if (command === "set_keep_running_in_tray_command") return { ok: true };
       expect(command).toBe("start_live_connector_command");
       return {
         ok: true,
@@ -325,7 +331,9 @@ describe("collector autostart", () => {
       vi.fn(async (url: string | URL | Request) => {
         const requestUrl = String(url);
         const { pathname } = new URL(requestUrl);
-        if (pathname === "/health" && !invoke.mock.calls.length) return new Response("offline", { status: 503 });
+        if (pathname === "/health" && commandCallCount(invoke.mock.calls, "start_live_connector_command") === 0) {
+          return new Response("offline", { status: 503 });
+        }
         return jsonResponse(responseForUrl(requestUrl));
       })
     );
@@ -342,7 +350,7 @@ describe("collector autostart", () => {
     });
 
     expect(container.textContent).toContain("Masthead");
-    expect(invoke).not.toHaveBeenCalled();
+    expect(commandCallCount(invoke.mock.calls, "start_live_connector_command")).toBe(0);
 
     await act(async () => {
       await flushTimers();
@@ -350,13 +358,14 @@ describe("collector autostart", () => {
       await flushTimers();
     });
 
-    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(commandCallCount(invoke.mock.calls, "start_live_connector_command")).toBe(1);
 
     root.unmount();
   });
 
   test("still starts once when scheduled autostart is cleaned up before frames fire", async () => {
     const invoke = vi.fn(async (command: string) => {
+      if (command === "set_keep_running_in_tray_command") return { ok: true };
       expect(command).toBe("start_live_connector_command");
       return {
         ok: true,
@@ -376,7 +385,9 @@ describe("collector autostart", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string | URL | Request) => {
-        if (!invoke.mock.calls.length) return new Response("offline", { status: 503 });
+        if (commandCallCount(invoke.mock.calls, "start_live_connector_command") === 0) {
+          return new Response("offline", { status: 503 });
+        }
         return jsonResponse(responseForUrl(String(url)));
       })
     );
@@ -400,7 +411,7 @@ describe("collector autostart", () => {
     });
 
     expect(container.textContent).toContain("Masthead");
-    expect(invoke).not.toHaveBeenCalled();
+    expect(commandCallCount(invoke.mock.calls, "start_live_connector_command")).toBe(0);
 
     await act(async () => {
       frames.flush();
@@ -408,7 +419,7 @@ describe("collector autostart", () => {
       await flushTimers();
     });
 
-    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(commandCallCount(invoke.mock.calls, "start_live_connector_command")).toBe(1);
 
     root.unmount();
   });
@@ -455,6 +466,10 @@ function createDetectedConnectorFetch() {
 
 function flushTimers(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function commandCallCount(calls: readonly (readonly unknown[])[], command: string): number {
+  return calls.filter(([candidate]) => candidate === command).length;
 }
 
 async function waitFor(condition: () => boolean): Promise<void> {
