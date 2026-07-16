@@ -77,7 +77,7 @@ export async function runImportWorkUnit(input: {
   let failed = unit.failedRecords;
   let recordsSinceYield = 0;
   let recordsSinceCheckpoint = 0;
-  let latestCursorAfter = cursorValue(unit.cursorAfter);
+  let latestCursorAfter = cursorValue(unit.cursorAfter ?? unit.cursorBefore);
   const sessionIds = new Set<string>();
   const pendingImpacts = new Map<string, { impactKind: "enriched" | "transcript_added" | "created" | "updated"; recordCount: number; sessionId: string }>();
   const pendingFailures = new Map<string, {

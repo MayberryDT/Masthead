@@ -6,6 +6,7 @@ import {
   markWorkbenchQualityForReview,
   markWorkbenchTranscriptStatus,
   readWorkbenchSessionState,
+  removeAutomaticWorkbenchSessionForImportRepair,
   reopenWorkbenchSessionForQualityReview,
   type WorkbenchActor,
   type WorkbenchSessionStateRecord
@@ -74,13 +75,7 @@ export function reconcileImportedTranscript(
   }
 
   if (options.holdForRepair) {
-    if (
-      state.publicationStatus !== "publish_path" ||
-      state.nextAction !== "review_quality" ||
-      state.qualityStatus !== "unchecked"
-    ) {
-      state = markWorkbenchQualityForReview(db, { actor, evidenceRevision: currentEvidenceRevision, sessionId }).state;
-    }
+    state = removeAutomaticWorkbenchSessionForImportRepair(db, sessionId);
     return { quality, state };
   }
 

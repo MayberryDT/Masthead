@@ -415,6 +415,7 @@ function workUnitFromRow(row: Record<string, unknown>): ImportWorkUnitDto {
     unitKind: stringValue(row.unit_kind) as ImportWorkUnitKind,
     workUnitId: stringValue(row.work_unit_id),
     estimatedRecords: optionalNumber(row.estimated_records),
+    cursorBefore: parseOptionalJson(row.cursor_before_json),
     cursorAfter: parseOptionalJson(row.cursor_after_json),
     failureGroupId: nullableString(row.failure_group_id) ?? undefined
   };

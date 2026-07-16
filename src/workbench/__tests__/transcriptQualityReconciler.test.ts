@@ -79,6 +79,23 @@ describe("transcript quality reconciliation", () => {
     db.close();
   });
 
+  test("removes an automatically enrolled session from the package path during an import repair hold", async () => {
+    const db = await testDb();
+    const sessionId = "session:repair-hold";
+    seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId, title: "Repair hold" });
+    reconcileImportedTranscript(db, sessionId, { finalizeNoise: false });
+    expect(readWorkbenchSessionState(db, sessionId)).toMatchObject({
+      publicationStatus: "publish_path",
+      qualityDecisionSource: "automatic"
+    });
+
+    const result = reconcileImportedTranscript(db, sessionId, { finalizeNoise: false, holdForRepair: true });
+
+    expect(result.state).toBeUndefined();
+    expect(readWorkbenchSessionState(db, sessionId)).toBeUndefined();
+    db.close();
+  });
+
   test("new transcript evidence automatically re-admits a provisional metadata-only session", async () => {
     const db = await testDb();
     seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:hydrate", title: "Hydrate" });

@@ -217,7 +217,7 @@ describe("import completion report", () => {
     db.close();
   });
 
-  test("holds pathological import sessions on the review path instead of automatic Not Added", async () => {
+  test("holds pathological import sessions outside the package path instead of automatic Not Added", async () => {
     const { db } = await seededReportDatabase("masthead-import-report-pathological-");
     cloneImportSession(db, "session:published", "s-published");
     markWorkbenchPublished(db, {
@@ -252,16 +252,11 @@ describe("import completion report", () => {
 
     expect(report).toMatchObject({
       nextActions: expect.arrayContaining(["repair_import"]),
-      sessionsOnPackagePath: 1,
+      sessionsOnPackagePath: 0,
       sessionsSuppressed: 0,
       status: "succeeded_with_issues"
     });
-    expect(readWorkbenchSessionState(db, "session:1")).toMatchObject({
-      nextAction: "review_quality",
-      publicationStatus: "publish_path",
-      qualityDecisionSource: "automatic",
-      qualityStatus: "unchecked"
-    });
+    expect(readWorkbenchSessionState(db, "session:1")).toBeUndefined();
     expect(readWorkbenchSessionState(db, "session:published")).toMatchObject({
       publicationStatus: "published",
       sessionPackageStatus: "published"

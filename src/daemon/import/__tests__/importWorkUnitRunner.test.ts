@@ -2,12 +2,14 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import type { AdapterRecord, DiscoveredSource } from "../../../adapters/types.ts";
+import type { AdapterRecord, DiscoveredSource, IngestCursor } from "../../../adapters/types.ts";
+import type { TranscriptUnitPlan } from "../../../adapters/transcriptUnits.ts";
 import {
   createImportManifest,
   createImportWorkUnit,
   listImportFailureGroups,
-  listImportWorkUnits
+  listImportWorkUnits,
+  updateImportWorkUnit
 } from "../../db/importLedgerRepository.ts";
 import { summarizeImportSessionImpacts } from "../../db/importSessionImpactRepository.ts";
 import { migrateDatabase } from "../../db/schema.ts";
@@ -536,6 +538,67 @@ describe("import work unit runner", () => {
     });
   });
 
+  test("hydrates incremental parsing from the latest durable cursor", async () => {
+    const sourcePath = join(tempDir, "incremental.jsonl");
+    const cursorBefore: IngestCursor = {
+      byteOffset: 120,
+      cursorId: "planned-cursor",
+      sourceId: "opencode-sessions:thread.jsonl",
+      sourcePath
+    };
+    const unitId = seedWorkUnit(db, sourcePath, { cursorBefore });
+    const observedCursors: Array<IngestCursor | undefined> = [];
+    const parseTranscriptUnit = async (unit: TranscriptUnitPlan, cursor?: IngestCursor) => {
+      observedCursors.push(cursor);
+      return {
+        completeness: "complete" as const,
+        diagnostics: [],
+        records: [],
+        sourceSessionIds: [],
+        unit
+      };
+    };
+
+    await runImportWorkUnit({
+      db,
+      hostId: "host:test",
+      parseTranscriptUnit,
+      runtimeKind: "opencode",
+      workUnitId: unitId
+    });
+
+    const cursorAfter: IngestCursor = {
+      byteOffset: 240,
+      cursorId: "checkpoint-cursor",
+      sourceId: "opencode-sessions:thread.jsonl",
+      sourcePath
+    };
+    updateImportWorkUnit(db, unitId, {
+      cursorAfter,
+      finishedAt: null,
+      status: "queued"
+    });
+    await runImportWorkUnit({
+      db,
+      hostId: "host:test",
+      parseTranscriptUnit,
+      runtimeKind: "opencode",
+      workUnitId: unitId
+    });
+
+    expect(observedCursors).toHaveLength(2);
+    expect(observedCursors[0]).toMatchObject({
+      byteOffset: cursorBefore.byteOffset,
+      sourceId: cursorBefore.sourceId,
+      sourcePath: cursorBefore.sourcePath
+    });
+    expect(observedCursors[1]).toMatchObject({
+      byteOffset: cursorAfter.byteOffset,
+      sourceId: cursorAfter.sourceId,
+      sourcePath: cursorAfter.sourcePath
+    });
+  });
+
   test("groups diagnostic records and marks the unit failed", async () => {
     const sourcePath = join(tempDir, "bad.jsonl");
     const unitId = seedWorkUnit(db, sourcePath);
@@ -714,7 +777,12 @@ function seedSourceAndImportJob(db: MastheadDatabase, sourcePath: string): void 
 function seedWorkUnit(
   db: MastheadDatabase,
   sourcePath: string,
-  overrides: { confidence?: "authoritative" | "inferred" | "heuristic"; runtime?: "opencode" | "cursor"; sourceKind?: "jsonl" | "sqlite" } = {}
+  overrides: {
+    confidence?: "authoritative" | "inferred" | "heuristic";
+    cursorBefore?: IngestCursor;
+    runtime?: "opencode" | "cursor";
+    sourceKind?: "jsonl" | "sqlite";
+  } = {}
 ): string {
   const manifest = createImportManifest(db, {
     excludedUnits: 0,
@@ -730,6 +798,7 @@ function seedWorkUnit(
   });
   return createImportWorkUnit(db, {
     confidence: overrides.confidence ?? "authoritative",
+    cursorBefore: overrides.cursorBefore,
     importJobId: "import-1",
     manifestId: manifest.manifestId,
     runtime: overrides.runtime ?? "opencode",

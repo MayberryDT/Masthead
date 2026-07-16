@@ -310,6 +310,20 @@ export function readWorkbenchSessionState(db: MastheadDatabase, sessionId: strin
   return row ? stateRowToRecord(db, row) : undefined;
 }
 
+export function removeAutomaticWorkbenchSessionForImportRepair(
+  db: MastheadDatabase,
+  sessionId: string
+): WorkbenchSessionStateRecord | undefined {
+  return writeStateTransition(db, () => {
+    const current = readWorkbenchSessionState(db, sessionId);
+    if (!current || current.publicationStatus === "published" || current.qualityDecisionSource === "user") {
+      return current;
+    }
+    db.prepare("DELETE FROM workbench_session_state WHERE session_id = ?").run(sessionId);
+    return undefined;
+  });
+}
+
 export function markWorkbenchPublished(
   db: MastheadDatabase,
   input: { actor: WorkbenchActor; publishedVia: string; sessionId: string }

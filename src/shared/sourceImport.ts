@@ -117,6 +117,7 @@ export type ImportWorkUnitDto = {
   startedAt?: string;
   finishedAt?: string;
   failureGroupId?: string;
+  cursorBefore?: unknown;
   cursorAfter?: unknown;
 };
 
