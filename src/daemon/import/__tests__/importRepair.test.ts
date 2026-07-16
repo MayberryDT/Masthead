@@ -199,7 +199,7 @@ describe("import repair", () => {
     expect(db.prepare("SELECT artifact_id FROM session_artifacts WHERE artifact_id = ?").get("artifact:published")).toBeDefined();
   });
 
-  test("mixed plans preserve published sessions and continue independent eligible repairs", async () => {
+  test("any published session refuses the entire mixed repair apply", async () => {
     const db = await repairDatabase();
     seedImpact(db, "job:published", "source:published", "session:published", "created");
     const mappings = [
@@ -211,22 +211,26 @@ describe("import repair", () => {
       sourceMappings: mappings
     });
 
-    expect(preview.applyAllowed).toBe(true);
+    expect(preview.applyAllowed).toBe(false);
     expect(preview.preservationReasons).toContainEqual({ reason: "published_artifact", sessionId: "session:published" });
-    const receipt = applyImportRepair(db, {
+    let stagingCalled = false;
+    expect(() => applyImportRepair(db, {
       importJobIds: preview.importJobIds,
       planHash: preview.planHash,
       sourceMappings: mappings,
-      stageReimports: (plans) => stageReplacementJobs(db, plans)
-    });
+      stageReimports: (plans) => {
+        stagingCalled = true;
+        return stageReplacementJobs(db, plans);
+      }
+    })).toThrow("published artifacts block repair");
 
-    expect(receipt.removedSessions).toEqual(["session:grok-fragment"]);
-    expect(receipt.reimportJobIds).toEqual(["job:replacement:job:grok"]);
+    expect(stagingCalled).toBe(false);
+    expect(readSession(db, "session:grok-fragment")).toBeDefined();
     expect(readSession(db, "session:published")).toBeDefined();
     expect(db.prepare("SELECT artifact_id FROM session_artifacts WHERE artifact_id = ?").get("artifact:published")).toBeDefined();
   });
 
-  test("a published session blocks its indivisible job while an independent safe job repairs", async () => {
+  test("a published session blocks every selected job before an independent safe job can repair", async () => {
     const db = await repairDatabase();
     seedImpact(db, "job:grok", "source:grok", "session:published", "updated");
     db.prepare(`INSERT INTO session_sources(session_id, source_id, first_seen_at, last_seen_at)
@@ -255,17 +259,22 @@ describe("import repair", () => {
       reason: "blocked_session_in_indivisible_job",
       sessionId: "session:grok-fragment"
     });
+    expect(preview.applyAllowed).toBe(false);
 
-    const receipt = applyImportRepair(db, {
+    let stagingCalled = false;
+    expect(() => applyImportRepair(db, {
       importJobIds: preview.importJobIds,
       planHash: preview.planHash,
       sourceMappings: mappings,
-      stageReimports: (plans) => stageReplacementJobs(db, plans)
-    });
-    expect(receipt.reimportJobIds).toEqual(["job:replacement:job:other"]);
+      stageReimports: (plans) => {
+        stagingCalled = true;
+        return stageReplacementJobs(db, plans);
+      }
+    })).toThrow("published artifacts block repair");
+    expect(stagingCalled).toBe(false);
     expect(readSession(db, "session:grok-fragment")).toBeDefined();
     expect(readSession(db, "session:published")).toBeDefined();
-    expect(readSession(db, "session:unrelated")).toBeUndefined();
+    expect(readSession(db, "session:unrelated")).toBeDefined();
   });
 
   test("a manual decision blocks its indivisible job while an independent safe job repairs", async () => {

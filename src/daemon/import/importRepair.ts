@@ -106,7 +106,7 @@ export function previewImportRepair(
   const plan = {
     affectedArtifacts,
     affectedSessions,
-    applyAllowed: blockedPublishedSessions.length === 0 || eligibleJobPlans.length > 0,
+    applyAllowed: blockedPublishedSessions.length === 0,
     automaticSuppressionsToReopen,
     blockedPublishedSessions,
     cursorSourcesToReset,
