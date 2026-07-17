@@ -3166,6 +3166,16 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     }
 
     const importUnitsMatch = url.pathname.match(/^\/imports\/([^/]+)\/units$/);
+    const importReportMatch = url.pathname.match(/^\/imports\/([^/]+)\/report$/);
+    const importMatch = url.pathname.match(/^\/imports\/([^/]+)(?:\/(cancel|retry))?$/);
+    const encodedImportJobId = importUnitsMatch?.[1] ?? importReportMatch?.[1] ?? importMatch?.[1];
+    const decodedImportJobId = encodedImportJobId ? decodeRouteSegment(encodedImportJobId) : undefined;
+    if (decodedImportJobId && !decodedImportJobId.ok) {
+      sendJson(request, response, config.allowedOrigins, 400, { ok: false, error: "invalid_import_id" });
+      return;
+    }
+    const importJobId = decodedImportJobId?.value;
+
     if (request.method === "GET" && importUnitsMatch?.[1]) {
       const limit = parseBoundedInteger(url.searchParams.get("limit"), 100, 1, 500);
       const offset = parseBoundedInteger(url.searchParams.get("offset"), 0, 0, Number.MAX_SAFE_INTEGER);
@@ -3178,7 +3188,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         return;
       }
       const units = listImportWorkUnits(database, {
-        importJobId: importUnitsMatch[1],
+        importJobId: importJobId!,
         limit: limit.value,
         offset: offset.value,
         status: isImportWorkUnitStatus(status) ? status : undefined
@@ -3192,9 +3202,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       return;
     }
 
-    const importReportMatch = url.pathname.match(/^\/imports\/([^/]+)\/report$/);
     if (request.method === "GET" && importReportMatch?.[1]) {
-      const job = getImportJob(database, importReportMatch[1]);
+      const job = getImportJob(database, importJobId!);
       sendJson(
         request,
         response,
@@ -3205,9 +3214,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       return;
     }
 
-    const importMatch = url.pathname.match(/^\/imports\/([^/]+)(?:\/(cancel|retry))?$/);
     if (request.method === "GET" && importMatch?.[1] && !importMatch[2]) {
-      const job = getImportJob(database, importMatch[1]);
+      const job = getImportJob(database, importJobId!);
       sendJson(request, response, config.allowedOrigins, job ? 200 : 404, job ? { ok: true, job } : { ok: false, error: "import not found" });
       return;
     }
@@ -3244,7 +3252,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
     if (request.method === "POST" && importMatch?.[1] && importMatch[2] === "cancel") {
       try {
-        const job = cancelImportJob(database, importMatch[1]);
+        const job = cancelImportJob(database, importJobId!);
         sendJson(request, response, config.allowedOrigins, 202, { ok: true, job });
       } catch (error) {
         sendJson(request, response, config.allowedOrigins, 404, {
@@ -3256,7 +3264,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     }
 
     if (request.method === "POST" && importMatch?.[1] && importMatch[2] === "retry") {
-      const existing = getImportJob(database, importMatch[1]);
+      const existing = getImportJob(database, importJobId!);
       if (!existing) {
         sendJson(request, response, config.allowedOrigins, 404, { ok: false, error: "import not found" });
         return;
@@ -4761,6 +4769,15 @@ function mapWorkbenchMissingSessionStatus(status: "current" | "stale" | "failed"
 
 function isRuntimeKind(value: unknown): value is RuntimeKind {
   return typeof value === "string" && (ALL_RUNTIME_KINDS as readonly string[]).includes(value);
+}
+
+function decodeRouteSegment(value: string): { ok: true; value: string } | { ok: false } {
+  try {
+    return { ok: true, value: decodeURIComponent(value) };
+  } catch (error) {
+    if (error instanceof URIError) return { ok: false };
+    throw error;
+  }
 }
 
 function liveRuntimeFromIngestRequest(url: URL, request: IncomingMessage): RuntimeKind | undefined {

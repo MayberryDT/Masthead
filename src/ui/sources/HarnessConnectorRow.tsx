@@ -1,6 +1,7 @@
 import type { HarnessConnectorDto } from "../../shared/harnessConnectors";
 import { AppButton } from "../primitives/AppButton";
 import { StatusBadge, type StatusBadgeTone } from "../primitives/StatusBadge";
+import { connectorStatusPresentation } from "./connectorStatusPresentation";
 
 export type HarnessConnectorRowActions = {
   onEnable?: (runtime: string) => void;
@@ -33,13 +34,8 @@ export function HarnessConnectorRow({
 }: Props) {
   const cta = resolvePrimaryCta(connector, { onEnable: Boolean(onEnable), onTest: Boolean(onTest), onConfirm: Boolean(onConfirm) });
   const disabled = busy || readOnly || !connector.supportsActions;
-  const footerStatus =
-    actionStatus ||
-    (connector.lastTest
-      ? connector.lastTest.status === "passed"
-        ? `Last test passed`
-        : `Last test failed`
-      : undefined);
+  const presentation = connectorStatusPresentation(connector, actionStatus);
+  const footerStatus = presentation.summary;
 
   return (
     <article
@@ -103,8 +99,8 @@ export function HarnessConnectorRow({
         )}
         <span
           className={`sources-connection-open-hint${footerStatus ? " has-status" : ""}${
-            connector.lastTest?.status === "failed" || (actionStatus && /fail/i.test(actionStatus)) ? " is-fail" : ""
-          }${connector.lastTest?.status === "passed" || (actionStatus && /passed|ready/i.test(actionStatus)) ? " is-pass" : ""}`}
+            presentation.tone === "fail" ? " is-fail" : ""
+          }${presentation.tone === "warn" ? " is-warn" : presentation.tone === "pass" ? " is-pass" : ""}`}
           title={footerStatus ?? "Open detail"}
         >
           {footerStatus ?? "Details"}

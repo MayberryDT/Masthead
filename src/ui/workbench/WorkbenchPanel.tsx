@@ -1,4 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { harnessForRuntime } from "../../adapters/harnessCatalog";
+import type { RuntimeKind } from "../../adapters/types";
 import type { WorkbenchActionKind, UseWorkbenchControllerResult } from "../../app/workbench/useWorkbenchController";
 import { AppButton } from "../primitives/AppButton";
 import { useNewItemIds } from "../motion/useNewItemIds";
@@ -84,6 +86,19 @@ const PIPELINE_ITEMS: PipelineItem[] = [
   { kind: "claim", label: "Claim", tooltip: TOOLTIPS.claim },
   { kind: "release", label: "Release", tooltip: TOOLTIPS.release }
 ];
+
+function importRepairReasonLabel(reason: string | undefined): string {
+  if (!reason) return "Imported evidence needs review";
+  if (reason === "partial_parse") return "Some transcript records could not be read";
+  if (reason === "schema_drift") return "Source format changed";
+  if (reason === "missing_identity" || reason === "missing_session_identity") return "Session identity could not be determined";
+  const words = reason.replaceAll("_", " ");
+  return `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
+}
+
+function importRepairRuntimeLabel(runtime: RuntimeKind): string {
+  return harnessForRuntime(runtime)?.label ?? runtime;
+}
 
 export function WorkbenchPanel({
   actionBusy = false,
@@ -331,12 +346,30 @@ export function WorkbenchPanel({
           <div>
             <p className="mono-label">Import repair — outside the package path</p>
             <p>
-              {importHealthSummary.repairRequired} import repair issue{importHealthSummary.repairRequired === 1 ? "" : "s"} remain outside the package path.
-              Repair units are not selectable sessions and are not counted as Not Added.
+              {importHealthSummary.repairRequired} imported source unit{importHealthSummary.repairRequired === 1 ? "" : "s"} need repair before Workbench can use them.
+              They are not selectable sessions and do not count as Not Added.
             </p>
           </div>
           <div className="workbench-import-repair-receipts">
-            {importHealthSummary.importJobIds.map((importJobId) => (
+            {importHealthSummary.repairImports?.length ? importHealthSummary.repairImports.map((importSummary) => (
+              <div className="workbench-import-repair-receipt" key={importSummary.importJobId}>
+                <div className="workbench-import-repair-evidence">
+                  <p className="mono-label">
+                    {importRepairRuntimeLabel(importSummary.runtime)} · {importSummary.repairRequired} repair unit{importSummary.repairRequired === 1 ? "" : "s"}
+                  </p>
+                  <p>Source {importSummary.sourceId}</p>
+                  <p>Import {importSummary.importJobId}</p>
+                  <p className="workbench-import-repair-reason">{importRepairReasonLabel(importSummary.reasons[0]?.reason)}</p>
+                </div>
+                <AppButton
+                  variant="quiet"
+                  onClick={() => onOpenImportReceipt?.(importSummary.importJobId)}
+                  disabled={!onOpenImportReceipt}
+                >
+                  Open import receipt
+                </AppButton>
+              </div>
+            )) : importHealthSummary.importJobIds.map((importJobId) => (
               <AppButton variant="quiet" key={importJobId} onClick={() => onOpenImportReceipt?.(importJobId)} disabled={!onOpenImportReceipt}>
                 Open import receipt
               </AppButton>

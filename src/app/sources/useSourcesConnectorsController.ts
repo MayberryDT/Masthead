@@ -10,6 +10,7 @@ import {
   type HarnessConnectorsSnapshotDto
 } from "../daemonClient";
 import { readOnboardingDismissed, writeOnboardingDismissed } from "../onboardingPreference";
+import type { ConnectorActionRequired } from "../../shared/harnessConnectors";
 
 export type UseSourcesConnectorsControllerOptions = {
   readOnly?: boolean;
@@ -37,7 +38,7 @@ export type UseSourcesConnectorsControllerResult = {
   discoverHistory: () => Promise<void>;
   enable: (runtime: string) => Promise<boolean>;
   enableAllDetected: () => Promise<void>;
-  test: (runtime: string) => Promise<{ verified: boolean; needsAction: boolean }>;
+  test: (runtime: string) => Promise<{ verified: boolean; needsAction: boolean; actionRequired?: ConnectorActionRequired }>;
   uninstall: (runtime: string) => Promise<void>;
   confirmActivation: (runtime: string) => Promise<void>;
 };
@@ -252,14 +253,22 @@ export function useSourcesConnectorsController(
         const connector = next.connectors.find((row) => row.runtime === runtime);
         const lastTest = connector?.lastTest;
         if (lastTest?.status === "passed") {
-          setCardStatus(setCardActionStatus, runtime, `Test passed — ${lastTest.message}`);
-          return { verified: true, needsAction: connector?.live === "needs_action" };
+          setCardStatus(setCardActionStatus, runtime, "Endpoint test passed.");
+          return {
+            verified: true,
+            needsAction: connector?.live === "needs_action" || connector?.live === "error",
+            actionRequired: connector?.actionRequired ?? (connector?.live === "error" ? "repair" : undefined)
+          };
         } else if (lastTest?.status === "failed") {
           setCardStatus(setCardActionStatus, runtime, `Test failed — ${lastTest.message}`);
         } else {
           setCardStatus(setCardActionStatus, runtime, "Test finished with no result payload.");
         }
-        return { verified: false, needsAction: connector?.live === "needs_action" };
+        return {
+          verified: false,
+          needsAction: connector?.live === "needs_action" || connector?.live === "error",
+          actionRequired: connector?.actionRequired ?? (connector?.live === "error" ? "repair" : undefined)
+        };
       } catch (error) {
         setCardStatus(setCardActionStatus, runtime, `Test failed: ${errorMessage(error)}`);
         return { verified: false, needsAction: false };

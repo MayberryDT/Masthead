@@ -8,6 +8,7 @@ import {
   presenceLabel,
   presenceTone
 } from "./HarnessConnectorRow";
+import { connectorStatusPresentation } from "./connectorStatusPresentation";
 
 type Props = {
   connector: HarnessConnectorDto;
@@ -44,8 +45,9 @@ export function HarnessConnectorDetail({
     (connector.live === "needs_action" && connector.actionRequired === "enable_plugin") ||
     showRepair;
 
-  const statusTone = statusBannerTone(connector, actionStatus);
-  const statusText = primaryStatusText(connector, actionStatus);
+  const presentation = connectorStatusPresentation(connector, actionStatus);
+  const statusTone = presentation.tone;
+  const statusText = presentation.detail;
 
   return (
     <aside className="sources-connector-detail sources-connection-detail-rich" aria-label={`${connector.label} connection detail`}>
@@ -170,29 +172,4 @@ export function HarnessConnectorDetail({
       ) : null}
     </aside>
   );
-}
-
-function primaryStatusText(connector: HarnessConnectorDto, actionStatus?: string): string | undefined {
-  if (actionStatus?.trim()) return actionStatus.trim();
-  if (connector.actionMessage && connector.live === "needs_action") return connector.actionMessage;
-  if (connector.presence === "not_found") {
-    return connector.live === "not_installed"
-      ? "Harness not found on this machine."
-      : "Harness not found on this machine. Live wiring may still exist from a previous install.";
-  }
-  if (connector.lastTest?.status === "passed") return `Test passed — ${connector.lastTest.message}`;
-  if (connector.lastTest?.status === "failed") return `Test failed — ${connector.lastTest.message}`;
-  if (connector.live === "ready") return "Live capture is ready for this harness.";
-  return undefined;
-}
-
-function statusBannerTone(
-  connector: HarnessConnectorDto,
-  actionStatus?: string
-): "neutral" | "pass" | "fail" | "warn" {
-  const text = `${actionStatus ?? ""} ${connector.actionMessage ?? ""} ${connector.lastTest?.status ?? ""}`.toLowerCase();
-  if (text.includes("fail") || connector.live === "error" || connector.lastTest?.status === "failed") return "fail";
-  if (text.includes("pass") || text.includes("ready") || connector.lastTest?.status === "passed") return "pass";
-  if (connector.live === "needs_action" || connector.presence === "not_found") return "warn";
-  return "neutral";
 }

@@ -76,6 +76,16 @@ describe("workbench API", () => {
     expect(summary).toEqual({
       ok: true,
       importJobIds: ["import-current"],
+      repairImports: [{
+        importJobId: "import-current",
+        reasons: [
+          { count: 1, reason: "missing_session_identity" },
+          { count: 1, reason: "schema_drift" }
+        ],
+        repairRequired: 2,
+        runtime: "codex",
+        sourceId: "source:import-health"
+      }],
       reasons: [
         { count: 1, reason: "missing_session_identity" },
         { count: 1, reason: "schema_drift" }

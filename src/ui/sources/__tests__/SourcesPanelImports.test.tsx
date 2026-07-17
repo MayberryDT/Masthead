@@ -1019,7 +1019,19 @@ function ReceiptNavigationHarness({ importJobIds, onLoadImportReport, onPreviewI
   if (surface === "workbench") {
     return (
       <WorkbenchPanel
-        importHealthSummary={{ ok: true, importJobIds, reasons: [], repairRequired: importJobIds.length }}
+        importHealthSummary={{
+          ok: true,
+          importJobIds,
+          repairImports: importJobIds.map((importJobId, index) => ({
+            importJobId,
+            reasons: [{ count: 1, reason: "partial_parse" }],
+            repairRequired: 1,
+            runtime: index === 0 ? "opencode" : "cursor",
+            sourceId: `source:receipt-${index}`
+          })),
+          reasons: [],
+          repairRequired: importJobIds.length
+        }}
         onOpenImportReceipt={(importJobId) => {
           setReceiptIntent({ importJobId });
           setSurface("sources");

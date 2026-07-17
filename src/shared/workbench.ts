@@ -1,3 +1,5 @@
+import type { RuntimeKind } from "../adapters/types.ts";
+
 export type WorkbenchMissingSessionDto = {
   sessionId: string;
   title: string;
@@ -43,6 +45,13 @@ export type WorkbenchImportHealthSummaryDto = {
   repairRequired: number;
   reasons: Array<{ reason: string; count: number }>;
   importJobIds: string[];
+  repairImports?: Array<{
+    importJobId: string;
+    sourceId: string;
+    runtime: RuntimeKind;
+    repairRequired: number;
+    reasons: Array<{ reason: string; count: number }>;
+  }>;
 };
 
 export type WorkbenchNextAction =

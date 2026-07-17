@@ -191,9 +191,10 @@ describe("useSourcesConnectorsController", () => {
 
   test("test, uninstall, and confirmActivation call daemon clients", async () => {
     vi.mocked(listHarnessConnectors).mockResolvedValue(snapshot({ ready: 1, found: true, live: "ready" }));
-    const passed = snapshot({ ready: 1, found: true, live: "ready" });
+    const passed = snapshot({ ready: 0, found: true, live: "needs_action" });
     passed.connectors[0] = {
       ...passed.connectors[0]!,
+      actionRequired: "enable_plugin",
       lastTest: { status: "passed", testedAt: "2026-07-08T12:00:00.000Z", message: "ok" }
     };
     vi.mocked(testHarnessConnector).mockResolvedValue(passed);
@@ -207,11 +208,11 @@ describe("useSourcesConnectorsController", () => {
     await renderHarness({ activeProjectionUrl: baseUrl });
     await waitFor(() => latest()?.snapshot !== undefined);
 
-    await act(async () => {
-      await latest().test("codex");
-    });
+    let verification: Awaited<ReturnType<ReturnType<typeof latest>["test"]>> | undefined;
+    await act(async () => { verification = await latest().test("codex"); });
     expect(testHarnessConnector).toHaveBeenCalledWith("codex", baseUrl);
-    expect(latest().cardActionStatus.codex).toMatch(/Test passed/i);
+    expect(latest().cardActionStatus.codex).toBe("Endpoint test passed.");
+    expect(verification).toEqual({ verified: true, needsAction: true, actionRequired: "enable_plugin" });
 
     await act(async () => {
       await latest().uninstall("codex");

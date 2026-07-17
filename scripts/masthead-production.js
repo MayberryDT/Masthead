@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import {
@@ -78,7 +78,7 @@ export async function acquireLifecycleLease(leasePath) {
   };
 }
 
-export async function installProductionLauncher(input) {
+export async function installProductionLauncher(input, dependencyOverrides = {}) {
   const productionRoot = resolve(input.productionRoot || join(input.homeDir || homedir(), ".local", "share", "masthead-production"));
   const requestedTarget = resolve(input.bundlePath || "");
   if (!input.bundlePath || dirname(requestedTarget) !== productionRoot || !VERSIONED_TARGET.test(basename(requestedTarget))) {
@@ -102,13 +102,7 @@ export async function installProductionLauncher(input) {
 
   const release = await readRelease(target);
   const runtime = productionRuntimePaths(target);
-  await Promise.all([
-    access(runtime.executable, constants.X_OK),
-    access(runtime.node, constants.X_OK),
-    access(runtime.lifecycle, constants.R_OK),
-    access(runtime.daemonEntry, constants.R_OK),
-    access(runtime.maintenanceEntry, constants.R_OK)
-  ]);
+  await assertRequiredProductionRuntimeResources(runtime);
 
   const homeDir = resolve(input.homeDir || homedir());
   const binDirectory = join(homeDir, ".local", "bin");
@@ -131,18 +125,10 @@ export async function installProductionLauncher(input) {
     target,
     version: release.version
   });
-  const desktop = [
-    "[Desktop Entry]",
-    "Type=Application",
-    "Name=Masthead",
-    `Exec=${launcherPath}`,
-    `Icon=${join(target, "resources", "masthead-logo-sail.png")}`,
-    "Terminal=false",
-    "Categories=Development;",
-    ""
-  ].join("\n");
+  const desktop = productionDesktopEntry(launcherPath, target);
   await atomicWrite(launcherPath, wrapper, 0o755);
   await atomicWrite(desktopPath, desktop, 0o644);
+  refreshDesktopDatabase(applicationDirectory, dependencyOverrides.runDesktopDatabaseCommand);
   return { desktopPath, gitSha: release.gitSha, launcherPath, target, version: release.version };
 }
 
@@ -268,13 +254,7 @@ export async function transitionProduction(input, dependencyOverrides = {}) {
   await verifyPinnedBundle(target, input.bundleDigest);
   const release = await readRelease(target);
   const runtime = productionRuntimePaths(target);
-  await Promise.all([
-    access(runtime.executable, constants.X_OK),
-    access(runtime.node, constants.X_OK),
-    access(runtime.lifecycle, constants.R_OK),
-    access(runtime.daemonEntry, constants.R_OK),
-    access(runtime.maintenanceEntry, constants.R_OK)
-  ]);
+  await assertRequiredProductionRuntimeResources(runtime);
   const dataDirectory = resolve(input.dataDirectory || join(homeDir, ".config", "masthead-production"));
   const config = await completeConfig({
     bundleDigest: input.bundleDigest,
@@ -290,7 +270,7 @@ export async function transitionProduction(input, dependencyOverrides = {}) {
   const noLifecycleLease = async () => ({ release: async () => undefined });
   const dependencies = {
     acquireLease: () => acquireLifecycleLease(config.lifecycleLeasePath),
-    activateLaunchers: (staged) => activateStagedLaunchers(staged),
+    activateLaunchers: (staged) => activateStagedLaunchers(staged, dependencyOverrides.runDesktopDatabaseCommand),
     cleanupCandidate: (candidate) => stopProduction(candidate, { acquireLease: noLifecycleLease }),
     completeMaintenance: (request) => runMaintenanceChild(config, "complete", request),
     currentTarget: () => realpath(join(productionRoot, "current")).catch(() => undefined),
@@ -684,10 +664,7 @@ async function stageProductionLaunchers(input) {
     lifecycleLeasePath: join(homeDir, ".local", "state", "masthead-production", "launcher.lease.sqlite"),
     port: validPort(input.port ?? DEFAULT_PORT), productionRoot, target, version: release.version
   });
-  const desktop = [
-    "[Desktop Entry]", "Type=Application", "Name=Masthead", `Exec=${launcherPath}`,
-    `Icon=${join(target, "resources", "masthead-logo-sail.png")}`, "Terminal=false", "Categories=Development;", ""
-  ].join("\n");
+  const desktop = productionDesktopEntry(launcherPath, target);
   const token = `${process.pid}.${Date.now()}`;
   const launcherStage = `${launcherPath}.${token}.staged`;
   const desktopStage = `${desktopPath}.${token}.staged`;
@@ -706,9 +683,32 @@ function pinnedDigestFromLauncherSnapshot(snapshot) {
   return match[1];
 }
 
-async function activateStagedLaunchers(staged) {
+async function activateStagedLaunchers(staged, runDesktopDatabaseCommand) {
   await rename(staged.launcherStage, staged.launcherPath);
   await rename(staged.desktopStage, staged.desktopPath);
+  refreshDesktopDatabase(dirname(staged.desktopPath), runDesktopDatabaseCommand);
+}
+
+function productionDesktopEntry(launcherPath, target) {
+  return [
+    "[Desktop Entry]",
+    "Type=Application",
+    "Name=Masthead",
+    `Exec=${launcherPath}`,
+    `Icon=${join(target, "resources", "masthead-logo-sail.png")}`,
+    "Terminal=false",
+    "Categories=Development;",
+    "StartupWMClass=masthead",
+    ""
+  ].join("\n");
+}
+
+function refreshDesktopDatabase(applicationDirectory, runCommand = spawnSync) {
+  try {
+    runCommand("update-desktop-database", [applicationDirectory], { stdio: "ignore" });
+  } catch {
+    // Desktop cache refresh is best-effort, matching the development launcher.
+  }
 }
 
 async function restoreStagedLaunchers(staged) {
@@ -879,13 +879,55 @@ async function attestCandidate(config) {
     throw new Error("Cold activation candidate release identity changed after attestation.");
   }
   const runtime = productionRuntimePaths(config.target);
+  await assertRequiredProductionRuntimeResources(runtime);
+}
+
+async function assertRequiredProductionRuntimeResources(runtime) {
   await Promise.all([
+    assertProductionAppIcon(runtime.appIcon),
     access(runtime.executable, constants.X_OK),
     access(runtime.node, constants.X_OK),
     access(runtime.lifecycle, constants.R_OK),
     access(runtime.daemonEntry, constants.R_OK),
     access(runtime.maintenanceEntry, constants.R_OK)
   ]);
+}
+
+async function assertProductionAppIcon(path) {
+  let body;
+  try {
+    body = await readFile(path);
+  } catch (error) {
+    throw new Error(`Production app icon is missing or unreadable: ${path}`, { cause: error });
+  }
+  if (!isStructurallyValidPng(body)) {
+    throw new Error(`Production app icon is not a valid PNG: ${path}`);
+  }
+}
+
+function isStructurallyValidPng(body) {
+  const signature = Buffer.from("89504e470d0a1a0a", "hex");
+  if (body.length < 45 || !body.subarray(0, signature.length).equals(signature)) return false;
+
+  let offset = signature.length;
+  let sawHeader = false;
+  let sawImageData = false;
+  while (offset + 12 <= body.length) {
+    const dataLength = body.readUInt32BE(offset);
+    const type = body.subarray(offset + 4, offset + 8).toString("ascii");
+    const dataStart = offset + 8;
+    const chunkEnd = dataStart + dataLength + 4;
+    if (chunkEnd > body.length) return false;
+    if (!sawHeader) {
+      if (type !== "IHDR" || dataLength !== 13) return false;
+      if (body.readUInt32BE(dataStart) === 0 || body.readUInt32BE(dataStart + 4) === 0) return false;
+      sawHeader = true;
+    }
+    if (type === "IDAT") sawImageData = true;
+    if (type === "IEND") return sawHeader && sawImageData && dataLength === 0 && chunkEnd === body.length;
+    offset = chunkEnd;
+  }
+  return false;
 }
 
 async function verifyColdCandidateCommit(config) {
@@ -1052,6 +1094,7 @@ async function readRelease(target) {
 function productionRuntimePaths(target) {
   const daemonRoot = join(target, "resources", "daemon");
   return {
+    appIcon: join(target, "resources", "masthead-logo-sail.png"),
     daemonEntry: join(daemonRoot, "dist", "src", "daemon", "main.js"),
     executable: join(target, process.platform === "win32" ? "masthead.exe" : "masthead"),
     lifecycle: join(daemonRoot, "scripts", "masthead-production.js"),

@@ -21,6 +21,14 @@ export type ProductionProcessRecord = {
   starttime: string;
 };
 
+export type ProductionDesktopDependencies = {
+  runDesktopDatabaseCommand?: (
+    command: string,
+    args: string[],
+    options: { stdio: "ignore" }
+  ) => unknown;
+};
+
 export function acquireLifecycleLease(path: string): Promise<{ release(): Promise<void> }>;
 export function assertColdProductionOffline(
   config: ProductionConfig,
@@ -97,7 +105,7 @@ export function installProductionLauncher(input: {
   homeDir?: string;
   port?: number;
   productionRoot?: string;
-}): Promise<{ desktopPath: string; gitSha: string; launcherPath: string; target: string; version: string }>;
+}, dependencies?: ProductionDesktopDependencies): Promise<{ desktopPath: string; gitSha: string; launcherPath: string; target: string; version: string }>;
 export function installDisabledProductionSurface(input: {
   databasePath: string;
   homeDir?: string;

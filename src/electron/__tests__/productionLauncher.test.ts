@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { EventEmitter } from "node:events";
+import { readFileSync } from "node:fs";
 import { PassThrough } from "node:stream";
 import { lstat, mkdir, mkdtemp, open as openFile, readFile, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -32,13 +33,17 @@ import {
 } from "../../../scripts/masthead-production.js";
 
 const cleanup: string[] = [];
+const VALID_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+  "base64"
+);
 
 afterEach(async () => {
   const { rm } = await import("node:fs/promises");
   await Promise.all(cleanup.splice(0).map((path) => rm(path, { force: true, recursive: true })));
 });
 
-async function fixture() {
+async function fixture({ includeIcon = true, iconContents = VALID_PNG } = {}) {
   const root = await mkdtemp(join(tmpdir(), "masthead-production-launcher-"));
   cleanup.push(root);
   const productionRoot = join(root, "production");
@@ -60,6 +65,9 @@ async function fixture() {
   await writeFile(join(daemonRoot, "dist", "src", "daemon", "main.js"), "daemon");
   await writeFile(join(daemonRoot, "dist", "src", "daemon", "productionTransitionMaintenance.js"), "maintenance");
   await writeFile(join(target, "resources", "app.asar"), "app");
+  if (includeIcon) {
+    await writeFile(join(target, "resources", "masthead-logo-sail.png"), iconContents);
+  }
   await writeFile(join(daemonRoot, "release.json"), JSON.stringify({
     gitSha: "a".repeat(40),
     version: "0.1.0"
@@ -1220,6 +1228,103 @@ describe("production lifecycle launcher", () => {
     expect(wrapper).not.toContain("/current/");
     expect(desktop).toContain(`Exec=${receipt.launcherPath}`);
     expect(desktop).toContain("Name=Masthead");
+    expect(desktop).toContain("StartupWMClass=masthead");
+  });
+
+  test("refreshes the Linux desktop database after atomically installing the production entry", async () => {
+    const { config, homeDir, productionRoot, target } = await fixture();
+    const calls: Array<{ command: string; args: string[] }> = [];
+
+    await installProductionLauncher({
+      bundleDigest: config.bundleDigest,
+      bundlePath: target,
+      homeDir,
+      productionRoot
+    }, {
+      runDesktopDatabaseCommand: (command: string, args: string[]) => {
+        calls.push({ args, command });
+      }
+    });
+
+    expect(calls).toEqual([{
+      args: [join(homeDir, ".local", "share", "applications")],
+      command: "update-desktop-database"
+    }]);
+  });
+
+  test("keeps production launcher installation successful when desktop cache refresh is unavailable", async () => {
+    const { config, homeDir, productionRoot, target } = await fixture();
+
+    await expect(installProductionLauncher({
+      bundleDigest: config.bundleDigest,
+      bundlePath: target,
+      homeDir,
+      productionRoot
+    }, {
+      runDesktopDatabaseCommand: () => {
+        throw new Error("update-desktop-database unavailable");
+      }
+    })).resolves.toMatchObject({ target });
+  });
+
+  test("refuses to install a production desktop entry without its packaged app icon", async () => {
+    const { config, homeDir, productionRoot, target } = await fixture({ includeIcon: false });
+
+    await expect(installProductionLauncher({
+      bundleDigest: config.bundleDigest,
+      bundlePath: target,
+      homeDir,
+      productionRoot
+    })).rejects.toThrow("Production app icon is missing or unreadable");
+  });
+
+  test("refuses a readable production app icon that is not a valid PNG", async () => {
+    const { config, homeDir, productionRoot, target } = await fixture({ iconContents: Buffer.alloc(0) });
+
+    await expect(installProductionLauncher({
+      bundleDigest: config.bundleDigest,
+      bundlePath: target,
+      homeDir,
+      productionRoot
+    })).rejects.toThrow("Production app icon is not a valid PNG");
+  });
+
+  test("refuses an iconless production transition before lifecycle mutation", async () => {
+    const { config, homeDir, productionRoot, target } = await fixture({ includeIcon: false });
+    let lifecycleStarted = false;
+
+    await expect(transitionProduction({
+      bundleDigest: config.bundleDigest,
+      bundlePath: target,
+      homeDir,
+      productionRoot
+    }, {
+      acquireLease: async () => {
+        lifecycleStarted = true;
+        throw new Error("Lifecycle mutation started");
+      }
+    })).rejects.toThrow("Production app icon is missing or unreadable");
+    expect(lifecycleStarted).toBe(false);
+  });
+
+  test("refuses an iconless cold-activation candidate before lifecycle mutation", async () => {
+    const { config, homeDir, productionRoot, target } = await fixture({ includeIcon: false });
+    let lifecycleStarted = false;
+
+    await expect(coldActivateProduction({
+      bundleDigest: config.bundleDigest,
+      bundlePath: target,
+      dataDirectory: config.dataDirectory,
+      databasePath: config.databasePath,
+      homeDir,
+      productionRoot
+    }, {
+      acquireLease: async () => {
+        lifecycleStarted = true;
+        throw new Error("Lifecycle mutation started");
+      }
+    })).rejects.toThrow("Production app icon is missing or unreadable");
+    expect(lifecycleStarted).toBe(false);
   });
 
   test("refuses a bundle outside the production root or a current symlink pointing elsewhere", async () => {
@@ -1293,6 +1398,39 @@ describe("production lifecycle launcher", () => {
     expect(calls).toEqual(["stage", "stop", "maintenance", "swap", "activate-launchers", "start", "complete-maintenance", "release"]);
     const { access } = await import("node:fs/promises");
     await expect(access(staleBundle)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("activates a staged desktop identity before refreshing the Linux desktop database", async () => {
+    const { config, homeDir, productionRoot, target } = await fixture();
+    const launcherPath = join(homeDir, ".local", "bin", "masthead-production");
+    const desktopPath = join(homeDir, ".local", "share", "applications", "ai.animas.masthead.desktop");
+    await writeFile(launcherPath, `MASTHEAD_BUNDLE_DIGEST='${config.bundleDigest}'\n`, { mode: 0o755 });
+    await writeFile(desktopPath, "previous desktop entry\n");
+    const refreshCalls: string[] = [];
+
+    await transitionProduction({
+      bundleDigest: config.bundleDigest,
+      bundlePath: target,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      port: config.port,
+      productionRoot
+    }, {
+      acquireLease: async () => ({ release: async () => undefined }),
+      completeMaintenance: async () => undefined,
+      currentTarget: async () => target,
+      prepareMaintenance: async () => ({ databaseId: "database:test", targetSchemaVersion: 1 }),
+      readMaintenanceJournal: async () => undefined,
+      runDesktopDatabaseCommand: (command: string) => {
+        expect(readFileSync(desktopPath, "utf8")).toContain("StartupWMClass=masthead");
+        refreshCalls.push(command);
+      },
+      start: async () => ({ started: true }),
+      stop: async () => ({ stopped: true })
+    });
+
+    expect(await readFile(desktopPath, "utf8")).toContain("StartupWMClass=masthead");
+    expect(refreshCalls).toEqual(["update-desktop-database"]);
   });
 
   test("requires explicit cold activation for a legacy current target with no attestable release identity", async () => {

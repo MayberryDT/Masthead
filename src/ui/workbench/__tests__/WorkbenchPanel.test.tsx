@@ -92,6 +92,34 @@ describe("WorkbenchPanel", () => {
     expect(text).not.toContain("Not Added 16");
   });
 
+  test("identifies each repair import with a plain-language reason and receipt action", () => {
+    const html = renderToStaticMarkup(
+      <WorkbenchPanel
+        importHealthSummary={{
+          ok: true,
+          importJobIds: ["import_job:codex-repair"],
+          repairImports: [{
+            importJobId: "import_job:codex-repair",
+            reasons: [{ reason: "schema_drift", count: 12 }],
+            repairRequired: 12,
+            runtime: "codex",
+            sourceId: "source:codex:history"
+          }],
+          reasons: [{ reason: "schema_drift", count: 12 }],
+          repairRequired: 12
+        }}
+        onOpenImportReceipt={vi.fn()}
+      />
+    );
+    const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+
+    expect(text).toContain("Codex · 12 repair units");
+    expect(text).toContain("Source source:codex:history");
+    expect(text).toContain("Import import_job:codex-repair");
+    expect(text).toContain("Source format changed");
+    expect(text).toContain("Open import receipt");
+  });
+
   test("keeps the responsive action row from collapsing behind queue facts", () => {
     const css = readFileSync("src/styles/masthead.css", "utf8");
     expect(mediaRule(css, "(max-width: 1120px)")).toMatch(

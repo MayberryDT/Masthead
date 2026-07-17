@@ -7,6 +7,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import { canonicalSessionId, runtimeIdFor } from "../../shared/sessionIdentity.ts";
 import type { DaemonConfig } from "../config.ts";
 import { seedSession } from "../db/__tests__/sessionTestHelpers.ts";
+import { createImportJob } from "../db/importJobRepository.ts";
 import { migrateDatabase } from "../db/schema.ts";
 import { createMastheadDaemon, type MastheadDaemon } from "../server.ts";
 import { grokAdapter } from "../../adapters/grok/adapter.ts";
@@ -22,6 +23,126 @@ afterEach(async () => {
 });
 
 describe("Masthead daemon startup", () => {
+  test("loads a receipt for a generated import job id", async () => {
+    const daemon = await createTestDaemon();
+    const now = "2026-07-17T12:00:00.000Z";
+    daemon.database.prepare(
+      `INSERT INTO ingest_sources(source_id, adapter, source_kind, confidence, discovered_at, last_seen_at)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).run("source:receipt-route", "codex", "jsonl", "authoritative", now, now);
+    const job = createImportJob(daemon.database, {
+      importKind: "transcript",
+      sourceId: "source:receipt-route",
+      updatedAt: now
+    });
+    expect(job.importJobId).toMatch(/^import_job:/);
+    const baseUrl = await listen(daemon);
+
+    const response = await fetch(`${baseUrl}/imports/${encodeURIComponent(job.importJobId)}/report`);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true });
+  });
+
+  test("reads work units and actions for a generated import job id", async () => {
+    const daemon = await createTestDaemon();
+    const now = "2026-07-17T12:00:00.000Z";
+    daemon.database.prepare(
+      `INSERT INTO ingest_sources(source_id, adapter, source_kind, confidence, discovered_at, last_seen_at)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).run("source:job-route", "codex", "jsonl", "authoritative", now, now);
+    const job = createImportJob(daemon.database, {
+      importKind: "transcript",
+      sourceId: "source:job-route",
+      updatedAt: now
+    });
+    daemon.database.prepare(
+      `INSERT INTO import_manifests(
+        manifest_id, import_job_id, source_id, runtime_kind, import_kind, scope_json, generated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run("manifest:job-route", job.importJobId, "source:job-route", "codex", "transcript", "{}", now);
+    daemon.database.prepare(
+      `INSERT INTO import_work_units(
+        work_unit_id, manifest_id, import_job_id, source_id, runtime_kind, source_kind,
+        confidence, unit_kind, status, timestamp_basis
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "unit:job-route",
+      "manifest:job-route",
+      job.importJobId,
+      "source:job-route",
+      "codex",
+      "jsonl",
+      "authoritative",
+      "transcript_file",
+      "queued",
+      "unknown"
+    );
+    const baseUrl = await listen(daemon);
+    const encodedId = encodeURIComponent(job.importJobId);
+
+    const jobResponse = await fetch(`${baseUrl}/imports/${encodedId}`);
+    const unitsResponse = await fetch(`${baseUrl}/imports/${encodedId}/units`);
+    const cancelResponse = await fetch(`${baseUrl}/imports/${encodedId}/cancel`, { method: "POST" });
+
+    expect(jobResponse.status).toBe(200);
+    await expect(unitsResponse.json()).resolves.toMatchObject({
+      units: [expect.objectContaining({ workUnitId: "unit:job-route" })]
+    });
+    expect(cancelResponse.status).toBe(202);
+  });
+
+  test("retries a generated import job id", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-retry-route-"));
+    tempDirs.push(tempDir);
+    await mkdir(join(tempDir, ".grok/sessions"), { recursive: true });
+    await writeFile(join(tempDir, ".grok/sessions/retry.jsonl"), `${JSON.stringify({ sessionId: "retry", role: "user", content: "retry" })}\n`);
+    const [source] = await grokAdapter.discover({ exclusions: [], homeDir: tempDir, now: "2026-07-17T12:00:00.000Z" });
+    expect(source).toBeDefined();
+    expect(source?.path).toBeTypeOf("string");
+    const daemon = await createTestDaemon(tempDir);
+    const now = "2026-07-17T12:00:00.000Z";
+    daemon.database.prepare(
+      `INSERT INTO ingest_sources(source_id, adapter, source_kind, source_path, confidence, discovered_at, last_seen_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(source!.sourceId, "grok", "jsonl", source!.path!, "heuristic", now, now);
+    const job = createImportJob(daemon.database, {
+      importKind: "transcript",
+      sourceId: source!.sourceId,
+      updatedAt: now
+    });
+    daemon.database.prepare("UPDATE import_jobs SET status = 'failed' WHERE import_job_id = ?").run(job.importJobId);
+    const baseUrl = await listen(daemon);
+
+    const response = await fetch(`${baseUrl}/imports/${encodeURIComponent(job.importJobId)}/retry`, { method: "POST" });
+
+    expect(response.status).toBe(202);
+    const body = await response.json() as { importJobId: string; job: { importJobId: string } };
+    expect(body).toMatchObject({
+      importJobId: job.importJobId,
+      job: { importJobId: job.importJobId }
+    });
+    await waitForImportJobSettled(daemon, job.importJobId);
+  });
+
+  test("rejects malformed encoded import job ids consistently", async () => {
+    const daemon = await createTestDaemon();
+    const baseUrl = await listen(daemon);
+    const routes = [
+      ["GET", "/imports/%E0%A4%A"],
+      ["GET", "/imports/%E0%A4%A/units"],
+      ["GET", "/imports/%E0%A4%A/report"],
+      ["POST", "/imports/%E0%A4%A/cancel"],
+      ["POST", "/imports/%E0%A4%A/retry"]
+    ] as const;
+
+    for (const [method, path] of routes) {
+      const response = await fetch(`${baseUrl}${path}`, { method });
+      expect(response.status, `${method} ${path}`).toBe(400);
+      await expect(response.json()).resolves.toEqual({ ok: false, error: "invalid_import_id" });
+    }
+  });
+
   test("import repair routes validate input, preview without writes, reject hash drift, and schedule viable reimports", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-repair-route-"));
     tempDirs.push(tempDir);

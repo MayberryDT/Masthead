@@ -82,18 +82,18 @@ describe("SourcesConnectOnboarding", () => {
     const connect = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Connect selected");
     await act(async () => { connect?.click(); await Promise.resolve(); await Promise.resolve(); });
 
-    expect(container.textContent).toContain("Verification failed");
+    expect(container.textContent).toContain("Endpoint test failed");
     expect(container.textContent).toContain("Connect found harnesses");
     expect(container.textContent).not.toContain("Import local history");
     await act(async () => root.unmount());
     container.remove();
   });
 
-  test("accepts verified connector commands without waiting for a first live host event", async () => {
+  test("continues to history while preserving pending host activation after a passed connector test", async () => {
     const onEnable = vi.fn(async () => undefined);
     const onTest = vi.fn(async (runtime: string) => {
       if (runtime !== "codex") return { verified: true, needsAction: false };
-      return { verified: true, needsAction: true };
+      return { verified: true, needsAction: true, actionRequired: "trust_hooks" as const };
     });
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -117,10 +117,85 @@ describe("SourcesConnectOnboarding", () => {
     const connect = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Connect selected");
     await act(async () => { connect?.click(); await Promise.resolve(); await Promise.resolve(); });
 
-    expect(container.textContent).not.toContain("Needs action");
-    expect(container.textContent).not.toContain("host action still required");
     expect(container.textContent).toContain("Import local history");
+    expect(container.textContent).toContain("Codex still needs activation");
+    expect(container.textContent).toContain("Trust hooks in Codex (/hooks) after install.");
+    expect(container.textContent).toContain("Endpoint test passed — trust hooks still required");
+    expect(container.textContent).not.toContain("Codex is ready");
     expect(onEnable).toHaveBeenCalledTimes(2);
+
+    const back = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Back");
+    await act(async () => back?.click());
+    const reconnect = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Connect selected");
+    await act(async () => { reconnect?.click(); await Promise.resolve(); await Promise.resolve(); });
+    expect(onEnable).toHaveBeenCalledTimes(2);
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  test("reports a passed endpoint with required repair and does not advance", async () => {
+    const onTest = vi.fn(async (runtime: string) => runtime === "codex"
+      ? { verified: true, needsAction: true, actionRequired: "repair" as const }
+      : { verified: true, needsAction: false });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <SourcesConnectOnboarding
+          open
+          snapshot={sampleSnapshot()}
+          onClose={noop}
+          onSkip={noop}
+          onDiscover={noop}
+          onEnable={noop}
+          onTest={onTest}
+        />
+      );
+      await Promise.resolve();
+    });
+    const continueButton = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Continue");
+    await act(async () => continueButton?.click());
+    const connect = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Connect selected");
+    await act(async () => { connect?.click(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).toContain("Endpoint test passed — connector repair still required");
+    expect(container.textContent).toContain("Connect found harnesses");
+    expect(container.textContent).not.toContain("Import local history");
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  test("reports a failed endpoint with required repair and does not advance", async () => {
+    const onTest = vi.fn(async (runtime: string) => runtime === "codex"
+      ? { verified: false, needsAction: true, actionRequired: "repair" as const }
+      : { verified: true, needsAction: false });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <SourcesConnectOnboarding
+          open
+          snapshot={sampleSnapshot()}
+          onClose={noop}
+          onSkip={noop}
+          onDiscover={noop}
+          onEnable={noop}
+          onTest={onTest}
+        />
+      );
+      await Promise.resolve();
+    });
+    const continueButton = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Continue");
+    await act(async () => continueButton?.click());
+    const connect = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Connect selected");
+    await act(async () => { connect?.click(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(container.textContent).toContain("Endpoint test failed — repair the connector and try again");
+    expect(container.textContent).not.toContain("Endpoint test passed — connector repair still required");
+    expect(container.textContent).toContain("Connect found harnesses");
+    expect(container.textContent).not.toContain("Import local history");
     await act(async () => root.unmount());
     container.remove();
   });

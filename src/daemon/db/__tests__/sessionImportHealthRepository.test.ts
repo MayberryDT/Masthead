@@ -108,6 +108,13 @@ describe("session import health repository", () => {
     expect(countRepairRequiredSessions(db, "import-health-1")).toBe(0);
     expect(summarizeCurrentSessionImportHealth(db)).toEqual({
       importJobIds: ["import-health-1"],
+      repairImports: [{
+        importJobId: "import-health-1",
+        reasons: [{ count: 1, reason: "missing_identity" }],
+        repairRequired: 1,
+        runtime: "opencode",
+        sourceId: "source:health"
+      }],
       reasons: [{ count: 1, reason: "missing_identity" }],
       repairRequired: 1
     });

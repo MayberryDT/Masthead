@@ -2080,9 +2080,9 @@ main {
 
 .workbench-import-repair-panel {
   display: flex;
+  flex-direction: column;
   min-width: 0;
-  align-items: center;
-  justify-content: space-between;
+  align-items: stretch;
   gap: var(--space-sm);
   border: 1px solid rgba(247, 201, 72, 0.28);
   border-radius: 5px;
@@ -2103,10 +2103,27 @@ main {
 }
 
 .workbench-import-repair-receipts {
+  display: grid;
+  gap: 8px;
+}
+
+.workbench-import-repair-receipt {
   display: flex;
-  flex: 0 0 auto;
-  flex-wrap: wrap;
-  gap: 6px;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  border-top: 1px solid rgba(247, 201, 72, 0.18);
+  padding-top: 8px;
+}
+
+.workbench-import-repair-evidence {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.workbench-import-repair-receipt .workbench-import-repair-reason {
+  color: var(--body);
 }
 
 .workbench-surface {

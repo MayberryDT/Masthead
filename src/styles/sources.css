@@ -2260,6 +2260,10 @@
   color: var(--green, #5bd18a);
 }
 
+.sources-connection-open-hint.is-warn {
+  color: var(--yellow, #ffcf36);
+}
+
 .sources-connection-open-hint.is-fail {
   color: var(--red, #ff7b7b);
 }

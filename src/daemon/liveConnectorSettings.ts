@@ -22,6 +22,7 @@ export type LiveConnectorSettings = {
   configPath: string;
   configExists: boolean;
   installed: boolean;
+  managedConnectorPresent: boolean;
   missingEvents: string[];
   mismatchedEvents: string[];
   command: string;
@@ -103,6 +104,7 @@ export async function getLiveConnectorSetting(config: DaemonConfig, runtime: Liv
         configPath,
         endpoint,
         installed: verification.installed,
+        managedConnectorPresent: verification.managedConnectorPresent,
         label: LABELS[runtime],
         latestBackupPath,
         mismatchedEvents: verification.mismatchedEvents,
@@ -123,6 +125,7 @@ export async function getLiveConnectorSetting(config: DaemonConfig, runtime: Liv
       endpoint,
       error: error instanceof Error ? error.message : String(error),
       installed: false,
+      managedConnectorPresent: false,
       label: LABELS[runtime],
       latestBackupPath,
       mismatchedEvents: [],
@@ -456,7 +459,7 @@ function stateFromVerification(
     existed: boolean;
     latestBackupPath?: string;
     stateEndpoint: string;
-    verification: { installed: boolean; missingEvents: string[]; mismatchedEvents: string[] };
+    verification: { installed: boolean; managedConnectorPresent: boolean; missingEvents: string[]; mismatchedEvents: string[] };
   }
 ): LiveConnectorSettings {
   return {
@@ -465,6 +468,7 @@ function stateFromVerification(
     configPath: input.configPath,
     endpoint: input.endpoint,
     installed: input.verification.installed,
+    managedConnectorPresent: input.verification.managedConnectorPresent,
     label: LABELS[runtime],
     latestBackupPath: input.latestBackupPath,
     mismatchedEvents: input.verification.mismatchedEvents,
@@ -526,6 +530,7 @@ async function getHermesConnectorSetting(
     configPath,
     endpoint: input.endpoint,
     installed: verification.installed,
+    managedConnectorPresent: verification.managedConnectorPresent,
     label: LABELS.hermes,
     latestBackupPath: input.latestBackupPath,
     mismatchedEvents: verification.mismatchedEvents,
@@ -614,14 +619,14 @@ async function verifyHermesPluginInstall(input: {
   initPath: string;
   pluginYamlPath: string;
   stateEndpoint: string;
-}): Promise<{ configExists: boolean; installed: boolean; missingEvents: string[]; mismatchedEvents: string[] }> {
+}): Promise<{ configExists: boolean; installed: boolean; managedConnectorPresent: boolean; missingEvents: string[]; mismatchedEvents: string[] }> {
   let pluginYaml = "";
   let initPy = "";
   try {
     pluginYaml = await readFile(input.pluginYamlPath, "utf8");
   } catch (error) {
     if (isErrno(error, "ENOENT")) {
-      return { configExists: false, installed: false, mismatchedEvents: [], missingEvents: ["plugin", "enabled"] };
+      return { configExists: false, installed: false, managedConnectorPresent: false, mismatchedEvents: [], missingEvents: ["plugin", "enabled"] };
     }
     throw error;
   }
@@ -629,7 +634,7 @@ async function verifyHermesPluginInstall(input: {
     initPy = await readFile(input.initPath, "utf8");
   } catch (error) {
     if (isErrno(error, "ENOENT")) {
-      return { configExists: true, installed: false, mismatchedEvents: [], missingEvents: ["plugin_init", "enabled"] };
+      return { configExists: true, installed: false, managedConnectorPresent: true, mismatchedEvents: [], missingEvents: ["plugin_init", "enabled"] };
     }
     throw error;
   }
@@ -657,6 +662,7 @@ async function verifyHermesPluginInstall(input: {
   return {
     configExists: true,
     installed: missingEvents.length === 0 && mismatchedEvents.length === 0,
+    managedConnectorPresent: hasMarker || initPy.includes(HERMES_PLUGIN_MARKER) || initPy.includes("masthead-live-connector"),
     missingEvents,
     mismatchedEvents
   };
@@ -904,10 +910,12 @@ function uninstallCursorHookConfig(config: CursorHookConfig): CursorHookConfig {
 
 function verifyCursorHookConfig(config: CursorHookConfig, expected: { command: string; events: readonly string[] }): {
   installed: boolean;
+  managedConnectorPresent: boolean;
   missingEvents: string[];
   mismatchedEvents: string[];
 } {
   const hooks = config.hooks ?? {};
+  const managedConnectorPresent = Object.values(hooks).some((entries) => (entries ?? []).some(isMastheadCursorHook));
   const missingEvents: string[] = [];
   const mismatchedEvents: string[] = [];
 
@@ -922,6 +930,7 @@ function verifyCursorHookConfig(config: CursorHookConfig, expected: { command: s
 
   return {
     installed: missingEvents.length === 0 && mismatchedEvents.length === 0,
+    managedConnectorPresent,
     missingEvents,
     mismatchedEvents
   };
@@ -930,6 +939,7 @@ function verifyCursorHookConfig(config: CursorHookConfig, expected: { command: s
 async function verifyMarkedPluginFile(configPath: string, input: { endpoint: string; marker: string; stateEndpoint: string }): Promise<{
   configExists: boolean;
   installed: boolean;
+  managedConnectorPresent: boolean;
   missingEvents: string[];
   mismatchedEvents: string[];
 }> {
@@ -938,7 +948,7 @@ async function verifyMarkedPluginFile(configPath: string, input: { endpoint: str
     raw = await readFile(configPath, "utf8");
   } catch (error) {
     if (isErrno(error, "ENOENT")) {
-      return { configExists: false, installed: false, mismatchedEvents: [], missingEvents: ["event", "state"] };
+      return { configExists: false, installed: false, managedConnectorPresent: false, mismatchedEvents: [], missingEvents: ["event", "state"] };
     }
     throw error;
   }
@@ -949,6 +959,7 @@ async function verifyMarkedPluginFile(configPath: string, input: { endpoint: str
   return {
     configExists: true,
     installed: hasMarker && hasEndpoint && hasStateEndpoint,
+    managedConnectorPresent: hasMarker,
     mismatchedEvents: hasMarker ? [!hasEndpoint ? "event" : undefined, !hasStateEndpoint ? "state" : undefined].filter((value): value is string => Boolean(value)) : [],
     missingEvents: hasMarker ? [] : ["event", "state"]
   };
