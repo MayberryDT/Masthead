@@ -2380,9 +2380,15 @@ describe("production lifecycle launcher", () => {
     });
 
     expect(classifyProductionProcess(electron, config)).toMatchObject({ role: "electron", target });
+    expect(classifyProductionProcess({ ...electron, argv: [electron.argv.join(" ")] }, config))
+      .toMatchObject({ role: "electron", target });
     expect(classifyProductionProcess(daemon, config)).toMatchObject({ role: "daemon", target });
     expect(classifyProductionProcess({ ...electron, argv: [...electron.argv, "--type=renderer"] }, config)).toBeUndefined();
-    expect(classifyProductionProcess({ ...electron, environ: {} }, config)).toBeUndefined();
+    expect(classifyProductionProcess({ ...electron, environ: {} }, config)).toMatchObject({ role: "electron", target });
+    expect(classifyProductionProcess({
+      ...electron,
+      argv: [...electron.argv, "--user-data-dir=/tmp/other-masthead-profile"]
+    }, config)).toBeUndefined();
     expect(classifyProductionProcess({ ...daemon, environ: { ...daemon.environ, MASTHEAD_PORT: "9" } }, config))
       .toMatchObject({ role: "daemon", target });
   });

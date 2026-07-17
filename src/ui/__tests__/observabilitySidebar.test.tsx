@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import { ObservabilitySidebar } from "../ObservabilitySidebar";
@@ -85,4 +86,46 @@ describe("ObservabilitySidebar", () => {
     expect(html).toContain("1 harness waiting");
     expect(html).not.toContain("Claude Code 0");
   });
+
+  test("bounds import health between navigation and Knowledge flow across sidebar layouts", () => {
+    const html = renderToStaticMarkup(
+      <ObservabilitySidebar
+        version={APP_VERSION_LABEL}
+        activeCount={0}
+        imports={[issueImport("codex-job", "codex:one")]}
+      />
+    );
+    const css = readFileSync("src/styles/masthead.css", "utf8");
+    const navIndex = html.indexOf('aria-label="Masthead sections"');
+    const importRegionIndex = html.indexOf('class="sidebar-import-region"');
+    const knowledgeIndex = html.indexOf('aria-label="Knowledge flow"');
+
+    expect(importRegionIndex).toBeGreaterThan(navIndex);
+    expect(knowledgeIndex).toBeGreaterThan(importRegionIndex);
+
+    expect(css).toContain("grid-template-rows: auto auto minmax(0, 1fr) auto;");
+    expect(css).toContain(".sidebar-import-region {\n  position: static;\n  min-height: 0;\n  margin: 16px 16px 0;\n  overflow: hidden;");
+    expect(css).toContain(".sidebar-import-region .sidebar-import-activity {\n  position: static;\n  max-height: 100%;\n  overflow-y: auto;");
+    expect(css).toContain(".masthead-shell .sidebar-knowledge-flow {\n  position: static;\n  margin: 10px 16px 16px;");
+    expect(css).toContain("@media (max-width: 760px) {\n  .sidebar-shell {\n    display: block;\n    height: auto;\n    overflow: visible;");
+    expect(css).not.toContain("@media (max-height: 720px)");
+  });
 });
+
+function issueImport(importJobId: string, sourceId: string) {
+  return {
+    completionReport: {
+      anomalies: [], cappedUnits: 0, dossierReadySessions: 0, enrichedSessions: 0, failedUnits: 0,
+      generatedAt: "2026-07-17T12:00:00.000Z", importJobId, logbookSearchableSessions: 0,
+      mcpVisibleSessions: 0, nextActions: ["repair_import" as const], outOfRangeSessions: 0,
+      recordsFailed: 1, recordsImported: 1, recordsRecognized: 1, recordsRejected: 1,
+      recordsSkipped: 0, runtime: "codex" as const, sessionsCreated: 1, sessionsDiscovered: 1,
+      sessionsFinalized: 1, sessionsOnPackagePath: 0, sessionsRepairRequired: 1,
+      sessionsSuppressed: 0, sessionsUpdated: 0, skippedUnits: 0, status: "succeeded_with_issues" as const,
+      timestampBasis: { file_modified: 0, semantic: 1, source_path: 0, unknown: 0 }, transcriptsImported: 1
+    },
+    discoveredCount: 1, failureCount: 0, importJobId, importKind: "transcript" as const,
+    importedCount: 1, queuedCount: 0, sourceId, status: "succeeded_with_issues" as const,
+    updatedAt: "2026-07-17T12:00:00.000Z"
+  };
+}

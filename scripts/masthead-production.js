@@ -437,13 +437,13 @@ export function classifyProductionProcess(record, config) {
   const runtime = productionRuntimePaths(target);
   const args = Array.isArray(record.argv) ? record.argv : [];
   const environment = record.environ || {};
+  const userDataArgument = `--user-data-dir=${resolve(config.dataDirectory)}`;
+  const exactElectronMainArgs =
+    (args.length === 2 && resolve(args[0] || "") === runtime.executable && args[1] === userDataArgument) ||
+    (args.length === 1 && args[0] === `${runtime.executable} ${userDataArgument}`);
   if (
     resolve(executableIdentity) === runtime.executable &&
-    resolve(args[0] || "") === runtime.executable &&
-    args.includes(`--user-data-dir=${resolve(config.dataDirectory)}`) &&
-    resolve(environment.MASTHEAD_DATA_DIR || "") === resolve(config.dataDirectory) &&
-    resolve(environment.MASTHEAD_DB_PATH || "") === resolve(config.databasePath) &&
-    !args.some((argument) => argument.startsWith("--type="))
+    exactElectronMainArgs
   ) {
     return { ...record, role: "electron", target };
   }

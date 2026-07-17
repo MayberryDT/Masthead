@@ -75,7 +75,9 @@ export function ObservabilitySidebar({
           />
         </SidebarGroup>
       </nav>
-      <SidebarImportActivity imports={imports} />
+      <div className="sidebar-import-region">
+        <SidebarImportActivity imports={imports} />
+      </div>
       <SidebarKnowledgeFlow
         summary={knowledgeFlowSummary}
         loading={knowledgeFlowLoading}

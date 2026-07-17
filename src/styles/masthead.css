@@ -4180,15 +4180,16 @@ body {
 .sidebar-shell {
   position: relative;
   z-index: 1;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  height: 100vh;
   min-height: 100vh;
+  overflow: hidden;
 }
 
 .sidebar-brand {
-  position: absolute;
+  position: static;
   box-sizing: border-box;
-  left: 0;
-  right: 0;
-  top: 0;
   display: grid;
   grid-template-columns: 42px auto;
   gap: 10px;
@@ -4230,12 +4231,10 @@ body {
 }
 
 .sidebar-nav {
-  position: absolute;
-  left: 16px;
-  right: 16px;
-  top: 100px;
+  position: static;
   display: grid;
   gap: var(--space-lg);
+  margin: 22px 16px 0;
 }
 
 .sidebar-group {
@@ -4450,11 +4449,20 @@ body {
   color: var(--ash);
 }
 
+.sidebar-import-region {
+  position: static;
+  min-height: 0;
+  margin: 16px 16px 0;
+  overflow: hidden;
+}
+
+.sidebar-import-region .sidebar-import-activity {
+  position: static;
+  max-height: 100%;
+  overflow-y: auto;
+}
+
 .sidebar-import-activity {
-  position: absolute;
-  right: 16px;
-  bottom: 186px;
-  left: 16px;
   border: 1px solid rgba(46, 167, 255, 0.2);
   border-radius: 4px;
   background: #03121c;
@@ -6545,12 +6553,6 @@ body {
   }
 }
 
-@media (max-height: 720px) {
-  .sidebar-knowledge-flow {
-    display: none;
-  }
-}
-
 @media (min-width: 401px) and (max-width: 760px) {
   .observability-toolbar {
     flex-wrap: nowrap;
@@ -7333,21 +7335,29 @@ body {
 
 .observability-console .sidebar-knowledge-flow,
 .masthead-shell .sidebar-knowledge-flow {
-  position: absolute;
-  right: 16px;
-  bottom: 16px;
-  left: 16px;
+  position: static;
+  margin: 10px 16px 16px;
 }
 
 @media (max-width: 760px) {
-  .sidebar-import-activity {
-    position: static;
+  .sidebar-shell {
+    display: block;
+    height: auto;
+    overflow: visible;
+  }
+
+  .sidebar-import-region {
     margin: 18px 16px 0;
+    overflow: visible;
+  }
+
+  .sidebar-import-region .sidebar-import-activity {
+    max-height: none;
+    overflow-y: visible;
   }
 
   .observability-console .sidebar-knowledge-flow,
   .masthead-shell .sidebar-knowledge-flow {
-    position: static;
     margin: 18px 16px 0;
   }
 }
