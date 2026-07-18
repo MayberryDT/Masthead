@@ -7291,7 +7291,7 @@ body {
 
 .observability-console .sidebar-knowledge-flow,
 .masthead-shell .sidebar-knowledge-flow {
-  position: static;
+  position: relative;
   margin: 10px 16px 16px;
 }
 

@@ -21,7 +21,7 @@ export function AppShell({ sidebar, main, motionMode = "daily" }: Props) {
       data-motion-mode={motionMode}
       aria-label="Masthead session manager"
     >
-      <aside className="masthead-sidebar metal-sidebar" aria-label="Primary navigation">
+      <aside className="masthead-sidebar" aria-label="Primary navigation">
         {sidebar}
       </aside>
       <section className="masthead-workspace">
