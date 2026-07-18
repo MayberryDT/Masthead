@@ -769,6 +769,26 @@ describe("production lifecycle launcher", () => {
     expect(statusReads).toBe(2);
   });
 
+  test("re-verifies transient zombie thread cardinality before failing closed", async () => {
+    const currentUid = typeof process.geteuid === "function" ? process.geteuid() : 1000;
+    let metadataReads = 0;
+    let statusReads = 0;
+    await expect(readOwnedProcessStrict(1488, {
+      currentUid,
+      readCommandLine: async () => { metadataReads += 1; return Buffer.alloc(0); },
+      readEnvironment: async () => { metadataReads += 1; return Buffer.alloc(0); },
+      readExecutable: async () => { metadataReads += 1; return "/usr/bin/unrelated"; },
+      readStatLine: async () => `1488 (gio-launch-desktop) Z ${Array(18).fill("0").join(" ")} stable-start`,
+      readStatus: async () => {
+        statusReads += 1;
+        const threads = statusReads === 1 ? "0" : "1";
+        return `Name:\tgio-launch-desktop\nState:\tZ (zombie)\nUid:\t${currentUid}\t${currentUid}\t${currentUid}\t${currentUid}\nThreads:\t${threads}\n`;
+      }
+    })).resolves.toBeUndefined();
+    expect(metadataReads).toBe(0);
+    expect(statusReads).toBeGreaterThanOrEqual(3);
+  });
+
   test("fails closed if a zombie PID identity changes while its exclusion is verified", async () => {
     const currentUid = typeof process.geteuid === "function" ? process.geteuid() : 1000;
     let statusReads = 0;

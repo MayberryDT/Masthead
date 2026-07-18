@@ -1204,7 +1204,7 @@ export async function readOwnedProcessStrict(pid, adapters = {}) {
     if (Number.isSafeInteger(ownership.uid) && ownership.uid !== currentUid) return undefined;
     throw error;
   }
-  const processStatus = parseProcStatus(status);
+  let processStatus = parseProcStatus(status);
   const effectiveUid = processStatus.effectiveUid;
   if (!Number.isSafeInteger(effectiveUid) || effectiveUid < 0) {
     const ownership = await statProcess().catch((error) => {
@@ -1218,7 +1218,31 @@ export async function readOwnedProcessStrict(pid, adapters = {}) {
   if (effectiveUid !== currentUid) return undefined;
   if (processStatus.state === "Z") {
     if (processStatus.threads !== 1) {
-      throw new Error(`Production process ${pid} zombie thread-group cardinality is unproven.`);
+      const cardinalityStatLine = await readProcValueOrRace(readStatLine);
+      if (cardinalityStatLine === undefined) return undefined;
+      const cardinalityStat = procStatSnapshot(cardinalityStatLine, pid);
+      if (cardinalityStat.pid !== pid || cardinalityStat.state !== "Z") {
+        throw new Error(`Production process ${pid} zombie identity changed during scan.`);
+      }
+      for (let attempt = 0; attempt < 3 && processStatus.threads !== 1; attempt += 1) {
+        const retryStatusText = await readProcValueOrRace(readStatus);
+        if (retryStatusText === undefined) return undefined;
+        const retryStatus = parseProcStatus(retryStatusText);
+        const retryStatLine = await readProcValueOrRace(readStatLine);
+        if (retryStatLine === undefined) return undefined;
+        const retryStat = procStatSnapshot(retryStatLine, pid);
+        if (
+          retryStatus.state !== "Z" || retryStatus.effectiveUid !== currentUid ||
+          retryStat.pid !== pid || retryStat.state !== "Z" ||
+          retryStat.starttime !== cardinalityStat.starttime
+        ) {
+          throw new Error(`Production process ${pid} zombie identity changed during scan.`);
+        }
+        processStatus = retryStatus;
+      }
+      if (processStatus.threads !== 1) {
+        throw new Error(`Production process ${pid} zombie thread-group cardinality is unproven.`);
+      }
     }
     const initialZombieStatLine = await readProcValueOrRace(readStatLine);
     if (initialZombieStatLine === undefined) return undefined;
