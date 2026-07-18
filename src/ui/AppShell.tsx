@@ -1,6 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { invokeDesktopCommand, isDesktopBridgeAvailable } from "../app/desktopBridge";
-import { Icon } from "./icons/Icon";
+import { isDesktopBridgeAvailable } from "../app/desktopBridge";
 
 type Props = {
   sidebar: ReactNode;
@@ -38,37 +37,8 @@ export function AppShell({ sidebar, main, motionMode = "daily" }: Props) {
 
 function MastheadWindowBar() {
   return (
-    <header className="masthead-window-bar" aria-label="Window controls">
+    <header className="masthead-window-bar" aria-label="Window title bar">
       <div className="masthead-window-drag-region" aria-hidden="true" />
-      <div className="masthead-window-controls">
-        <button
-          className="masthead-window-control"
-          type="button"
-          title="Minimize"
-          aria-label="Minimize window"
-          onClick={() => void invokeDesktopCommand("window_minimize_command")}
-        >
-          <Icon name="minimize" size={11} weight="bold" />
-        </button>
-        <button
-          className="masthead-window-control"
-          type="button"
-          title="Maximize"
-          aria-label="Maximize window"
-          onClick={() => void invokeDesktopCommand("window_maximize_command")}
-        >
-          <Icon name="maximize" size={10} weight="regular" />
-        </button>
-        <button
-          className="masthead-window-control close"
-          type="button"
-          title="Close"
-          aria-label="Close window"
-          onClick={() => void invokeDesktopCommand("window_close_command")}
-        >
-          <Icon name="close" size={11} weight="regular" />
-        </button>
-      </div>
     </header>
   );
 }
