@@ -191,7 +191,7 @@ async function runSmokeAndQuit(window: BrowserWindow): Promise<void> {
           cardCount: cards.length,
           hasDesktopBridge: typeof window.mastheadDesktop?.invoke === 'function',
           hasTypedNotify: typeof window.mastheadDesktop?.notifySessionTransition === 'function',
-          hasCustomChrome: document.querySelector('.masthead-shell.desktop-chrome .masthead-window-bar') !== null,
+          hasRendererTitleBar: document.querySelector('.masthead-shell.desktop-chrome .masthead-window-bar') !== null,
           hasRendererWindowControls: document.querySelector('.masthead-window-control') !== null,
           hasNodeProcess: typeof window.process !== 'undefined',
           hasRawIpc: typeof window.ipcRenderer !== 'undefined',

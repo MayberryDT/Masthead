@@ -47,7 +47,7 @@ describe("Electron window chrome styles", () => {
     await act(async () => root.unmount());
   });
 
-  test("uses the native overlay safe area without renderer control styles", () => {
+  test("translates the viewport overlay safe area into workspace-local coordinates", () => {
     expect(cssRule(".masthead-shell.desktop-chrome .masthead-workspace")).toMatch(
       /grid-template-rows:\s*env\(titlebar-area-height,\s*32px\)\s+minmax\(0,\s*1fr\);/
     );
@@ -57,8 +57,14 @@ describe("Electron window chrome styles", () => {
     expect(cssRule(".masthead-window-bar::after")).toMatch(/height:\s*1px;/);
     expect(cssRule(".masthead-window-bar::after")).toMatch(/z-index:\s*2;/);
     expect(cssRule(".masthead-window-drag-region")).toMatch(/position:\s*absolute;/);
-    expect(cssRule(".masthead-window-drag-region")).toMatch(/left:\s*env\(titlebar-area-x,\s*0px\);/);
-    expect(cssRule(".masthead-window-drag-region")).toMatch(/width:\s*env\(titlebar-area-width,\s*100%\);/);
+    expect(mastheadCss).toMatch(/--masthead-sidebar-offset:\s*215px;/);
+    expect(cssRule(".masthead-window-drag-region")).toMatch(
+      /left:\s*max\(0px,\s*calc\(env\(titlebar-area-x,\s*0px\)\s*-\s*var\(--masthead-sidebar-offset\)\)\);/
+    );
+    expect(cssRule(".masthead-window-drag-region")).toMatch(
+      /right:\s*max\(0px,\s*calc\(100vw\s*-\s*env\(titlebar-area-x,\s*0px\)\s*-\s*env\(titlebar-area-width,\s*100vw\)\)\);/
+    );
+    expect(cssRule(".masthead-window-drag-region")).toMatch(/width:\s*auto;/);
     expect(cssRule(".masthead-window-drag-region")).toMatch(/-webkit-app-region:\s*drag;/);
     expect(mastheadCss).not.toMatch(/\.masthead-window-controls?\b/);
   });

@@ -51,8 +51,8 @@ if (!parsed.renderer?.hasTypedNotify) {
   console.error("Electron preload typed notification bridge was not exposed.");
   process.exit(1);
 }
-if (!parsed.renderer?.hasCustomChrome) {
-  console.error(`Electron custom window chrome was not rendered: ${JSON.stringify(parsed.renderer)}`);
+if (!parsed.renderer?.hasRendererTitleBar) {
+  console.error(`Electron renderer title bar was not rendered: ${JSON.stringify(parsed.renderer)}`);
   process.exit(1);
 }
 if (parsed.renderer?.hasRendererWindowControls !== false) {

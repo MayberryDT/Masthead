@@ -3824,6 +3824,7 @@ body {
 
 .observability-console,
 .masthead-shell {
+  --masthead-sidebar-offset: 215px;
   --space-xs: 8px;
   --space-sm: 12px;
   --space-md: 16px;
@@ -3990,8 +3991,9 @@ body {
 .masthead-window-drag-region {
   position: absolute;
   top: 0;
-  left: env(titlebar-area-x, 0px);
-  width: env(titlebar-area-width, 100%);
+  left: max(0px, calc(env(titlebar-area-x, 0px) - var(--masthead-sidebar-offset)));
+  right: max(0px, calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)));
+  width: auto;
   height: 100%;
   -webkit-app-region: drag;
 }
@@ -6339,6 +6341,10 @@ body {
 }
 
 @media (max-width: 760px) {
+  .masthead-shell {
+    --masthead-sidebar-offset: 0px;
+  }
+
   .observability-console,
   .masthead-shell {
     grid-template-columns: 1fr;

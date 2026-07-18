@@ -36,7 +36,7 @@ describe("Electron window security policy", () => {
     );
     for (const smokeSource of [developmentSmokeSource, packagedSmokeSource]) {
       expect(smokeSource).toContain("parsed.renderer?.hasRendererWindowControls !== false");
-      expect(smokeSource).toContain("parsed.renderer?.hasCustomChrome");
+      expect(smokeSource).toContain("parsed.renderer?.hasRendererTitleBar");
       expect(smokeSource).not.toContain('includes("Minimize window")');
       expect(smokeSource).not.toContain('includes("Maximize window")');
       expect(smokeSource).not.toContain('includes("Close window")');

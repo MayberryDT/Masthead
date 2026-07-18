@@ -597,8 +597,8 @@ function assertPackagedSmokeResult(parsed, dataDir, smokePort, release) {
   if (!parsed.renderer?.hasDesktopBridge || parsed.renderer?.hasNodeProcess || parsed.renderer?.hasRequire || parsed.renderer?.hasRawIpc) {
     throw new Error(`Packaged renderer security check failed: ${JSON.stringify(parsed.renderer)}`);
   }
-  if (!parsed.renderer?.hasCustomChrome) {
-    throw new Error(`Packaged custom window chrome was not rendered: ${JSON.stringify(parsed.renderer)}`);
+  if (!parsed.renderer?.hasRendererTitleBar) {
+    throw new Error(`Packaged renderer title bar was not rendered: ${JSON.stringify(parsed.renderer)}`);
   }
   if (parsed.renderer?.hasRendererWindowControls !== false) {
     throw new Error(`Packaged renderer window controls were unexpectedly rendered: ${JSON.stringify(parsed.renderer)}`);
