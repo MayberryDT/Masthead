@@ -15,6 +15,7 @@ describe("folded sheet-metal control system", () => {
 
     for (const selector of [
       ".masthead-shell .observability-toolbar::before",
+      ".masthead-shell .sidebar-group > div",
       ".masthead-shell .import-jobs-section"
     ]) {
       const plateRule = cssRuleBody(mastheadCss, selector);
@@ -23,6 +24,7 @@ describe("folded sheet-metal control system", () => {
     }
 
     for (const selector of [
+      ".masthead-shell .sidebar-link",
       ".masthead-shell .app-button",
       ".masthead-shell .toolbar-select",
       ".masthead-shell .observability-toolbar .search-field",
@@ -32,9 +34,6 @@ describe("folded sheet-metal control system", () => {
     ]) {
       expect(cssRuleBody(mastheadCss, selector), selector).toContain("clip-path: var(--folded-control-clip);");
     }
-
-    expect(mastheadCss).not.toContain(".masthead-shell .sidebar-group > div");
-    expect(mastheadCss).not.toContain(".masthead-shell .sidebar-link,");
 
     expect(cssRuleBodyContaining(mastheadCss, ".masthead-shell .app-button", "background-image:")).not.toContain("--folded-control-texture");
     expect(cssRuleBodyContaining(mastheadCss, ".masthead-shell .toolbar-select", "background-image:")).not.toContain("--folded-control-texture");

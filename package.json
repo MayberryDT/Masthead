@@ -1,6 +1,6 @@
 {
   "name": "masthead",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Local-first session data layer and session manager.",
   "private": true,
   "license": "MIT",

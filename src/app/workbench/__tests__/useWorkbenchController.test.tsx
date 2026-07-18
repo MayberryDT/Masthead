@@ -87,6 +87,15 @@ afterEach(async () => {
 });
 
 describe("useWorkbenchController", () => {
+  test("does not fetch hidden import-repair diagnostics for the human Workbench", async () => {
+    mockWorkbenchResponse([]);
+
+    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
+    await waitFor(() => latest().loading === false);
+
+    expect(getWorkbenchImportHealthSummary).not.toHaveBeenCalled();
+  });
+
   test("preserves selections across pages in one authoritative handoff", async () => {
     vi.mocked(getWorkbenchAuthoringCapabilities).mockResolvedValue(
       authoringCapabilities("database:test", "/home/test/.local/bin/mastheadctl")

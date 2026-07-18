@@ -64,15 +64,9 @@ function mediaRule(css: string, query: string): string {
 }
 
 describe("WorkbenchPanel", () => {
-  test("separates import repair from the package path and Not Added", () => {
+  test("keeps import repair diagnostics out of the human Workbench surface", () => {
     const html = renderToStaticMarkup(
       <WorkbenchPanel
-        importHealthSummary={{
-          ok: true,
-          importJobIds: ["import-opencode"],
-          reasons: [{ reason: "schema_drift", count: 12 }],
-          repairRequired: 12
-        }}
         notAddedSummary={{ ok: true, total: 4, reasons: [{ reason: "confirmed_noise", count: 4 }] }}
         sessions={Array.from({ length: 102 }, (_, index) => session({ sessionId: `session:${index}` }))}
         selectedSessionIds={new Set()}
@@ -87,37 +81,11 @@ describe("WorkbenchPanel", () => {
     const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 
     expect(text).toContain("Package path 102");
-    expect(text).toContain("Import repair 12");
     expect(text).toContain("Not Added 4");
-    expect(text).not.toContain("Not Added 16");
-  });
-
-  test("identifies each repair import with a plain-language reason and receipt action", () => {
-    const html = renderToStaticMarkup(
-      <WorkbenchPanel
-        importHealthSummary={{
-          ok: true,
-          importJobIds: ["import_job:codex-repair"],
-          repairImports: [{
-            importJobId: "import_job:codex-repair",
-            reasons: [{ reason: "schema_drift", count: 12 }],
-            repairRequired: 12,
-            runtime: "codex",
-            sourceId: "source:codex:history"
-          }],
-          reasons: [{ reason: "schema_drift", count: 12 }],
-          repairRequired: 12
-        }}
-        onOpenImportReceipt={vi.fn()}
-      />
-    );
-    const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-
-    expect(text).toContain("Codex · 12 repair units");
-    expect(text).toContain("Source source:codex:history");
-    expect(text).toContain("Import import_job:codex-repair");
-    expect(text).toContain("Source format changed");
-    expect(text).toContain("Open import receipt");
+    expect(text).not.toContain("Import repair");
+    expect(text).not.toContain("outside the package path");
+    expect(text).not.toContain("repair units");
+    expect(text).not.toContain("Open import receipt");
   });
 
   test("keeps the responsive action row from collapsing behind queue facts", () => {

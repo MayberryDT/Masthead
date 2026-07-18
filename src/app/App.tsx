@@ -108,7 +108,6 @@ const emptyLiveBoard: LiveBoardProjection = {
 export function App() {
   const [activeSurface, setActiveSurface] = useState<AppSurface>(() => readOnboardingDismissed() ? "now" : "sources");
   const onboardingRoutedDatabaseIdsRef = useRef(new Set<string>());
-  const [importReceiptIntent, setImportReceiptIntent] = useState<{ importJobId: string }>();
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<BoardFilter>("all");
@@ -649,7 +648,6 @@ export function App() {
           imports={imports}
           importTotal={importPage.total}
           importFilterRuntime={importFilterRuntime}
-          importReceiptIntent={importReceiptIntent}
           lastRefreshAt={sourcesLastRefreshAt}
           setup={sourcesSetup}
           busy={sourcesBusy || sourcesConnectors.busy}
@@ -684,7 +682,6 @@ export function App() {
           onConnectSelected={handleConnectSelectedSources}
           onExcludePath={handleExcludeSourcePath}
           onImportMetadata={handleImportMetadata}
-          onImportReceiptIntentConsumed={() => setImportReceiptIntent(undefined)}
           onLoadImportReport={sourcesController.loadImportReport}
           onLoadAdapterSources={handleLoadAdapterSources}
           onOpenImportJobsForRuntime={handleOpenImportJobsForRuntime}
@@ -757,11 +754,6 @@ export function App() {
           notAddedOpen={workbench.notAddedOpen}
           notAddedSessions={workbench.notAddedSessions}
           notAddedSummary={workbench.notAddedSummary}
-          importHealthSummary={workbench.importHealthSummary}
-          onOpenImportReceipt={(importJobId) => {
-            setImportReceiptIntent({ importJobId });
-            setActiveSurface("sources");
-          }}
           onClearSelection={workbench.clearSelection}
           onRetry={workbench.retry}
           onSelectAll={workbench.selectAll}
