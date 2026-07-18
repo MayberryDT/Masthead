@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { afterEach, describe, expect, test } from "vitest";
 import {
   isAllowedRendererUrl,
@@ -21,6 +22,25 @@ describe("Electron window security policy", () => {
       titleBarStyle: "hidden",
       titleBarOverlay: { color: "#051724", symbolColor: "#d6e4ef", height: 32 }
     });
+  });
+
+  test("keeps Electron smoke contracts free of renderer-owned window controls", async () => {
+    const [mainSource, developmentSmokeSource, packagedSmokeSource] = await Promise.all([
+      readFile("src/electron/main.ts", "utf8"),
+      readFile("scripts/masthead-electron-smoke.js", "utf8"),
+      readFile("scripts/masthead-electron-packaged-smoke.js", "utf8")
+    ]);
+
+    expect(mainSource).toContain(
+      "hasRendererWindowControls: document.querySelector('.masthead-window-control') !== null"
+    );
+    for (const smokeSource of [developmentSmokeSource, packagedSmokeSource]) {
+      expect(smokeSource).toContain("parsed.renderer?.hasRendererWindowControls !== false");
+      expect(smokeSource).toContain("parsed.renderer?.hasCustomChrome");
+      expect(smokeSource).not.toContain('includes("Minimize window")');
+      expect(smokeSource).not.toContain('includes("Maximize window")');
+      expect(smokeSource).not.toContain('includes("Close window")');
+    }
   });
 
   test("uses the hidden native title bar without an overlay on macOS", () => {

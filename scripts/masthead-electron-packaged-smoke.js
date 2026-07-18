@@ -600,12 +600,8 @@ function assertPackagedSmokeResult(parsed, dataDir, smokePort, release) {
   if (!parsed.renderer?.hasCustomChrome) {
     throw new Error(`Packaged custom window chrome was not rendered: ${JSON.stringify(parsed.renderer)}`);
   }
-  if (
-    !parsed.renderer?.windowControls?.includes("Minimize window") ||
-    !parsed.renderer?.windowControls?.includes("Maximize window") ||
-    !parsed.renderer?.windowControls?.includes("Close window")
-  ) {
-    throw new Error(`Packaged custom window controls were not rendered: ${JSON.stringify(parsed.renderer)}`);
+  if (parsed.renderer?.hasRendererWindowControls !== false) {
+    throw new Error(`Packaged renderer window controls were unexpectedly rendered: ${JSON.stringify(parsed.renderer)}`);
   }
 }
 
