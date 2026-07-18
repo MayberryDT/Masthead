@@ -189,6 +189,10 @@ export function App() {
     readOnly: !connection.writable,
     databaseId: activeDatabaseId
   });
+  const reopenOnboarding = useCallback(() => {
+    setActiveSurface("sources");
+    sourcesConnectors.openOnboarding();
+  }, [sourcesConnectors.openOnboarding]);
   useEffect(() => {
     if (!activeDatabaseId) return;
     const surface = resolveDatabaseOnboardingRoute(activeDatabaseId, onboardingRoutedDatabaseIdsRef.current);
@@ -796,6 +800,7 @@ export function App() {
             onExportLocalData={settingsData.exportLocalData}
             onKeepRunningInTrayChange={setKeepRunningInTray}
             onMotionDisabledChange={handleMotionDisabledChange}
+            onOpenOnboarding={reopenOnboarding}
             onReloadSettings={() => void settingsData.loadSettingsState()}
             onRequestPruneLocalData={settingsData.requestPruneLocalData}
             onConfirmPruneLocalData={settingsData.confirmPruneLocalData}

@@ -10,6 +10,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { AdvancedSettings } from "./settings/AdvancedSettings";
 import { DangerZone } from "./settings/DangerZone";
 import { McpSettings } from "./settings/McpSettings";
+import { OnboardingSettings } from "./settings/OnboardingSettings";
 import type { SettingsFeedback } from "./settings/SettingsActionFeedback";
 import { SettingsSpineCard } from "./settings/SettingsSpineCard";
 import { StorageSettings } from "./settings/StorageSettings";
@@ -56,6 +57,7 @@ type Props = {
   onExportLocalData?: () => void;
   onKeepRunningInTrayChange?: (enabled: boolean) => void;
   onMotionDisabledChange?: (disabled: boolean) => void;
+  onOpenOnboarding?: () => void;
   onReloadSettings?: () => void;
   onRequestPruneLocalData?: () => void;
   onConfirmPruneLocalData?: () => void;
@@ -86,6 +88,7 @@ export function OperationsPanel({
   onExportLocalData,
   onKeepRunningInTrayChange,
   onMotionDisabledChange,
+  onOpenOnboarding,
   onReloadSettings,
   onRequestDeleteLocalData,
   onRequestPruneLocalData,
@@ -192,6 +195,7 @@ export function OperationsPanel({
               settings={effectiveSettings}
               writeDisabled={writesDisabled}
             />
+            <OnboardingSettings onOpenOnboarding={onOpenOnboarding} readOnly={readOnly} />
             <McpSettings baseUrl={baseUrl} privacy={effectiveSettings?.privacy} />
             <AdvancedSettings settings={effectiveSettings} />
             <DangerZone
