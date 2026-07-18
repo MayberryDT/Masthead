@@ -3932,6 +3932,20 @@ body {
   background: var(--sidebar-bg);
 }
 
+.masthead-shell.desktop-chrome .masthead-sidebar {
+  --masthead-sidebar-titlebar-inset: min(env(titlebar-area-height, 0px), env(titlebar-area-x, 0px));
+  padding-top: var(--masthead-sidebar-titlebar-inset);
+}
+
+.masthead-shell.desktop-chrome.desktop-chrome-macos .masthead-sidebar {
+  --masthead-sidebar-titlebar-inset: env(titlebar-area-height, 32px);
+}
+
+.masthead-shell.desktop-chrome .masthead-sidebar .sidebar-shell {
+  height: calc(100vh - var(--masthead-sidebar-titlebar-inset));
+  min-height: calc(100vh - var(--masthead-sidebar-titlebar-inset));
+}
+
 .observability-console .metal-sidebar,
 .masthead-shell .metal-sidebar {
   isolation: isolate;
@@ -6343,6 +6357,11 @@ body {
 @media (max-width: 760px) {
   .masthead-shell {
     --masthead-sidebar-offset: 0px;
+  }
+
+  .masthead-shell.desktop-chrome .masthead-sidebar,
+  .masthead-shell.desktop-chrome.desktop-chrome-macos .masthead-sidebar {
+    --masthead-sidebar-titlebar-inset: 0px;
   }
 
   .observability-console,

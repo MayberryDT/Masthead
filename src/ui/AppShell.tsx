@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { isDesktopBridgeAvailable } from "../app/desktopBridge";
+import { getDesktopBridge } from "../app/desktopBridge";
 
 type Props = {
   sidebar: ReactNode;
@@ -9,14 +9,17 @@ type Props = {
 
 export function AppShell({ sidebar, main, motionMode = "daily" }: Props) {
   const [desktopChrome, setDesktopChrome] = useState(false);
+  const [desktopPlatform, setDesktopPlatform] = useState<string>();
 
   useEffect(() => {
-    setDesktopChrome(isDesktopBridgeAvailable());
+    const bridge = getDesktopBridge();
+    setDesktopChrome(Boolean(bridge));
+    setDesktopPlatform(bridge?.platform);
   }, []);
 
   return (
     <main
-      className={`masthead-shell ${desktopChrome ? "desktop-chrome" : ""}`}
+      className={`masthead-shell ${desktopChrome ? "desktop-chrome" : ""} ${desktopPlatform === "darwin" ? "desktop-chrome-macos" : ""}`}
       data-motion-mode={motionMode}
       aria-label="Masthead session manager"
     >

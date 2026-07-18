@@ -12,6 +12,7 @@ describe("desktop bridge", () => {
     const calls: Array<{ command: string; args?: Record<string, unknown> }> = [];
     vi.stubGlobal("window", {
       mastheadDesktop: {
+        platform: "darwin",
         invoke: async <T>(command: string, args?: Record<string, unknown>) => {
           calls.push({ command, args });
           return { ok: true } as T;
@@ -21,6 +22,7 @@ describe("desktop bridge", () => {
 
     expect(isDesktopBridgeAvailable()).toBe(true);
     expect(getDesktopBridge()?.kind).toBe("electron");
+    expect(getDesktopBridge()?.platform).toBe("darwin");
     await expect(invokeDesktopCommand("start_live_connector_command", { from: "test" })).resolves.toEqual({ ok: true });
     expect(calls).toEqual([{ command: "start_live_connector_command", args: { from: "test" } }]);
   });

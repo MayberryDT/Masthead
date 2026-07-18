@@ -14,6 +14,7 @@ export type DesktopNotificationResult =
 export type DesktopBridge = {
   invoke: DesktopInvoke;
   kind: "electron";
+  platform?: string;
   notifySessionTransition?: (input: DesktopSessionTransitionNotificationInput) => Promise<DesktopNotificationResult>;
 };
 
@@ -23,6 +24,7 @@ export function getDesktopBridge(): DesktopBridge | undefined {
   return {
     invoke: candidate.invoke,
     kind: "electron",
+    platform: candidate.platform,
     notifySessionTransition:
       typeof candidate.notifySessionTransition === "function" ? candidate.notifySessionTransition : undefined
   };

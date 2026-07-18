@@ -26,6 +26,7 @@ describe("Electron window chrome styles", () => {
 
   test("renders only the safe draggable title bar when the desktop bridge is available", async () => {
     window.mastheadDesktop = {
+      platform: "darwin",
       invoke: vi.fn(async () => ({ ok: true })) as unknown as NonNullable<Window["mastheadDesktop"]>["invoke"]
     };
     const container = document.createElement("div");
@@ -40,6 +41,7 @@ describe("Electron window chrome styles", () => {
     expect(windowBar?.tagName).toBe("DIV");
     expect(windowBar?.getAttribute("aria-hidden")).toBe("true");
     expect(windowBar?.getAttribute("aria-label")).toBeNull();
+    expect(container.querySelector(".masthead-shell")?.classList.contains("desktop-chrome-macos")).toBe(true);
     expect(container.querySelector(".masthead-window-drag-region")).not.toBeNull();
     expect(container.querySelector(".masthead-window-controls")).toBeNull();
     expect(container.querySelectorAll(".masthead-window-control")).toHaveLength(0);
@@ -66,6 +68,15 @@ describe("Electron window chrome styles", () => {
     );
     expect(cssRule(".masthead-window-drag-region")).toMatch(/width:\s*auto;/);
     expect(cssRule(".masthead-window-drag-region")).toMatch(/-webkit-app-region:\s*drag;/);
+    expect(cssRule(".masthead-shell.desktop-chrome .masthead-sidebar")).toMatch(
+      /--masthead-sidebar-titlebar-inset:\s*min\(env\(titlebar-area-height,\s*0px\),\s*env\(titlebar-area-x,\s*0px\)\);/
+    );
+    expect(cssRule(".masthead-shell.desktop-chrome.desktop-chrome-macos .masthead-sidebar")).toMatch(
+      /--masthead-sidebar-titlebar-inset:\s*env\(titlebar-area-height,\s*32px\);/
+    );
+    expect(cssRule(".masthead-shell.desktop-chrome .masthead-sidebar .sidebar-shell")).toMatch(
+      /height:\s*calc\(100vh\s*-\s*var\(--masthead-sidebar-titlebar-inset\)\);/
+    );
     expect(mastheadCss).not.toMatch(/\.masthead-window-controls?\b/);
   });
 });
