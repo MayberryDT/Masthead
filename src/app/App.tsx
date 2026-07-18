@@ -25,6 +25,7 @@ import {
 } from "../ui/motionPreference";
 import { emitSessionTransitionNotifications } from "./liveSessionEndedNotifications";
 import { readOnboardingDismissed } from "./onboardingPreference";
+import { resolveDatabaseOnboardingRoute } from "./onboardingRoute";
 import {
   applyIdlePresentationToProjection,
   markIdleDoneSeen,
@@ -106,6 +107,7 @@ const emptyLiveBoard: LiveBoardProjection = {
 
 export function App() {
   const [activeSurface, setActiveSurface] = useState<AppSurface>(() => readOnboardingDismissed() ? "now" : "sources");
+  const onboardingRoutedDatabaseIdsRef = useRef(new Set<string>());
   const [importReceiptIntent, setImportReceiptIntent] = useState<{ importJobId: string }>();
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -133,6 +135,10 @@ export function App() {
   const [connectorAction, setConnectorAction] = useState<ConnectorActionState>({ state: "idle" });
   const [collectorStartupLog, setCollectorStartupLog] = useState<CollectorStartupLogEntry[]>([]);
   const connection = useMastheadConnection();
+  const activeDatabaseId =
+    connection.state.state === "ready" || connection.state.state === "read_only"
+      ? connection.state.health.data.databaseId
+      : undefined;
   const activeProjectionUrl = connection.baseUrl;
   const activeProjectionUrlRef = useRef(activeProjectionUrl);
   const [showDemoData, setShowDemoData] = useState(startsInFixtureMode);
@@ -181,8 +187,14 @@ export function App() {
     syncRuntime: handleSyncAdapter
   } = sourcesController;
   const sourcesConnectors = useSourcesConnectorsController(activeProjectionUrl, {
-    readOnly: !connection.writable
+    readOnly: !connection.writable,
+    databaseId: activeDatabaseId
   });
+  useEffect(() => {
+    if (!activeDatabaseId) return;
+    const surface = resolveDatabaseOnboardingRoute(activeDatabaseId, onboardingRoutedDatabaseIdsRef.current);
+    if (surface) setActiveSurface(surface);
+  }, [activeDatabaseId]);
   const logbook = useLogbookController({
     activeProjectionUrl,
     activeSurface,

@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { HarnessConnectorsSnapshotDto } from "../../../shared/harnessConnectors";
-import { mastheadOnboardingDismissedStorageKey } from "../../onboardingPreference";
+import { writeOnboardingDismissed } from "../../onboardingPreference";
 import {
   useSourcesConnectorsController,
   type UseSourcesConnectorsControllerResult
@@ -41,6 +41,8 @@ type HarnessProps = {
   activeProjectionUrl: string;
   readOnly?: boolean;
   autoLoad?: boolean;
+  databaseId?: string;
+  onRender?: (result: UseSourcesConnectorsControllerResult) => void;
 };
 
 let container: HTMLDivElement | undefined;
@@ -64,19 +66,28 @@ beforeEach(() => {
 });
 
 describe("useSourcesConnectorsController", () => {
-  test("opens first-run onboarding immediately before connector inventory resolves", async () => {
+  test("opens first-run onboarding once database identity is known before connector inventory resolves", async () => {
     vi.mocked(listHarnessConnectors).mockImplementation(() => new Promise(() => undefined));
 
-    await renderHarness({ activeProjectionUrl: baseUrl });
+    await renderHarness({ activeProjectionUrl: baseUrl, databaseId: "database:test" });
 
     expect(latest().snapshot).toBeUndefined();
     expect(latest().onboardingOpen).toBe(true);
   });
 
-  test("auto-loads connectors and opens first-run onboarding when none are ready but some are found", async () => {
+  test("does not auto-open onboarding until the canonical database identity is known", async () => {
     vi.mocked(listHarnessConnectors).mockResolvedValue(snapshot({ ready: 0, found: true }));
 
     await renderHarness({ activeProjectionUrl: baseUrl });
+    await waitFor(() => latest()?.snapshot !== undefined);
+
+    expect(latest().onboardingOpen).toBe(false);
+  });
+
+  test("auto-loads connectors and opens first-run onboarding when none are ready but some are found", async () => {
+    vi.mocked(listHarnessConnectors).mockResolvedValue(snapshot({ ready: 0, found: true }));
+
+    await renderHarness({ activeProjectionUrl: baseUrl, databaseId: "database:test" });
     await waitFor(() => latest()?.snapshot !== undefined);
 
     expect(listHarnessConnectors).toHaveBeenCalledWith(baseUrl);
@@ -87,7 +98,7 @@ describe("useSourcesConnectorsController", () => {
   test("opens first-run onboarding when found connectors are already ready but onboarding is incomplete", async () => {
     vi.mocked(listHarnessConnectors).mockResolvedValue(snapshot({ ready: 1, found: true, live: "ready" }));
 
-    await renderHarness({ activeProjectionUrl: baseUrl });
+    await renderHarness({ activeProjectionUrl: baseUrl, databaseId: "database:test" });
     await waitFor(() => latest()?.snapshot !== undefined);
 
     expect(latest().onboardingOpen).toBe(true);
@@ -96,19 +107,51 @@ describe("useSourcesConnectorsController", () => {
   test("opens first-run onboarding even when no harness has been found yet", async () => {
     vi.mocked(listHarnessConnectors).mockResolvedValue(snapshot({ ready: 0, found: false }));
 
-    await renderHarness({ activeProjectionUrl: baseUrl });
+    await renderHarness({ activeProjectionUrl: baseUrl, databaseId: "database:test" });
     await waitFor(() => latest()?.snapshot !== undefined);
 
     expect(latest().onboardingOpen).toBe(true);
   });
 
   test("does not auto-open onboarding when preference is dismissed", async () => {
-    window.localStorage.setItem(mastheadOnboardingDismissedStorageKey, "1");
+    writeOnboardingDismissed(true, "database:test");
     vi.mocked(listHarnessConnectors).mockResolvedValue(snapshot({ ready: 0, found: true }));
 
-    await renderHarness({ activeProjectionUrl: baseUrl });
+    await renderHarness({ activeProjectionUrl: baseUrl, databaseId: "database:test" });
     await waitFor(() => latest()?.snapshot !== undefined);
 
+    expect(latest().onboardingOpen).toBe(false);
+  });
+
+  test("opens onboarding when a replacement database inherits the old Electron profile", async () => {
+    writeOnboardingDismissed(true, "database:old");
+    vi.mocked(listHarnessConnectors).mockResolvedValue(snapshot({ ready: 0, found: true }));
+
+    await renderHarness({ activeProjectionUrl: baseUrl, databaseId: "database:new" });
+    await waitFor(() => latest()?.snapshot !== undefined);
+
+    expect(latest().onboardingOpen).toBe(true);
+  });
+
+  test("never transiently opens while migrating a known legacy dismissal", async () => {
+    writeOnboardingDismissed(true);
+    vi.mocked(listHarnessConnectors).mockResolvedValue(snapshot({ ready: 0, found: true }));
+    const renderedOpenStates: boolean[] = [];
+
+    await renderHarness({
+      activeProjectionUrl: baseUrl,
+      onRender: (result) => renderedOpenStates.push(result.onboardingOpen)
+    });
+    const databaseResolutionRender = renderedOpenStates.length;
+
+    await rerenderHarness({
+      activeProjectionUrl: baseUrl,
+      databaseId: "database:existing",
+      onRender: (result) => renderedOpenStates.push(result.onboardingOpen)
+    });
+    await waitFor(() => latest()?.snapshot !== undefined);
+
+    expect(renderedOpenStates.slice(databaseResolutionRender)).not.toContain(true);
     expect(latest().onboardingOpen).toBe(false);
   });
 
@@ -227,8 +270,10 @@ describe("useSourcesConnectorsController", () => {
 function Harness(props: HarnessProps) {
   latestResult = useSourcesConnectorsController(props.activeProjectionUrl, {
     readOnly: props.readOnly,
-    autoLoad: props.autoLoad
+    autoLoad: props.autoLoad,
+    databaseId: props.databaseId
   });
+  props.onRender?.(latestResult);
   return null;
 }
 

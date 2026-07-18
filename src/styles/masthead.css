@@ -4337,6 +4337,8 @@ body {
 .sidebar-knowledge-flow {
   display: block;
   min-height: 154px;
+  border-top: 1px solid var(--line);
+  background: transparent;
   color: var(--body);
   padding: 12px;
 }
@@ -4463,13 +4465,13 @@ body {
 }
 
 .sidebar-import-activity {
-  border: 1px solid rgba(46, 167, 255, 0.2);
-  border-radius: 4px;
-  background: #03121c;
-  padding: 11px 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 11px 0;
   color: #d8eaf6;
   font-family: var(--font-mono);
-  box-shadow: inset 0 1px 0 rgba(210, 237, 252, 0.035);
+  box-shadow: none;
 }
 
 .sidebar-import-heading {
@@ -7161,8 +7163,6 @@ body {
  * Secondary app card treatment sourced from
  * mockups/secondary-card-directions.html option 11.
  */
-.observability-console .sidebar-knowledge-flow,
-.masthead-shell .sidebar-knowledge-flow,
 .observability-console .settings-spine-card,
 .masthead-shell .settings-spine-card,
 .observability-console .summary-strip .summary-metric,
@@ -7213,8 +7213,6 @@ body {
   transform: none;
 }
 
-.observability-console .sidebar-knowledge-flow::before,
-.masthead-shell .sidebar-knowledge-flow::before,
 .observability-console .settings-spine-card::before,
 .masthead-shell .settings-spine-card::before,
 .observability-console .summary-strip .summary-metric::before,
@@ -7284,8 +7282,6 @@ body {
   border-bottom-color: rgba(255, 72, 62, 0.48);
 }
 
-.observability-console .sidebar-knowledge-flow::after,
-.masthead-shell .sidebar-knowledge-flow::after,
 .observability-console .settings-spine-card::after,
 .masthead-shell .settings-spine-card::after,
 .observability-console .summary-strip .summary-metric::after,
@@ -7310,8 +7306,6 @@ body {
   pointer-events: none;
 }
 
-.observability-console .sidebar-knowledge-flow > *,
-.masthead-shell .sidebar-knowledge-flow > *,
 .observability-console .settings-spine-card > *,
 .masthead-shell .settings-spine-card > *,
 .observability-console .summary-strip .summary-metric > *,
@@ -7649,8 +7643,6 @@ body {
   }
 }
 
-.observability-console .sidebar-group > div,
-.masthead-shell .sidebar-group > div,
 .observability-console .import-jobs-section,
 .masthead-shell .import-jobs-section {
   position: relative;
@@ -7667,20 +7659,12 @@ body {
     inset 0 -1px 0 rgba(0, 0, 0, 0.48);
 }
 
-.observability-console .sidebar-group > div,
-.masthead-shell .sidebar-group > div {
-  gap: 6px;
-  padding: 6px;
-}
-
 .observability-console .import-jobs-section::before,
 .masthead-shell .import-jobs-section::before {
   background-image: none;
   opacity: 0;
 }
 
-.observability-console .sidebar-link,
-.masthead-shell .sidebar-link,
 .observability-console .app-button,
 .masthead-shell .app-button,
 .masthead-control-scope .app-button,
@@ -7709,8 +7693,6 @@ body {
   clip-path: var(--folded-control-clip);
 }
 
-.observability-console .sidebar-link,
-.masthead-shell .sidebar-link,
 .observability-console .app-button,
 .masthead-shell .app-button,
 .masthead-control-scope .app-button,
@@ -7737,8 +7719,6 @@ body {
     inset 0 -1px 0 var(--folded-control-bottom);
 }
 
-.observability-console .sidebar-link,
-.masthead-shell .sidebar-link,
 .observability-console .app-button:not(.app-button-primary):not(.app-button-danger),
 .masthead-shell .app-button:not(.app-button-primary):not(.app-button-danger),
 .masthead-control-scope .app-button:not(.app-button-primary):not(.app-button-danger),
@@ -7761,8 +7741,6 @@ body {
   background-color: var(--folded-control-fill);
 }
 
-.observability-console .sidebar-link:hover,
-.masthead-shell .sidebar-link:hover,
 .observability-console .app-button:hover:not(:disabled),
 .masthead-shell .app-button:hover:not(:disabled),
 .masthead-control-scope .app-button:hover:not(:disabled),
@@ -7780,8 +7758,6 @@ body {
 .observability-console .app-button-primary,
 .masthead-shell .app-button-primary,
 .masthead-control-scope .app-button-primary,
-.observability-console .sidebar-link.active,
-.masthead-shell .sidebar-link.active,
 .observability-console .toolbar-select.open,
 .masthead-shell .toolbar-select.open {
   border-color: rgba(46, 167, 255, 0.36);

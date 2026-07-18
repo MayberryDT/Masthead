@@ -1,18 +1,23 @@
 // @vitest-environment happy-dom
 import { act, useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import currentHealth from "../../../fixtures/protocol/current-health.json";
 import { App } from "../App";
 import { MastheadConnectionProvider } from "../connection/MastheadConnectionProvider";
 import { useMastheadConnection } from "../connection/useMastheadConnection";
-import { mastheadOnboardingDismissedStorageKey } from "../onboardingPreference";
+import { writeOnboardingDismissed } from "../onboardingPreference";
 
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   delete window.mastheadDesktop;
-  window.localStorage.setItem(mastheadOnboardingDismissedStorageKey, "1");
+});
+
+beforeEach(() => {
+  window.localStorage.clear();
+  writeOnboardingDismissed(true, "fixture-database");
+  writeOnboardingDismissed(true, "db");
 });
 
 describe("collector autostart", () => {
@@ -76,7 +81,7 @@ describe("collector autostart", () => {
   });
 
   test("keeps first-run sources onboarding open after connector discovery", async () => {
-    window.localStorage.removeItem(mastheadOnboardingDismissedStorageKey);
+    window.localStorage.clear();
     const connectorFetch = createDetectedConnectorFetch();
     vi.stubGlobal("fetch", connectorFetch.fetch);
 
@@ -106,7 +111,7 @@ describe("collector autostart", () => {
   });
 
   test("keeps the sources wizard open while selecting detected connectors", async () => {
-    window.localStorage.removeItem(mastheadOnboardingDismissedStorageKey);
+    window.localStorage.clear();
     const connectorFetch = createDetectedConnectorFetch();
     vi.stubGlobal("fetch", connectorFetch.fetch);
 

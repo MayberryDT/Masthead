@@ -106,6 +106,9 @@ describe("ObservabilitySidebar", () => {
     expect(css).toContain("grid-template-rows: auto auto minmax(0, 1fr) auto;");
     expect(css).toContain(".sidebar-import-region {\n  position: static;\n  min-height: 0;\n  margin: 16px 16px 0;\n  overflow: hidden;");
     expect(css).toContain(".sidebar-import-region .sidebar-import-activity {\n  position: static;\n  max-height: 100%;\n  overflow-y: auto;");
+    expect(css).toMatch(/\.sidebar-import-activity \{[\s\S]*?border: 0;[\s\S]*?border-radius: 0;[\s\S]*?background: transparent;[\s\S]*?box-shadow: none;/);
+    expect(css).not.toContain(".masthead-shell .sidebar-group > div");
+    expect(css).not.toContain(".masthead-shell .sidebar-link,");
     expect(css).toContain(".masthead-shell .sidebar-knowledge-flow {\n  position: static;\n  margin: 10px 16px 16px;");
     expect(css).toContain("@media (max-width: 760px) {\n  .sidebar-shell {\n    display: block;\n    height: auto;\n    overflow: visible;");
     expect(css).not.toContain("@media (max-height: 720px)");

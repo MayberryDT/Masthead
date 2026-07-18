@@ -75,28 +75,18 @@ describe("SidebarKnowledgeFlow", () => {
     expect(html).not.toContain("4 automatically resolved");
   });
 
-  test("uses the approved green resolution note and shared steel shell", () => {
+  test("uses the approved green resolution note in a flat navigation rail", () => {
     const css = readFileSync(new URL("../../styles/masthead.css", import.meta.url), "utf8");
     const resolvedRule = cssRuleBody(css, ".sidebar-knowledge-resolved");
     const unavailableRule = cssRuleBody(css, ".sidebar-knowledge-flow.unavailable .sidebar-knowledge-resolved");
-    const shellRule = cssRuleBodyContaining(
-      css,
-      ".masthead-shell .sidebar-knowledge-flow",
-      "background: #071b28;"
-    );
-    const bottomEdgeRule = cssRuleBodyContaining(
-      css,
-      ".masthead-shell .sidebar-knowledge-flow::after",
-      "border-bottom: 2px solid rgba(46, 167, 255, 0.42);"
-    );
+    const railRule = cssRuleBody(css, ".sidebar-knowledge-flow");
 
     expect(resolvedRule).toContain("color: var(--green);");
     expect(unavailableRule).toContain("color: var(--ash);");
-    expect(shellRule).toContain("border: 1px solid rgba(92, 153, 187, 0.14);");
-    expect(shellRule).toContain("border-radius: 5px;");
-    expect(shellRule).toContain("background: #071b28;");
-    expect(shellRule).toContain("box-shadow: none;");
-    expect(bottomEdgeRule).toContain("border-bottom: 2px solid rgba(46, 167, 255, 0.42);");
+    expect(railRule).toContain("border-top: 1px solid var(--line);");
+    expect(railRule).toContain("background: transparent;");
+    expect(css).not.toMatch(/\.masthead-shell \.sidebar-knowledge-flow::(?:before|after)/);
+    expect(css).not.toMatch(/\.observability-console \.sidebar-knowledge-flow::(?:before|after)/);
   });
 });
 
