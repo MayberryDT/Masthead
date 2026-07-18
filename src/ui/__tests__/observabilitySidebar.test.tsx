@@ -67,7 +67,7 @@ describe("ObservabilitySidebar", () => {
     expect(html.indexOf('aria-label="Knowledge flow"')).toBeGreaterThan(html.indexOf('aria-label="Masthead sections"'));
   });
 
-  test("renders active history imports as compact background activity", () => {
+  test("renders active history imports as a distinct card", () => {
     const html = renderToStaticMarkup(
       <ObservabilitySidebar
         version={APP_VERSION_LABEL}
@@ -86,6 +86,11 @@ describe("ObservabilitySidebar", () => {
     expect(html).toContain("1,201 outside this pass");
     expect(html).toContain("1 harness waiting");
     expect(html).not.toContain("Claude Code 0");
+
+    const css = readFileSync("src/styles/masthead.css", "utf8");
+    expect(css).toMatch(/\.sidebar-import-activity \{[\s\S]*?border: 1px solid rgba\(46, 167, 255, 0\.2\);[\s\S]*?background: #03121c;/);
+    expect(css).toMatch(/\.sidebar-import-activity\.is-updating \{[\s\S]*?box-sizing: border-box;[\s\S]*?height: 100%;/);
+    expect(css).not.toMatch(/\.sidebar-import-activity\.is-updating \{[^}]*background: transparent;/);
   });
 
   test("bounds import health between navigation and Knowledge flow across sidebar layouts", () => {
@@ -108,9 +113,8 @@ describe("ObservabilitySidebar", () => {
     expect(css).toContain("grid-template-rows: auto auto minmax(0, 1fr) auto;");
     expect(css).toContain(".sidebar-import-region {\n  position: static;\n  min-height: 0;\n  margin: 16px 16px 0;\n  overflow: hidden;");
     expect(css).toContain(".sidebar-import-region .sidebar-import-activity {\n  position: static;\n  max-height: 100%;\n  overflow-y: auto;");
-    expect(css).toMatch(/\.sidebar-import-activity\.is-updating \{[\s\S]*?border: 0;[\s\S]*?border-radius: 0;[\s\S]*?background: transparent;[\s\S]*?box-shadow: none;/);
-    expect(css).toContain(".masthead-shell .sidebar-group > div");
-    expect(css).toContain(".masthead-shell .sidebar-link,");
+    expect(css).not.toContain(".masthead-shell .sidebar-group > div");
+    expect(css).not.toContain(".masthead-shell .sidebar-link,");
     expect(css).toContain(".masthead-shell .sidebar-knowledge-flow {\n  position: static;\n  margin: 10px 16px 16px;");
     expect(css).toContain("@media (max-width: 760px) {\n  .sidebar-shell {\n    display: block;\n    height: auto;\n    overflow: visible;");
     expect(css).not.toContain("@media (max-height: 720px)");

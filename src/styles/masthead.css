@@ -4424,11 +4424,8 @@ body {
 }
 
 .sidebar-import-activity.is-updating {
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  padding: 11px 0;
-  box-shadow: none;
+  box-sizing: border-box;
+  height: 100%;
 }
 
 .sidebar-import-heading {
@@ -7608,8 +7605,6 @@ body {
   }
 }
 
-.observability-console .sidebar-group > div,
-.masthead-shell .sidebar-group > div,
 .observability-console .import-jobs-section,
 .masthead-shell .import-jobs-section {
   position: relative;
@@ -7626,20 +7621,12 @@ body {
     inset 0 -1px 0 rgba(0, 0, 0, 0.48);
 }
 
-.observability-console .sidebar-group > div,
-.masthead-shell .sidebar-group > div {
-  gap: 6px;
-  padding: 6px;
-}
-
 .observability-console .import-jobs-section::before,
 .masthead-shell .import-jobs-section::before {
   background-image: none;
   opacity: 0;
 }
 
-.observability-console .sidebar-link,
-.masthead-shell .sidebar-link,
 .observability-console .app-button,
 .masthead-shell .app-button,
 .masthead-control-scope .app-button,
@@ -7668,8 +7655,6 @@ body {
   clip-path: var(--folded-control-clip);
 }
 
-.observability-console .sidebar-link,
-.masthead-shell .sidebar-link,
 .observability-console .app-button,
 .masthead-shell .app-button,
 .masthead-control-scope .app-button,
@@ -7696,8 +7681,6 @@ body {
     inset 0 -1px 0 var(--folded-control-bottom);
 }
 
-.observability-console .sidebar-link,
-.masthead-shell .sidebar-link,
 .observability-console .app-button:not(.app-button-primary):not(.app-button-danger),
 .masthead-shell .app-button:not(.app-button-primary):not(.app-button-danger),
 .masthead-control-scope .app-button:not(.app-button-primary):not(.app-button-danger),
@@ -7720,8 +7703,6 @@ body {
   background-color: var(--folded-control-fill);
 }
 
-.observability-console .sidebar-link:hover,
-.masthead-shell .sidebar-link:hover,
 .observability-console .app-button:hover:not(:disabled),
 .masthead-shell .app-button:hover:not(:disabled),
 .masthead-control-scope .app-button:hover:not(:disabled),
@@ -7739,8 +7720,6 @@ body {
 .observability-console .app-button-primary,
 .masthead-shell .app-button-primary,
 .masthead-control-scope .app-button-primary,
-.observability-console .sidebar-link.active,
-.masthead-shell .sidebar-link.active,
 .observability-console .toolbar-select.open,
 .masthead-shell .toolbar-select.open {
   border-color: rgba(46, 167, 255, 0.36);
