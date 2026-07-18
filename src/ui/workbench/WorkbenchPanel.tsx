@@ -11,6 +11,8 @@ type WorkbenchPanelProps = Partial<
     | "actionBusy"
     | "actionError"
     | "activity"
+    | "agentPromptExcludedCount"
+    | "agentPromptSessionCount"
     | "canRun"
     | "clearActionFeedback"
     | "error"
@@ -87,6 +89,8 @@ export function WorkbenchPanel({
   actionBusy = false,
   actionError,
   activity = EMPTY_ACTIVITY,
+  agentPromptExcludedCount = 0,
+  agentPromptSessionCount = 0,
   canRun = defaultCanRun,
   clearActionFeedback,
   error,
@@ -126,6 +130,17 @@ export function WorkbenchPanel({
       ? sanitizeWorkbenchVisibleText(lastActionSummary)
       : undefined;
   const toastTone = actionError ? "error" : "ok";
+  const copyAgentPromptTitle = selectionCount === 0
+    ? TOOLTIPS.copyAgentPrompt
+    : agentPromptSessionCount === 0
+      ? "No selected sessions are ready for agent enrichment. Review transcript and quality status first."
+      : agentPromptExcludedCount > 0
+        ? `Copy a plain-language request for ${agentPromptSessionCount} ready session${
+          agentPromptSessionCount === 1 ? "" : "s"
+        }. ${agentPromptExcludedCount} selected session${
+          agentPromptExcludedCount === 1 ? " needs" : "s need"
+        } review and will be left out.`
+        : TOOLTIPS.copyAgentPrompt;
 
   const pageSessionIds = sessions.map((session) => session.sessionId);
   const newSessionIds = useNewItemIds(pageSessionIds, page);
@@ -223,7 +238,7 @@ export function WorkbenchPanel({
             variant="primary"
             onClick={() => void run("copy_agent_prompt")}
             disabled={!canRun("copy_agent_prompt")}
-            title={TOOLTIPS.copyAgentPrompt}
+            title={copyAgentPromptTitle}
           >
             Copy Agent Prompt
           </AppButton>
@@ -292,9 +307,15 @@ export function WorkbenchPanel({
             <dt>Package path</dt>
             <dd>{publishPathLabel}</dd>
           </div>
-          <div title="Sessions currently selected for bulk actions">
+          <div title="Sessions currently selected for bulk actions and ready for agent enrichment">
             <dt>Selected</dt>
             <dd>{selectionCount}</dd>
+            {selectionCount > 0 ? (
+              <span className="workbench-selection-readiness">
+                {agentPromptSessionCount} ready
+                {agentPromptExcludedCount > 0 ? ` · ${agentPromptExcludedCount} review` : ""}
+              </span>
+            ) : null}
           </div>
           {notAddedLabel != null ? (
             <div className={notAddedOpen ? "is-active" : undefined} title={TOOLTIPS.notAdded}>

@@ -337,6 +337,13 @@ describe("SourcesPanel", () => {
     expect(actionRule).toContain("justify-self: end;");
   });
 
+  test("keeps full-window onboarding below native desktop controls", () => {
+    const css = readFileSync("src/styles/sources.css", "utf8");
+    const desktopRule = css.match(/\.masthead-shell\.desktop-chrome \.sources-onboarding-full-window\s*\{(?<body>[\s\S]*?)\}/)?.groups?.body ?? "";
+
+    expect(desktopRule).toContain("top: env(titlebar-area-height, 32px);");
+  });
+
   test("keeps onboarding source paths clipped and shared action rows spaced", () => {
     const sourcesCss = readFileSync("src/styles/sources.css", "utf8");
     const primitivesCss = readFileSync("src/styles/primitives.css", "utf8");

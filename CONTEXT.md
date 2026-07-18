@@ -192,8 +192,11 @@ not a durable task, proposal, or workflow object.
 _Avoid_: CLI command, script, recipe
 
 **Copy Agent Prompt**:
-Copies a disposable request for the selected sessions. The prompt asks the agent to enrich those
-sessions and choose any useful optional artifacts; it is not a durable task or a detector verdict.
+Copies a disposable request for the compile-ready subset of the current selection. Sessions that
+still need transcript or quality review remain selected for human operations, but do not block or
+enter the agent request; Workbench discloses the ready and excluded counts. The prompt asks the
+agent to enrich the ready sessions and choose any useful optional artifacts; it is not a durable
+task or a detector verdict.
 _Avoid_: Assignment, saved job, required artifact list
 
 **Disposable handoff**:

@@ -64,7 +64,6 @@ import { initializeSessionTranscriptFingerprintIndex } from "./db/sessionTranscr
 import {
   claimWorkbenchSessions,
   countWorkbenchQueue,
-  enrollMissingWorkbenchSessions,
   listWorkbenchActivity,
   listWorkbenchQueue,
   markWorkbenchQuality,
@@ -121,6 +120,7 @@ import { planTranscriptImportUnits, transcriptPlanForWorkUnit } from "./import/t
 import { countImportedRecord, emptyImportResult } from "./import/importWorker.ts";
 import { runImportWorkUnit } from "./import/importWorkUnitRunner.ts";
 import { applyImportRepair, previewImportRepair } from "./import/importRepair.ts";
+import { reconcileMissingImportedWorkbenchSessions } from "../workbench/importReconciliation.ts";
 import { reconcileImportedTranscript } from "../workbench/transcriptQualityReconciler.ts";
 import { getAdapterStatuses, getSourceStatuses } from "./import/sourceStatusService.ts";
 import { recordRequestDiagnostic, recordRuntimeDiagnostic, runtimeDiagnosticsSnapshot } from "./diagnostics.ts";
@@ -2687,10 +2687,11 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       };
       const limit =
         typeof body.limit === "number" && Number.isFinite(body.limit) ? body.limit : undefined;
-      const result = enrollMissingWorkbenchSessions(database, { actor, limit });
+      const result = reconcileMissingImportedWorkbenchSessions(database, { actor, limit });
       const responseBody: WorkbenchEnrollMissingResponse = {
         ok: true,
         enrolled: result.enrolled,
+        heldForImportRepair: result.heldForImportRepair,
         skippedExisting: result.skippedExisting,
         enrolledSessionIds: result.enrolledSessionIds,
         limit: result.limit,

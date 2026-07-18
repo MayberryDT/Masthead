@@ -104,7 +104,7 @@ async function fixtureSources(tempDir: string): Promise<DiscoveredSource[]> {
   const sources: DiscoveredSource[] = [];
   sources.push(await codexJsonlSource(tempDir));
   sources.push(await sqliteJsonSource(tempDir, "cursor", "cursor.vscdb"));
-  sources.push(await jsonlSource(tempDir, "claude_code"));
+  sources.push(await claudeCodeJsonlSource(tempDir));
   sources.push(await jsonlSource(tempDir, "opencode"));
   sources.push(await jsonlSource(tempDir, "grok"));
   sources.push(await sqliteRowsSource(tempDir, "hermes", "hermes.db"));
@@ -125,6 +125,32 @@ async function codexJsonlSource(tempDir: string): Promise<DiscoveredSource> {
     "utf8"
   );
   return makeSource("codex", path, "jsonl", "codex-rollout-jsonl");
+}
+
+async function claudeCodeJsonlSource(tempDir: string): Promise<DiscoveredSource> {
+  const path = join(tempDir, "claude-code-session.jsonl");
+  const sessionId = "claude-code-session";
+  await writeFile(
+    path,
+    [
+      JSON.stringify({
+        cwd: tempDir,
+        message: { content: "claude_code user prompt", role: "user" },
+        sessionId,
+        timestamp: "2026-06-27T10:00:00.000Z",
+        type: "user"
+      }),
+      JSON.stringify({
+        cwd: tempDir,
+        message: { content: [{ text: "claude_code assistant reply", type: "text" }], role: "assistant" },
+        sessionId,
+        timestamp: "2026-06-27T10:01:00.000Z",
+        type: "assistant"
+      })
+    ].join("\n") + "\n",
+    "utf8"
+  );
+  return makeSource("claude_code", path, "jsonl", "claude-code-jsonl");
 }
 
 async function jsonlSource(tempDir: string, runtime: RuntimeKind, schemaVersion?: string): Promise<DiscoveredSource> {

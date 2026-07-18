@@ -51,6 +51,8 @@ export type UseWorkbenchControllerResult = {
   actionBusy: boolean;
   actionError?: string;
   activity: WorkbenchActivityDto[];
+  agentPromptExcludedCount: number;
+  agentPromptSessionCount: number;
   canRun: (kind: WorkbenchActionKind) => boolean;
   clearActionFeedback: () => void;
   clearSelection: () => void;
@@ -206,6 +208,12 @@ export function useWorkbenchController({
   );
 
   const deferredSelectedSessionIds = useDeferredValue(selectedSessionIds);
+  const agentPromptSessionIds = useMemo(
+    () => Array.from(selectedSessionIds).filter((sessionId) => selectedCompileReadySessionIds.has(sessionId)),
+    [selectedCompileReadySessionIds, selectedSessionIds]
+  );
+  const agentPromptSessionCount = agentPromptSessionIds.length;
+  const agentPromptExcludedCount = selectedSessionIds.size - agentPromptSessionCount;
   const handoffSessions = useMemo(
     () => sessions.filter((session) => deferredSelectedSessionIds.has(session.sessionId)),
     [deferredSelectedSessionIds, sessions]
@@ -214,15 +222,15 @@ export function useWorkbenchController({
   const handoffText = useMemo(
     () =>
       authoringCapabilities?.bundleVersion === "workbench-authoring-v3" &&
-      isCompileReadySelection(selectedSessionIds, selectedCompileReadySessionIds)
+      agentPromptSessionCount > 0
         ? buildWorkbenchHandoff({
             authoringCommand: authoringCapabilities.command,
             databaseId: authoringCapabilities.databaseId,
-            sessionIds: Array.from(selectedSessionIds),
+            sessionIds: agentPromptSessionIds,
             sessions: handoffSessions
           })
         : "",
-    [authoringCapabilities, handoffSessions, selectedSessionIds]
+    [agentPromptSessionCount, agentPromptSessionIds, authoringCapabilities, handoffSessions]
   );
 
   const canRun = useCallback(
@@ -231,7 +239,7 @@ export function useWorkbenchController({
       if (kind === "enroll_missing") return true;
       if (kind === "copy_agent_prompt") {
         return authoringCapabilities?.bundleVersion === "workbench-authoring-v3" &&
-          isCompileReadySelection(selectedSessionIds, selectedCompileReadySessionIds);
+          agentPromptSessionCount > 0;
       }
       if (selectedSessions.length === 0) return false;
 
@@ -266,7 +274,7 @@ export function useWorkbenchController({
           return false;
       }
     },
-    [actionBusy, authoringCapabilities, isLive, selectedCompileReadySessionIds, selectedSessionIds, selectedSessions]
+    [actionBusy, agentPromptSessionCount, authoringCapabilities, isLive, selectedSessions]
   );
 
   const runAction = useCallback(
@@ -275,7 +283,16 @@ export function useWorkbenchController({
 
       if (kind === "copy_agent_prompt") {
         setActionError(undefined);
-        setLastActionSummary(`Agent prompt copied for ${selectedSessionIds.size} sessions`);
+        const copiedLabel = `Agent prompt copied for ${agentPromptSessionCount} ready session${
+          agentPromptSessionCount === 1 ? "" : "s"
+        }`;
+        setLastActionSummary(
+          agentPromptExcludedCount === 0
+            ? copiedLabel
+            : `${copiedLabel}; ${agentPromptExcludedCount} selected session${
+              agentPromptExcludedCount === 1 ? " needs" : "s need"
+            } review and ${agentPromptExcludedCount === 1 ? "was" : "were"} left out`
+        );
         return;
       }
 
@@ -358,7 +375,16 @@ export function useWorkbenchController({
         setActionBusy(false);
       }
     },
-    [activeProjectionUrl, canRun, load, onLibraryChanged, selectedSessionIds, sessions]
+    [
+      activeProjectionUrl,
+      agentPromptExcludedCount,
+      agentPromptSessionCount,
+      canRun,
+      load,
+      onLibraryChanged,
+      selectedSessionIds,
+      sessions
+    ]
   );
 
   const retry = useCallback(() => {
@@ -435,6 +461,8 @@ export function useWorkbenchController({
     actionBusy,
     actionError,
     activity,
+    agentPromptExcludedCount,
+    agentPromptSessionCount,
     canRun,
     clearActionFeedback,
     clearSelection,
@@ -466,11 +494,6 @@ export function useWorkbenchController({
 function isCompileReadySession(session: WorkbenchQueueSessionDto): boolean {
   return (session.transcriptStatus === "available" || session.transcriptStatus === "imported") &&
     session.qualityStatus === "passed";
-}
-
-function isCompileReadySelection(selectedSessionIds: Set<string>, compileReadySessionIds: Set<string>): boolean {
-  return selectedSessionIds.size > 0 &&
-    Array.from(selectedSessionIds).every((sessionId) => compileReadySessionIds.has(sessionId));
 }
 
 async function resolveSelectedCompileReadiness(

@@ -84,7 +84,8 @@ them a CLI recipe. Whether that handoff is copied verbatim or the user directs
 the agent conversationally, one daemon-owned authoring module enforces the same
 quality behavior:
 
-1. accept the selected sessions through **Copy Agent Prompt**, a disposable request;
+1. accept the compile-ready subset of the selected sessions through **Copy Agent Prompt**, a
+   disposable request that discloses any review-needed sessions left out;
 2. open a durable `workbench-authoring-v3` run for the exact selection and evidence revision;
 3. read the canonical redacted evidence and enrich every selected session;
 4. choose and submit any useful optional artifacts whose claims carry verbatim supporting excerpts;

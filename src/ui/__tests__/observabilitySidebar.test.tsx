@@ -115,6 +115,7 @@ describe("ObservabilitySidebar", () => {
     expect(css).toContain(".sidebar-import-region .sidebar-import-activity {\n  position: static;\n  max-height: 100%;\n  overflow-y: auto;");
     expect(css).not.toContain(".masthead-shell .sidebar-group > div");
     expect(css).toContain(".masthead-shell .sidebar-link,");
+    expect(css).toMatch(/\.sidebar-link \{[^}]*border: 1px solid rgba\(92, 153, 187, 0\.18\);/);
     expect(css).toContain(".masthead-shell .sidebar-knowledge-flow {\n  position: relative;\n  margin: 10px 16px 16px;");
     expect(css).toContain("@media (max-width: 760px) {\n  .sidebar-shell {\n    display: block;\n    height: auto;\n    overflow: visible;");
     expect(css).not.toContain("@media (max-height: 720px)");

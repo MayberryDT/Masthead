@@ -815,6 +815,10 @@
     #031019;
 }
 
+.masthead-shell.desktop-chrome .sources-onboarding-full-window {
+  top: env(titlebar-area-height, 32px);
+}
+
 .session-detail-modal.sources-onboarding-modal {
   grid-template-rows: auto minmax(0, 1fr);
   width: min(900px, calc(100vw - 32px));

@@ -151,6 +151,7 @@ export type WorkbenchMissingSessionsResponse = {
 export type WorkbenchEnrollMissingResponse = {
   ok: true;
   enrolled: number;
+  heldForImportRepair: number;
   skippedExisting: number;
   enrolledSessionIds: string[];
   limit: number;

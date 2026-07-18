@@ -382,6 +382,32 @@ describe("WorkbenchPanel", () => {
     }
   });
 
+  test("keeps mixed selection counts truthful while enabling the ready agent handoff", () => {
+    const html = renderToStaticMarkup(
+      <WorkbenchPanel
+        sessions={[session({ qualityStatus: "passed", transcriptStatus: "imported" })]}
+        selectedSessionIds={new Set(["session:ready", "session:review-a", "session:review-b"])}
+        agentPromptSessionCount={1}
+        agentPromptExcludedCount={2}
+        handoffText="Ready-only agent prompt"
+        canRun={allow("copy_agent_prompt")}
+        loading={false}
+        onClearSelection={() => undefined}
+        onRetry={() => undefined}
+        onSelectAll={() => undefined}
+        onToggleSession={() => undefined}
+      />
+    );
+    const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    const copyButton = html.match(/<button[^>]*workbench-copy-agent[^>]*>/)?.[0];
+
+    expect(text).toContain("Selected 3 1 ready · 2 review");
+    expect(copyButton).not.toContain("disabled");
+    expect(copyButton).toContain(
+      "title=\"Copy a plain-language request for 1 ready session. 2 selected sessions need review and will be left out.\""
+    );
+  });
+
   test("activity rail renders console rows with tone gutters and sanitized text", () => {
     const eventAt = "2026-07-08T12:34:56.000Z";
     const items: WorkbenchActivityDto[] = [

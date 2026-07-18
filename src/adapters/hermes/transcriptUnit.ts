@@ -22,6 +22,7 @@ type HermesRows = {
   diagnostics?: AdapterDiagnostic[];
   lastUpdated?: string;
   rows: HermesRow[];
+  scopedDiagnostics?: Array<{ diagnostic: AdapterDiagnostic; sourceSessionId?: string }>;
   startedAt?: string;
 };
 
@@ -71,7 +72,10 @@ export async function parseHermesTranscriptUnit(unit: TranscriptUnitPlan, cursor
     scopedRows.flatMap((entry) => recordFromRow(source, unit.sourceSessionId, entry))
   );
   const parsed = parsedTranscriptUnit({ ...unit, source }, records);
-  const diagnostics = [...(content.diagnostics ?? []), ...shapeDiagnostics];
+  const scopedDiagnostics = (content.scopedDiagnostics ?? [])
+    .filter(({ sourceSessionId }) => !sourceSessionId || !unit.sourceSessionId || sourceSessionId === unit.sourceSessionId)
+    .map(({ diagnostic }) => diagnostic);
+  const diagnostics = [...(content.diagnostics ?? []), ...scopedDiagnostics, ...shapeDiagnostics];
   if (!diagnostics.length) return parsed;
   return {
     ...parsed,
@@ -146,6 +150,7 @@ async function readSqliteRows(path: string): Promise<HermesRows> {
   return withReadonlySqliteCopy(path, (db) => {
     const diagnostics: AdapterDiagnostic[] = [];
     const rows: HermesRow[] = [];
+    const scopedDiagnostics: Array<{ diagnostic: AdapterDiagnostic; sourceSessionId?: string }> = [];
     let lastUpdated: string | undefined;
     let startedAt: string | undefined;
     const availableTables = new Set(sqliteTables(db));
@@ -163,7 +168,8 @@ async function readSqliteRows(path: string): Promise<HermesRows> {
         for (const [index, rawRow] of values.entries()) {
           const value = sqliteJsonValue(rawRow) ?? rawRow;
           const parsed = rowsFromJsonValue(value, `${path}:${table}:${offset + index}`);
-          diagnostics.push(...(parsed.diagnostics ?? []));
+          const sourceSessionId = readString(rawRow, ["session_id", "sessionId", "conversation_id", "conversationId"]);
+          scopedDiagnostics.push(...(parsed.diagnostics ?? []).map((diagnostic) => ({ diagnostic, sourceSessionId })));
           rows.push(...parsed.rows);
           lastUpdated = newestTimestamp([lastUpdated, parsed.lastUpdated]);
           startedAt = newestTimestamp([startedAt, parsed.startedAt]);
@@ -172,7 +178,7 @@ async function readSqliteRows(path: string): Promise<HermesRows> {
         offset += values.length;
       }
     }
-    return { diagnostics, lastUpdated, rows, startedAt };
+    return { diagnostics, lastUpdated, rows, scopedDiagnostics, startedAt };
   }).catch((error) => ({ diagnostics: [sqliteQueryDiagnostic("database", error)], rows: [] }));
 }
 
@@ -202,7 +208,9 @@ function sqliteJsonValue(row: Record<string, unknown>): unknown {
     if (typeof value !== "string") continue;
     try {
       const parsed = JSON.parse(value);
-      return isRecord(parsed) ? { ...row, ...parsed } : parsed;
+      if (isRecord(parsed)) return { ...row, ...parsed };
+      if (key === "content" && typeof parsed === "string") return { ...row, content: parsed };
+      return undefined;
     } catch {
       // This is an ordinary relational value, not a JSON document.
     }

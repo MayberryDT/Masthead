@@ -217,16 +217,19 @@ describe("import completion report", () => {
     db.close();
   });
 
-  test("holds pathological import sessions outside the package path instead of automatic Not Added", async () => {
+  test("holds only sessions whose own import health requires repair when the job has an error anomaly", async () => {
     const { db } = await seededReportDatabase("masthead-import-report-pathological-");
     cloneImportSession(db, "session:published", "s-published");
+    cloneImportSession(db, "session:healthy", "s-healthy");
     markWorkbenchPublished(db, {
       actor: { kind: "system", id: "test" },
       publishedVia: "test",
       sessionId: "session:published"
     });
     removeCanonicalEvidence(db, "session:1");
-    for (const sessionId of ["session:1", "session:published"]) {
+    insertMessage(db, "session:healthy", 0, "user", "Keep the complete session on the package path.");
+    insertMessage(db, "session:healthy", 1, "assistant", "The complete session remains usable.");
+    for (const sessionId of ["session:1", "session:healthy", "session:published"]) {
       recordImportSessionImpact(db, {
         importJobId: "import-1",
         impactKind: "transcript_added",
@@ -239,6 +242,15 @@ describe("import completion report", () => {
     db.prepare(
       "UPDATE import_work_units SET processed_records = 200, imported_records = 100, failed_records = 100 WHERE work_unit_id = 'unit:1'"
     ).run();
+    recordSessionImportHealth(db, {
+      evidenceRevision: "sha256:session-repair",
+      importJobId: "import-1",
+      reason: "partial_parse",
+      sessionId: "session:1",
+      status: "repair_required",
+      updatedAt: "2026-07-01T00:02:30.000Z",
+      workUnitId: "unit:1"
+    });
     reconcileImportedTranscript(db, "session:1");
     expect(readWorkbenchSessionState(db, "session:1")?.publicationStatus).toBe("not_added_to_logbook");
 
@@ -252,11 +264,16 @@ describe("import completion report", () => {
 
     expect(report).toMatchObject({
       nextActions: expect.arrayContaining(["repair_import"]),
-      sessionsOnPackagePath: 0,
+      sessionsOnPackagePath: 1,
       sessionsSuppressed: 0,
       status: "succeeded_with_issues"
     });
     expect(readWorkbenchSessionState(db, "session:1")).toBeUndefined();
+    expect(readWorkbenchSessionState(db, "session:healthy")).toMatchObject({
+      publicationStatus: "publish_path",
+      qualityStatus: "passed",
+      transcriptStatus: "imported"
+    });
     expect(readWorkbenchSessionState(db, "session:published")).toMatchObject({
       publicationStatus: "published",
       sessionPackageStatus: "published"
@@ -535,6 +552,27 @@ function cloneImportSession(db: MastheadDatabase, sessionId: string, sourceSessi
     FROM sessions
     WHERE session_id = 'session:1'`
   ).run(sessionId, sourceSessionId);
+}
+
+function insertMessage(
+  db: MastheadDatabase,
+  sessionId: string,
+  index: number,
+  role: "assistant" | "user",
+  text: string
+): void {
+  db.prepare(
+    "INSERT INTO messages (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+  ).run(
+    `${sessionId}:message:${index}`,
+    sessionId,
+    role,
+    text,
+    `${sessionId}:hash:${index}`,
+    `2026-07-01T00:01:${String(index).padStart(2, "0")}.000Z`,
+    "{}",
+    "authoritative"
+  );
 }
 
 function reportInput(overrides: { recordsFailed?: number; recordsImported?: number } = {}) {

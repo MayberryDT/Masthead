@@ -95,8 +95,9 @@ describe("Masthead daemon startup", () => {
   test("retries a generated import job id", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-retry-route-"));
     tempDirs.push(tempDir);
-    await mkdir(join(tempDir, ".grok/sessions"), { recursive: true });
-    await writeFile(join(tempDir, ".grok/sessions/retry.jsonl"), `${JSON.stringify({ sessionId: "retry", role: "user", content: "retry" })}\n`);
+    const retryRoot = join(tempDir, ".grok/sessions/retry");
+    await mkdir(retryRoot, { recursive: true });
+    await writeFile(join(retryRoot, "chat_history.jsonl"), `${JSON.stringify({ sessionId: "retry", role: "user", content: "retry" })}\n`);
     const [source] = await grokAdapter.discover({ exclusions: [], homeDir: tempDir, now: "2026-07-17T12:00:00.000Z" });
     expect(source).toBeDefined();
     expect(source?.path).toBeTypeOf("string");
@@ -146,8 +147,9 @@ describe("Masthead daemon startup", () => {
   test("import repair routes validate input, preview without writes, reject hash drift, and schedule viable reimports", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-repair-route-"));
     tempDirs.push(tempDir);
-    await mkdir(join(tempDir, ".grok/sessions"), { recursive: true });
-    await writeFile(join(tempDir, ".grok/sessions/repair.jsonl"), `${JSON.stringify({ sessionId: "repair", role: "user", content: "repair" })}\n`);
+    const repairRoot = join(tempDir, ".grok/sessions/repair");
+    await mkdir(repairRoot, { recursive: true });
+    await writeFile(join(repairRoot, "chat_history.jsonl"), `${JSON.stringify({ sessionId: "repair", role: "user", content: "repair" })}\n`);
     const [source] = await grokAdapter.discover({ exclusions: [], homeDir: tempDir, now: "2026-07-15T12:00:00.000Z" });
     expect(source).toBeDefined();
     const daemon = await createTestDaemon(tempDir);
@@ -214,8 +216,9 @@ describe("Masthead daemon startup", () => {
   test("import repair maps a moved source to one compatible discovered candidate", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-repair-moved-"));
     tempDirs.push(tempDir);
-    await mkdir(join(tempDir, ".grok/sessions"), { recursive: true });
-    await writeFile(join(tempDir, ".grok/sessions/moved.jsonl"), `${JSON.stringify({ sessionId: "moved", role: "user", content: "moved" })}\n`);
+    const movedRoot = join(tempDir, ".grok/sessions/moved");
+    await mkdir(movedRoot, { recursive: true });
+    await writeFile(join(movedRoot, "chat_history.jsonl"), `${JSON.stringify({ sessionId: "moved", role: "user", content: "moved" })}\n`);
     const [corrected] = await grokAdapter.discover({ exclusions: [], homeDir: tempDir, now: "2026-07-15T12:00:00.000Z" });
     const daemon = await createTestDaemon(tempDir);
     seedRepairRouteData(daemon, "source:grok:old-path", "/old/grok.jsonl", corrected!.schemaVersion);
@@ -244,9 +247,11 @@ describe("Masthead daemon startup", () => {
   test("import repair treats multiple compatible moved-source candidates as ambiguous", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-repair-ambiguous-"));
     tempDirs.push(tempDir);
-    await mkdir(join(tempDir, ".grok/sessions"), { recursive: true });
-    await writeFile(join(tempDir, ".grok/sessions/one.jsonl"), "{}\n");
-    await writeFile(join(tempDir, ".grok/sessions/two.jsonl"), "{}\n");
+    const ambiguousRoot = join(tempDir, ".grok/sessions");
+    await mkdir(join(ambiguousRoot, "one"), { recursive: true });
+    await mkdir(join(ambiguousRoot, "two"), { recursive: true });
+    await writeFile(join(ambiguousRoot, "one/chat_history.jsonl"), "{}\n");
+    await writeFile(join(ambiguousRoot, "two/chat_history.jsonl"), "{}\n");
     const daemon = await createTestDaemon(tempDir);
     seedRepairRouteData(daemon, "source:grok:old-path", "/old/grok.jsonl", "grok-jsonl-tree");
     const baseUrl = await listen(daemon);
@@ -268,8 +273,9 @@ describe("Masthead daemon startup", () => {
   test("import repair rejects many historical sources mapping to one current candidate", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-repair-many-to-one-"));
     tempDirs.push(tempDir);
-    await mkdir(join(tempDir, ".grok/sessions"), { recursive: true });
-    await writeFile(join(tempDir, ".grok/sessions/current.jsonl"), "{}\n");
+    const currentRoot = join(tempDir, ".grok/sessions/current");
+    await mkdir(currentRoot, { recursive: true });
+    await writeFile(join(currentRoot, "chat_history.jsonl"), "{}\n");
     const daemon = await createTestDaemon(tempDir);
     seedRepairRouteData(daemon, "source:grok:old-a", "/old/a.jsonl", "grok-jsonl-tree", {
       jobId: "job:repair:a", sessionId: "session:repair:a"

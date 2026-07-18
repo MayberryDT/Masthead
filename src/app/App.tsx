@@ -749,6 +749,8 @@ export function App() {
           actionBusy={workbench.actionBusy}
           actionError={workbench.actionError}
           activity={workbench.activity}
+          agentPromptExcludedCount={workbench.agentPromptExcludedCount}
+          agentPromptSessionCount={workbench.agentPromptSessionCount}
           canRun={workbench.canRun}
           clearActionFeedback={workbench.clearActionFeedback}
           error={workbench.error}
