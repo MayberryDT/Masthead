@@ -37,8 +37,8 @@ export function AppShell({ sidebar, main, motionMode = "daily" }: Props) {
 
 function MastheadWindowBar() {
   return (
-    <header className="masthead-window-bar" aria-label="Window title bar">
+    <div className="masthead-window-bar" aria-hidden="true">
       <div className="masthead-window-drag-region" aria-hidden="true" />
-    </header>
+    </div>
   );
 }

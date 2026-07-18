@@ -35,7 +35,11 @@ describe("Electron window chrome styles", () => {
       root.render(createElement(AppShell, { sidebar: createElement("nav"), main: createElement("section") }));
     });
 
-    expect(container.querySelector(".masthead-window-bar")).not.toBeNull();
+    const windowBar = container.querySelector(".masthead-window-bar");
+    expect(windowBar).not.toBeNull();
+    expect(windowBar?.tagName).toBe("DIV");
+    expect(windowBar?.getAttribute("aria-hidden")).toBe("true");
+    expect(windowBar?.getAttribute("aria-label")).toBeNull();
     expect(container.querySelector(".masthead-window-drag-region")).not.toBeNull();
     expect(container.querySelector(".masthead-window-controls")).toBeNull();
     expect(container.querySelectorAll(".masthead-window-control")).toHaveLength(0);
