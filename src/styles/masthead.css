@@ -7627,6 +7627,8 @@ body {
   opacity: 0;
 }
 
+.observability-console .sidebar-link,
+.masthead-shell .sidebar-link,
 .observability-console .app-button,
 .masthead-shell .app-button,
 .masthead-control-scope .app-button,
@@ -7655,6 +7657,8 @@ body {
   clip-path: var(--folded-control-clip);
 }
 
+.observability-console .sidebar-link,
+.masthead-shell .sidebar-link,
 .observability-console .app-button,
 .masthead-shell .app-button,
 .masthead-control-scope .app-button,
@@ -7681,6 +7685,8 @@ body {
     inset 0 -1px 0 var(--folded-control-bottom);
 }
 
+.observability-console .sidebar-link,
+.masthead-shell .sidebar-link,
 .observability-console .app-button:not(.app-button-primary):not(.app-button-danger),
 .masthead-shell .app-button:not(.app-button-primary):not(.app-button-danger),
 .masthead-control-scope .app-button:not(.app-button-primary):not(.app-button-danger),
@@ -7703,6 +7709,8 @@ body {
   background-color: var(--folded-control-fill);
 }
 
+.observability-console .sidebar-link:hover,
+.masthead-shell .sidebar-link:hover,
 .observability-console .app-button:hover:not(:disabled),
 .masthead-shell .app-button:hover:not(:disabled),
 .masthead-control-scope .app-button:hover:not(:disabled),
@@ -7720,6 +7728,8 @@ body {
 .observability-console .app-button-primary,
 .masthead-shell .app-button-primary,
 .masthead-control-scope .app-button-primary,
+.observability-console .sidebar-link.active,
+.masthead-shell .sidebar-link.active,
 .observability-console .toolbar-select.open,
 .masthead-shell .toolbar-select.open {
   border-color: rgba(46, 167, 255, 0.36);

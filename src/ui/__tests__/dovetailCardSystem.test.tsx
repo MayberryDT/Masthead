@@ -351,7 +351,7 @@ describe("dovetail card system", () => {
       "@media (max-width: 760px)",
       ".masthead-shell .sidebar-knowledge-flow"
     );
-    expect(sidebarPositionRule).toContain("position: static;");
+    expect(sidebarPositionRule).toContain("position: relative;");
     expect(sidebarPositionRule).toContain("margin: 10px 16px 16px;");
     expect(sidebarMobileRule).toContain("margin: 18px 16px 0;");
     expect(mastheadCss).not.toContain(".masthead-shell .import-jobs-section::after");

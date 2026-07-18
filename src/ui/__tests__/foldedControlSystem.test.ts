@@ -23,6 +23,7 @@ describe("folded sheet-metal control system", () => {
     }
 
     for (const selector of [
+      ".masthead-shell .sidebar-link",
       ".masthead-shell .app-button",
       ".masthead-shell .toolbar-select",
       ".masthead-shell .observability-toolbar .search-field",
@@ -39,8 +40,9 @@ describe("folded sheet-metal control system", () => {
     expect(cssRuleBodyContaining(mastheadCss, ".masthead-shell .toolbar-select-menu::after", "background-image: none;")).toContain("opacity: 0;");
     expect(cssRuleBody(mastheadCss, ".masthead-shell .import-jobs-summary div")).toContain("background: #071b28;");
     expect(mastheadCss).not.toContain(".masthead-shell .sidebar-group > div");
-    expect(mastheadCss).not.toContain(".masthead-shell .sidebar-link,");
-    expect(cssRuleBody(mastheadCss, ".sidebar-link")).not.toContain("clip-path: var(--folded-control-clip);");
+    expect(mastheadCss).toContain(".masthead-shell .sidebar-link,");
+    expect(cssRuleBodyContaining(mastheadCss, ".masthead-shell .sidebar-link", "background-color:")).toContain("background-color: var(--folded-control-fill);");
+    expect(cssRuleBodyContaining(mastheadCss, ".masthead-shell .sidebar-link.active", "background-color:")).toContain("background-color: #09263a;");
     expect(mastheadCss).not.toContain(".masthead-shell .session-card,\n.masthead-shell .app-button");
     expect(cssRuleBody(mastheadCss, ".masthead-shell .collapsible-search.expanded .collapsible-search-trigger")).toContain("background-image: none;");
     expect(cssRuleBody(mastheadCss, ".masthead-shell .collapsible-search.expanded .collapsible-search-trigger")).toContain("box-shadow: none;");
