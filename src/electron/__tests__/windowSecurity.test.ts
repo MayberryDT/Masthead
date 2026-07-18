@@ -13,11 +13,21 @@ describe("Electron window security policy", () => {
     delete process.env.MASTHEAD_ELECTRON_RENDERER_URL;
   });
 
-  test("removes native chrome for Masthead-owned window controls", () => {
-    expect(mastheadWindowChromeOptions()).toEqual({
+  test.each(["linux", "win32"] as const)("uses a native title bar overlay on %s", (platform) => {
+    expect(mastheadWindowChromeOptions(platform)).toEqual({
       autoHideMenuBar: true,
       backgroundColor: "#031019",
-      frame: false,
+      frame: true,
+      titleBarStyle: "hidden",
+      titleBarOverlay: { color: "#051724", symbolColor: "#d6e4ef", height: 32 }
+    });
+  });
+
+  test("uses the hidden native title bar without an overlay on macOS", () => {
+    expect(mastheadWindowChromeOptions("darwin")).toEqual({
+      autoHideMenuBar: true,
+      backgroundColor: "#031019",
+      frame: true,
       titleBarStyle: "hidden"
     });
   });

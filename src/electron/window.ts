@@ -15,6 +15,11 @@ export type MastheadWindowChromeOptions = {
   backgroundColor: string;
   frame: boolean;
   titleBarStyle: "hidden";
+  titleBarOverlay?: {
+    color: string;
+    symbolColor: string;
+    height: number;
+  };
 };
 
 export type RendererUrlPolicy = {
@@ -22,12 +27,15 @@ export type RendererUrlPolicy = {
   devServerUrl?: string;
 };
 
-export function mastheadWindowChromeOptions(): MastheadWindowChromeOptions {
+export function mastheadWindowChromeOptions(platform: NodeJS.Platform = process.platform): MastheadWindowChromeOptions {
   return {
     autoHideMenuBar: true,
     backgroundColor: "#031019",
-    frame: false,
-    titleBarStyle: "hidden"
+    frame: true,
+    titleBarStyle: "hidden",
+    ...(platform !== "darwin"
+      ? { titleBarOverlay: { color: "#051724", symbolColor: "#d6e4ef", height: 32 } }
+      : {})
   };
 }
 
