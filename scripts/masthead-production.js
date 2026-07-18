@@ -2112,12 +2112,12 @@ function maintenanceChildExitUnproven(message) {
 }
 
 async function probeExclusiveOwnership(config) {
-  const modulePath = join(config.target, "resources", "daemon", "dist", "src", "daemon", "databaseBackup.js");
+  const modulePath = join(config.target, "resources", "daemon", "dist", "src", "core", "daemonOwnership.js");
   const module = await import(pathToFileURL(modulePath).href);
-  if (typeof module.withExclusiveDatabaseMaintenance !== "function") {
+  if (typeof module.probeExclusiveDatabaseStartupOwnership !== "function") {
     throw new Error(`Packaged ownership probe is unavailable at ${modulePath}.`);
   }
-  await module.withExclusiveDatabaseMaintenance(config.databasePath, async () => undefined);
+  await module.probeExclusiveDatabaseStartupOwnership(config.databasePath, config.dataDirectory);
 }
 
 function productionWrapper(config) {
