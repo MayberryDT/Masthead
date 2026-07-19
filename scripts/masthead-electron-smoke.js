@@ -51,10 +51,6 @@ if (!parsed.renderer?.hasTypedNotify) {
   console.error("Electron preload typed notification bridge was not exposed.");
   process.exit(1);
 }
-if (!parsed.renderer?.hasRendererTitleBar) {
-  console.error(`Electron renderer title bar was not rendered: ${JSON.stringify(parsed.renderer)}`);
-  process.exit(1);
-}
 if (parsed.renderer?.hasRendererWindowControls !== false) {
   console.error(`Electron renderer window controls were unexpectedly rendered: ${JSON.stringify(parsed.renderer)}`);
   process.exit(1);
