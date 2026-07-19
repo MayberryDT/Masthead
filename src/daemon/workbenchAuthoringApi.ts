@@ -5,6 +5,7 @@ import type {
   WorkbenchAuthoringBundleV3,
   WorkbenchAuthoringCapabilitiesDto
 } from "../shared/workbenchAuthoring.ts";
+import { isAbsoluteAuthoringCommand } from "../shared/workbenchAuthoring.ts";
 import {
   finishAuthoringRun,
   getAuthoringRunContext,
@@ -18,6 +19,7 @@ import { parseAuthoringBundleV2, parseAuthoringBundleV3 } from "../workbench/aut
 import type { SessionTranscriptKindFilter } from "./db/sessionTranscriptRepository.ts";
 import { getOrCreateDatabaseIdentity } from "./db/schema.ts";
 import type { MastheadDatabase } from "./db/sqlite.ts";
+import type { GuidedAuthoringExpectedIdentity } from "../shared/instanceIdentity.ts";
 
 const SUBMIT_BODY_LIMIT_BYTES = 5 * 1024 * 1024;
 const evidenceKinds = new Set<SessionTranscriptKindFilter>([
@@ -36,7 +38,7 @@ export type WorkbenchAuthoringHttpResult = {
 };
 
 export async function routeWorkbenchAuthoringRequest(
-  context: { authoringCommand: string; db: MastheadDatabase },
+  context: { authoringCommand: string; db: MastheadDatabase; identity?: GuidedAuthoringExpectedIdentity },
   request: { method: string; url: URL; body?: unknown }
 ): Promise<WorkbenchAuthoringHttpResult | undefined> {
   const { pathname } = request.url;
@@ -45,11 +47,17 @@ export async function routeWorkbenchAuthoringRequest(
   try {
     if (pathname === "/workbench/authoring/capabilities") {
       if (request.method !== "GET") return methodNotAllowed();
+      if (!context.identity) throw new Error("authoring_identity_unavailable");
+      if (!isAbsoluteAuthoringCommand(context.authoringCommand.trim())) throw new Error("authoring_command_unavailable");
       const body: WorkbenchAuthoringCapabilitiesDto = {
         bundleVersion: "workbench-authoring-v3",
         capability: "artifact_authoring",
-        command: context.authoringCommand.trim() || "mastheadctl",
+        command: context.authoringCommand.trim(),
+        baseUrl: context.identity.baseUrl,
         databaseId: getOrCreateDatabaseIdentity(context.db),
+        buildSha: context.identity.buildSha,
+        instanceManifest: context.identity.instanceManifest,
+        instanceId: context.identity.instanceId,
         evidencePolicy: "selected_session_canonical_evidence",
         maxSessionsPerRun: 12,
         operations: ["suggestions", "open", "status", "evidence", "context", "submit", "finish"],

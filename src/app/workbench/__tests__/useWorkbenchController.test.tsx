@@ -957,9 +957,13 @@ function authoringCapabilities(databaseId: string, command: string): WorkbenchAu
   return {
     bundleVersion: "workbench-authoring-v3",
     capability: "artifact_authoring",
+    baseUrl: "http://127.0.0.1:17373",
+    buildSha: "development",
     command,
     databaseId,
     evidencePolicy: "selected_session_canonical_evidence",
+    instanceId: "instance:test",
+    instanceManifest: "/tmp/masthead/masthead-instance.json",
     maxSessionsPerRun: 12,
     operations: ["suggestions", "open", "status", "evidence", "context", "submit", "finish"],
     protocol: "masthead.workbench.authoring/v1",

@@ -4,6 +4,7 @@ import type {
   WorkbenchAuthoringFinding,
   WorkbenchClaimSupport
 } from "./workbenchAuthoring.ts";
+export type { GuidedAuthoringExpectedIdentity } from "./instanceIdentity.ts";
 
 export const GUIDED_AUTHORING_POLICY_VERSION = "guided-authoring-v1" as const;
 

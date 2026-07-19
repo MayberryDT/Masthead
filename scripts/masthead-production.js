@@ -5,6 +5,7 @@ import { constants } from "node:fs";
 import {
   access,
   chmod,
+  cp,
   link,
   lstat,
   mkdir,
@@ -267,10 +268,15 @@ export async function transitionProduction(input, dependencyOverrides = {}) {
     target,
     version: release.version
   });
+  const preparedInstallation = dependencyOverrides.stageLaunchers
+    ? undefined
+    : await stageProductionInstallation({ ...input, sourceBundlePath: target, homeDir, productionRoot });
   const noLifecycleLease = async () => ({ release: async () => undefined });
   const dependencies = {
     acquireLease: () => acquireLifecycleLease(config.lifecycleLeasePath),
-    activateLaunchers: (staged) => activateStagedLaunchers(staged, dependencyOverrides.runDesktopDatabaseCommand),
+    activateLaunchers: (staged) => staged?.receiptVersion === "masthead-production-stage-v1"
+      ? activateStagedProductionInstallation(staged, { runDesktopDatabaseCommand: dependencyOverrides.runDesktopDatabaseCommand })
+      : activateStagedLaunchers(staged, dependencyOverrides.runDesktopDatabaseCommand),
     cleanupCandidate: (candidate) => stopProduction(candidate, { acquireLease: noLifecycleLease }),
     completeMaintenance: (request) => runMaintenanceChild(config, "complete", request),
     currentTarget: () => realpath(join(productionRoot, "current")).catch(() => undefined),
@@ -290,10 +296,10 @@ export async function transitionProduction(input, dependencyOverrides = {}) {
     restoreMaintenance: (request) => runMaintenanceChild(config, "restore", request),
     cleanupBundles: () => cleanupOldProductionBundles(productionRoot, target),
     cleanupRecoveredBundles: (oldTarget) => cleanupOldProductionBundles(productionRoot, oldTarget),
-    stageLaunchers: () => stageProductionLaunchers({ ...input, bundlePath: target, homeDir, productionRoot }),
+    stageLaunchers: () => preparedInstallation ?? stageProductionLaunchers({ ...input, bundlePath: target, homeDir, productionRoot }),
     start: (candidate = config) => startProduction(candidate, { acquireLease: noLifecycleLease }),
     stop: () => stopProduction(config, { acquireLease: noLifecycleLease }),
-    swapCurrent: () => swapCurrentTarget(productionRoot, target),
+    swapCurrent: () => preparedInstallation ? undefined : swapCurrentTarget(productionRoot, target),
     ...dependencyOverrides
   };
   const lease = await dependencies.acquireLease();
@@ -423,8 +429,141 @@ export async function transitionProduction(input, dependencyOverrides = {}) {
     await dependencies.cleanupBundles(productionRoot, target);
     return { activated: true, started, stopped: stopReceipt, target };
   } finally {
-    if (staged) await discardStagedLaunchers(staged);
+    if (staged || preparedInstallation) await discardStagedLaunchers(staged ?? preparedInstallation);
     await lease.release();
+  }
+}
+
+export async function stageProductionInstallation(input) {
+  const homeDir = resolve(input.homeDir || homedir());
+  const productionRoot = resolve(input.productionRoot || join(homeDir, ".local", "share", "masthead-production"));
+  const sourceBundlePath = await realpath(input.sourceBundlePath || input.bundlePath || "");
+  await mkdir(productionRoot, { recursive: true });
+  const release = await readRelease(sourceBundlePath);
+  let target;
+  if (dirname(sourceBundlePath) === await realpath(productionRoot) && VERSIONED_TARGET.test(basename(sourceBundlePath))) {
+    target = sourceBundlePath;
+  } else {
+    target = join(productionRoot, `Masthead-linux-x64-${release.version}-${release.gitSha.slice(0, 8)}`);
+    const temporaryTarget = `${target}.${process.pid}.${randomUUID()}.staged`;
+    await cp(sourceBundlePath, temporaryTarget, { errorOnExist: true, recursive: true });
+    try {
+      await rename(temporaryTarget, target);
+    } catch (error) {
+      await rm(temporaryTarget, { force: true, recursive: true });
+      if (!(error && typeof error === "object" && error.code === "EEXIST")) throw error;
+    }
+  }
+  const manifest = await verifyPinnedBundle(target, input.bundleDigest);
+  const runtime = productionRuntimePaths(target);
+  await assertRequiredProductionRuntimeResources(runtime);
+  const currentPath = join(productionRoot, "current");
+  const previousCurrentTarget = await realpath(currentPath);
+  const instanceDir = resolve(input.dataDirectory || join(homeDir, ".config", "masthead-production"));
+  const instanceManifestPath = join(instanceDir, "masthead-instance.json");
+  const activeInstanceLauncherPath = join(instanceDir, "bin", process.platform === "win32" ? "mastheadctl.cmd" : "mastheadctl");
+  const previousInstanceLauncher = await snapshotFile(activeInstanceLauncherPath);
+  const stagingNonce = randomUUID();
+  const stagedInstanceLauncherPath = join(productionRoot, `.mastheadctl.${stagingNonce}.staged`);
+  const instanceLauncher = productionInstanceLauncher({
+    cliEntry: runtime.cliEntry,
+    instanceManifestPath,
+    node: runtime.node
+  });
+  await writeFile(stagedInstanceLauncherPath, instanceLauncher, { encoding: "utf8", mode: 0o755 });
+  await chmod(stagedInstanceLauncherPath, 0o755);
+  const stagedSurface = await stageProductionLaunchers({
+    ...input,
+    bundlePath: target,
+    homeDir,
+    productionRoot
+  });
+  const receiptPath = join(productionRoot, `.masthead-install-${stagingNonce}.receipt.json`);
+  const receipt = {
+    receiptVersion: "masthead-production-stage-v1",
+    staged: true,
+    launched: false,
+    databaseOpened: false,
+    stagingNonce,
+    sourceDigest: manifest.bundleDigest,
+    buildSha: release.gitSha,
+    target,
+    productionRoot,
+    currentPath,
+    previousCurrentTarget,
+    instanceDir,
+    instanceManifestPath,
+    activeInstanceLauncherPath,
+    stagedInstanceLauncherPath,
+    stagedSurface,
+    previousInstanceLauncher,
+    previousLauncher: stagedSurface.previousLauncher,
+    previousDesktop: stagedSurface.previousDesktop,
+    receiptPath
+  };
+  await writeFile(receiptPath, `${JSON.stringify(stagedReceiptRecord(receipt), null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o444 });
+  return receipt;
+}
+
+export async function activateStagedProductionInstallation(receipt, dependencyOverrides = {}) {
+  if (!receipt || receipt.receiptVersion !== "masthead-production-stage-v1" || receipt.staged !== true) {
+    throw new Error("Invalid staged production installation receipt.");
+  }
+  const persistedReceipt = JSON.parse(await readFile(receipt.receiptPath, "utf8"));
+  if (JSON.stringify(persistedReceipt) !== JSON.stringify(stagedReceiptRecord(receipt))) {
+    throw new Error("Staged production installation receipt identity changed.");
+  }
+  const currentTarget = await realpath(receipt.currentPath);
+  if (currentTarget !== receipt.previousCurrentTarget) {
+    throw new Error(`Production current target changed after staging: expected ${receipt.previousCurrentTarget}, found ${currentTarget}.`);
+  }
+  await verifyPinnedBundle(receipt.target, receipt.sourceDigest);
+  await assertRequiredProductionRuntimeResources(productionRuntimePaths(receipt.target));
+  await mkdir(dirname(receipt.activeInstanceLauncherPath), { recursive: true });
+  await swapCurrentTarget(receipt.productionRoot, receipt.target);
+  await rename(receipt.stagedInstanceLauncherPath, receipt.activeInstanceLauncherPath);
+  await activateStagedLaunchers(receipt.stagedSurface, dependencyOverrides.runDesktopDatabaseCommand);
+  await cleanupActivationBundles(receipt.productionRoot, new Set([receipt.target, receipt.previousCurrentTarget]));
+  return {
+    activated: true,
+    launched: false,
+    databaseOpened: false,
+    currentPath: receipt.currentPath,
+    target: receipt.target,
+    activeInstanceLauncherPath: receipt.activeInstanceLauncherPath,
+    instanceManifestPath: receipt.instanceManifestPath
+  };
+}
+
+function stagedReceiptRecord(receipt) {
+  return {
+    receiptVersion: receipt.receiptVersion,
+    stagingNonce: receipt.stagingNonce,
+    sourceDigest: receipt.sourceDigest,
+    buildSha: receipt.buildSha,
+    target: receipt.target,
+    productionRoot: receipt.productionRoot,
+    currentPath: receipt.currentPath,
+    previousCurrentTarget: receipt.previousCurrentTarget,
+    instanceDir: receipt.instanceDir,
+    instanceManifestPath: receipt.instanceManifestPath,
+    activeInstanceLauncherPath: receipt.activeInstanceLauncherPath,
+    stagedInstanceLauncherPath: receipt.stagedInstanceLauncherPath
+  };
+}
+
+function productionInstanceLauncher(input) {
+  if (process.platform === "win32") {
+    return `@echo off\r\n@setlocal DisableDelayedExpansion\r\n@set "MASTHEAD_INSTANCE_MANIFEST=${input.instanceManifestPath.replace(/%/gu, "%%")}"\r\n"${input.node.replace(/%/gu, "%%")}" "${input.cliEntry.replace(/%/gu, "%%")}" %*\r\n`;
+  }
+  return `#!/bin/sh\nexec env MASTHEAD_INSTANCE_MANIFEST=${shellQuote(input.instanceManifestPath)} ${shellQuote(input.node)} ${shellQuote(input.cliEntry)} "$@"\n`;
+}
+
+async function cleanupActivationBundles(productionRoot, retainedTargets) {
+  const retainedNames = new Set([...retainedTargets].map((target) => basename(target)));
+  for (const entry of await readdir(productionRoot, { withFileTypes: true })) {
+    if (!VERSIONED_TARGET.test(entry.name) || retainedNames.has(entry.name)) continue;
+    await rm(join(productionRoot, entry.name), { force: true, recursive: true });
   }
 }
 
@@ -712,12 +851,19 @@ function refreshDesktopDatabase(applicationDirectory, runCommand = spawnSync) {
 }
 
 async function restoreStagedLaunchers(staged) {
+  if (staged?.activeInstanceLauncherPath && staged?.previousInstanceLauncher) {
+    await restoreSnapshot(staged.activeInstanceLauncherPath, staged.previousInstanceLauncher);
+  }
+  if (staged?.stagedSurface) staged = staged.stagedSurface;
   await restoreSnapshot(staged.launcherPath, staged.previousLauncher);
   await restoreSnapshot(staged.desktopPath, staged.previousDesktop);
 }
 
 async function discardStagedLaunchers(staged) {
+  const stagedInstanceLauncherPath = staged?.stagedInstanceLauncherPath;
+  if (staged?.stagedSurface) staged = staged.stagedSurface;
   const paths = [staged.launcherStage, staged.desktopStage].filter((path) => typeof path === "string");
+  if (typeof stagedInstanceLauncherPath === "string") paths.push(stagedInstanceLauncherPath);
   await Promise.all(paths.map((path) => rm(path, { force: true })));
 }
 
@@ -889,6 +1035,7 @@ async function assertRequiredProductionRuntimeResources(runtime) {
     access(runtime.node, constants.X_OK),
     access(runtime.lifecycle, constants.R_OK),
     access(runtime.daemonEntry, constants.R_OK),
+    access(runtime.cliEntry, constants.R_OK),
     access(runtime.maintenanceEntry, constants.R_OK)
   ]);
 }
@@ -1096,6 +1243,7 @@ function productionRuntimePaths(target) {
   return {
     appIcon: join(target, "resources", "masthead-logo-sail.png"),
     daemonEntry: join(daemonRoot, "dist", "src", "daemon", "main.js"),
+    cliEntry: join(daemonRoot, "dist", "src", "cli", "mastheadctl.js"),
     executable: join(target, process.platform === "win32" ? "masthead.exe" : "masthead"),
     lifecycle: join(daemonRoot, "scripts", "masthead-production.js"),
     maintenanceEntry: join(daemonRoot, "dist", "src", "daemon", "productionTransitionMaintenance.js"),

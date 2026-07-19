@@ -16,7 +16,9 @@ const applicationsDir = join(home, ".local", "share", "applications");
 const systemdUserDir = join(home, ".config", "systemd", "user");
 const stateDir = join(home, ".local", "state", "masthead");
 const launcherPath = join(binDir, "masthead-dev-desktop");
-const cliLauncherPath = join(binDir, process.platform === "win32" ? "mastheadctl.cmd" : "mastheadctl");
+const devInstanceDir = join(home, ".local", "share", "masthead-dev");
+const cliLauncherPath = join(devInstanceDir, "bin", process.platform === "win32" ? "mastheadctl.cmd" : "mastheadctl");
+const instanceManifestPath = join(devInstanceDir, "masthead-instance.json");
 const cliEntry = join(repo, "dist", "daemon", "src", "cli", "mastheadctl.js");
 const desktopPath = join(applicationsDir, "ai.animas.masthead-dev.desktop");
 const servicePath = join(systemdUserDir, "masthead-dev-electron.service");
@@ -34,8 +36,8 @@ async function installCliLauncher() {
   await access(cliEntry, constants.R_OK);
   const temporaryPath = `${cliLauncherPath}.${process.pid}.${randomUUID()}.tmp`;
   const body = process.platform === "win32"
-    ? `@echo off\r\n@setlocal DisableDelayedExpansion\r\n"${nodeBin.replace(/%/g, "%%")}" "${cliEntry.replace(/%/g, "%%")}" %*\r\n`
-    : `#!/bin/sh\nexec ${shellQuote(nodeBin)} ${shellQuote(cliEntry)} "$@"\n`;
+    ? `@echo off\r\n@setlocal DisableDelayedExpansion\r\n@set "MASTHEAD_INSTANCE_MANIFEST=${instanceManifestPath.replace(/%/g, "%%")}"\r\n"${nodeBin.replace(/%/g, "%%")}" "${cliEntry.replace(/%/g, "%%")}" %*\r\n`
+    : `#!/bin/sh\nexec env MASTHEAD_INSTANCE_MANIFEST=${shellQuote(instanceManifestPath)} ${shellQuote(nodeBin)} ${shellQuote(cliEntry)} "$@"\n`;
   try {
     await writeFile(temporaryPath, body, { encoding: "utf8", mode: process.platform === "win32" ? undefined : 0o755 });
     if (process.platform !== "win32") await chmod(temporaryPath, 0o755);
@@ -55,6 +57,7 @@ LOG_FILE="$LOG_DIR/dev-desktop.log"
 NODE_BIN=${shellQuote(nodeBin)}
 NPM_BIN=${shellQuote(npmBin)}
 CLI_LAUNCHER=${shellQuote(cliLauncherPath)}
+INSTANCE_MANIFEST=${shellQuote(instanceManifestPath)}
 CLI_ENTRY="$APP_DIR/dist/daemon/src/cli/mastheadctl.js"
 DATA_DIR="$HOME/.local/share/masthead-dev"
 DB_PATH="$DATA_DIR/masthead.sqlite"
@@ -72,7 +75,7 @@ ACTIVE_PROJECTION_URL="$ACTIVE_DAEMON_BASE_URL/projection"
 export PATH="$(dirname "$NODE_BIN"):$HOME/.cargo/bin:$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
 export npm_config_update_notifier=false
 
-mkdir -p "$LOG_DIR" "$DATA_DIR/legacy"
+mkdir -p "$LOG_DIR" "$DATA_DIR/legacy" "$(dirname "$CLI_LAUNCHER")"
 
 log() {
   echo "$(date -Is) $*" >>"$LOG_FILE"
@@ -160,7 +163,7 @@ daemon_data_matches() {
 daemon_authoring_is_compatible() {
   local port="$1" capabilities
   capabilities="$(curl -fsS --max-time 5 "http://127.0.0.1:$port/workbench/authoring/capabilities" 2>/dev/null)" || return 1
-  EXPECTED_CLI="$CLI_LAUNCHER" "$NODE_BIN" -e 'let input = ""; const expected = ["open", "status", "evidence", "submit", "finish"]; process.stdin.on("data", (chunk) => { input += chunk; }); process.stdin.on("end", () => { try { const j = JSON.parse(input); const valid = j?.capability === "artifact_authoring" && j?.protocol === "masthead.workbench.authoring/v1" && j?.transport === "daemon_http" && j?.bundleVersion === "workbench-authoring-v1" && j?.evidencePolicy === "all_canonical_redacted_evidence" && typeof j?.databaseId === "string" && j.databaseId === j.databaseId.trim() && j.databaseId.length > 0 && j?.command === process.env.EXPECTED_CLI && Array.isArray(j?.operations) && j.operations.length === expected.length && expected.every((operation, index) => j.operations[index] === operation); process.exit(valid ? 0 : 1); } catch { process.exit(1); } });' <<<"$capabilities"
+  EXPECTED_CLI="$CLI_LAUNCHER" EXPECTED_MANIFEST="$INSTANCE_MANIFEST" "$NODE_BIN" -e 'let input = ""; const expected = ["suggestions", "open", "status", "evidence", "context", "submit", "finish"]; process.stdin.on("data", (chunk) => { input += chunk; }); process.stdin.on("end", () => { try { const j = JSON.parse(input); const valid = j?.capability === "artifact_authoring" && j?.protocol === "masthead.workbench.authoring/v1" && j?.transport === "daemon_http" && j?.bundleVersion === "workbench-authoring-v3" && j?.evidencePolicy === "selected_session_canonical_evidence" && typeof j?.databaseId === "string" && j.databaseId === j.databaseId.trim() && j.databaseId.length > 0 && j?.command === process.env.EXPECTED_CLI && j?.instanceManifest === process.env.EXPECTED_MANIFEST && typeof j?.instanceId === "string" && typeof j?.buildSha === "string" && Array.isArray(j?.operations) && j.operations.length === expected.length && expected.every((operation, index) => j.operations[index] === operation); process.exit(valid ? 0 : 1); } catch { process.exit(1); } });' <<<"$capabilities"
 }
 
 daemon_is_compatible() {
@@ -183,8 +186,8 @@ stop_stale_authoring_daemon() {
 
 install_active_cli_launcher() {
   local temporary_path="\${CLI_LAUNCHER}.tmp.$$"
-  if ! printf '#!/bin/sh\\nexec env MASTHEAD_DAEMON_URL=%q %q %q "$@"\\n' \\
-    "$ACTIVE_DAEMON_BASE_URL" "$NODE_BIN" "$CLI_ENTRY" >"$temporary_path" || \\
+  if ! printf '#!/bin/sh\\nexec env MASTHEAD_INSTANCE_MANIFEST=%q %q %q "$@"\\n' \\
+    "$INSTANCE_MANIFEST" "$NODE_BIN" "$CLI_ENTRY" >"$temporary_path" || \\
     ! chmod 0755 "$temporary_path" || \\
     ! mv -f "$temporary_path" "$CLI_LAUNCHER"; then
     rm -f "$temporary_path"
@@ -372,6 +375,8 @@ start_dev_daemon() {
       MASTHEAD_HOST="127.0.0.1" \\
       MASTHEAD_HOOK_TRANSCRIPT_CATCHUP="1" \\
       MASTHEAD_CLI_COMMAND="$CLI_LAUNCHER" \\
+      MASTHEAD_INSTANCE_DIR="$DATA_DIR" \\
+      MASTHEAD_INSTANCE_MANIFEST="$INSTANCE_MANIFEST" \\
       MASTHEAD_MCP_COMMAND="$NODE_BIN" \\
       MASTHEAD_MCP_ENTRY="$MCP_ENTRY" \\
       MASTHEAD_PORT="$port" \\
@@ -436,6 +441,8 @@ exec env \\
   MASTHEAD_DATA_DIR="$DATA_DIR" \\
   MASTHEAD_DB_PATH="$DB_PATH" \\
   MASTHEAD_CLI_COMMAND="$CLI_LAUNCHER" \\
+  MASTHEAD_INSTANCE_DIR="$DATA_DIR" \\
+  MASTHEAD_INSTANCE_MANIFEST="$INSTANCE_MANIFEST" \\
   MASTHEAD_MCP_ENTRY="$MCP_ENTRY" \\
   MASTHEAD_NODE_PATH="$NODE_BIN" \\
   MASTHEAD_PORT="$ACTIVE_DAEMON_PORT" \\
@@ -476,6 +483,7 @@ WantedBy=default.target
 `;
 
 await mkdir(binDir, { recursive: true });
+await mkdir(dirname(cliLauncherPath), { recursive: true });
 await mkdir(applicationsDir, { recursive: true });
 await mkdir(systemdUserDir, { recursive: true });
 await mkdir(stateDir, { recursive: true });

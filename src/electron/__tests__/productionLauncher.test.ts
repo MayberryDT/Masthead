@@ -11,6 +11,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import { writePackagedBundleManifest } from "../../../scripts/packaged-bundle-manifest.js";
 import {
   acquireLifecycleLease,
+  activateStagedProductionInstallation,
   assertColdProductionOffline,
   captureMaintenanceSentinel,
   captureLegacyTargetIdentity,
@@ -25,6 +26,7 @@ import {
   readProductionProcesses,
   waitForProductionHealth,
   startProduction,
+  stageProductionInstallation,
   statusProduction,
   stopColdMaintenanceChildren,
   stopProduction,
@@ -52,6 +54,7 @@ async function fixture({ includeIcon = true, iconContents = VALID_PNG } = {}) {
   const daemonRoot = join(target, "resources", "daemon");
   await mkdir(join(daemonRoot, "scripts"), { recursive: true });
   await mkdir(join(daemonRoot, "dist", "src", "daemon"), { recursive: true });
+  await mkdir(join(daemonRoot, "dist", "src", "cli"), { recursive: true });
   await mkdir(join(daemonRoot, "dist", "src", "core"), { recursive: true });
   await mkdir(join(target, "resources"), { recursive: true });
   await mkdir(join(homeDir, ".local", "bin"), { recursive: true });
@@ -64,6 +67,7 @@ async function fixture({ includeIcon = true, iconContents = VALID_PNG } = {}) {
   await writeFile(join(daemonRoot, "scripts", "masthead-hook.js"), "hook");
   await writeFile(join(daemonRoot, "scripts", "resolve-hook-runtime.js"), "resolver");
   await writeFile(join(daemonRoot, "dist", "src", "daemon", "main.js"), "daemon");
+  await writeFile(join(daemonRoot, "dist", "src", "cli", "mastheadctl.js"), "cli");
   await writeFile(join(daemonRoot, "dist", "src", "daemon", "productionTransitionMaintenance.js"), "maintenance");
   await writeFile(join(daemonRoot, "dist", "src", "daemon", "databaseBackup.js"), [
     "export async function withExclusiveDatabaseMaintenance() {",
@@ -161,6 +165,52 @@ function legacyIdentity(path: string) {
 }
 
 describe("production lifecycle launcher", () => {
+  test("stages and activates an instance-bound production installation without runtime or database side effects", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const activeInstanceLauncherPath = join(config.dataDirectory, "bin", "mastheadctl");
+    await mkdir(join(config.dataDirectory, "bin"), { recursive: true });
+    await writeFile(activeInstanceLauncherPath, "old launcher");
+    const forbidden = () => { throw new Error("forbidden runtime side effect"); };
+
+    const receipt = await stageProductionInstallation({
+      bundleDigest: candidate.bundleDigest,
+      sourceBundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot,
+      openDatabase: forbidden,
+      launch: forbidden,
+      probe: forbidden,
+      cleanupBundles: forbidden
+    } as never);
+
+    expect(receipt).toMatchObject({ databaseOpened: false, launched: false, staged: true });
+    expect(await realpath(join(productionRoot, "current"))).toBe(oldTarget);
+    expect(await readFile(activeInstanceLauncherPath, "utf8")).toBe("old launcher");
+    expect(await readFile(receipt.stagedInstanceLauncherPath, "utf8")).toContain("MASTHEAD_INSTANCE_MANIFEST");
+    expect(JSON.parse(await readFile(receipt.receiptPath, "utf8"))).toMatchObject({
+      receiptVersion: "masthead-production-stage-v1",
+      stagingNonce: receipt.stagingNonce,
+      target: candidate.target
+    });
+    await expect(lstat(receipt.instanceManifestPath)).rejects.toMatchObject({ code: "ENOENT" });
+
+    const activated = await activateStagedProductionInstallation(receipt, {
+      openDatabase: forbidden,
+      runMaintenance: forbidden,
+      launch: forbidden,
+      probe: forbidden,
+      writeManifest: forbidden,
+      runDesktopDatabaseCommand: () => undefined
+    });
+    expect(activated).toMatchObject({ activated: true, databaseOpened: false, launched: false });
+    expect(await realpath(join(productionRoot, "current"))).toBe(candidate.target);
+    expect(await readFile(activeInstanceLauncherPath, "utf8")).toContain("MASTHEAD_INSTANCE_MANIFEST");
+    await expect(lstat(receipt.instanceManifestPath)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await realpath(oldTarget)).toBe(oldTarget);
+  });
+
   test("allows five bounded minutes for activation health without extending for maintenance", () => {
     expect(productionHealthPollPolicy()).toEqual({
       intervalMs: 250,

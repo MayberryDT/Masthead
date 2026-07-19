@@ -12,7 +12,7 @@ import { buildPackagedCliInvocation } from "./packaged-cli-command.js";
 
 const REQUIRED_HOOK_EVENTS = ["SessionStart", "PermissionRequest", "PostToolUse", "Stop"];
 const MASTHEAD_HOOK_MARKER = "masthead-hook.js";
-const AUTHORING_OPERATIONS = ["open", "status", "evidence", "submit", "finish"];
+const AUTHORING_OPERATIONS = ["suggestions", "open", "status", "evidence", "context", "submit", "finish"];
 const REQUIRED_CAPABILITIES = [
   "live_projection",
   "canonical_sessions",
@@ -209,11 +209,18 @@ function checkDatabaseIdentity(body) {
   };
 }
 
-export function inspectAuthoringCapabilities(value, expectedDatabaseId) {
+export function inspectAuthoringCapabilities(value, expectedIdentity) {
   const capabilities = isRecord(value) ? value : {};
   const problems = [];
   const command = stringValue(capabilities.command);
   const databaseId = stringValue(capabilities.databaseId);
+  const capabilityIdentity = {
+    baseUrl: stringValue(capabilities.baseUrl),
+    buildSha: stringValue(capabilities.buildSha),
+    databaseId,
+    instanceManifest: stringValue(capabilities.instanceManifest),
+    instanceId: stringValue(capabilities.instanceId)
+  };
   const operations = Array.isArray(capabilities.operations)
     ? capabilities.operations.filter((operation) => typeof operation === "string")
     : [];
@@ -221,10 +228,17 @@ export function inspectAuthoringCapabilities(value, expectedDatabaseId) {
   if (capabilities.capability !== "artifact_authoring") problems.push("artifact_authoring capability is missing");
   if (capabilities.protocol !== "masthead.workbench.authoring/v1") problems.push("authoring protocol is incompatible");
   if (capabilities.transport !== "daemon_http") problems.push("authoring transport is not daemon_http");
-  if (capabilities.bundleVersion !== "workbench-authoring-v1") problems.push("authoring bundle version is incompatible");
-  if (capabilities.evidencePolicy !== "all_canonical_redacted_evidence") problems.push("authoring evidence policy is incomplete");
+  if (capabilities.bundleVersion !== "workbench-authoring-v3") problems.push("authoring bundle version is incompatible");
+  if (capabilities.evidencePolicy !== "selected_session_canonical_evidence") problems.push("authoring evidence policy is incomplete");
+  if (capabilities.maxSessionsPerRun !== 12 || capabilities.suggestionsAreBinding !== false) problems.push("authoring V3 policy is incomplete");
   if (!command) problems.push("authoring command is missing");
-  if (!databaseId || databaseId !== expectedDatabaseId) problems.push("database identity mismatch");
+  if (!isRecord(expectedIdentity)) problems.push("expected authoring identity is missing");
+  else {
+    for (const field of ["baseUrl", "databaseId", "buildSha", "instanceManifest", "instanceId"]) {
+      if (!capabilityIdentity[field] || capabilityIdentity[field] !== expectedIdentity[field]) problems.push(`${field} identity mismatch`);
+    }
+    if (command !== expectedIdentity.command) problems.push("authoring command identity mismatch");
+  }
   if (
     operations.length !== AUTHORING_OPERATIONS.length ||
     !AUTHORING_OPERATIONS.every((operation, index) => operations[index] === operation)
@@ -232,7 +246,7 @@ export function inspectAuthoringCapabilities(value, expectedDatabaseId) {
     problems.push("authoring operations are incomplete");
   }
 
-  return { command, databaseId, ok: problems.length === 0, operations, problems };
+  return { command, databaseId, identity: capabilityIdentity, ok: problems.length === 0, operations, problems };
 }
 
 export async function resolveAuthoringCommand(command, options = {}) {
@@ -261,6 +275,7 @@ export async function resolveAuthoringCommand(command, options = {}) {
 
 async function checkAuthoring() {
   const data = isRecord(health?.data) ? health.data : {};
+  const runtime = isRecord(health?.runtime) ? health.runtime : {};
   const expectedDatabaseId = stringValue(data.databaseId);
   if (!expectedDatabaseId) {
     return {
@@ -273,8 +288,24 @@ async function checkAuthoring() {
   }
 
   try {
+    const manifestPath = stringValue(runtime.instanceManifest);
+    if (!manifestPath || !isAbsolute(manifestPath)) throw new Error("Health did not expose an absolute instance manifest path.");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    const expectedIdentity = {
+      baseUrl: stringValue(runtime.baseUrl),
+      buildSha: stringValue(health?.buildSha),
+      command: stringValue(runtime.authoringCommand),
+      databaseId: expectedDatabaseId,
+      instanceManifest: manifestPath,
+      instanceId: stringValue(runtime.daemonInstanceId)
+    };
+    if (expectedIdentity.baseUrl !== baseUrl) throw new Error("Health base URL does not match the doctor target.");
+    for (const field of ["baseUrl", "databaseId", "buildSha", "instanceId"]) {
+      if (manifest[field] !== expectedIdentity[field]) throw new Error(`Instance manifest ${field} identity mismatch.`);
+    }
+    if (resolve(manifest.instanceDir, "masthead-instance.json") !== manifestPath) throw new Error("Instance manifest path identity mismatch.");
     const capabilities = await getJson("/workbench/authoring/capabilities");
-    const inspected = inspectAuthoringCapabilities(capabilities, expectedDatabaseId);
+    const inspected = inspectAuthoringCapabilities(capabilities, expectedIdentity);
     const commandPath = await resolveAuthoringCommand(inspected.command, {
       extensions: process.platform === "win32"
         ? (process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD").split(";").map((extension) => extension.toLowerCase())
@@ -285,7 +316,7 @@ async function checkAuthoring() {
     const cliCapabilities = commandPath
       ? await runJsonCommand(commandPath, ["workbench", "capabilities", "--json"])
       : undefined;
-    const cliInspected = inspectAuthoringCapabilities(cliCapabilities, expectedDatabaseId);
+    const cliInspected = inspectAuthoringCapabilities(cliCapabilities, expectedIdentity);
     const ok = inspected.ok && Boolean(commandPath) && cliInspected.ok;
     return {
       id: "artifact-authoring",
@@ -1043,7 +1074,7 @@ function runJsonCommand(command, args) {
     });
     const child = spawn(invocation.command, invocation.args, {
       cwd: process.cwd(),
-      env: { ...process.env, ...invocation.env, MASTHEAD_DAEMON_URL: baseUrl },
+      env: { ...process.env, ...invocation.env },
       stdio: ["ignore", "pipe", "pipe"]
     });
     let stdout = "";

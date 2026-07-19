@@ -3,6 +3,14 @@ import { existsSync } from "node:fs";
 import { createServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import {
+  assertGuidedAuthoringExpectedIdentity,
+  canonicalInstancePaths,
+  identityFromCapabilities,
+  identityFromManifest,
+  readMastheadInstanceManifest,
+  type GuidedAuthoringExpectedIdentity
+} from "../shared/instanceIdentity";
+import {
   isAbsoluteAuthoringCommand,
   isWorkbenchAuthoringCapabilitiesDto
 } from "../shared/workbenchAuthoring";
@@ -28,6 +36,11 @@ export type MastheadHealthSummary = {
   databasePath?: string;
   dataDirectory?: string;
   mode?: string;
+  baseUrl?: string;
+  instanceId?: string;
+  instanceManifest?: string;
+  authoringCommand?: string;
+  pid?: number;
 };
 
 export type DaemonLaunchTarget = {
@@ -40,6 +53,9 @@ export type DaemonLaunchTarget = {
   mcpEntry: string;
   nodePath: string;
   port: number;
+  instanceDir: string;
+  instanceManifest: string;
+  cliCommand: string;
 };
 
 export type StartLiveConnectorResult = {
@@ -82,7 +98,9 @@ export type ResolveDaemonLaunchTargetInput = {
 };
 
 export type StartLiveConnectorOptions = {
-  prepareAuthoringLauncher?: (input: { baseUrl: string; port: number }) => Promise<void>;
+  prepareAuthoringLauncher?: (input: { baseUrl: string; port: number; instanceManifest: string; launcherPath: string }) => Promise<void>;
+  verifyAuthoringManifest?: (path: string, health: MastheadHealthSummary) => Promise<void>;
+  findAvailablePort?: (startPort: number) => Promise<number>;
 };
 
 export function connectorBaseUrl(port: number): string {
@@ -94,6 +112,9 @@ export function resolveDaemonLaunchTarget(input: ResolveDaemonLaunchTargetInput)
   const dataDirectory = resolve(input.env.MASTHEAD_DATA_DIR || input.defaultDataDir || input.userDataDir);
   const databasePath = resolve(input.env.MASTHEAD_DB_PATH || join(dataDirectory, "masthead.sqlite"));
   const legacyStorePath = resolve(input.env.MASTHEAD_STORE_PATH || join(dataDirectory, "legacy", "events.ndjson"));
+  const instancePaths = canonicalInstancePaths(resolve(input.env.MASTHEAD_INSTANCE_DIR || dataDirectory));
+  const instanceManifest = resolve(input.env.MASTHEAD_INSTANCE_MANIFEST || instancePaths.instanceManifest);
+  const cliCommand = resolve(input.env.MASTHEAD_CLI_COMMAND || instancePaths.launcherPath);
   const mcpEntryOverride = input.env.MASTHEAD_MCP_ENTRY;
 
   if (input.env.MASTHEAD_DAEMON_ENTRY) {
@@ -106,7 +127,10 @@ export function resolveDaemonLaunchTarget(input: ResolveDaemonLaunchTargetInput)
       legacyStorePath,
       mcpEntry: mcpEntryOverride || join(input.currentDir, "dist", "daemon", "src", "mcp", "server.js"),
       nodePath: input.env.MASTHEAD_NODE_PATH || process.execPath,
-      port
+      port,
+      instanceDir: instancePaths.instanceDir,
+      instanceManifest,
+      cliCommand
     };
   }
 
@@ -120,7 +144,10 @@ export function resolveDaemonLaunchTarget(input: ResolveDaemonLaunchTargetInput)
     legacyStorePath,
     mcpEntry: mcpEntryOverride || packaged.mcpEntry,
     nodePath: input.env.MASTHEAD_NODE_PATH || packaged.nodePath,
-    port
+    port,
+    instanceDir: instancePaths.instanceDir,
+    instanceManifest,
+    cliCommand
   };
 }
 
@@ -134,10 +161,14 @@ export function buildDaemonEnv(input: {
   mcpCommand: string;
   mcpEntry: string;
   port: number;
+  instanceDir: string;
+  instanceManifest: string;
 }): Record<string, string> {
   return {
     MASTHEAD_ALLOWED_ORIGINS: input.allowedOrigins.join(","),
     MASTHEAD_CLI_COMMAND: input.cliCommand,
+    MASTHEAD_INSTANCE_DIR: input.instanceDir,
+    MASTHEAD_INSTANCE_MANIFEST: input.instanceManifest,
     MASTHEAD_DATA_DIR: input.dataDirectory,
     MASTHEAD_DB_PATH: input.databasePath,
     MASTHEAD_HOST: "127.0.0.1",
@@ -169,7 +200,12 @@ export function parseCompatibleHealth(value: unknown): MastheadHealthSummary | u
     databaseId: stringField(data?.databaseId),
     databasePath: stringField(data?.databasePath),
     dataDirectory: stringField(data?.dataDirectory),
-    mode: stringField(runtime?.mode)
+    mode: stringField(runtime?.mode),
+    baseUrl: stringField(runtime?.baseUrl),
+    instanceId: stringField(runtime?.daemonInstanceId),
+    instanceManifest: stringField(runtime?.instanceManifest),
+    authoringCommand: stringField(runtime?.authoringCommand),
+    pid: numberField(runtime?.pid)
   };
 }
 
@@ -180,7 +216,7 @@ export async function startLiveConnector(
   options: StartLiveConnectorOptions = {}
 ): Promise<StartLiveConnectorResult> {
   const target = resolveDaemonLaunchTarget(input);
-  const cliCommand = input.env.MASTHEAD_CLI_COMMAND?.trim();
+  const cliCommand = target.cliCommand;
   if (!cliCommand || !isAbsoluteAuthoringCommand(cliCommand)) {
     throw new Error("Masthead connector requires an absolute installed MASTHEAD_CLI_COMMAND");
   }
@@ -192,7 +228,7 @@ export async function startLiveConnector(
   }
   if (initialProbe.state === "compatible") {
     const baseUrl = connectorBaseUrl(target.port);
-    await options.prepareAuthoringLauncher?.({ baseUrl, port: target.port });
+    await (options.verifyAuthoringManifest ?? verifyDaemonOwnedManifest)(target.instanceManifest, initialProbe.health);
     await warmProjection(baseUrl);
     return connectorStartResult(false, baseUrl, "Local Masthead collector is already running.", initialProbe.health);
   }
@@ -201,12 +237,16 @@ export async function startLiveConnector(
     throw new Error(`Masthead daemon entry not found at ${target.entryPath}`);
   }
 
-  const port = initialProbe.state === "incompatible" ? await findAvailablePort(target.port + 1) : target.port;
+  const port = initialProbe.state === "incompatible"
+    ? await (options.findAvailablePort ?? findAvailablePort)(target.port + 1)
+    : target.port;
   const baseUrl = connectorBaseUrl(port);
-  await options.prepareAuthoringLauncher?.({ baseUrl, port });
+  await options.prepareAuthoringLauncher?.({ baseUrl, port, instanceManifest: target.instanceManifest, launcherPath: target.cliCommand });
   const env = buildDaemonEnv({
     allowedOrigins,
     cliCommand,
+    instanceDir: target.instanceDir,
+    instanceManifest: target.instanceManifest,
     dataDirectory: target.dataDirectory,
     databasePath: target.databasePath,
     hookScript: target.hookScript,
@@ -226,6 +266,7 @@ export async function startLiveConnector(
   });
 
   const health = await waitForCompatibleCollector(port, target.dataDirectory, target.databasePath, cliCommand);
+  await (options.verifyAuthoringManifest ?? verifyDaemonOwnedManifest)(target.instanceManifest, health);
   await warmProjection(baseUrl);
   return connectorStartResult(true, baseUrl, "Started local Masthead collector.", health);
 }
@@ -329,10 +370,58 @@ async function probeCollector(
     if (!isWorkbenchAuthoringCapabilitiesDto(capabilities, { expectedCommand: expectedCliCommand })) {
       return { state: "same_database_authoring_incompatible" };
     }
+    const healthIdentity = identityFromHealth(healthBody);
+    assertGuidedAuthoringExpectedIdentity(identityFromCapabilities(capabilities), healthIdentity);
     return { state: "compatible", health };
   } catch {
     return { state: "same_database_authoring_incompatible" };
   }
+}
+
+function identityFromHealth(value: unknown): GuidedAuthoringExpectedIdentity {
+  const record = objectField(value);
+  const runtime = objectField(record?.runtime);
+  const data = objectField(record?.data);
+  const baseUrl = stringField(runtime?.baseUrl);
+  const buildSha = stringField(record?.buildSha);
+  const databaseId = stringField(data?.databaseId);
+  const instanceId = stringField(runtime?.daemonInstanceId);
+  const instanceManifest = stringField(runtime?.instanceManifest);
+  if (!baseUrl || !buildSha || !databaseId || !instanceId || !instanceManifest) throw new Error("incomplete daemon identity");
+  return { baseUrl, buildSha, databaseId, instanceId, instanceManifest };
+}
+
+async function verifyDaemonOwnedManifest(path: string, health: MastheadHealthSummary): Promise<void> {
+  const deadline = Date.now() + 2_000;
+  let lastError: unknown;
+  while (Date.now() < deadline) {
+    try {
+      const manifest = await readMastheadInstanceManifest(path);
+      const expected: GuidedAuthoringExpectedIdentity = {
+        baseUrl: requiredSummaryField(health.baseUrl, "baseUrl"),
+        buildSha: requiredSummaryField(health.buildSha, "buildSha"),
+        databaseId: requiredSummaryField(health.databaseId, "databaseId"),
+        instanceId: requiredSummaryField(health.instanceId, "instanceId"),
+        instanceManifest: path
+      };
+      assertGuidedAuthoringExpectedIdentity(identityFromManifest(manifest, path), expected);
+      if (manifest.pid !== health.pid) throw new Error("instance manifest PID mismatch");
+      return;
+    } catch (error) {
+      lastError = error;
+      await delay(50);
+    }
+  }
+  throw new Error(`Masthead daemon instance manifest did not match compatible health: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
+}
+
+function requiredSummaryField(value: string | undefined, field: string): string {
+  if (!value) throw new Error(`compatible health missing ${field}`);
+  return value;
+}
+
+function numberField(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 async function warmProjection(baseUrl: string): Promise<void> {

@@ -2,6 +2,14 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, realpath, rm, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import {
+  canonicalInstancePaths,
+  identityFromManifest,
+  removeOwnedMastheadInstanceManifest,
+  writeMastheadInstanceManifestAtomic,
+  type GuidedAuthoringExpectedIdentity,
+  type MastheadInstanceManifest
+} from "../shared/instanceIdentity.ts";
 import type { AdapterMaturity } from "../adapters/capabilities.ts";
 import { adapterRecordFromLiveHook, liveHookSourceForRuntime } from "../adapters/live/hookAdapter.ts";
 import { LIVE_CONNECTOR_RUNTIMES } from "../adapters/liveRuntimes.ts";
@@ -180,6 +188,8 @@ export type MastheadDaemon = {
   startBackgroundHydration: () => void;
   waitForBackgroundHydration: () => Promise<void>;
   close: () => Promise<void>;
+  instanceIdentity: () => MastheadInstanceManifest;
+  publishInstanceManifest: () => Promise<MastheadInstanceManifest>;
 };
 
 export const LIVE_BOARD_RAW_RECORD_LIMIT = 500;
@@ -372,6 +382,15 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     });
     const daemonInstanceId = randomUUID();
     const daemonStartedAt = new Date().toISOString();
+    const instancePaths = canonicalInstancePaths(
+      resolve(process.env.MASTHEAD_INSTANCE_DIR || writableDataDirectory)
+    );
+    const instanceManifestPath = resolve(process.env.MASTHEAD_INSTANCE_MANIFEST || instancePaths.instanceManifest);
+    const authoringCommand = resolve(process.env.MASTHEAD_CLI_COMMAND || instancePaths.launcherPath);
+    const buildSha = process.env.MASTHEAD_BUILD_SHA || "development";
+    const databaseId = getOrCreateDatabaseIdentity(database);
+    let instanceManifestPublished = false;
+    let instanceManifestPublishPromise: Promise<MastheadInstanceManifest> | undefined;
     const enrichmentProvider = createSettingsBackedEnrichmentProvider(database, config);
     const enrichment = createEnrichmentCoordinator(database, enrichmentProvider, {
       failureBackoffAfterMs: Date.parse(daemonStartedAt)
@@ -1475,7 +1494,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         failureGroups: listImportFailureGroups(database, controls.importJobId),
         manifest: manifest.summary
       },
-      updatedAt: new Date().toISOString()
+      updatedAt: daemonStartedAt
     });
     return result;
   }
@@ -1915,7 +1934,43 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   server.on("listening", () => {
     const address = server.address();
     if (typeof address === "object" && address?.port) config.port = address.port;
+    void publishInstanceManifest().catch((error) => {
+      recordRuntimeDiagnostic({
+        details: { error, instanceManifestPath },
+        kind: "instance_manifest_publish_failed",
+        message: "Daemon failed to publish its instance manifest.",
+        severity: "error"
+      });
+    });
   });
+
+  function instanceIdentity(): MastheadInstanceManifest {
+    return {
+      schemaVersion: 1,
+      instanceId: daemonInstanceId,
+      baseUrl: `http://${config.host}:${boundPort(server, config.port)}`,
+      databaseId,
+      buildSha,
+      pid: process.pid,
+      instanceDir: instancePaths.instanceDir,
+      updatedAt: new Date().toISOString()
+    };
+  }
+
+  async function publishInstanceManifest(): Promise<MastheadInstanceManifest> {
+    if (instanceManifestPublishPromise) return instanceManifestPublishPromise;
+    instanceManifestPublishPromise = (async () => {
+      const manifest = instanceIdentity();
+      await writeMastheadInstanceManifestAtomic(instanceManifestPath, manifest);
+      instanceManifestPublished = true;
+      return manifest;
+    })();
+    return instanceManifestPublishPromise;
+  }
+
+  function guidedIdentity(): GuidedAuthoringExpectedIdentity {
+    return identityFromManifest(instanceIdentity(), instanceManifestPath);
+  }
 
   async function handleDaemonRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const url = new URL(request.url || "/", `http://${config.host}:${config.port}`);
@@ -1932,11 +1987,21 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
     if (request.method === "GET" && url.pathname === "/health") {
 
+      if (!instanceManifestPublished) {
+        sendJson(request, response, config.allowedOrigins, 503, { ok: false, error: "instance_manifest_not_ready" });
+        return;
+      }
+
       const health = buildMastheadHealth(
         config,
         database,
         {
           daemonInstanceId,
+          pid: process.pid,
+          baseUrl: () => `http://${config.host}:${boundPort(server, config.port)}`,
+          instanceDir: instancePaths.instanceDir,
+          instanceManifest: instanceManifestPath,
+          authoringCommand,
           startedAt: daemonStartedAt,
           port: () => boundPort(server, config.port)
         },
@@ -2611,7 +2676,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       }
       const result = await routeWorkbenchAuthoringRequest(
         {
-          authoringCommand: process.env.MASTHEAD_CLI_COMMAND?.trim() || "mastheadctl",
+          authoringCommand,
+          identity: guidedIdentity(),
           db: database
         },
         { body, method: request.method ?? "GET", url }
@@ -3720,10 +3786,19 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       queuedSearchIndexSessionIds.clear();
       searchIndexQueueScheduled = false;
       closePromise = (async () => {
+        await instanceManifestPublishPromise;
         await hydrationPromise;
         if (gitRefreshTimer) clearInterval(gitRefreshTimer);
         await new Promise<void>((resolve) => {
           server.close(() => resolve());
+        });
+        await removeOwnedMastheadInstanceManifest(instanceManifestPath, daemonInstanceId).catch((error) => {
+          recordRuntimeDiagnostic({
+            details: { error, instanceManifestPath },
+            kind: "instance_manifest_cleanup_failed",
+            message: "Daemon could not remove its owned instance manifest.",
+            severity: "warning"
+          });
         });
         let gitRefreshError: unknown;
         try {
@@ -3755,7 +3830,9 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         if (deferredQueueError) throw deferredQueueError;
       })();
       return closePromise;
-    }
+    },
+    instanceIdentity,
+    publishInstanceManifest
   };
   } catch (error) {
     database.close();

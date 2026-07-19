@@ -386,6 +386,10 @@ function rewriteHealthBody(
                 ...runtime,
                 mode: "read_only_bridge",
                 writable: false,
+                baseUrl: options.baseUrl,
+                instanceDir: undefined,
+                instanceManifest: undefined,
+                authoringCommand: undefined,
                 host: options.baseUrl ? new URL(options.baseUrl).hostname : runtime.host,
                 port: options.baseUrl ? Number(new URL(options.baseUrl).port) : runtime.port,
                 upstream: {

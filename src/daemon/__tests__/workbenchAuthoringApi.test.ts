@@ -13,6 +13,7 @@ import { markSessionCompileReady, seedSession } from "../db/__tests__/sessionTes
 import { getOrCreateDatabaseIdentity } from "../db/schema.ts";
 import { createMastheadDaemon, type MastheadDaemon } from "../server.ts";
 import type { MastheadDatabase } from "../db/sqlite.ts";
+import { identityFromManifest } from "../../shared/instanceIdentity.ts";
 import {
   openAgentLedAuthoringRun,
   openAuthoringRun
@@ -43,6 +44,8 @@ describe("Workbench authoring HTTP API", () => {
 
     const capabilities = await getJson(baseUrl, "/workbench/authoring/capabilities");
     expect(capabilities.body).toMatchObject({
+      baseUrl,
+      buildSha: "development",
       bundleVersion: "workbench-authoring-v3",
       capability: "artifact_authoring",
       command: expect.any(String),
@@ -51,10 +54,16 @@ describe("Workbench authoring HTTP API", () => {
       maxSessionsPerRun: 12,
       operations: ["suggestions", "open", "status", "evidence", "context", "submit", "finish"],
       protocol: "masthead.workbench.authoring/v1",
+      instanceId: expect.any(String),
+      instanceManifest: expect.stringMatching(/masthead-instance\.json$/),
       transport: "daemon_http"
     });
     const injected = await routeWorkbenchAuthoringRequest(
-      { authoringCommand: "/opt/masthead/bin/mastheadctl", db: daemon.database },
+      {
+        authoringCommand: "/opt/masthead/bin/mastheadctl",
+        db: daemon.database,
+        identity: identityFromManifest(daemon.instanceIdentity(), join(tempDirs[0], "masthead-instance.json"))
+      },
       {
         method: "GET",
         url: new URL("http://127.0.0.1/workbench/authoring/capabilities")
@@ -62,18 +71,22 @@ describe("Workbench authoring HTTP API", () => {
     );
     expect(injected?.body).toMatchObject({ command: "/opt/masthead/bin/mastheadctl" });
     const blankCommand = await routeWorkbenchAuthoringRequest(
-      { authoringCommand: "   ", db: daemon.database },
+      {
+        authoringCommand: "   ",
+        db: daemon.database,
+        identity: identityFromManifest(daemon.instanceIdentity(), join(tempDirs[0], "masthead-instance.json"))
+      },
       {
         method: "GET",
         url: new URL("http://127.0.0.1/workbench/authoring/capabilities")
       }
     );
-    expect(blankCommand?.body).toMatchObject({ command: "mastheadctl" });
+    expect(blankCommand).toMatchObject({ status: 500, body: { ok: false } });
     const previousCommand = process.env.MASTHEAD_CLI_COMMAND;
     process.env.MASTHEAD_CLI_COMMAND = "   ";
     try {
       expect((await getJson(baseUrl, "/workbench/authoring/capabilities")).body).toMatchObject({
-        command: "mastheadctl"
+        command: join(tempDirs[0], "bin", "mastheadctl")
       });
     } finally {
       if (previousCommand === undefined) delete process.env.MASTHEAD_CLI_COMMAND;
@@ -396,6 +409,13 @@ describe("Workbench authoring HTTP API", () => {
     const unexpected = await routeWorkbenchAuthoringRequest(
       {
         authoringCommand: "mastheadctl",
+        identity: {
+          baseUrl: "http://127.0.0.1:17373",
+          buildSha: "development",
+          databaseId: "database:test",
+          instanceId: "instance:test",
+          instanceManifest: "/tmp/masthead/masthead-instance.json"
+        },
         db: {
           prepare() {
             throw new Error("secret database invariant detail");

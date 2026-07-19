@@ -27,6 +27,8 @@ describe("Electron daemon launcher policy", () => {
         databaseId: "db",
         databasePath: "/tmp/masthead/masthead.sqlite",
         cliCommand: "/home/test/.local/bin/mastheadctl",
+        instanceDir: "/tmp/masthead",
+        instanceManifest: "/tmp/masthead/masthead-instance.json",
         dataDirectory: "/tmp/masthead",
         migrationState: "ready"
       },
@@ -72,6 +74,8 @@ describe("Electron daemon launcher policy", () => {
         legacyStorePath: "/tmp/masthead/legacy/events.ndjson",
         mcpCommand: "/opt/Masthead/resources/daemon/node",
         mcpEntry: "/opt/Masthead/resources/daemon/dist/src/mcp/server.js",
+        instanceDir: "/tmp/masthead",
+        instanceManifest: "/tmp/masthead/masthead-instance.json",
         port: 17373
       })
     ).toMatchObject({
@@ -80,6 +84,8 @@ describe("Electron daemon launcher policy", () => {
       MASTHEAD_DB_PATH: "/tmp/masthead/masthead.sqlite",
       MASTHEAD_CLI_COMMAND: "/home/test/.local/bin/mastheadctl",
       MASTHEAD_HOST: "127.0.0.1",
+      MASTHEAD_INSTANCE_DIR: "/tmp/masthead",
+      MASTHEAD_INSTANCE_MANIFEST: "/tmp/masthead/masthead-instance.json",
       MASTHEAD_HOOK_SCRIPT: "/opt/Masthead/resources/daemon/scripts/masthead-hook.js",
       MASTHEAD_MCP_COMMAND: "/opt/Masthead/resources/daemon/node",
       MASTHEAD_MCP_ENTRY: "/opt/Masthead/resources/daemon/dist/src/mcp/server.js",
@@ -166,7 +172,8 @@ describe("Electron daemon launcher policy", () => {
       {
         prepareAuthoringLauncher: async ({ baseUrl, port }) => {
           events.push(`prepare:${baseUrl}:${port}`);
-        }
+        },
+        verifyAuthoringManifest: async () => { events.push("verify-manifest"); }
       }
     );
 
@@ -174,7 +181,7 @@ describe("Electron daemon launcher policy", () => {
     expect(events).toEqual([
       "fetch:/health",
       "fetch:/workbench/authoring/capabilities",
-      "prepare:http://127.0.0.1:17373:17373",
+      "verify-manifest",
       "fetch:/projection"
     ]);
   });
@@ -195,7 +202,8 @@ describe("Electron daemon launcher policy", () => {
 
     await expect(
       startLiveConnector(connectorInput("/home/test/.local/bin/mastheadctl"), ["masthead://app"], owned, {
-        prepareAuthoringLauncher: prepare
+        prepareAuthoringLauncher: prepare,
+        findAvailablePort: async () => 17374
       })
     ).rejects.toThrow("same database");
     expect(prepare).not.toHaveBeenCalled();
@@ -273,10 +281,11 @@ describe("Electron daemon launcher policy", () => {
 
     await expect(
       startLiveConnector(connectorInput("/home/test/.local/bin/mastheadctl"), ["masthead://app"], owned, {
-        prepareAuthoringLauncher: prepare
+        prepareAuthoringLauncher: prepare,
+        findAvailablePort: async () => 17374
       })
     ).rejects.toThrow("fallback launcher selected");
-    expect(prepare).toHaveBeenCalledWith({ baseUrl: expect.any(String), port: expect.any(Number) });
+    expect(prepare).toHaveBeenCalledWith(expect.objectContaining({ baseUrl: expect.any(String), port: expect.any(Number) }));
     expect(prepare.mock.calls[0]?.[0].port).toBeGreaterThan(17373);
     expect(owned.size).toBe(0);
   });
@@ -300,10 +309,19 @@ function connectorInput(cliCommand: string, env: Record<string, string> = {}) {
 function compatibleHealth(dataDirectory: string, databasePath = `${dataDirectory}/masthead.sqlite`) {
   return {
     apiVersion: 1,
+    buildSha: "development",
     capabilities: ["live_projection", "canonical_sessions", "logbook_search", "source_discovery", "adapter_inventory", "mcp_status", "settings", "artifact_authoring"],
-    data: { databasePath, dataDirectory, migrationState: "ready" },
+    data: { databaseId: "database:test", databasePath, dataDirectory, migrationState: "ready" },
     ok: true,
-    product: "masthead"
+    product: "masthead",
+    runtime: {
+      authoringCommand: "/home/test/.local/bin/mastheadctl",
+      baseUrl: "http://127.0.0.1:17373",
+      daemonInstanceId: "instance:test",
+      instanceManifest: "/tmp/masthead/masthead-instance.json",
+      mode: "primary",
+      pid: process.pid
+    }
   };
 }
 
@@ -312,7 +330,11 @@ function authoringCapabilities(command: string) {
     bundleVersion: "workbench-authoring-v3",
     capability: "artifact_authoring",
     command,
+    baseUrl: "http://127.0.0.1:17373",
+    buildSha: "development",
     databaseId: "database:test",
+    instanceId: "instance:test",
+    instanceManifest: "/tmp/masthead/masthead-instance.json",
     evidencePolicy: "selected_session_canonical_evidence",
     maxSessionsPerRun: 12,
     operations: ["suggestions", "open", "status", "evidence", "context", "submit", "finish"],

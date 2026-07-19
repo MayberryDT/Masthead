@@ -5,26 +5,47 @@ import { inspectAuthoringCapabilities, resolveAuthoringCommand } from "../../../
 describe("Doctor authoring checks", () => {
   test("requires the complete authoring contract and the health database identity", () => {
     const valid = {
-      bundleVersion: "workbench-authoring-v1",
+      bundleVersion: "workbench-authoring-v3",
       capability: "artifact_authoring",
       command: "/opt/masthead/bin/mastheadctl",
+      baseUrl: "http://127.0.0.1:17373",
+      buildSha: "build-1",
       databaseId: "database-1",
-      evidencePolicy: "all_canonical_redacted_evidence",
-      operations: ["open", "status", "evidence", "submit", "finish"],
+      evidencePolicy: "selected_session_canonical_evidence",
+      instanceManifest: "/state/masthead/masthead-instance.json",
+      instanceId: "instance-1",
+      maxSessionsPerRun: 12,
+      suggestionsAreBinding: false,
+      operations: ["suggestions", "open", "status", "evidence", "context", "submit", "finish"],
       protocol: "masthead.workbench.authoring/v1",
       transport: "daemon_http"
     };
 
-    expect(inspectAuthoringCapabilities(valid, "database-1")).toEqual({
+    const expected = {
+      baseUrl: valid.baseUrl,
+      buildSha: valid.buildSha,
+      command: valid.command,
+      databaseId: valid.databaseId,
+      instanceManifest: valid.instanceManifest,
+      instanceId: valid.instanceId
+    };
+    expect(inspectAuthoringCapabilities(valid, expected)).toEqual({
       command: "/opt/masthead/bin/mastheadctl",
       databaseId: "database-1",
       ok: true,
-      operations: ["open", "status", "evidence", "submit", "finish"],
+      identity: {
+        baseUrl: valid.baseUrl,
+        buildSha: valid.buildSha,
+        databaseId: valid.databaseId,
+        instanceManifest: valid.instanceManifest,
+        instanceId: valid.instanceId
+      },
+      operations: ["suggestions", "open", "status", "evidence", "context", "submit", "finish"],
       problems: []
     });
-    expect(inspectAuthoringCapabilities({ ...valid, databaseId: "database-2", operations: ["open"] }, "database-1")).toMatchObject({
+    expect(inspectAuthoringCapabilities({ ...valid, databaseId: "database-2", operations: ["open"] }, expected)).toMatchObject({
       ok: false,
-      problems: ["database identity mismatch", "authoring operations are incomplete"]
+      problems: ["databaseId identity mismatch", "authoring operations are incomplete"]
     });
   });
 

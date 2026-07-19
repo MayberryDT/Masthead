@@ -41,6 +41,11 @@ export type MastheadHealthDto = {
   capabilities: MastheadCapability[];
   runtime: {
     daemonInstanceId: string;
+    pid: number;
+    baseUrl: string;
+    instanceDir?: string;
+    instanceManifest?: string;
+    authoringCommand?: string;
     startedAt: string;
     mode: MastheadRuntimeMode;
     writable: boolean;
@@ -118,6 +123,8 @@ export function classifyDaemonHealth(
   if (
     !runtime ||
     !stringValue(runtime.daemonInstanceId) ||
+    !positiveInteger(runtime.pid) ||
+    !stringValue(runtime.baseUrl) ||
     !stringValue(runtime.startedAt) ||
     !["primary", "read_only_bridge"].includes(String(runtime.mode)) ||
     booleanValue(runtime.writable) === undefined ||
@@ -129,6 +136,31 @@ export function classifyDaemonHealth(
     !stringValue(data.databaseId) ||
     !["ready", "migrating", "failed"].includes(String(data.migrationState))
   ) {
+    return { state: "malformed", reason: "missing_required_fields" };
+  }
+
+  try {
+    const baseUrl = new URL(String(runtime.baseUrl));
+    if (
+      baseUrl.protocol !== "http:" ||
+      baseUrl.username ||
+      baseUrl.password ||
+      baseUrl.pathname !== "/" ||
+      baseUrl.search ||
+      baseUrl.hash
+      || baseUrl.hostname !== runtime.host
+      || Number(baseUrl.port || 80) !== runtime.port
+    ) return { state: "malformed", reason: "missing_required_fields" };
+    if (
+      runtime.mode === "primary" &&
+      (!stringValue(runtime.instanceDir) || !stringValue(runtime.instanceManifest) || !stringValue(runtime.authoringCommand) ||
+        !isAbsolutePath(String(runtime.instanceDir)) ||
+        !isAbsolutePath(String(runtime.instanceManifest)) || !isAbsolutePath(String(runtime.authoringCommand)) ||
+        !isManifestInsideInstanceDir(String(runtime.instanceManifest), String(runtime.instanceDir)))
+    ) {
+      return { state: "malformed", reason: "missing_required_fields" };
+    }
+  } catch {
     return { state: "malformed", reason: "missing_required_fields" };
   }
 
@@ -151,6 +183,20 @@ function numberValue(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+function positiveInteger(value: unknown): boolean {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
 function booleanValue(value: unknown): boolean | undefined {
   return typeof value === "boolean" ? value : undefined;
+}
+
+function isAbsolutePath(value: string): boolean {
+  return value.startsWith("/") || /^(?:[A-Za-z]:[\\/]|\\\\)/.test(value);
+}
+
+function isManifestInsideInstanceDir(manifest: string, instanceDir: string): boolean {
+  const normalizedManifest = manifest.replace(/\\/gu, "/");
+  const normalizedDir = instanceDir.replace(/\\/gu, "/").replace(/\/+$/u, "");
+  return normalizedManifest === `${normalizedDir}/masthead-instance.json`;
 }

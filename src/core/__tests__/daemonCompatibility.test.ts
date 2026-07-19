@@ -71,6 +71,16 @@ describe("daemon compatibility", () => {
     });
   });
 
+  test.each(["pid", "baseUrl", "instanceDir", "instanceManifest", "authoringCommand"])(
+    "rejects missing daemon instance %s",
+    (field) => {
+      expect(classifyDaemonHealth({
+        ...currentHealth,
+        runtime: { ...currentHealth.runtime, [field]: undefined }
+      })).toMatchObject({ state: "malformed", reason: "missing_required_fields" });
+    }
+  );
+
   test("rejects missing database identity fields", () => {
     expect(classifyDaemonHealth({ ...currentHealth, data: { ...currentHealth.data, databaseId: "" } })).toMatchObject({
       state: "malformed",

@@ -9,6 +9,15 @@ import type {
   WorkbenchAuthoringRunDto
 } from "../shared/workbenchAuthoring.ts";
 import type { SessionDossierDto } from "../shared/sessionDossier.ts";
+import {
+  assertGuidedAuthoringExpectedIdentity,
+  GuidedAuthoringIdentityError,
+  identityFromCapabilities,
+  identityFromManifest,
+  readMastheadInstanceManifest,
+  type GuidedAuthoringExpectedIdentity
+} from "../shared/instanceIdentity.ts";
+import { isWorkbenchAuthoringCapabilitiesDto } from "../shared/workbenchAuthoring.ts";
 
 export const DEFAULT_MASTHEAD_DAEMON_URL = "http://127.0.0.1:17373";
 
@@ -27,14 +36,29 @@ export class MastheadAuthoringClientError extends Error {
 }
 
 export class MastheadAuthoringClient {
-  private readonly baseUrl: string;
+  private readonly configuredBaseUrl: string;
+  private readonly instanceManifest?: string;
 
-  constructor(baseUrl = DEFAULT_MASTHEAD_DAEMON_URL) {
-    this.baseUrl = (baseUrl.trim() || DEFAULT_MASTHEAD_DAEMON_URL).replace(/\/+$/, "");
+  constructor(input: string | { baseUrl?: string; instanceManifest?: string } = DEFAULT_MASTHEAD_DAEMON_URL) {
+    const options = typeof input === "string" ? { baseUrl: input } : input;
+    this.configuredBaseUrl = (options.baseUrl?.trim() || DEFAULT_MASTHEAD_DAEMON_URL).replace(/\/+$/, "");
+    this.instanceManifest = options.instanceManifest?.trim() || undefined;
   }
 
-  capabilities(): Promise<WorkbenchAuthoringCapabilitiesDto> {
-    return this.request("GET", "/workbench/authoring/capabilities");
+  async capabilities(): Promise<WorkbenchAuthoringCapabilitiesDto> {
+    const binding = await this.currentBinding();
+    const capabilities = await this.requestAt<WorkbenchAuthoringCapabilitiesDto>(binding.baseUrl, "GET", "/workbench/authoring/capabilities");
+    if (!isWorkbenchAuthoringCapabilitiesDto(capabilities)) {
+      throw new MastheadAuthoringClientError({ code: "invalid_daemon_response", message: "Masthead daemon returned incompatible authoring capabilities" });
+    }
+    if (binding.expected) this.assertIdentity(identityFromCapabilities(capabilities), binding.expected);
+    return capabilities;
+  }
+
+  async assertAuthoringIdentity(expected: GuidedAuthoringExpectedIdentity): Promise<WorkbenchAuthoringCapabilitiesDto> {
+    const actual = await this.capabilities();
+    this.assertIdentity(identityFromCapabilities(actual), expected);
+    return actual;
   }
 
   suggestions(sessionIds: string[]): Promise<WorkbenchArtifactSuggestionDto[]> {
@@ -82,9 +106,45 @@ export class MastheadAuthoringClient {
   }
 
   private async request<T>(method: "GET" | "POST", pathname: string, body?: unknown): Promise<T> {
+    const binding = await this.currentBinding();
+    if (method === "POST" && binding.expected) {
+      const capabilities = await this.requestAt<WorkbenchAuthoringCapabilitiesDto>(binding.baseUrl, "GET", "/workbench/authoring/capabilities");
+      if (!isWorkbenchAuthoringCapabilitiesDto(capabilities)) {
+        throw new MastheadAuthoringClientError({ code: "invalid_daemon_response", message: "Masthead daemon returned incompatible authoring capabilities" });
+      }
+      this.assertIdentity(identityFromCapabilities(capabilities), binding.expected);
+    }
+    return this.requestAt(method === "GET" ? binding.baseUrl : binding.baseUrl, method, pathname, body);
+  }
+
+  private async currentBinding(): Promise<{ baseUrl: string; expected?: GuidedAuthoringExpectedIdentity }> {
+    if (!this.instanceManifest) return { baseUrl: this.configuredBaseUrl };
+    try {
+      const manifest = await readMastheadInstanceManifest(this.instanceManifest);
+      return { baseUrl: manifest.baseUrl, expected: identityFromManifest(manifest, this.instanceManifest) };
+    } catch (error) {
+      throw new MastheadAuthoringClientError({
+        code: "instance_manifest_unavailable",
+        message: `Masthead instance manifest is unavailable at ${this.instanceManifest}: ${error instanceof Error ? error.message : String(error)}`
+      });
+    }
+  }
+
+  private assertIdentity(actual: GuidedAuthoringExpectedIdentity, expected: GuidedAuthoringExpectedIdentity): void {
+    try {
+      assertGuidedAuthoringExpectedIdentity(actual, expected);
+    } catch (error) {
+      if (error instanceof GuidedAuthoringIdentityError) {
+        throw new MastheadAuthoringClientError({ code: error.code, message: error.message });
+      }
+      throw error;
+    }
+  }
+
+  private async requestAt<T>(baseUrl: string, method: "GET" | "POST", pathname: string, body?: unknown): Promise<T> {
     let response: Response;
     try {
-      response = await fetch(`${this.baseUrl}${pathname}`, {
+      response = await fetch(`${baseUrl}${pathname}`, {
         body: body === undefined ? undefined : JSON.stringify(body),
         headers: {
           accept: "application/json",
@@ -95,7 +155,7 @@ export class MastheadAuthoringClient {
     } catch (error) {
       throw new MastheadAuthoringClientError({
         code: "daemon_unavailable",
-        message: `Masthead daemon is unavailable at ${this.baseUrl}: ${error instanceof Error ? error.message : String(error)}`
+        message: `Masthead daemon is unavailable at ${baseUrl}: ${error instanceof Error ? error.message : String(error)}`
       });
     }
 

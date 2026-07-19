@@ -271,6 +271,7 @@ describe("Masthead worktree connector planning", () => {
       ok: true,
       product: "masthead",
       runtime: {
+        baseUrl: bridge.baseUrl,
         mode: "read_only_bridge",
         writable: false,
         upstream: {
@@ -285,6 +286,8 @@ describe("Masthead worktree connector planning", () => {
       projectionUrl: `${bridge.baseUrl}/projection`,
       readOnly: true
     });
+    expect((health.runtime as Record<string, unknown>).instanceManifest).toBeUndefined();
+    expect((health.runtime as Record<string, unknown>).authoringCommand).toBeUndefined();
 
     const projectionResponse = await fetch(`${bridge.baseUrl}/projection`, {
       headers: { origin: "http://127.0.0.1:5180" }

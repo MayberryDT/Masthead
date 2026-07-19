@@ -42,7 +42,10 @@ export async function runWorkbenchAuthoringCli(args: string[], options: Workbenc
     return errorResult("unknown_command", `Unknown workbench command: ${command}`, json);
   }
 
-  const client = new MastheadAuthoringClient(options.env?.MASTHEAD_DAEMON_URL);
+  const client = new MastheadAuthoringClient({
+    baseUrl: options.env?.MASTHEAD_DAEMON_URL,
+    instanceManifest: options.env?.MASTHEAD_INSTANCE_MANIFEST
+  });
   try {
     if (command === "capabilities") {
       return jsonResult({ ok: true, ...(await client.capabilities()) });

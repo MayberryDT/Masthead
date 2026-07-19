@@ -15,6 +15,7 @@ import { getOrCreateDatabaseIdentity } from "../../daemon/db/schema.ts";
 import { openMastheadDatabase } from "../../daemon/db/sqlite.ts";
 import { migrateDatabase } from "../../daemon/db/schema.ts";
 import { runMastheadCli } from "../mastheadctl.ts";
+import { MastheadAuthoringClient } from "../authoringClient.ts";
 import { openAuthoringRun } from "../../workbench/authoring/authoringService.ts";
 import { fingerprintWorkbenchOutput } from "../../workbench/applyArtifact.ts";
 import {
@@ -33,6 +34,10 @@ const execFileAsync = promisify(execFile);
 let exactCliRecoveryTemplatePromise: Promise<ExactCliRecoveryTemplate> | undefined;
 const SMALL_RECOVERY_AUDIT_HASH = "b".repeat(64);
 const SMALL_ALTERED_RECOVERY_AUDIT_HASH = "c".repeat(64);
+
+function jsonResponse(body: unknown): Response {
+  return new Response(JSON.stringify(body), { headers: { "content-type": "application/json" }, status: 200 });
+}
 
 function validCliV3Bundle(runId: string, evidenceRevision: string, sessionId: string) {
   const evidenceRef = {
@@ -85,6 +90,7 @@ function validCliV3Bundle(runId: string, evidenceRevision: string, sessionId: st
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   await Promise.all(daemons.map((daemon) => daemon.close()));
   daemons.length = 0;
   await Promise.all(tempDirs.map((path) => rm(path, { force: true, recursive: true })));
@@ -97,6 +103,58 @@ afterAll(async () => {
 });
 
 describe("mastheadctl daemon-owned Workbench authoring", () => {
+  test("reloads the instance manifest before each mutation and accepts a safe daemon nonce change", async () => {
+    const instanceDir = await mkdtemp(join(tmpdir(), "masthead-cli-instance-"));
+    tempDirs.push(instanceDir);
+    const instanceManifest = join(instanceDir, "masthead-instance.json");
+    let instanceId = "instance:old";
+    const writeManifest = () => writeFile(instanceManifest, JSON.stringify({
+      schemaVersion: 1,
+      instanceId,
+      baseUrl: "http://127.0.0.1:17373",
+      databaseId: "database:test",
+      buildSha: "build:test",
+      pid: 12345,
+      instanceDir,
+      updatedAt: new Date().toISOString()
+    }));
+    await writeManifest();
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      calls.push(`${init?.method}:${url.pathname}:${instanceId}`);
+      if (url.pathname === "/workbench/authoring/capabilities") {
+        return jsonResponse({
+          baseUrl: "http://127.0.0.1:17373",
+          buildSha: "build:test",
+          bundleVersion: "workbench-authoring-v3",
+          capability: "artifact_authoring",
+          command: join(instanceDir, "bin", "mastheadctl"),
+          databaseId: "database:test",
+          evidencePolicy: "selected_session_canonical_evidence",
+          instanceId,
+          instanceManifest,
+          maxSessionsPerRun: 12,
+          operations: ["suggestions", "open", "status", "evidence", "context", "submit", "finish"],
+          protocol: "masthead.workbench.authoring/v1",
+          suggestionsAreBinding: false,
+          transport: "daemon_http"
+        });
+      }
+      return jsonResponse([]);
+    }));
+    const client = new MastheadAuthoringClient({ instanceManifest });
+    await client.capabilities();
+    instanceId = "instance:new";
+    await writeManifest();
+    await client.suggestions(["session:a"]);
+    expect(calls).toEqual([
+      "GET:/workbench/authoring/capabilities:instance:old",
+      "GET:/workbench/authoring/capabilities:instance:new",
+      "POST:/workbench/authoring/suggestions:instance:new"
+    ]);
+  });
+
   test("gets advisory suggestions and opens a multi-session V3 selection", async () => {
     const { baseUrl, daemon } = await startTestDaemon();
     seedDurableArtifactCorpus(daemon.database);
@@ -366,10 +424,14 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
         JSON.stringify({
           bundleVersion: "workbench-authoring-v3",
           capability: "artifact_authoring",
-          command: "mastheadctl",
+          command: "/tmp/masthead/bin/mastheadctl",
+          baseUrl: "http://127.0.0.1:17373",
+          buildSha: "development",
           databaseId: "database",
           evidencePolicy: "selected_session_canonical_evidence",
           maxSessionsPerRun: 12,
+          instanceId: "instance:test",
+          instanceManifest: "/tmp/masthead/masthead-instance.json",
           operations: ["suggestions", "open", "status", "evidence", "context", "submit", "finish"],
           protocol: "masthead.workbench.authoring/v1",
           suggestionsAreBinding: false,

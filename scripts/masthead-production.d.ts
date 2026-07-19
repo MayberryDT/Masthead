@@ -139,4 +139,38 @@ export function transitionProduction(input: {
   port?: number;
   productionRoot?: string;
 }, dependencies?: Record<string, unknown>): Promise<Record<string, unknown>>;
+export type StagedProductionInstallationReceipt = {
+  receiptVersion: "masthead-production-stage-v1";
+  receiptPath: string;
+  staged: true;
+  launched: false;
+  databaseOpened: false;
+  stagingNonce: string;
+  sourceDigest: string;
+  buildSha: string;
+  target: string;
+  productionRoot: string;
+  currentPath: string;
+  previousCurrentTarget: string;
+  instanceDir: string;
+  instanceManifestPath: string;
+  activeInstanceLauncherPath: string;
+  stagedInstanceLauncherPath: string;
+  previousInstanceLauncher: Record<string, unknown>;
+  stagedSurface: Record<string, unknown>;
+};
+export function stageProductionInstallation(input: {
+  sourceBundlePath?: string;
+  bundlePath?: string;
+  bundleDigest: string;
+  dataDirectory?: string;
+  databasePath?: string;
+  homeDir?: string;
+  port?: number;
+  productionRoot?: string;
+}): Promise<StagedProductionInstallationReceipt>;
+export function activateStagedProductionInstallation(
+  receipt: StagedProductionInstallationReceipt,
+  dependencies?: Record<string, unknown>
+): Promise<Record<string, unknown>>;
 export function runCli(argv?: string[], environment?: NodeJS.ProcessEnv): Promise<Record<string, unknown>>;

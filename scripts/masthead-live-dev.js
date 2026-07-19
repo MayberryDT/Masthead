@@ -6,6 +6,7 @@ import { removeDaemonOwnershipMetadata, writeDaemonOwnershipMetadata } from "../
 import { buildLiveDevDaemonEnv } from "../dist/daemon/src/core/liveDevDaemonEnv.js";
 import { buildLiveDevPlan, startReadOnlyConnectorBridge } from "../dist/daemon/src/core/worktreeConnector.js";
 import { classifyDaemonHealth } from "../dist/daemon/src/shared/protocol.js";
+import { prepareLiveDevInstanceLauncher, assertLiveDevInstanceManifest } from "../dist/daemon/src/core/liveDevLauncher.js";
 
 loadLocalEnv();
 
@@ -33,21 +34,39 @@ try {
       writeLine("Starting current daemon on an isolated port.", "warn");
     }
     writeLine(`Connector: ${plan.connector.baseUrl} (${plan.connector.mode === "primary" ? "primary" : "isolated primary"})`);
+    const instance = await prepareLiveDevInstanceLauncher({
+      cliEntry: resolve("dist/daemon/src/cli/mastheadctl.js"),
+      dataDirectory: plan.connector.dataDirectory,
+      nodePath: process.execPath
+    });
     collector = start(
       "collector",
       process.execPath,
       ["dist/daemon/src/daemon/main.js"],
-      buildLiveDevDaemonEnv({
+      {
+        ...buildLiveDevDaemonEnv({
         allowedOrigins: plan.allowedOrigins,
         dataDirectory: plan.connector.dataDirectory,
         diagnosticLogFile: join(plan.connector.dataDirectory, "runtime", "daemon.log"),
         env: process.env,
         host: plan.host,
         port: plan.connector.port
-      })
+        }),
+        MASTHEAD_CLI_COMMAND: instance.launcherPath,
+        MASTHEAD_INSTANCE_DIR: instance.instanceDir,
+        MASTHEAD_INSTANCE_MANIFEST: instance.instanceManifest
+      }
     );
 
     activeHealth = await waitForHealth(`${plan.connector.baseUrl}/health`, healthTimeoutMs);
+    await assertLiveDevInstanceManifest(instance.instanceManifest, {
+      baseUrl: activeHealth.runtime.baseUrl,
+      buildSha: activeHealth.buildSha,
+      databaseId: activeHealth.data.databaseId,
+      instanceId: activeHealth.runtime.daemonInstanceId,
+      instanceManifest: activeHealth.runtime.instanceManifest,
+      pid: activeHealth.runtime.pid
+    });
     ownershipPath = await writeOwnership(plan.connector.baseUrl, activeHealth);
   } else {
     writeLine(`Connector: ${plan.connector.baseUrl} (read-only worktree bridge)`);
