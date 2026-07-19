@@ -133,7 +133,13 @@ git commit -m "test: bound v1 recovery verification"
 - Modify: `prd.md`
 - Modify: `openwiki/quickstart.md`
 - Modify: `openwiki/logbook-and-workbench.md`
+- Modify: `openwiki/data-and-integrations.md`
 - Modify: `docs/reference/daemon-api.md`
+- Modify: `docs/reference/enrichment.md`
+- Modify: `docs/reference/session-dossier.md`
+- Modify: `docs/reference/artifact-first-logbook-cutover.md`
+- Modify: `docs/acceptance/product-release-gate.md`
+- Modify: `docs/acceptance/durable-artifact-production-canary.md`
 - Modify: `src/workbench/__tests__/productContract.test.ts`
 
 **Interfaces:**
@@ -153,6 +159,10 @@ test("documents guided V4 authoring and retires V3 writes", async () => {
     "prd.md",
     "openwiki/quickstart.md",
     "openwiki/logbook-and-workbench.md",
+    "openwiki/data-and-integrations.md",
+    "docs/reference/enrichment.md",
+    "docs/reference/session-dossier.md",
+    "docs/reference/artifact-first-logbook-cutover.md",
     "docs/reference/daemon-api.md",
     "docs/adr/0015-guided-authoring-campaigns.md"
   ].map((path) => readFile(resolve(path), "utf8")));
@@ -209,7 +219,7 @@ Canary = the first staged assignment of at most 3 sessions, reviewed by an opera
 Next action = the single command Masthead requires from the agent at the current assignment state.
 ```
 
-Document V3 routes as audit-only and `authoring_contract_retired` for mutation attempts. Replace the existing V3 product-contract assertion instead of adding a contradictory second assertion. Replace OpenWiki's claim that the handoff never includes a CLI recipe with the narrower rule that it includes one instance-bound start command and no multi-step recipe or session list.
+Document V3 routes as audit-only and `authoring_contract_retired` for mutation attempts. Replace the existing V3 product-contract assertion instead of adding a contradictory second assertion. Replace OpenWiki's claim that the handoff never includes a CLI recipe with the narrower rule that it includes one instance-bound start command and no multi-step recipe or session list. Update the active enrichment, session-dossier, cutover, and data/integrations references so none advertises V1 or V3 writes as current. Add a supersession banner and unchecked V4 gates to the two acceptance records; preserve their signed V3 evidence as history instead of rewriting it as V4 evidence.
 
 - [ ] **Step 5: Run the focused contract checks**
 
@@ -225,7 +235,7 @@ Expected: both commands PASS.
 - [ ] **Step 6: Commit the contract**
 
 ```bash
-git add docs/adr/0015-guided-authoring-campaigns.md docs/adr/0014-agent-led-enriched-artifact-authoring.md CONTEXT.md README.md design.md prd.md openwiki/quickstart.md openwiki/logbook-and-workbench.md docs/reference/daemon-api.md src/workbench/__tests__/productContract.test.ts
+git add docs/adr/0015-guided-authoring-campaigns.md docs/adr/0014-agent-led-enriched-artifact-authoring.md CONTEXT.md README.md design.md prd.md openwiki/quickstart.md openwiki/logbook-and-workbench.md openwiki/data-and-integrations.md docs/reference/daemon-api.md docs/reference/enrichment.md docs/reference/session-dossier.md docs/reference/artifact-first-logbook-cutover.md docs/acceptance/product-release-gate.md docs/acceptance/durable-artifact-production-canary.md src/workbench/__tests__/productContract.test.ts
 git commit -m "docs: define guided authoring campaigns"
 ```
 
