@@ -1031,6 +1031,7 @@ git commit -m "feat: plan guided authoring assignments"
 ### Task 6: Guide complete evidence inspection
 
 **Files:**
+- Modify: `src/shared/guidedAuthoring.ts`
 - Modify: `src/workbench/authoring/guidedAuthoringPolicy.ts`
 - Modify: `src/workbench/authoring/guidedAuthoringService.ts`
 - Modify: `src/daemon/db/guidedAuthoringRepository.ts`
@@ -1089,7 +1090,19 @@ export function inspectGuidedAssignment(
     limit?: number;
   }
 ): GuidedInspectionDto;
+
+export type GuidedInspectionDto = {
+  assignmentId: string;
+  evidenceRevision: string;
+  sessionId: string;
+  evidence: WorkbenchAuthoringEvidencePage;
+  editorialQuestions: string[];
+  coverage: GuidedEvidenceCoverageDto[];
+  nextAction: GuidedAuthoringNextAction;
+};
 ```
+
+The inspection response contains exactly the canonical page that advanced coverage, the assignment-wide revision checked before and after that read, the bounded session identity, unresolved editorial questions, current assignment coverage, and one next action. It never embeds the full assignment or request selection.
 
 Default to the first session with unread evidence, ascending canonical order, and 100 items. Record only refs actually returned. Reject `query`, `kind`, and descending inspection as completion-bearing operations; those remain supplementary reads and do not advance complete-evidence coverage. The assignment stores one revision over all assignment sessions, while an evidence page reports its session revision. Before and after every page read, recompute and compare the assignment-wide revision; never compare a session-only page revision directly with the multi-session assignment revision. If any member changes, reject the read, advance the assignment to the fresh revision, and compute current coverage only from access rows carrying that revision. Preserve older revision rows as audit history, but never count them toward current completion.
 
@@ -1124,7 +1137,7 @@ Expected: PASS, including stale evidence revision rejection and idempotent repea
 - [ ] **Step 6: Commit guided inspection**
 
 ```bash
-git add src/workbench/authoring/guidedAuthoringPolicy.ts src/workbench/authoring/guidedAuthoringService.ts src/daemon/db/guidedAuthoringRepository.ts src/workbench/authoring/__tests__/guidedAuthoringService.test.ts
+git add src/shared/guidedAuthoring.ts src/workbench/authoring/guidedAuthoringPolicy.ts src/workbench/authoring/guidedAuthoringService.ts src/daemon/db/guidedAuthoringRepository.ts src/workbench/authoring/__tests__/guidedAuthoringService.test.ts
 git commit -m "feat: guide complete authoring evidence inspection"
 ```
 
@@ -1302,7 +1315,7 @@ test("stages an accepted canary without publishing", () => {
 test("publishes the approved canary and releases the next assignment", () => {
   approveGuidedCanary(db, approvalInput());
   const receipt = finishGuidedAssignment(db, "assignment:canary");
-  expect(receipt.publishedArtifactIds.length).toBeGreaterThan(0);
+  expect(receipt.publishedArtifacts.length).toBeGreaterThan(0);
   expect(getGuidedRequest(db, receipt.requestId)?.status).toBe("active");
   expect(startGuidedAssignment(db, receipt.requestId).assignment.ordinal).toBe(1);
 });
