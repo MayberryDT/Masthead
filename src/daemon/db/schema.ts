@@ -155,6 +155,11 @@ const migrations = [
     version: 30,
     name: "030_session_search_rowids",
     path: resolve(currentDir, "migrations/030_session_search_rowids.sql")
+  },
+  {
+    version: 31,
+    name: "031_guided_authoring",
+    path: resolve(currentDir, "migrations/031_guided_authoring.sql")
   }
 ];
 
@@ -217,7 +222,16 @@ const criticalTables = [
   "workbench_artifact_candidate_provenance",
   "workbench_artifact_candidate_signature_members",
   "workbench_artifact_candidate_source_revisions",
-  "workbench_artifact_candidate_scans"
+  "workbench_artifact_candidate_scans",
+  "guided_authoring_requests",
+  "guided_authoring_request_sessions",
+  "guided_authoring_opportunities",
+  "guided_authoring_assignments",
+  "guided_authoring_assignment_sessions",
+  "guided_authoring_assignment_opportunities",
+  "guided_authoring_evidence_access",
+  "guided_authoring_draft_reviews",
+  "guided_authoring_operator_reviews"
 ];
 
 export function migrateDatabase(db: MastheadDatabase): void {

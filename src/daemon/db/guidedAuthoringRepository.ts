@@ -1,0 +1,726 @@
+import { randomUUID } from "node:crypto";
+import type {
+  GuidedAuthoringAssignmentDto,
+  GuidedAuthoringBundleV4,
+  GuidedAuthoringOperatorReviewDto,
+  GuidedAuthoringReceiptDto,
+  GuidedAuthoringRequestDto
+} from "../../shared/guidedAuthoring.ts";
+import type { WorkbenchAuthoringFinding, WorkbenchAutomaticArtifactKind } from "../../shared/workbenchAuthoring.ts";
+import { type MastheadDatabase, withImmediateTransaction } from "./sqlite.ts";
+
+export type GuidedAuthoringOpportunityRecord = {
+  requestId: string;
+  opportunityId: string;
+  suggestedKind: WorkbenchAutomaticArtifactKind;
+  signalStrength: "high" | "medium";
+  summary: string;
+  signatureKey?: string;
+  evidenceRefs: string[];
+  provenanceSessionIds: string[];
+  createdAt: string;
+};
+
+export type GuidedEvidenceAccessRecord = {
+  assignmentId: string;
+  requestId: string;
+  sessionId: string;
+  evidenceRevision: string;
+  evidenceRef: string;
+  accessedAt: string;
+};
+
+export type GuidedDraftReviewRecord = {
+  assignmentId: string;
+  revision: number;
+  evidenceRevision: string;
+  draft: GuidedAuthoringBundleV4;
+  findings: WorkbenchAuthoringFinding[];
+  accepted: boolean;
+  createdAt: string;
+};
+
+export type CreateGuidedAuthoringRequestInput = {
+  requestId: string;
+  actorId: string;
+  policyVersion: "guided-authoring-v1";
+  identity: {
+    creationInstanceId: string;
+    instanceManifest: string;
+    baseUrl: string;
+    databaseId: string;
+    buildSha: string;
+  };
+  sessions: Array<{ sessionId: string; ordinal: number; groupKey?: string }>;
+  opportunities: Array<{
+    opportunityId: string;
+    suggestedKind: WorkbenchAutomaticArtifactKind;
+    signalStrength: "high" | "medium";
+    summary: string;
+    signatureKey?: string;
+    evidenceRefs: string[];
+    provenanceSessionIds: string[];
+  }>;
+  assignments: Array<{
+    assignmentId: string;
+    ordinal: number;
+    canary: boolean;
+    evidenceRevision: string;
+    sessionIds: string[];
+    opportunityIds: string[];
+  }>;
+};
+
+type RequestRow = {
+  requestId: string;
+  actorId: string;
+  creationInstanceId: string;
+  instanceManifest: string;
+  baseUrl: string;
+  databaseId: string;
+  buildSha: string;
+  policyVersion: "guided-authoring-v1";
+  status: GuidedAuthoringRequestDto["status"];
+  canaryApprovedAt: string | null;
+  canaryApprovedBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+};
+
+type AssignmentRow = {
+  assignmentId: string;
+  requestId: string;
+  ordinal: number;
+  status: GuidedAuthoringAssignmentDto["status"];
+  canary: number;
+  evidenceRevision: string;
+  currentDraftRevision: number;
+  acceptedDraftRevision: number | null;
+  receiptJson: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+};
+
+export function createGuidedAuthoringRequest(
+  db: MastheadDatabase,
+  input: CreateGuidedAuthoringRequestInput
+): GuidedAuthoringRequestDto {
+  validateRequestPlan(db, input);
+  return withImmediateTransaction(db, () => createGuidedAuthoringRequestInTransaction(db, input));
+}
+
+export function createGuidedAuthoringRequestInTransaction(
+  db: MastheadDatabase,
+  input: CreateGuidedAuthoringRequestInput
+): GuidedAuthoringRequestDto {
+  validateRequestPlan(db, input);
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO guided_authoring_requests (
+      request_id, actor_id, creation_instance_id, instance_manifest, base_url, database_id,
+      build_sha, policy_version, status, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)`
+  ).run(
+    input.requestId,
+    input.actorId,
+    input.identity.creationInstanceId,
+    input.identity.instanceManifest,
+    input.identity.baseUrl,
+    input.identity.databaseId,
+    input.identity.buildSha,
+    input.policyVersion,
+    now,
+    now
+  );
+
+  const canarySessionIds = new Set(input.assignments.find(({ canary }) => canary)!.sessionIds);
+  const insertSession = db.prepare(
+    `INSERT INTO guided_authoring_request_sessions
+     (request_id, session_id, ordinal, group_key, state) VALUES (?, ?, ?, ?, ?)`
+  );
+  for (const session of input.sessions) {
+    insertSession.run(
+      input.requestId,
+      session.sessionId,
+      session.ordinal,
+      session.groupKey ?? null,
+      canarySessionIds.has(session.sessionId) ? "assigned" : "pending"
+    );
+  }
+
+  const insertOpportunity = db.prepare(
+    `INSERT INTO guided_authoring_opportunities (
+      opportunity_id, request_id, suggested_kind, signal_strength, summary, signature_key,
+      evidence_refs_json, provenance_session_ids_json, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  );
+  for (const opportunity of input.opportunities) {
+    insertOpportunity.run(
+      opportunity.opportunityId,
+      input.requestId,
+      opportunity.suggestedKind,
+      opportunity.signalStrength,
+      opportunity.summary,
+      opportunity.signatureKey ?? null,
+      JSON.stringify(opportunity.evidenceRefs),
+      JSON.stringify(opportunity.provenanceSessionIds),
+      now
+    );
+  }
+
+  const insertAssignment = db.prepare(
+    `INSERT INTO guided_authoring_assignments (
+      assignment_id, request_id, ordinal, status, canary, evidence_revision, created_at, updated_at
+    ) VALUES (?, ?, ?, 'investigating', ?, ?, ?, ?)`
+  );
+  const insertAssignmentSession = db.prepare(
+    `INSERT INTO guided_authoring_assignment_sessions
+     (assignment_id, request_id, session_id, ordinal) VALUES (?, ?, ?, ?)`
+  );
+  const insertAssignmentOpportunity = db.prepare(
+    `INSERT INTO guided_authoring_assignment_opportunities
+     (assignment_id, request_id, opportunity_id, ordinal) VALUES (?, ?, ?, ?)`
+  );
+  for (const assignment of input.assignments) {
+    insertAssignment.run(
+      assignment.assignmentId,
+      input.requestId,
+      assignment.ordinal,
+      assignment.canary ? 1 : 0,
+      assignment.evidenceRevision,
+      now,
+      now
+    );
+    assignment.sessionIds.forEach((sessionId, ordinal) => {
+      insertAssignmentSession.run(assignment.assignmentId, input.requestId, sessionId, ordinal);
+    });
+    assignment.opportunityIds.forEach((opportunityId, ordinal) => {
+      insertAssignmentOpportunity.run(assignment.assignmentId, input.requestId, opportunityId, ordinal);
+    });
+  }
+  return requireGuidedRequest(db, input.requestId);
+}
+
+export function getGuidedAuthoringRequest(
+  db: MastheadDatabase,
+  requestId: string
+): GuidedAuthoringRequestDto | undefined {
+  const row = db.prepare(
+    `SELECT request_id AS requestId, actor_id AS actorId, creation_instance_id AS creationInstanceId,
+            instance_manifest AS instanceManifest, base_url AS baseUrl, database_id AS databaseId,
+            build_sha AS buildSha, policy_version AS policyVersion, status,
+            canary_approved_at AS canaryApprovedAt, canary_approved_by AS canaryApprovedBy,
+            created_at AS createdAt, updated_at AS updatedAt, completed_at AS completedAt
+     FROM guided_authoring_requests WHERE request_id = ?`
+  ).get(requestId) as RequestRow | undefined;
+  if (!row) return undefined;
+  const counts = db.prepare(
+    `SELECT COUNT(*) AS sessionCount,
+            SUM(CASE WHEN state = 'completed' THEN 1 ELSE 0 END) AS completedSessionCount
+     FROM guided_authoring_request_sessions WHERE request_id = ?`
+  ).get(requestId) as { sessionCount: number; completedSessionCount: number };
+  const assignments = db.prepare(
+    `SELECT assignment_id AS assignmentId, canary, status
+     FROM guided_authoring_assignments WHERE request_id = ? ORDER BY ordinal`
+  ).all(requestId) as Array<{ assignmentId: string; canary: number; status: string }>;
+  const current = assignments.find(({ status }) => status !== "completed");
+  const canary = assignments.find(({ canary: isCanary }) => isCanary === 1);
+  if (!canary) throw new Error("guided_request_missing_canary");
+  return {
+    requestId: row.requestId,
+    actorId: row.actorId,
+    policyVersion: row.policyVersion,
+    status: row.status,
+    baseUrl: row.baseUrl,
+    databaseId: row.databaseId,
+    buildSha: row.buildSha,
+    instanceManifest: row.instanceManifest,
+    creationInstanceId: row.creationInstanceId,
+    sessionCount: Number(counts.sessionCount),
+    completedSessionCount: Number(counts.completedSessionCount ?? 0),
+    assignmentCount: assignments.length,
+    ...(current ? { currentAssignmentId: current.assignmentId } : {}),
+    canaryAssignmentId: canary.assignmentId,
+    ...(row.canaryApprovedAt ? { canaryApprovedAt: row.canaryApprovedAt } : {}),
+    ...(row.canaryApprovedBy ? { canaryApprovedBy: row.canaryApprovedBy } : {}),
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    ...(row.completedAt ? { completedAt: row.completedAt } : {})
+  };
+}
+
+export function getGuidedAssignment(
+  db: MastheadDatabase,
+  assignmentId: string
+): GuidedAuthoringAssignmentDto | undefined {
+  const row = getAssignmentRow(db, assignmentId);
+  return row ? mapAssignment(db, row) : undefined;
+}
+
+export function getGuidedAssignments(db: MastheadDatabase, requestId: string): GuidedAuthoringAssignmentDto[] {
+  const rows = db.prepare(`${assignmentSelect} WHERE request_id = ? ORDER BY ordinal`).all(requestId) as AssignmentRow[];
+  return rows.map((row) => mapAssignment(db, row));
+}
+
+export function listGuidedOpportunities(
+  db: MastheadDatabase,
+  requestId: string
+): GuidedAuthoringOpportunityRecord[] {
+  const rows = db.prepare(
+    `SELECT request_id AS requestId, opportunity_id AS opportunityId, suggested_kind AS suggestedKind,
+            signal_strength AS signalStrength, summary, signature_key AS signatureKey,
+            evidence_refs_json AS evidenceRefsJson, provenance_session_ids_json AS provenanceSessionIdsJson,
+            created_at AS createdAt
+     FROM guided_authoring_opportunities WHERE request_id = ? ORDER BY rowid`
+  ).all(requestId) as Array<{
+    requestId: string;
+    opportunityId: string;
+    suggestedKind: WorkbenchAutomaticArtifactKind;
+    signalStrength: "high" | "medium";
+    summary: string;
+    signatureKey: string | null;
+    evidenceRefsJson: string;
+    provenanceSessionIdsJson: string;
+    createdAt: string;
+  }>;
+  return rows.map((row) => ({
+    requestId: row.requestId,
+    opportunityId: row.opportunityId,
+    suggestedKind: row.suggestedKind,
+    signalStrength: row.signalStrength,
+    summary: row.summary,
+    ...(row.signatureKey ? { signatureKey: row.signatureKey } : {}),
+    evidenceRefs: parseJson(row.evidenceRefsJson),
+    provenanceSessionIds: parseJson(row.provenanceSessionIdsJson),
+    createdAt: row.createdAt
+  }));
+}
+
+export function recordGuidedEvidenceAccess(
+  db: MastheadDatabase,
+  input: { assignmentId: string; requestId: string; sessionId: string; evidenceRevision: string; evidenceRefs: string[] }
+): void {
+  withImmediateTransaction(db, () => recordGuidedEvidenceAccessInTransaction(db, input));
+}
+
+export function recordGuidedEvidenceAccessInTransaction(
+  db: MastheadDatabase,
+  input: { assignmentId: string; requestId: string; sessionId: string; evidenceRevision: string; evidenceRefs: string[] }
+): void {
+  requireNonblank([input.assignmentId, input.requestId, input.sessionId, input.evidenceRevision], "invalid_guided_evidence_access");
+  if (input.evidenceRefs.length === 0 || input.evidenceRefs.some((ref) => !isNonblank(ref))) {
+    throw new Error("invalid_guided_evidence_access");
+  }
+  const membership = db.prepare(
+    `SELECT rs.state, a.status
+     FROM guided_authoring_assignment_sessions AS membership
+     JOIN guided_authoring_request_sessions AS rs
+       ON rs.request_id = membership.request_id AND rs.session_id = membership.session_id
+     JOIN guided_authoring_assignments AS a ON a.assignment_id = membership.assignment_id
+     WHERE membership.assignment_id = ? AND membership.request_id = ? AND membership.session_id = ?`
+  ).get(input.assignmentId, input.requestId, input.sessionId) as { state: string; status: string } | undefined;
+  if (!membership) throw new Error("guided_evidence_session_not_assigned");
+  if (membership.state !== "assigned" || membership.status === "completed") {
+    throw new Error("guided_assignment_not_active");
+  }
+  const insert = db.prepare(
+    `INSERT OR IGNORE INTO guided_authoring_evidence_access
+     (assignment_id, request_id, session_id, evidence_revision, evidence_ref, accessed_at)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  );
+  const now = new Date().toISOString();
+  for (const evidenceRef of new Set(input.evidenceRefs)) {
+    insert.run(input.assignmentId, input.requestId, input.sessionId, input.evidenceRevision, evidenceRef, now);
+  }
+}
+
+export function listGuidedEvidenceAccess(
+  db: MastheadDatabase,
+  assignmentId: string,
+  evidenceRevision?: string
+): GuidedEvidenceAccessRecord[] {
+  const args: string[] = [assignmentId];
+  let where = "assignment_id = ?";
+  if (evidenceRevision) {
+    where += " AND evidence_revision = ?";
+    args.push(evidenceRevision);
+  }
+  return db.prepare(
+    `SELECT assignment_id AS assignmentId, request_id AS requestId, session_id AS sessionId,
+            evidence_revision AS evidenceRevision, evidence_ref AS evidenceRef, accessed_at AS accessedAt
+     FROM guided_authoring_evidence_access WHERE ${where}
+     ORDER BY session_id, evidence_revision, evidence_ref`
+  ).all(...args) as GuidedEvidenceAccessRecord[];
+}
+
+export function storeGuidedDraftReview(
+  db: MastheadDatabase,
+  input: { assignmentId: string; draft: GuidedAuthoringBundleV4; findings: WorkbenchAuthoringFinding[] }
+): GuidedAuthoringAssignmentDto {
+  return withImmediateTransaction(db, () => storeGuidedDraftReviewInTransaction(db, input));
+}
+
+export function storeGuidedDraftReviewInTransaction(
+  db: MastheadDatabase,
+  input: { assignmentId: string; draft: GuidedAuthoringBundleV4; findings: WorkbenchAuthoringFinding[] }
+): GuidedAuthoringAssignmentDto {
+  const assignment = getAssignmentRow(db, input.assignmentId);
+  if (!assignment) throw new Error("guided_assignment_not_found");
+  if (
+    assignment.status === "completed" ||
+    input.draft.assignmentId !== assignment.assignmentId ||
+    input.draft.evidenceRevision !== assignment.evidenceRevision
+  ) {
+    throw new Error("invalid_guided_draft_review");
+  }
+  const inactiveMembership = db.prepare(
+    `SELECT 1 AS found
+     FROM guided_authoring_assignment_sessions AS membership
+     JOIN guided_authoring_request_sessions AS rs
+       ON rs.request_id = membership.request_id AND rs.session_id = membership.session_id
+     WHERE membership.assignment_id = ? AND rs.state != 'assigned' LIMIT 1`
+  ).get(assignment.assignmentId);
+  if (inactiveMembership) throw new Error("guided_assignment_not_active");
+  const revision = assignment.currentDraftRevision + 1;
+  const accepted = !input.findings.some(({ severity }) => severity === "error");
+  const status: GuidedAuthoringAssignmentDto["status"] = accepted
+    ? assignment.canary === 1 ? "staged_canary" : "ready_to_finish"
+    : "needs_revision";
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO guided_authoring_draft_reviews
+     (assignment_id, revision, evidence_revision, draft_json, findings_json, accepted, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    assignment.assignmentId,
+    revision,
+    assignment.evidenceRevision,
+    JSON.stringify(input.draft),
+    JSON.stringify(input.findings),
+    accepted ? 1 : 0,
+    now
+  );
+  db.prepare(
+    `UPDATE guided_authoring_assignments
+     SET status = ?, current_draft_revision = ?, accepted_draft_revision = ?, updated_at = ?
+     WHERE assignment_id = ?`
+  ).run(status, revision, accepted ? revision : assignment.acceptedDraftRevision, now, assignment.assignmentId);
+  if (accepted && assignment.canary === 1) {
+    db.prepare(
+      `UPDATE guided_authoring_requests SET status = 'awaiting_canary_approval', updated_at = ? WHERE request_id = ?`
+    ).run(now, assignment.requestId);
+  }
+  return requireGuidedAssignment(db, assignment.assignmentId);
+}
+
+export function listGuidedDraftReviews(db: MastheadDatabase, assignmentId: string): GuidedDraftReviewRecord[] {
+  const rows = db.prepare(
+    `SELECT assignment_id AS assignmentId, revision, evidence_revision AS evidenceRevision,
+            draft_json AS draftJson, findings_json AS findingsJson, accepted, created_at AS createdAt
+     FROM guided_authoring_draft_reviews WHERE assignment_id = ? ORDER BY revision`
+  ).all(assignmentId) as Array<{
+    assignmentId: string;
+    revision: number;
+    evidenceRevision: string;
+    draftJson: string;
+    findingsJson: string;
+    accepted: number;
+    createdAt: string;
+  }>;
+  return rows.map((row) => ({
+    assignmentId: row.assignmentId,
+    revision: row.revision,
+    evidenceRevision: row.evidenceRevision,
+    draft: parseJson(row.draftJson),
+    findings: parseJson(row.findingsJson),
+    accepted: row.accepted === 1,
+    createdAt: row.createdAt
+  }));
+}
+
+export function recordCanaryDecision(
+  db: MastheadDatabase,
+  input: {
+    requestId: string;
+    assignmentId: string;
+    draftRevision: number;
+    decision: "approved" | "rejected";
+    notes: string;
+    reviewedBy: string;
+  }
+): GuidedAuthoringRequestDto {
+  return withImmediateTransaction(db, () => recordCanaryDecisionInTransaction(db, input));
+}
+
+export function recordCanaryDecisionInTransaction(
+  db: MastheadDatabase,
+  input: {
+    requestId: string;
+    assignmentId: string;
+    draftRevision: number;
+    decision: "approved" | "rejected";
+    notes: string;
+    reviewedBy: string;
+  }
+): GuidedAuthoringRequestDto {
+  requireNonblank([input.requestId, input.assignmentId, input.notes, input.reviewedBy], "invalid_canary_decision");
+  const assignment = getAssignmentRow(db, input.assignmentId);
+  const request = getGuidedAuthoringRequest(db, input.requestId);
+  if (
+    !assignment ||
+    request?.status !== "awaiting_canary_approval" ||
+    assignment.requestId !== input.requestId ||
+    assignment.canary !== 1 ||
+    assignment.status !== "staged_canary" ||
+    assignment.acceptedDraftRevision !== input.draftRevision
+  ) {
+    throw new Error("guided_canary_not_ready");
+  }
+  const acceptedDraft = db.prepare(
+    `SELECT accepted FROM guided_authoring_draft_reviews WHERE assignment_id = ? AND revision = ?`
+  ).get(input.assignmentId, input.draftRevision) as { accepted: number } | undefined;
+  if (acceptedDraft?.accepted !== 1) throw new Error("guided_canary_not_ready");
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO guided_authoring_operator_reviews
+     (review_id, request_id, assignment_id, draft_revision, decision, notes, reviewed_by, reviewed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(randomUUID(), input.requestId, input.assignmentId, input.draftRevision, input.decision, input.notes, input.reviewedBy, now);
+  if (input.decision === "approved") {
+    db.prepare(
+      `UPDATE guided_authoring_requests
+       SET status = 'active', canary_approved_at = ?, canary_approved_by = ?, updated_at = ?
+       WHERE request_id = ?`
+    ).run(now, input.reviewedBy, now, input.requestId);
+  } else {
+    db.prepare(
+      `UPDATE guided_authoring_assignments SET status = 'needs_revision', updated_at = ? WHERE assignment_id = ?`
+    ).run(now, input.assignmentId);
+    db.prepare(
+      `UPDATE guided_authoring_requests
+       SET status = 'open', canary_approved_at = NULL, canary_approved_by = NULL, updated_at = ?
+       WHERE request_id = ?`
+    ).run(now, input.requestId);
+  }
+  return requireGuidedRequest(db, input.requestId);
+}
+
+export function listGuidedOperatorReviews(
+  db: MastheadDatabase,
+  assignmentId: string
+): GuidedAuthoringOperatorReviewDto[] {
+  return db.prepare(
+    `SELECT review_id AS reviewId, draft_revision AS draftRevision, decision, notes,
+            reviewed_by AS reviewedBy, reviewed_at AS reviewedAt
+     FROM guided_authoring_operator_reviews WHERE assignment_id = ?
+     ORDER BY reviewed_at, rowid`
+  ).all(assignmentId) as GuidedAuthoringOperatorReviewDto[];
+}
+
+export function completeGuidedAssignment(
+  db: MastheadDatabase,
+  assignmentId: string,
+  receipt: GuidedAuthoringReceiptDto
+): GuidedAuthoringReceiptDto {
+  return withImmediateTransaction(db, () => completeGuidedAssignmentInTransaction(db, assignmentId, receipt));
+}
+
+export function completeGuidedAssignmentInTransaction(
+  db: MastheadDatabase,
+  assignmentId: string,
+  receipt: GuidedAuthoringReceiptDto
+): GuidedAuthoringReceiptDto {
+  const assignment = getAssignmentRow(db, assignmentId);
+  if (!assignment) throw new Error("guided_assignment_not_found");
+  if (assignment.status === "completed" && assignment.receiptJson) return parseJson(assignment.receiptJson);
+  const request = getGuidedAuthoringRequest(db, assignment.requestId);
+  const ready = assignment.status === "ready_to_finish" || (
+    assignment.canary === 1 && assignment.status === "staged_canary" && Boolean(request?.canaryApprovedAt)
+  );
+  if (!ready) throw new Error("guided_assignment_not_ready");
+  const sessionIds = assignmentMembership(db, assignmentId, "guided_authoring_assignment_sessions", "session_id");
+  const opportunityIds = assignmentMembership(db, assignmentId, "guided_authoring_assignment_opportunities", "opportunity_id");
+  if (
+    receipt.assignmentId !== assignmentId ||
+    receipt.requestId !== assignment.requestId ||
+    receipt.evidenceRevision !== assignment.evidenceRevision ||
+    receipt.draftRevision !== assignment.acceptedDraftRevision ||
+    request?.baseUrl !== receipt.baseUrl ||
+    request.databaseId !== receipt.databaseId ||
+    request.buildSha !== receipt.buildSha ||
+    request.instanceManifest !== receipt.instanceManifest ||
+    !sameOrderedValues(receipt.sessionIds, sessionIds) ||
+    !sameOrderedValues(receipt.opportunityIds, opportunityIds) ||
+    !isNonblank(receipt.publicationInstanceId)
+  ) {
+    throw new Error("invalid_guided_assignment_receipt");
+  }
+  const now = receipt.completedAt;
+  db.prepare(
+    `UPDATE guided_authoring_assignments
+     SET status = 'completed', receipt_json = ?, completed_at = ?, updated_at = ? WHERE assignment_id = ?`
+  ).run(JSON.stringify(receipt), now, now, assignmentId);
+  db.prepare(
+    `UPDATE guided_authoring_request_sessions SET state = 'completed'
+     WHERE request_id = ? AND session_id IN (
+       SELECT session_id FROM guided_authoring_assignment_sessions WHERE assignment_id = ?
+     )`
+  ).run(assignment.requestId, assignmentId);
+  const next = db.prepare(
+    `SELECT assignment_id AS assignmentId FROM guided_authoring_assignments
+     WHERE request_id = ? AND status != 'completed' ORDER BY ordinal LIMIT 1`
+  ).get(assignment.requestId) as { assignmentId: string } | undefined;
+  if (next) {
+    db.prepare(
+      `UPDATE guided_authoring_request_sessions SET state = 'assigned'
+       WHERE request_id = ? AND session_id IN (
+         SELECT session_id FROM guided_authoring_assignment_sessions WHERE assignment_id = ?
+       )`
+    ).run(assignment.requestId, next.assignmentId);
+    db.prepare("UPDATE guided_authoring_requests SET status = 'active', updated_at = ? WHERE request_id = ?")
+      .run(now, assignment.requestId);
+  } else {
+    db.prepare(
+      `UPDATE guided_authoring_requests SET status = 'completed', completed_at = ?, updated_at = ? WHERE request_id = ?`
+    ).run(now, now, assignment.requestId);
+  }
+  return receipt;
+}
+
+const assignmentSelect = `SELECT assignment_id AS assignmentId, request_id AS requestId, ordinal, status,
+  canary, evidence_revision AS evidenceRevision, current_draft_revision AS currentDraftRevision,
+  accepted_draft_revision AS acceptedDraftRevision, receipt_json AS receiptJson,
+  created_at AS createdAt, updated_at AS updatedAt, completed_at AS completedAt
+  FROM guided_authoring_assignments`;
+
+function getAssignmentRow(db: MastheadDatabase, assignmentId: string): AssignmentRow | undefined {
+  return db.prepare(`${assignmentSelect} WHERE assignment_id = ?`).get(assignmentId) as AssignmentRow | undefined;
+}
+
+function mapAssignment(db: MastheadDatabase, row: AssignmentRow): GuidedAuthoringAssignmentDto {
+  const draft = row.currentDraftRevision > 0
+    ? db.prepare(
+      `SELECT findings_json AS findingsJson FROM guided_authoring_draft_reviews
+       WHERE assignment_id = ? AND revision = ?`
+    ).get(row.assignmentId, row.currentDraftRevision) as { findingsJson: string } | undefined
+    : undefined;
+  return {
+    assignmentId: row.assignmentId,
+    requestId: row.requestId,
+    ordinal: row.ordinal,
+    status: row.status,
+    canary: row.canary === 1,
+    evidenceRevision: row.evidenceRevision,
+    sessionIds: assignmentMembership(db, row.assignmentId, "guided_authoring_assignment_sessions", "session_id"),
+    opportunityIds: assignmentMembership(db, row.assignmentId, "guided_authoring_assignment_opportunities", "opportunity_id"),
+    currentDraftRevision: row.currentDraftRevision,
+    ...(row.acceptedDraftRevision === null ? {} : { acceptedDraftRevision: row.acceptedDraftRevision }),
+    findings: draft ? parseJson(draft.findingsJson) : [],
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    ...(row.completedAt ? { completedAt: row.completedAt } : {})
+  };
+}
+
+function assignmentMembership(
+  db: MastheadDatabase,
+  assignmentId: string,
+  table: "guided_authoring_assignment_sessions" | "guided_authoring_assignment_opportunities",
+  column: "session_id" | "opportunity_id"
+): string[] {
+  return (db.prepare(`SELECT ${column} AS value FROM ${table} WHERE assignment_id = ? ORDER BY ordinal`).all(assignmentId) as Array<{ value: string }>).map(
+    ({ value }) => value
+  );
+}
+
+function validateRequestPlan(db: MastheadDatabase, input: CreateGuidedAuthoringRequestInput): void {
+  const fail = () => { throw new Error("invalid_guided_authoring_plan"); };
+  try {
+    requireNonblank([
+      input.requestId,
+      input.actorId,
+      input.policyVersion,
+      input.identity.creationInstanceId,
+      input.identity.instanceManifest,
+      input.identity.baseUrl,
+      input.identity.databaseId,
+      input.identity.buildSha
+    ], "invalid_guided_authoring_plan");
+    if (input.policyVersion !== "guided-authoring-v1" || input.sessions.length === 0 || input.assignments.length === 0) fail();
+    assertUniqueContiguous(input.sessions.map(({ sessionId, ordinal }) => ({ id: sessionId, ordinal })));
+    assertUniqueContiguous(input.assignments.map(({ assignmentId, ordinal }) => ({ id: assignmentId, ordinal })));
+    const sessionIds = new Set(input.sessions.map(({ sessionId }) => sessionId));
+    const opportunityIds = new Set(input.opportunities.map(({ opportunityId }) => opportunityId));
+    if (opportunityIds.size !== input.opportunities.length) fail();
+    const canaries = input.assignments.filter(({ canary }) => canary);
+    if (canaries.length !== 1 || canaries[0]?.ordinal !== 0 || canaries[0].sessionIds.length > 3) fail();
+    const assignedSessions: string[] = [];
+    const assignedOpportunities: string[] = [];
+    for (const assignment of input.assignments) {
+      requireNonblank([assignment.assignmentId, assignment.evidenceRevision], "invalid_guided_authoring_plan");
+      if (assignment.sessionIds.length === 0 || assignment.sessionIds.length > 12) fail();
+      if (new Set(assignment.sessionIds).size !== assignment.sessionIds.length) fail();
+      if (new Set(assignment.opportunityIds).size !== assignment.opportunityIds.length) fail();
+      if (assignment.sessionIds.some((id) => !sessionIds.has(id))) fail();
+      if (assignment.opportunityIds.some((id) => !opportunityIds.has(id))) fail();
+      assignedSessions.push(...assignment.sessionIds);
+      assignedOpportunities.push(...assignment.opportunityIds);
+    }
+    if (!sameSetsExactly(assignedSessions, [...sessionIds]) || !sameSetsExactly(assignedOpportunities, [...opportunityIds])) fail();
+    for (const opportunity of input.opportunities) {
+      requireNonblank([opportunity.opportunityId, opportunity.summary, ...opportunity.evidenceRefs, ...opportunity.provenanceSessionIds], "invalid_guided_authoring_plan");
+      if (opportunity.evidenceRefs.length === 0 || opportunity.provenanceSessionIds.length === 0) fail();
+      if (opportunity.provenanceSessionIds.some((id) => !sessionIds.has(id))) fail();
+    }
+    const placeholders = input.sessions.map(() => "?").join(",");
+    const existing = db.prepare(`SELECT session_id AS sessionId FROM sessions WHERE session_id IN (${placeholders})`)
+      .all(...input.sessions.map(({ sessionId }) => sessionId)) as Array<{ sessionId: string }>;
+    if (existing.length !== input.sessions.length) fail();
+  } catch (error) {
+    if (error instanceof Error && error.message === "invalid_guided_authoring_plan") throw error;
+    fail();
+  }
+}
+
+function assertUniqueContiguous(items: Array<{ id: string; ordinal: number }>): void {
+  if (new Set(items.map(({ id }) => id)).size !== items.length) throw new Error("invalid_guided_authoring_plan");
+  const ordinals = [...items.map(({ ordinal }) => ordinal)].sort((left, right) => left - right);
+  if (new Set(ordinals).size !== items.length || ordinals.some((ordinal, index) => ordinal !== index)) {
+    throw new Error("invalid_guided_authoring_plan");
+  }
+  requireNonblank(items.map(({ id }) => id), "invalid_guided_authoring_plan");
+}
+
+function sameSetsExactly(actual: string[], expected: string[]): boolean {
+  return actual.length === expected.length && new Set(actual).size === actual.length && expected.every((value) => actual.includes(value));
+}
+
+function sameOrderedValues(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function requireGuidedRequest(db: MastheadDatabase, requestId: string): GuidedAuthoringRequestDto {
+  const request = getGuidedAuthoringRequest(db, requestId);
+  if (!request) throw new Error("guided_request_not_found");
+  return request;
+}
+
+function requireGuidedAssignment(db: MastheadDatabase, assignmentId: string): GuidedAuthoringAssignmentDto {
+  const assignment = getGuidedAssignment(db, assignmentId);
+  if (!assignment) throw new Error("guided_assignment_not_found");
+  return assignment;
+}
+
+function isNonblank(value: string): boolean {
+  return typeof value === "string" && value.trim().length > 0 && value === value.trim();
+}
+
+function requireNonblank(values: string[], errorCode: string): void {
+  if (values.some((value) => !isNonblank(value))) throw new Error(errorCode);
+}
+
+function parseJson<T>(value: string): T {
+  return JSON.parse(value) as T;
+}

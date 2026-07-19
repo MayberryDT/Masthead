@@ -190,7 +190,7 @@ describe("daemon database schema", () => {
     migrateDatabase(db);
     migrateDatabase(db);
 
-    expect(CURRENT_SCHEMA_VERSION).toBe(30);
+    expect(CURRENT_SCHEMA_VERSION).toBe(31);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'virtual') ORDER BY name").all() as Array<{ name: string }>;
     expect(tables.map((row) => row.name)).toEqual(
@@ -252,7 +252,16 @@ describe("daemon database schema", () => {
         "workbench_artifact_candidate_provenance",
         "workbench_artifact_candidate_signature_members",
         "workbench_artifact_candidate_source_revisions",
-        "workbench_artifact_candidate_scans"
+        "workbench_artifact_candidate_scans",
+        "guided_authoring_requests",
+        "guided_authoring_request_sessions",
+        "guided_authoring_opportunities",
+        "guided_authoring_assignments",
+        "guided_authoring_assignment_sessions",
+        "guided_authoring_assignment_opportunities",
+        "guided_authoring_evidence_access",
+        "guided_authoring_draft_reviews",
+        "guided_authoring_operator_reviews"
       ])
     );
     const applied = db.prepare("SELECT version, name FROM schema_migrations").all();
@@ -286,7 +295,8 @@ describe("daemon database schema", () => {
       { version: 27, name: "027_workbench_suppression_provenance" },
       { version: 28, name: "028_session_transcript_fingerprints" },
       { version: 29, name: "029_import_repair_replacements" },
-      { version: 30, name: "030_session_search_rowids" }
+      { version: 30, name: "030_session_search_rowids" },
+      { version: 31, name: "031_guided_authoring" }
     ]);
     expect(
       (db.prepare("PRAGMA table_info(workbench_artifact_candidate_scans)").all() as Array<{ name: string }>).map(
@@ -563,7 +573,7 @@ describe("daemon database schema", () => {
       "2026-07-15T00:00:00.000Z"
     );
 
-    expect(CURRENT_SCHEMA_VERSION).toBe(30);
+    expect(CURRENT_SCHEMA_VERSION).toBe(31);
     expect(db.prepare("SELECT version, name FROM schema_migrations ORDER BY version DESC LIMIT 1").get()).toEqual({
       name: "024_artifact_candidate_detector_revision",
       version: 24
