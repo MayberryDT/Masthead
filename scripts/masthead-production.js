@@ -224,6 +224,7 @@ export async function coldActivateProduction(input, dependencyOverrides = {}) {
     acquireLease: async () => {
       const lease = await acquireLifecycleLease(config.lifecycleLeasePath);
       try {
+        await dependencyOverrides.onLifecycleLeaseAcquired?.();
         await reconcileProductionStageIntent(config.productionRoot, config.lifecycleLeasePath);
         await gatePendingProductionLifecycle(config.productionRoot, "cold-activate");
         return lease;
@@ -334,6 +335,7 @@ export async function transitionProduction(input, dependencyOverrides = {}) {
   let staged;
   let oldTarget;
   try {
+    await dependencyOverrides.onLifecycleLeaseAcquired?.();
     await reconcileProductionStageIntent(productionRoot, config.lifecycleLeasePath);
     await gatePendingProductionLifecycle(productionRoot, "transition");
     const pending = await dependencies.readMaintenanceJournal();
@@ -500,6 +502,12 @@ export async function stageProductionInstallation(input) {
     await reconcileProductionStageIntent(productionRoot, lifecycleLeasePath);
     const pending = await gatePendingProductionLifecycle(productionRoot, "stage");
     if (pending === "completed") throw new Error("A previous staged activation must be finalized before staging another bundle.");
+    const durableReceipt = await findPendingStagedProductionReceipt(productionRoot);
+    if (durableReceipt) {
+      await assertPendingStageRetryMatches(durableReceipt, input, { dataDirectory, databasePath, homeDir, lifecycleLeasePath, port, productionRoot });
+      await rm(productionStagePendingPath(productionRoot));
+      return durableReceipt;
+    }
     return await stageProductionInstallationUnlocked(input, { dataDirectory, databasePath, homeDir, lifecycleLeasePath, port, productionRoot });
   } catch (error) {
     await reconcileProductionStageIntent(productionRoot, lifecycleLeasePath).catch(() => undefined);
@@ -617,6 +625,16 @@ async function stageProductionInstallationUnlocked(input, identity) {
     previousInstanceLauncher,
     previousLauncher: stagedSurface.previousLauncher,
     previousDesktop: stagedSurface.previousDesktop,
+    stageRequest: {
+      bundleDigest: manifest.bundleDigest,
+      sourceBundlePath,
+      dataDirectory,
+      databasePath,
+      homeDir,
+      lifecycleLeasePath,
+      port,
+      productionRoot
+    },
     receiptPath
   };
   receipt.stagedFiles = await Promise.all([
@@ -624,8 +642,20 @@ async function stageProductionInstallationUnlocked(input, identity) {
     attestStagedFile(stagedSurface.launcherStage),
     attestStagedFile(stagedSurface.desktopStage)
   ]);
-  await atomicWrite(receiptPath, `${JSON.stringify(stagedReceiptRecord(receipt), null, 2)}\n`, 0o444);
+  const receiptRecord = stagedReceiptRecord(receipt);
+  const receiptHash = createHash("sha256").update(JSON.stringify(receiptRecord)).digest("hex");
+  await atomicWrite(productionStagePendingPath(productionRoot), `${JSON.stringify({
+    schemaVersion: 1,
+    productionRoot,
+    receiptPath,
+    receiptHash,
+    stagingNonce
+  }, null, 2)}\n`, 0o600);
+  await atomicWrite(receiptPath, `${JSON.stringify(receiptRecord, null, 2)}\n`, 0o444);
+  await input.onStageStep?.("receipt-publication");
   await rm(productionStageIntentPath(productionRoot));
+  await input.onStageStep?.("intent-removal");
+  await rm(productionStagePendingPath(productionRoot));
   return receipt;
 }
 
@@ -655,11 +685,18 @@ function hydrateStagedReceiptRecord(record, receiptPath) {
 
 export async function activateStagedProductionInstallation(receiptInput, dependencyOverrides = {}) {
   const receiptPath = typeof receiptInput === "string" ? receiptInput : receiptInput?.receiptPath;
-  const preliminaryReceipt = await loadStagedProductionInstallation(receiptPath);
+  const preliminaryReceipt = await loadStagedOrActivationJournalReceipt(receiptPath);
   const lease = await acquireLifecycleLease(preliminaryReceipt.lifecycleLeasePath);
   try {
     await dependencyOverrides.onLifecycleLeaseAcquired?.();
     await reconcileProductionStageIntent(preliminaryReceipt.productionRoot, preliminaryReceipt.lifecycleLeasePath);
+    const pendingStageReceipt = await findPendingStagedProductionReceipt(preliminaryReceipt.productionRoot);
+    if (pendingStageReceipt) {
+      if (pendingStageReceipt.receiptPath !== preliminaryReceipt.receiptPath) {
+        throw new Error("Production staged receipt pending record belongs to a different receipt.");
+      }
+      await rm(productionStagePendingPath(preliminaryReceipt.productionRoot));
+    }
     if (await gatePendingProductionLifecycle(preliminaryReceipt.productionRoot, "activate", preliminaryReceipt.receiptPath) === "completed") {
       return { activated: true, launched: false, databaseOpened: false, currentPath: preliminaryReceipt.currentPath, target: preliminaryReceipt.target };
     }
@@ -672,6 +709,8 @@ export async function activateStagedProductionInstallation(receiptInput, depende
 async function activateStagedProductionInstallationUnlocked(receiptPath, dependencyOverrides) {
   const receipt = await loadStagedProductionInstallation(receiptPath);
   await reconcileProductionStageIntent(receipt.productionRoot, receipt.lifecycleLeasePath);
+  await assertCanonicalProductionBundlePath(receipt.rollbackBundle.path, receipt.productionRoot, "rollback");
+  await assertCanonicalProductionBundlePath(receipt.target, receipt.productionRoot, "candidate");
   await verifyPinnedBundle(receipt.rollbackBundle.path, receipt.rollbackBundle.bundleDigest);
   const rollbackRelease = await readRelease(receipt.rollbackBundle.path);
   if (rollbackRelease.gitSha !== receipt.rollbackBundle.buildSha || rollbackRelease.version !== receipt.rollbackBundle.version) {
@@ -724,13 +763,15 @@ async function activateStagedProductionInstallationUnlocked(receiptPath, depende
     refreshDesktopDatabase(dirname(receipt.stagedSurface.desktopPath), dependencyOverrides.runDesktopDatabaseCommand);
     receipt.activatedAt = new Date().toISOString();
     await writeActivationJournal(activationJournalPath, receipt, "before-activation-commit");
-    await persistStagedReceipt(receipt);
-    await dependencyOverrides.onStep?.("activation-receipt");
-    simulateActivationProcessDeath(dependencyOverrides, "activation-receipt");
+    await dependencyOverrides.onStep?.("activation-pre-commit");
+    simulateActivationProcessDeath(dependencyOverrides, "activation-pre-commit");
     await writeActivationJournal(activationJournalPath, receipt, "activation-committed");
     activationCommitted = true;
     await dependencyOverrides.onStep?.("activation-commit");
     simulateActivationProcessDeath(dependencyOverrides, "activation-commit");
+    await persistStagedReceipt(receipt);
+    await dependencyOverrides.onStep?.("activation-receipt");
+    simulateActivationProcessDeath(dependencyOverrides, "activation-receipt");
   } catch (error) {
     if (activationCommitted || error?.code === "simulated_activation_process_death") throw error;
     let rollbackError;
@@ -770,6 +811,18 @@ function productionActivationJournalPath(productionRoot) {
   return join(productionRoot, ".masthead-install-activation.journal.json");
 }
 
+async function loadStagedOrActivationJournalReceipt(receiptPathInput) {
+  const receiptPath = resolve(required(receiptPathInput, "staged production receipt path"));
+  try {
+    return await loadStagedProductionInstallation(receiptPath);
+  } catch (error) {
+    if (!(error && typeof error === "object" && error.code === "ENOENT")) throw error;
+    const journal = JSON.parse(await readFile(productionActivationJournalPath(dirname(receiptPath)), "utf8"));
+    if (journal?.phase !== "activation-committed" || journal.receiptPath !== receiptPath || !journal.receipt) throw error;
+    return hydrateStagedReceiptRecord(journal.receipt, receiptPath);
+  }
+}
+
 async function writeActivationJournal(path, receipt, phase) {
   const receiptRecord = stagedReceiptRecord(receipt);
   const receiptHash = createHash("sha256").update(JSON.stringify(receiptRecord)).digest("hex");
@@ -807,29 +860,32 @@ async function gatePendingProductionLifecycle(productionRoot, command, expectedR
   }
   if (![1, 2].includes(journal?.schemaVersion) || typeof journal.receiptPath !== "string") throw new Error("Production lifecycle journal is malformed.");
   if (expectedReceiptPath && journal.receiptPath !== expectedReceiptPath) throw new Error("Production lifecycle journal belongs to a different staged receipt.");
-  let receipt;
+  let persistedReceipt;
   try {
-    receipt = await loadStagedProductionInstallation(journal.receiptPath);
+    persistedReceipt = await loadStagedProductionInstallation(journal.receiptPath);
   } catch (error) {
     if (!(error && typeof error === "object" && error.code === "ENOENT") || !journal.receipt) throw error;
-    receipt = hydrateStagedReceiptRecord(journal.receipt, journal.receiptPath);
   }
+  let receipt = persistedReceipt ?? hydrateStagedReceiptRecord(journal.receipt, journal.receiptPath);
   if (journal.schemaVersion === 2) {
+    const journalReceipt = hydrateStagedReceiptRecord(journal.receipt, journal.receiptPath);
     const journalReceiptHash = createHash("sha256").update(JSON.stringify(journal.receipt)).digest("hex");
-    const receiptRecord = stagedReceiptRecord(receipt);
-    const receiptHash = createHash("sha256").update(JSON.stringify(receiptRecord)).digest("hex");
-    const commitWindowMatch = journal.phase === "before-activation-commit" && receiptMatchesBeforeActivationCommit(receiptRecord, journal.receipt);
-    if (journalReceiptHash !== journal.receiptHash || receiptHash !== journal.receiptHash && !commitWindowMatch) {
+    const persistedRecord = persistedReceipt ? stagedReceiptRecord(persistedReceipt) : undefined;
+    const persistedHash = persistedRecord ? createHash("sha256").update(JSON.stringify(persistedRecord)).digest("hex") : undefined;
+    const prospectiveReceiptMatch = persistedRecord && receiptMatchesProspectiveActivation(persistedRecord, journal.receipt);
+    if (
+      journalReceiptHash !== journal.receiptHash ||
+      persistedHash && persistedHash !== journal.receiptHash && !prospectiveReceiptMatch
+    ) {
       throw new Error("Production lifecycle journal receipt hash mismatch.");
     }
+    assertActivationJournalReceiptBinding(journal, journalReceipt);
+    if (journal.phase === "activation-committed") receipt = journalReceipt;
   }
   if (command === "finalize" && (journal.phase.startsWith("finalize-cleanup-") || journal.phase === "finalize-after-stage-cleanup")) {
     return "resume-finalization";
   }
-  const result = await recoverInterruptedProductionActivation(receipt);
-  if (result === "completed" && journal.phase !== "activation-committed") {
-    await writeActivationJournal(path, receipt, "activation-committed");
-  }
+  const result = await recoverInterruptedProductionActivation(receipt, journal);
   if (result === "completed" && ["stage", "install", "cold-activate", "transition"].includes(command)) {
     throw new Error(`Pending activation must be finalized before ${command}.`);
   }
@@ -839,36 +895,62 @@ async function gatePendingProductionLifecycle(productionRoot, command, expectedR
   return result;
 }
 
-function receiptMatchesBeforeActivationCommit(receiptRecord, committedReceiptRecord) {
+function receiptMatchesProspectiveActivation(receiptRecord, committedReceiptRecord) {
   if (!committedReceiptRecord || typeof committedReceiptRecord.activatedAt !== "string" || "activatedAt" in receiptRecord) return false;
   const beforeCommitRecord = { ...committedReceiptRecord };
   delete beforeCommitRecord.activatedAt;
   return JSON.stringify(receiptRecord) === JSON.stringify(beforeCommitRecord);
 }
 
-async function recoverInterruptedProductionActivation(receipt) {
+function assertActivationJournalReceiptBinding(journal, receipt) {
+  const expectedBefore = {
+    current: receipt.previousCurrentTarget,
+    instanceLauncher: snapshotForReceipt(receipt.previousInstanceLauncher),
+    lifecycleLauncher: snapshotForReceipt(receipt.previousLauncher),
+    desktop: snapshotForReceipt(receipt.previousDesktop)
+  };
+  const expectedBuild = { buildSha: receipt.buildSha, buildVersion: receipt.buildVersion, sourceDigest: receipt.sourceDigest };
+  if (
+    journal.receiptPath !== receipt.receiptPath || journal.stagingNonce !== receipt.stagingNonce ||
+    JSON.stringify(journal.before) !== JSON.stringify(expectedBefore) ||
+    JSON.stringify(journal.after) !== JSON.stringify(receipt.stagedFiles) ||
+    JSON.stringify(journal.build) !== JSON.stringify(expectedBuild) ||
+    JSON.stringify(journal.recovery?.rollbackBundle) !== JSON.stringify(receipt.rollbackBundle)
+  ) throw new Error("Production activation journal does not match its staged receipt authority.");
+}
+
+async function recoverInterruptedProductionActivation(receipt, journal) {
   const journalPath = productionActivationJournalPath(receipt.productionRoot);
-  let journal;
-  try {
-    journal = JSON.parse(await readFile(journalPath, "utf8"));
-  } catch (error) {
-    if (error && typeof error === "object" && error.code === "ENOENT") return false;
-    throw error;
-  }
   if (![1, 2].includes(journal?.schemaVersion) || journal.receiptPath !== receipt.receiptPath || journal.stagingNonce !== receipt.stagingNonce) {
     throw new Error("Production activation journal does not match the staged receipt.");
   }
+  await assertCanonicalProductionBundlePath(receipt.target, receipt.productionRoot, "candidate");
+  await assertCanonicalProductionBundlePath(receipt.rollbackBundle.path, receipt.productionRoot, "rollback");
   const current = await realpath(receipt.currentPath);
   if (current !== receipt.previousCurrentTarget && current !== receipt.target) throw new Error("Interrupted production activation current target is not recoverable.");
   const stagedInstance = await readAttestedStagedFile(stagedFileAttestation(receipt, receipt.stagedInstanceLauncherPath));
   const stagedLifecycle = await readAttestedStagedFile(stagedFileAttestation(receipt, receipt.stagedSurface.launcherStage));
   const stagedDesktop = await readAttestedStagedFile(stagedFileAttestation(receipt, receipt.stagedSurface.desktopStage));
-  if (receipt.activatedAt && current === receipt.target) {
+  if (journal.phase === "activation-committed") {
+    if (!receipt.activatedAt || current !== receipt.target) {
+      throw new Error("Committed production activation does not match its authoritative target and receipt.");
+    }
+    await assertCanonicalProductionBundlePath(receipt.rollbackBundle.path, receipt.productionRoot, "rollback");
+    await assertCanonicalProductionBundlePath(receipt.target, receipt.productionRoot, "candidate");
+    await verifyPinnedBundle(receipt.rollbackBundle.path, receipt.rollbackBundle.bundleDigest);
+    await verifyPinnedBundle(receipt.target, receipt.sourceDigest);
+    const [rollbackRelease, targetRelease] = await Promise.all([readRelease(receipt.rollbackBundle.path), readRelease(receipt.target)]);
+    if (
+      rollbackRelease.gitSha !== receipt.rollbackBundle.buildSha || rollbackRelease.version !== receipt.rollbackBundle.version ||
+      targetRelease.gitSha !== receipt.buildSha || targetRelease.version !== receipt.buildVersion
+    ) throw new Error("Committed production activation bundle identity changed before receipt repair.");
+    await assertRequiredProductionRuntimeResources(productionRuntimePaths(receipt.target));
     await Promise.all([
       assertActiveMatchesStaged(receipt.activeInstanceLauncherPath, stagedFileAttestation(receipt, receipt.stagedInstanceLauncherPath)),
       assertActiveMatchesStaged(receipt.stagedSurface.launcherPath, stagedFileAttestation(receipt, receipt.stagedSurface.launcherStage)),
       assertActiveMatchesStaged(receipt.stagedSurface.desktopPath, stagedFileAttestation(receipt, receipt.stagedSurface.desktopStage))
     ]);
+    await persistStagedReceipt(receipt);
     return "completed";
   }
   await Promise.all([
@@ -912,6 +994,8 @@ async function finalizeStagedProductionInstallationUnlocked(receiptPath, depende
       return { finalized: true, recovered: true, target: preliminaryReceipt.target, receiptRemoved: true };
     }
     const receipt = await loadStagedProductionInstallation(receiptPath);
+    await assertCanonicalProductionBundlePath(receipt.target, receipt.productionRoot, "candidate");
+    await assertCanonicalProductionBundlePath(receipt.rollbackBundle.path, receipt.productionRoot, "rollback");
     if (await realpath(receipt.currentPath) !== receipt.target) throw new Error("Cannot finalize a staged installation that is not current.");
     await verifyStagedCandidateIdentity(receipt);
     await Promise.all([
@@ -931,6 +1015,7 @@ async function finalizeStagedProductionInstallationUnlocked(receiptPath, depende
     ]);
     await verifyLiveProof(receipt, dependencyOverrides);
     await assertNoOtherLifecycleArtifacts(receipt);
+    await prepareFinalizationMarkerDirectory(receipt.productionRoot);
     await continueFinalizationCleanup(receipt, dependencyOverrides);
     return { finalized: true, target: receipt.target, receiptRemoved: true };
 }
@@ -947,9 +1032,11 @@ async function loadFinalizationReceipt(receiptPathInput) {
       return hydrateStagedReceiptRecord(journal.receipt, receiptPath);
     } catch (journalError) {
       if (!(journalError && typeof journalError === "object" && journalError.code === "ENOENT")) throw journalError;
-      const marker = JSON.parse(await readFile(finalizationCompletionMarkerPath(receiptPath), "utf8"));
-      const receiptHash = createHash("sha256").update(JSON.stringify(marker.receipt)).digest("hex");
-      if (marker?.schemaVersion !== 1 || marker.receiptPath !== receiptPath || marker.receiptHash !== receiptHash) throw error;
+      const markerPath = finalizationCompletionMarkerPath(receiptPath);
+      await assertFinalizationMarkerDirectory(dirname(receiptPath), false);
+      const marker = JSON.parse(await readFile(markerPath, "utf8"));
+      const ownership = finalizationMarkerOwnership(dirname(receiptPath));
+      if (!isOwnedFinalizationMarker(marker, markerPath, ownership) || marker.receiptPath !== receiptPath) throw error;
       return { ...hydrateStagedReceiptRecord(marker.receipt, receiptPath), finalizationCommitted: true };
     }
   }
@@ -976,6 +1063,7 @@ async function assertResumableFinalizationProof(receipt, dependencyOverrides) {
   ]);
   await (dependencyOverrides.verifyLiveProof ?? assertSuccessfulStagedStartup)(receipt, dependencyOverrides);
   await assertNoOtherLifecycleArtifacts(receipt);
+  await prepareFinalizationMarkerDirectory(receipt.productionRoot);
 }
 
 async function continueFinalizationCleanup(receipt, dependencyOverrides) {
@@ -1004,25 +1092,82 @@ async function continueFinalizationCleanup(receipt, dependencyOverrides) {
 function finalizationCompletionMarkerPath(receiptPath) {
   const productionRoot = dirname(resolve(receiptPath));
   const markerName = `${createHash("sha256").update(resolve(receiptPath)).digest("hex")}.json`;
-  return join(dirname(productionRoot), ".masthead-production-finalization", markerName);
+  return join(finalizationMarkerOwnership(productionRoot).markerDirectory, markerName);
+}
+
+function finalizationMarkerOwnership(productionRootInput) {
+  const productionRoot = resolve(productionRootInput);
+  const productionRootHash = createHash("sha256").update(productionRoot).digest("hex");
+  return {
+    markerDirectory: join(dirname(productionRoot), `.masthead-production-finalization-${productionRootHash}`),
+    productionRoot,
+    productionRootHash
+  };
+}
+
+async function assertCanonicalDirectory(path, label) {
+  const requested = resolve(path);
+  const info = await lstat(requested).catch((error) => {
+    if (error && typeof error === "object" && error.code === "ENOENT") return undefined;
+    throw error;
+  });
+  if (!info || info.isSymbolicLink() || !info.isDirectory() || await realpath(requested) !== requested) {
+    throw new Error(`${label} must be a canonical directory: ${requested}`);
+  }
+  return requested;
+}
+
+async function assertFinalizationMarkerDirectory(productionRootInput, createIfMissing) {
+  const ownership = finalizationMarkerOwnership(productionRootInput);
+  const productionRoot = await assertCanonicalDirectory(ownership.productionRoot, "Production root");
+  const canonicalParent = await assertCanonicalDirectory(dirname(productionRoot), "Production root parent");
+  if (dirname(productionRoot) !== canonicalParent) throw new Error("Production finalization marker directory parent is not canonical.");
+  if (createIfMissing) {
+    await mkdir(ownership.markerDirectory).catch((error) => {
+      if (!(error && typeof error === "object" && error.code === "EEXIST")) throw error;
+    });
+  }
+  await assertCanonicalDirectory(ownership.markerDirectory, "Production finalization marker directory");
+  if (await realpath(dirname(ownership.markerDirectory)) !== canonicalParent) {
+    throw new Error("Production finalization marker directory escapes its canonical parent.");
+  }
+  return ownership;
+}
+
+async function prepareFinalizationMarkerDirectory(productionRoot) {
+  return assertFinalizationMarkerDirectory(productionRoot, true);
+}
+
+function isOwnedFinalizationMarker(marker, markerPath, ownership) {
+  if (
+    marker?.schemaVersion !== 2 || marker.productionRoot !== ownership.productionRoot ||
+    marker.productionRootHash !== ownership.productionRootHash || typeof marker.receiptPath !== "string" ||
+    dirname(resolve(marker.receiptPath)) !== ownership.productionRoot || marker.receipt?.receiptPath !== marker.receiptPath ||
+    marker.receipt?.productionRoot !== ownership.productionRoot || finalizationCompletionMarkerPath(marker.receiptPath) !== markerPath
+  ) return false;
+  return marker.receiptHash === createHash("sha256").update(JSON.stringify(marker.receipt)).digest("hex");
 }
 
 async function writeFinalizationCompletionMarker(receipt) {
   const markerPath = finalizationCompletionMarkerPath(receipt.receiptPath);
-  const markerDirectory = dirname(markerPath);
+  const ownership = await assertFinalizationMarkerDirectory(receipt.productionRoot, true);
+  const markerDirectory = ownership.markerDirectory;
   const receiptRecord = stagedReceiptRecord(receipt);
-  await mkdir(markerDirectory, { recursive: true });
   await atomicWrite(markerPath, `${JSON.stringify({
-    schemaVersion: 1,
+    schemaVersion: 2,
+    productionRoot: ownership.productionRoot,
+    productionRootHash: ownership.productionRootHash,
     receiptPath: receipt.receiptPath,
     receiptHash: createHash("sha256").update(JSON.stringify(receiptRecord)).digest("hex"),
     receipt: receiptRecord,
     committedAt: new Date().toISOString()
   }, null, 2)}\n`, 0o600);
   for (const entry of await readdir(markerDirectory, { withFileTypes: true })) {
-    if (entry.isFile() && entry.name.endsWith(".json") && join(markerDirectory, entry.name) !== markerPath) {
-      await rm(join(markerDirectory, entry.name), { force: true });
-    }
+    const path = join(markerDirectory, entry.name);
+    if (!entry.isFile() || !entry.name.endsWith(".json") || path === markerPath) continue;
+    const priorMarker = await readFile(path, "utf8").then(JSON.parse).catch(() => undefined);
+    if (!isOwnedFinalizationMarker(priorMarker, path, ownership)) continue;
+    await rm(path, { force: true });
   }
 }
 
@@ -1092,6 +1237,7 @@ function stagedReceiptRecord(receipt) {
     previousInstanceLauncher: snapshotForReceipt(receipt.previousInstanceLauncher),
     previousLauncher: snapshotForReceipt(receipt.previousLauncher),
     previousDesktop: snapshotForReceipt(receipt.previousDesktop),
+    ...(receipt.stageRequest ? { stageRequest: receipt.stageRequest } : {}),
     stagedSurface: {
       desktopPath: receipt.stagedSurface.desktopPath,
       desktopStage: receipt.stagedSurface.desktopStage,
@@ -1127,7 +1273,7 @@ async function assertSuccessfulStagedStartup(receipt, dependencies = {}) {
   ) throw new Error("Activated production startup manifest does not prove the staged target started successfully.");
   const processReader = dependencies.readProcess ?? readProcess;
   const healthReader = dependencies.fetchHealth ?? fetchHealth;
-  const [firstProcess, health] = await Promise.all([processReader(manifest.pid), healthReader(receipt.port)]);
+  const [firstProcess, health] = await Promise.all([processReader(manifest.pid), readAvailableStagedHealth(healthReader, receipt.port)]);
   const secondProcess = await processReader(manifest.pid);
   if (!firstProcess?.starttime || firstProcess.starttime !== secondProcess?.starttime) throw new Error("Activated production daemon PID/start identity is not live.");
   const classified = classifyProductionProcess(firstProcess, {
@@ -1138,7 +1284,9 @@ async function assertSuccessfulStagedStartup(receipt, dependencies = {}) {
   });
   if (classified?.role !== "daemon" || classified.target !== receipt.target) throw new Error("Activated production daemon process does not belong to the staged target.");
   const compatibility = await classifyPackagedDaemonHealth(receipt, health);
-  if (compatibility?.state !== "compatible") throw new Error(`Activated production health failed strict protocol classification: ${compatibility?.state || "unavailable"}.`);
+  if (compatibility?.state !== "compatible") {
+    throw new Error(`Activated production health failed strict protocol classification: ${compatibility?.state || "unavailable"}${compatibility?.reason ? ` (${compatibility.reason})` : ""}.`);
+  }
   if (health?.data?.migrationState !== "ready") throw new Error("Activated production health must report migration state ready before finalization.");
   if (
     health?.runtime?.mode !== "primary" || health.runtime.writable !== true ||
@@ -1149,6 +1297,15 @@ async function assertSuccessfulStagedStartup(receipt, dependencies = {}) {
     health.data?.databaseId !== manifest.databaseId || health.buildSha !== receipt.buildSha
   ) throw new Error("Activated production health does not match the staged receipt and daemon manifest.");
   await (dependencies.assertManifestWriterGuard ?? assertManifestWriterGuardActive)(receipt.instanceDir);
+}
+
+async function readAvailableStagedHealth(healthReader, port) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const health = await healthReader(port);
+    if (health !== undefined) return health;
+    if (attempt < 4) await delay(50);
+  }
+  return undefined;
 }
 
 async function classifyPackagedDaemonHealth(receipt, health) {
@@ -1291,6 +1448,17 @@ function validateStagedReceiptPaths(receipt) {
     [...expectedStages].some((path) => !attestedStages.has(path)) ||
     receipt.stagedFiles.some((file) => !/^[0-9a-f]{64}$/u.test(file?.sha256) || !Number.isInteger(file?.mode) || file.mode < 0 || file.mode > 0o777)
   ) throw new Error("Staged receipt attestation path substitution.");
+  if (receipt.stageRequest !== undefined) {
+    const request = receipt.stageRequest;
+    if (
+      request.bundleDigest !== receipt.sourceDigest || resolve(request.sourceBundlePath || "") !== request.sourceBundlePath ||
+      request.dataDirectory !== receipt.dataDirectory || request.databasePath !== receipt.databasePath ||
+      resolve(request.homeDir || "") !== request.homeDir || resolve(request.lifecycleLeasePath || "") !== request.lifecycleLeasePath ||
+      request.port !== receipt.port || request.productionRoot !== receipt.productionRoot ||
+      receipt.stagedSurface.launcherPath !== join(request.homeDir, ".local", "bin", "masthead-production") ||
+      receipt.stagedSurface.desktopPath !== join(request.homeDir, ".local", "share", "applications", "ai.animas.masthead.desktop")
+    ) throw new Error("Staged receipt stage request identity changed.");
+  }
 }
 
 function productionInstanceLauncher(input) {
@@ -1512,6 +1680,8 @@ export async function runCli(argv = process.argv.slice(2), environment = process
       dataDirectory: option(argv, "--data-dir"),
       databasePath: option(argv, "--db-path"),
       homeDir: environment.HOME,
+      lifecycleLeasePath: environment.MASTHEAD_LIFECYCLE_LEASE,
+      onLifecycleLeaseAcquired: dependencyOverrides.onLifecycleLeaseAcquired,
       port: numberOption(argv, "--port"),
       productionRoot: option(argv, "--production-root")
     });
@@ -1533,14 +1703,15 @@ export async function runCli(argv = process.argv.slice(2), environment = process
       dataDirectory: option(argv, "--data-dir"),
       databasePath: option(argv, "--db-path"),
       homeDir: environment.HOME,
+      lifecycleLeasePath: environment.MASTHEAD_LIFECYCLE_LEASE,
       port: numberOption(argv, "--port"),
       productionRoot: option(argv, "--production-root")
-    });
+    }, dependencyOverrides);
   }
   const config = await configFromEnvironment(environment);
-  if (command === "start") return startProduction(config);
-  if (command === "stop") return stopProduction(config);
-  if (command === "status") return statusProduction(config);
+  if (command === "start") return startProduction(config, dependencyOverrides);
+  if (command === "stop") return stopProduction(config, dependencyOverrides);
+  if (command === "status") return statusProduction(config, dependencyOverrides);
   throw new Error(`Unknown production lifecycle command: ${command}. Expected stage, activate, finalize, install, start, stop, or status.`);
 }
 
@@ -1689,13 +1860,16 @@ async function cleanupOldProductionBundles(productionRoot, target) {
 }
 
 async function cleanupProductionInstallArtifacts(productionRoot, target, remove = (path, options) => rm(path, options)) {
+  await assertCanonicalProductionBundlePath(target, productionRoot, "candidate");
   const retainedName = basename(target);
   const entries = await readdir(productionRoot, { withFileTypes: true });
   for (const entry of entries) {
     const staleBundle = VERSIONED_TARGET.test(entry.name) && entry.name !== retainedName;
     const staleInstallArtifact = /^(?:previous|backup-)/u.test(entry.name) || entry.name === "app-menu-icons" || /^helper(?:-|$)/u.test(entry.name);
     if (!staleBundle && !staleInstallArtifact) continue;
-    await remove(join(productionRoot, entry.name), { force: true, recursive: true }, `artifact-${entry.name}`);
+    const path = join(productionRoot, entry.name);
+    if (staleBundle) await assertCanonicalProductionBundlePath(path, productionRoot, "rollback");
+    await remove(path, { force: true, recursive: true }, `artifact-${entry.name}`);
   }
 }
 
@@ -1703,9 +1877,71 @@ function productionStageIntentPath(productionRoot) {
   return join(productionRoot, ".masthead-install-stage.intent.json");
 }
 
+function productionStagePendingPath(productionRoot) {
+  return join(productionRoot, ".masthead-install-stage.pending.json");
+}
+
 async function writeProductionStageIntent(intent) {
   validateProductionStageIntent(intent, intent.productionRoot, intent.lifecycleLeasePath);
   await atomicWrite(productionStageIntentPath(intent.productionRoot), `${JSON.stringify(intent, null, 2)}\n`, 0o600);
+}
+
+async function findPendingStagedProductionReceipt(productionRoot) {
+  let pending;
+  try {
+    pending = JSON.parse(await readFile(productionStagePendingPath(productionRoot), "utf8"));
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "ENOENT") return undefined;
+    throw new Error("Production staged receipt pending record is malformed.", { cause: error });
+  }
+  validateProductionStagePending(pending, productionRoot);
+  const receipt = await loadStagedProductionInstallation(pending.receiptPath);
+  const receiptHash = createHash("sha256").update(JSON.stringify(stagedReceiptRecord(receipt))).digest("hex");
+  if (receipt.stagingNonce !== pending.stagingNonce || receiptHash !== pending.receiptHash) {
+    throw new Error("Production staged receipt pending record does not match its durable receipt.");
+  }
+  return receipt;
+}
+
+function validateProductionStagePending(pending, productionRootInput, expectedIntent) {
+  const productionRoot = resolve(productionRootInput);
+  if (
+    pending?.schemaVersion !== 1 || pending.productionRoot !== productionRoot ||
+    typeof pending.stagingNonce !== "string" || !/^[0-9a-f-]{36}$/u.test(pending.stagingNonce) ||
+    pending.receiptPath !== join(productionRoot, `.masthead-install-${pending.stagingNonce}.receipt.json`) ||
+    !/^[0-9a-f]{64}$/u.test(pending.receiptHash || "") ||
+    expectedIntent && (pending.stagingNonce !== expectedIntent.stagingNonce || pending.receiptPath !== expectedIntent.receiptPath)
+  ) throw new Error("Production staged receipt pending record is malformed.");
+  return pending;
+}
+
+async function assertPendingStageRetryMatches(receipt, input, identity) {
+  if (receipt.activatedAt) throw new Error("A pending staged receipt is already activated and must be finalized.");
+  const sourceBundlePath = await realpath(input.sourceBundlePath || input.bundlePath || "");
+  const sourceManifest = await verifyPinnedBundle(sourceBundlePath, input.bundleDigest);
+  const expectedRequest = {
+    bundleDigest: sourceManifest.bundleDigest,
+    sourceBundlePath,
+    dataDirectory: identity.dataDirectory,
+    databasePath: identity.databasePath,
+    homeDir: identity.homeDir,
+    lifecycleLeasePath: identity.lifecycleLeasePath,
+    port: identity.port,
+    productionRoot: identity.productionRoot
+  };
+  if (JSON.stringify(receipt.stageRequest) !== JSON.stringify(expectedRequest)) {
+    throw new Error("The pending staged receipt does not match this stage request.");
+  }
+  if (
+    receipt.sourceDigest !== sourceManifest.bundleDigest || receipt.dataDirectory !== identity.dataDirectory ||
+    receipt.databasePath !== identity.databasePath || receipt.lifecycleLeasePath !== identity.lifecycleLeasePath ||
+    receipt.port !== identity.port || receipt.productionRoot !== identity.productionRoot
+  ) throw new Error("The pending staged receipt does not match this stage request.");
+  if (await realpath(receipt.currentPath) !== receipt.previousCurrentTarget) {
+    throw new Error("The pending staged receipt no longer has its staged current binding.");
+  }
+  await verifyPinnedBundle(receipt.target, receipt.sourceDigest);
+  await Promise.all(receipt.stagedFiles.map((file) => readAttestedStagedFile(file)));
 }
 
 function validateProductionStageIntent(intent, productionRootInput, lifecycleLeasePathInput) {
@@ -1750,6 +1986,17 @@ async function reconcileProductionStageIntent(productionRootInput, lifecycleLeas
     throw new Error("Production stage intent is malformed.", { cause: error });
   }
   validateProductionStageIntent(intent, productionRoot, lifecycleLeasePath);
+  const stagePendingPath = productionStagePendingPath(productionRoot);
+  let stagePending;
+  try {
+    stagePending = JSON.parse(await readFile(stagePendingPath, "utf8"));
+    validateProductionStagePending(stagePending, productionRoot, intent);
+  } catch (error) {
+    if (!(error && typeof error === "object" && error.code === "ENOENT")) {
+      if (error instanceof SyntaxError) throw new Error("Production staged receipt pending record is malformed.", { cause: error });
+      throw error;
+    }
+  }
   const receiptExists = await lstat(intent.receiptPath).then(() => true).catch((error) => {
     if (error && typeof error === "object" && error.code === "ENOENT") return false;
     throw error;
@@ -1778,6 +2025,7 @@ async function reconcileProductionStageIntent(productionRootInput, lifecycleLeas
     await rm(path, { force: true, recursive: true });
   }
   if (intent.ownsCandidate) await rm(intent.target, { force: true, recursive: true });
+  if (stagePending) await rm(stagePendingPath);
   await rm(intentPath);
   return "recovered";
 }
@@ -3248,7 +3496,29 @@ async function verifyPinnedBundle(target, expectedDigest) {
   return manifest;
 }
 
+async function assertCanonicalProductionBundlePath(bundlePathInput, productionRootInput, role) {
+  const productionRoot = await assertCanonicalDirectory(productionRootInput, "Production root");
+  const bundlePath = resolve(bundlePathInput);
+  const label = `Staged ${role} bundle`;
+  let info;
+  try {
+    info = await lstat(bundlePath);
+  } catch (error) {
+    throw new Error(`${label} must be a canonical direct child of ${productionRoot}.`, { cause: error });
+  }
+  const canonicalParent = await realpath(dirname(bundlePath)).catch(() => undefined);
+  const canonicalBundle = await realpath(bundlePath).catch(() => undefined);
+  if (
+    dirname(bundlePath) !== productionRoot || !VERSIONED_TARGET.test(basename(bundlePath)) ||
+    info.isSymbolicLink() || !info.isDirectory() || canonicalParent !== productionRoot || canonicalBundle !== bundlePath
+  ) {
+    throw new Error(`${label} must be a canonical direct child of ${productionRoot}.`);
+  }
+  return bundlePath;
+}
+
 async function verifyStagedCandidateIdentity(receipt) {
+  await assertCanonicalProductionBundlePath(receipt.target, receipt.productionRoot, "candidate");
   await verifyPinnedBundle(receipt.target, receipt.sourceDigest);
   const release = await readRelease(receipt.target);
   if (release.gitSha !== receipt.buildSha || release.version !== receipt.buildVersion) {

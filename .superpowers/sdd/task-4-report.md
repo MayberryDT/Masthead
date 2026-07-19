@@ -125,3 +125,22 @@ Fresh closeout verification from review base `baf0b7de347615ce15d1c7ae55b4e3f88e
 - Typecheck completed inside the successful package build; JavaScript syntax checks and `git diff --check` passed.
 
 Closeout commit: `fix: close production lifecycle recovery gaps`.
+
+## Lifecycle terminal-boundary security closeout
+
+The final gate now treats receipt publication itself as durable pending lifecycle state. Staging writes an exact request-bound pending record before publishing the receipt, and fresh-process retries after receipt publication or intent removal return that same validated receipt; a different request fails before any production write. Activation's `activation-committed` journal is the sole commit authority: every earlier phase restores the old generation, while a fully attested committed journal can repair a missing or stale receipt after process death.
+
+All real CLI entrypoints now carry `MASTHEAD_LIFECYCLE_LEASE`, including stage, normal install, and cold install. Two six-child `runCli` races prove normal transition and cold activation contend on the same custom lease as stage, activate, finalize, start, and stop. Finalization markers are stored in canonical, non-symlink, production-root-namespaced directories; rotation removes only markers whose embedded ownership matches that root. Candidate and rollback bundles are revalidated as canonical non-symlink direct children immediately before activation, recovery, finalization, and deletion.
+
+The operational rehearsal validates its canonical temporary parent before allocation, rejects any parent inside live production state, and keeps allocation inside cleanup control. It drives the supplied package through JSON subprocess commands for stage, activate, start, finalize, and identity-bound stop, then proves the process set, health, port, and ownership are offline. Its fallback SIGKILL path captures PID/start identity and refuses escalation after identity changes. Strict finalization retains exact protocol classification and adds only a short bounded retry when health is temporarily unavailable.
+
+Fresh security-closeout verification from review base `57556c48c4cede141e90ca7df4ef5a8471cccf99`:
+
+- Focused production lifecycle and rehearsal suite: 2 files, 203/203 tests passed, exit 0.
+- Complete Task 4 regression after the final health-availability change: 17 files, 450/450 tests passed, exit 0.
+- `npm run typecheck`, JavaScript syntax checks, and `git diff --check`: passed.
+- `npm run package:electron`: passed; the bundled production lifecycle source is byte-identical to the workspace source.
+- Operational rehearsal against the absolute rebuilt package: passed, including the packaged subprocess lifecycle and 25/25 selected crash/race cases; final result `{ "ok": true, "isolated": true, "matrix": true }`.
+- Installed production runtime, data, processes, and installation were not touched.
+
+Security-closeout commit: `fix: harden lifecycle terminal boundaries`.

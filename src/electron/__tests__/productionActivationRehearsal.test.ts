@@ -1,10 +1,14 @@
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { EventEmitter } from "node:events";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
 import {
   runProductionActivationRehearsal,
+  stopChild,
   validateRehearsalBundle
 } from "../../../scripts/masthead-production-activation-rehearsal.js";
 
@@ -76,6 +80,45 @@ describe("production activation rehearsal CLI", () => {
     }
   });
 
+  test("rejects a temporary parent inside live production before allocating any rehearsal artifact", async () => {
+    const home = await temporaryDirectory("masthead-rehearsal-live-tmp-home-");
+    const liveProduction = join(home, ".local", "share", "masthead-production");
+    const liveTmp = join(liveProduction, "tmp");
+    await mkdir(liveTmp, { recursive: true });
+
+    await expect(runProductionActivationRehearsal(
+      ["--bundle", join(home, "missing-bundle-outside-production")],
+      { HOME: home, TMPDIR: liveTmp }
+    )).rejects.toThrow("temporary parent overlaps live production state");
+    expect(await readdir(liveTmp)).toEqual([]);
+  });
+
+  test("CLI live-temporary-parent refusal exits nonzero without allocating state", async () => {
+    const home = await temporaryDirectory("masthead-rehearsal-live-tmp-cli-home-");
+    const liveTmp = join(home, ".local", "share", "masthead-production", "tmp");
+    await mkdir(liveTmp, { recursive: true });
+    const child = spawn(process.execPath, [SCRIPT_PATH, "--bundle", join(home, "missing-bundle")], {
+      env: { ...process.env, HOME: home, TMPDIR: liveTmp },
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    const [code] = await once(child, "close");
+
+    expect(code).toBe(1);
+    expect(await readdir(liveTmp)).toEqual([]);
+  });
+
+  test("CLI invalid-bundle refusal exits nonzero without allocating state", async () => {
+    const isolatedTmp = await temporaryDirectory("masthead-rehearsal-invalid-cli-tmp-");
+    const child = spawn(process.execPath, [SCRIPT_PATH, "--bundle", join(isolatedTmp, "missing-bundle")], {
+      env: { ...process.env, TMPDIR: isolatedTmp },
+      stdio: "ignore"
+    });
+    const [code] = await once(child, "close");
+
+    expect(code).toBe(1);
+    expect(await readdir(isolatedTmp)).toEqual([]);
+  });
+
   test("reports CLI failure with exitCode after cleanup control flow instead of process.exit", async () => {
     const source = await readFile(SCRIPT_PATH, "utf8");
 
@@ -86,7 +129,7 @@ describe("production activation rehearsal CLI", () => {
   test("proves daemon exit before deleting disposable rehearsal state", async () => {
     const source = await readFile(SCRIPT_PATH, "utf8");
     const cleanupStart = source.indexOf("} finally {");
-    const stopAttempt = source.indexOf("await stopChild(daemon)", cleanupStart);
+    const stopAttempt = source.indexOf("runInstalledLifecycleCommand(installedLauncher, [\"stop\"]", cleanupStart);
     const preservedFailure = source.indexOf("preserved ${rehearsalRoot}", cleanupStart);
     const removeRoot = source.indexOf("await rm(rehearsalRoot", cleanupStart);
 
@@ -101,8 +144,37 @@ describe("production activation rehearsal CLI", () => {
     const source = await readFile(SCRIPT_PATH, "utf8");
 
     expect(source).not.toContain("readProcesses: async () => []");
-    expect(source).toContain("stopProduction(baselineConfig)");
-    expect(source).toContain("statusProduction(baselineConfig)");
+    expect(source).toContain("runPackagedLifecycleCommand(verified, [\"stop\"]");
+    expect(source).toContain("runPackagedLifecycleCommand(verified, [\"status\"]");
     expect(source).toContain("baselineStatus.running !== false");
+  });
+
+  test("drives the supplied package through lifecycle subprocess JSON commands", async () => {
+    const source = await readFile(SCRIPT_PATH, "utf8");
+
+    expect(source).toContain("runPackagedLifecycleCommand");
+    expect(source).toContain("runInstalledLifecycleCommand");
+    for (const command of ["stage", "activate", "finalize", "start", "stop"]) {
+      expect(source).toContain(`\"${command}\"`);
+    }
+    expect(source).not.toContain("spawnPackagedDaemon(receipt");
+    expect(source).not.toContain("await stopChild(daemon)");
+  });
+
+  test("fallback cleanup refuses SIGKILL after spawned PID identity changes", async () => {
+    const signals: string[] = [];
+    const child = Object.assign(new EventEmitter(), {
+      exitCode: null,
+      kill(signal: string) { signals.push(signal); return true; },
+      pid: 4242,
+      signalCode: null
+    });
+    let reads = 0;
+
+    await expect(stopChild(child as any, {
+      readProcess: async () => ({ pid: 4242, starttime: ++reads === 1 ? "original" : "replacement" }),
+      termTimeoutMs: 1
+    })).rejects.toThrow("refused SIGKILL because the spawned PID identity changed");
+    expect(signals).toEqual(["SIGTERM"]);
   });
 });
