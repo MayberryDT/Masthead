@@ -143,6 +143,61 @@ describe("guided authoring repository", () => {
     ]);
   });
 
+  test("returns an identical canary approval retry without appending a review", async () => {
+    const db = await createdDb();
+    storeGuidedDraftReview(db, { assignmentId: "assignment:one:0", draft: draft(1), findings: [] });
+
+    const first = recordCanaryDecision(db, decision(1, "approved"));
+    const retried = recordCanaryDecision(db, decision(1, "approved"));
+
+    expect(retried).toEqual(first);
+    expect(listGuidedOperatorReviews(db, "assignment:one:0")).toHaveLength(1);
+    expect(getGuidedAssignment(db, "assignment:one:0")?.status).toBe("staged_canary");
+  });
+
+  test("rejects conflicting canary decision retries without changing approved state", async () => {
+    const db = await createdDb();
+    storeGuidedDraftReview(db, { assignmentId: "assignment:one:0", draft: draft(1), findings: [] });
+    const approvedRequest = recordCanaryDecision(db, decision(1, "approved"));
+    const approvedAssignment = getGuidedAssignment(db, "assignment:one:0");
+    const approvedReviews = listGuidedOperatorReviews(db, "assignment:one:0");
+
+    const conflicts = [
+      decision(1, "rejected"),
+      { ...decision(1, "approved"), notes: "changed approval notes" },
+      { ...decision(1, "approved"), reviewedBy: "another-operator" }
+    ];
+    for (const conflict of conflicts) {
+      expect(() => recordCanaryDecision(db, conflict)).toThrow("guided_canary_decision_conflict");
+    }
+
+    expect(getGuidedAuthoringRequest(db, "request:one")).toEqual(approvedRequest);
+    expect(getGuidedAssignment(db, "assignment:one:0")).toEqual(approvedAssignment);
+    expect(listGuidedOperatorReviews(db, "assignment:one:0")).toEqual(approvedReviews);
+  });
+
+  test("enforces one operator decision per assignment draft revision in sqlite", async () => {
+    const db = await createdDb();
+    storeGuidedDraftReview(db, { assignmentId: "assignment:one:0", draft: draft(1), findings: [] });
+    recordCanaryDecision(db, decision(1, "approved"));
+
+    expect(() => db.prepare(
+      `INSERT INTO guided_authoring_operator_reviews
+       (review_id, request_id, assignment_id, draft_revision, decision, notes, reviewed_by, reviewed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "review:duplicate",
+      "request:one",
+      "assignment:one:0",
+      1,
+      "rejected",
+      "conflicting direct write",
+      "operator",
+      "2026-07-19T12:01:00.000Z"
+    )).toThrow();
+    expect(listGuidedOperatorReviews(db, "assignment:one:0")).toHaveLength(1);
+  });
+
   test("keeps canary approval pending until finish and refuses a post-approval draft", async () => {
     const db = await createdDb();
     storeGuidedDraftReview(db, { assignmentId: "assignment:one:0", draft: draft(1), findings: [] });

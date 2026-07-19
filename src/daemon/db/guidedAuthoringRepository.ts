@@ -473,6 +473,27 @@ export function recordCanaryDecisionInTransaction(
   }
 ): GuidedAuthoringRequestDto {
   requireNonblank([input.requestId, input.assignmentId, input.notes, input.reviewedBy], "invalid_canary_decision");
+  const existingDecision = db.prepare(
+    `SELECT request_id AS requestId, decision, notes, reviewed_by AS reviewedBy
+     FROM guided_authoring_operator_reviews
+     WHERE assignment_id = ? AND draft_revision = ?`
+  ).get(input.assignmentId, input.draftRevision) as {
+    requestId: string;
+    decision: "approved" | "rejected";
+    notes: string;
+    reviewedBy: string;
+  } | undefined;
+  if (existingDecision) {
+    if (
+      existingDecision.requestId === input.requestId &&
+      existingDecision.decision === input.decision &&
+      existingDecision.notes === input.notes &&
+      existingDecision.reviewedBy === input.reviewedBy
+    ) {
+      return requireGuidedRequest(db, input.requestId);
+    }
+    throw new Error("guided_canary_decision_conflict");
+  }
   const assignment = getAssignmentRow(db, input.assignmentId);
   const request = getGuidedAuthoringRequest(db, input.requestId);
   if (

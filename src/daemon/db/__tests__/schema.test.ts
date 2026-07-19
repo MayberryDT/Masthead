@@ -324,7 +324,8 @@ describe("daemon database schema", () => {
         "idx_session_transcript_fingerprints_lookup",
         "idx_session_import_health_status",
         "idx_import_repair_replacements_original",
-        "idx_workbench_activity_time"
+        "idx_workbench_activity_time",
+        "idx_guided_operator_review_revision"
       ])
     );
     const importHealthColumns = db.prepare("PRAGMA table_info(session_import_health)").all() as Array<{

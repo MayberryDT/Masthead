@@ -116,3 +116,4 @@ CREATE INDEX idx_guided_request_sessions_state ON guided_authoring_request_sessi
 CREATE INDEX idx_guided_assignment_request ON guided_authoring_assignments(request_id, ordinal);
 CREATE INDEX idx_guided_opportunity_request ON guided_authoring_opportunities(request_id, opportunity_id);
 CREATE INDEX idx_guided_operator_review_assignment ON guided_authoring_operator_reviews(assignment_id, reviewed_at, review_id);
+CREATE UNIQUE INDEX idx_guided_operator_review_revision ON guided_authoring_operator_reviews(assignment_id, draft_revision);
