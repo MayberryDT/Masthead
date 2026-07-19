@@ -36,12 +36,15 @@ original dossier. It preserves identity, coverage, narrative, files, tools,
 verification, attention, excerpts, timeline, durable enrichment and state, reuse,
 and usage. Only the live DTO's recursive `artifacts` listing is excluded.
 
-Publication is daemon-owned and occurs only through V3 authoring finish. The agent
-must first provide grounded enrichment for every selected session. Finish applies
-that enrichment, rebuilds the canonical snapshot from current canonical data,
-publishes and indexes it atomically, and records exactly one provenance session.
-Agents never author or replace dossier presentation; optional-artifact bundles
-cannot contain a dossier.
+Publication is daemon-owned and occurs only through accepted `workbench-authoring-v4` assignment
+finish. The agent must traverse complete canonical evidence and provide typed, verbatim claim support
+for every substantive enrichment claim. Finish applies that enrichment, rebuilds the canonical
+snapshot from current canonical data, publishes and indexes it atomically, and records exactly one
+provenance session. Agents never author or replace dossier presentation; optional-artifact drafts
+cannot contain a dossier. A dossier in the three-session canary remains staged until operator approval.
+
+Historical V1, V2, and V3 dossier publication records remain audit-only. Legacy mutation attempts
+return `authoring_contract_retired`; they cannot republish a dossier.
 
 Logbook recognizes the exact `canonical-session-dossier-v1` schema and renders it
 through `SessionDossierContent`, the body component used by the original dossier

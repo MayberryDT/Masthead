@@ -1,4 +1,33 @@
-# Focused V3 agent-led acceptance
+# Guided authoring acceptance transition
+
+> **Superseded:** Everything beneath the preserved historical heading is signed V1–V3 evidence and
+> remains unchanged as an audit record. It is not current V4 acceptance, does not authorize a
+> production mutation, and must not be rewritten as if it proved guided authoring. A new production
+> canary can proceed only from fresh V4 evidence and explicit authorization.
+
+## V4 replacement gates — all pending
+
+- [ ] Exact release identity, package manifest, instance manifest, and isolated database are recorded.
+- [ ] `workbench-authoring-v4` advertises only guided operations; legacy mutation routes fail with
+      `authoring_contract_retired` while V1–V3 reads remain audit-only.
+- [ ] The isolated failed-template corpus is rejected and the reusable-artifact corpus passes without
+      production access.
+- [ ] Request planning proves assignments of at most 12 and a legal three-session canary without
+      splitting any larger strong opportunity group.
+- [ ] Complete evidence traversal, typed verbatim support, enrichment delta, completion truth, reuse
+      rubrics, and all high-signal opportunity dispositions pass machine review.
+- [ ] The installed instance-bound launcher verifies daemon URL, database ID, build SHA, manifest path,
+      and instance identity before every mutation.
+- [ ] The first accepted production assignment stays staged until real operator approval in Workbench.
+- [ ] One approved canary assignment publishes atomically; Workbench and Logbook refresh without an app
+      restart; a human reviews every canary dossier and optional artifact.
+- [ ] Offline audit, one verified sibling backup, hash-locked invalidation rehearsal, rollback, and
+      production authorization receipts are complete before any production database mutation.
+- [ ] The signed canary decision explicitly authorizes or refuses bounded rollout waves.
+
+---
+
+## Preserved historical V3 agent-led acceptance
 
 Status: **current fixture-only release acceptance; rendered inspection remains required; production
 human canary remains separately gated below**

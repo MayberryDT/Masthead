@@ -13,7 +13,15 @@ This deletes all `session_artifacts` and provenance rows and resets pipeline pub
 ## Rebuild path
 
 1. Enroll missing Workbench sessions.
-2. Run the automatic kind set (session package + runbook/ADR/timeline) via disposable handoff or directed agent.
-3. Publish artifacts after validate/apply.
+2. Create a durable guided authoring request for the compile-ready selection and give the agent its
+   request ID plus instance-bound start command.
+3. Let Masthead group assignments, record complete evidence traversal, review grounded enrichment and
+   knowledge-opportunity dispositions, and stage the three-session canary.
+4. After operator approval, atomically finish accepted assignments to rebuild dossiers and publish any
+   useful runbooks, ADRs, or incident timelines.
+
+Masthead never splits a larger strong opportunity group to manufacture the canary. It chooses a
+complete group of at most three sessions or diverse dossier-only sessions; otherwise request creation
+returns `guided_canary_not_constructible` and persists nothing.
 
 See ADR 0011 and CONTEXT.md for product vocabulary.

@@ -20,8 +20,8 @@ Masthead is not primarily a chat client, live monitoring console, or task manage
 Ownership in one line each:
 
 - **Workbench** owns transcript import, cleanup, selection-scoped agent enrichment, daemon-rebuilt
-  dossier publication, and optional-artifact authoring. **Copy Agent Prompt** copies a disposable
-  request for selected sessions; the agent may choose zero or more optional artifacts.
+  dossier publication, and optional-artifact authoring. **Copy Agent Prompt** creates a durable
+  guided authoring request, then copies only its request ID and instance-bound start command.
 - **Logbook** is an **artifact book**: capsule list + body inspector + provenance. No bulk enrich, checkboxes, or session-library chrome.
 - **Sources** owns discovering local harnesses and enabling live connectors — not import jobs or per-session Workbench work. Contract: [sources.md](sources.md) → `docs/reference/sources-v2.md`.
 - **Now** is shallow live presence only.
@@ -53,7 +53,8 @@ These are the main existing docs this wiki synthesizes:
 - `prd.md` — product scope; **read with ADR 0011 supersession note** for Logbook unit of search.
 - `docs/adr/0011-artifact-first-logbook.md` — Logbook is an artifact book.
 - `docs/adr/0013-canonical-dossier-and-candidate-authoring.md` — preserved original-rendering and evidence findings; its V2 authoring flow is superseded.
-- `docs/adr/0014-agent-led-enriched-artifact-authoring.md` — current selection-scoped V3 authoring contract.
+- `docs/adr/0014-agent-led-enriched-artifact-authoring.md` — preserved selection-scoped V3 implementation history.
+- `docs/adr/0015-guided-authoring-campaigns.md` — current V4 guided-authoring contract.
 - `docs/adr/0009-logbook-only-shows-published-sessions.md` — Workbench pipeline ownership (Logbook unit refined by 0011).
 - `docs/architecture/data-paths.md` — runtime data directory and store ownership.
 - `docs/reference/daemon-api.md` — daemon HTTP API.
@@ -79,7 +80,7 @@ Useful scripts from `package.json`:
 
 `npm run install:electron-dev-launcher` **must be run from the checkout you intend to run**. The desktop entry and systemd unit hardwire that path. After switching branches/worktrees/main, reinstall the launcher or Masthead Dev will keep serving a stale tree.
 
-Dogfood Logbook may be **empty after artifact cutover** until Workbench completes V3 enrichment and
+Dogfood Logbook may be **empty after artifact cutover** until Workbench completes V4 guided enrichment and
 publication — that is expected, not a broken connection.
 
 ## Where to go next
@@ -98,5 +99,24 @@ publication — that is expected, not a broken connection.
 - Keep the `src/core`/`src/daemon` boundary clear: core is transformation logic; daemon owns runtime state and persistence.
 - Logbook has **no** bulk enrich UI; bulk/session-library chrome is deleted. Workbench owns compile and publish.
 - An enriched dossier means the original canonical dossier structure rendered after current durable enrichment; agents never author its body.
-- `workbench-authoring-v3` uses selected sessions. Artifact suggestions are nonbinding, optional authoring may produce zero or more artifacts, and finish publishes atomically.
+- `workbench-authoring-v4` uses durable requests and daemon-grouped assignments. The agent follows one
+  next action at a time; the first accepted assignment remains staged for operator approval.
+
+## Guided authoring vocabulary
+
+Guided authoring request = the durable Workbench selection and campaign policy.
+
+Assignment = one daemon-grouped authoring unit containing at most 12 sessions.
+
+Knowledge opportunity = nonbinding evidence that may support a runbook, ADR, or incident timeline.
+
+Opportunity disposition = authored, dismissed, merged, or changed kind, with evidence-backed rationale.
+
+Canary = the first staged assignment of at most 3 sessions, reviewed by an operator before publication.
+
+Next action = the single command Masthead requires from the agent at the current assignment state.
+
+The three-session canary uses a complete strong opportunity group of at most three sessions or
+diverse dossier-only sessions. Masthead never splits a larger strong opportunity merely to make the
+canary; request creation returns `guided_canary_not_constructible` and persists nothing instead.
 - For new source or setup behavior, check both `src/daemon/sources/` and renderer Sources controllers; onboarding spans both layers.

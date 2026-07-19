@@ -1,5 +1,36 @@
 # Masthead Product Release Gate
 
+> **V4 supersession:** The checked V1–V3 items below are preserved historical evidence. They do not
+> prove `workbench-authoring-v4`, authorize production recovery, or satisfy the guided-authoring
+> release gate. Every V4 item remains unchecked until new evidence is recorded against the exact
+> release candidate.
+
+## Guided authoring V4 gates
+
+- [ ] Capabilities advertise `workbench-authoring-v4`, one next action, and an instance-bound launcher;
+      V1, V2, and V3 remain audit-only and mutation attempts return `authoring_contract_retired`.
+- [ ] Copy Agent Prompt persists one guided authoring request and copies only its opaque request ID
+      and instance-bound start command, with no session list or multi-step recipe.
+- [ ] The daemon groups assignments of at most 12 sessions using strong opportunity joins first and
+      dossier-only groups second.
+- [ ] The three-session canary uses a complete strong group of at most three or diverse dossier-only
+      sessions; an impossible canary returns `guided_canary_not_constructible` and persists nothing.
+- [ ] Every assignment traverses all canonical evidence pages before draft review, and every
+      substantive dossier or optional-artifact claim has typed verbatim support.
+- [ ] High-signal opportunities require an evidence-backed disposition, while unsupported optional
+      kinds create neither artifacts nor blanket not-applicable output.
+- [ ] The failed bulk-template corpus is rejected for incomplete inspection, protocol leakage,
+      negligible enrichment, unsupported completion, duplicate templates, and copied dismissals.
+- [ ] The first accepted assignment remains staged until operator approval, then finish publishes one
+      assignment atomically and releases the next.
+- [ ] Development and production launcher manifests cannot collide, and every authoring mutation
+      verifies daemon URL, database ID, build SHA, manifest path, and instance identity.
+- [ ] Workbench and Logbook refresh after external authoring writes without requiring an app restart.
+- [ ] Isolated fixture, latency, packaged smoke, responsive inspection, and human-reviewed production
+      canary evidence are complete under the separate production authorization boundary.
+
+## Preserved historical V3 release record
+
 ## Fresh launch
 - [ ] No daemon running: Masthead starts compatible daemon.
 - [ ] Legacy daemon running: Masthead isolates it and starts current daemon.

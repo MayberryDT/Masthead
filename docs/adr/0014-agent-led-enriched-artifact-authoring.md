@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted.
+Superseded by ADR 0015.
+
+This ADR is preserved as implementation history for `workbench-authoring-v3`. ADR 0015 defines the
+current guided-authoring contract.
 
 ## Context
 

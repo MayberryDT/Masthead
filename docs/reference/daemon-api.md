@@ -36,10 +36,19 @@ Clients should reject a daemon that does not identify `product: "masthead"` with
 - `GET /workbench/not-added-summary` returns aggregate Not Added to Logbook counts by reason.
 - `GET /workbench/not-added?includeDetails=true&limit=...` explicitly inspects Not Added to Logbook sessions.
 - `GET /workbench/missing-sessions?limit=...` remains a compatibility read endpoint backed by the Workbench pipeline queue.
-- `GET /workbench/authoring/capabilities` returns the stable daemon-owned transport protocol (`masthead.workbench.authoring/v1`), installed CLI command, database identity, `workbench-authoring-v3` bundle version, `selected_session_canonical_evidence` policy, 12-session run limit, nonbinding-suggestion flag, and supported operations. Bridge-safe read.
-- `GET /workbench/authoring/runs/:runId` returns one durable run, its selected sessions and claims, evidence revision state, structured findings, accepted bundle when present, and immutable completion report when finished. Historical V1/V2 runs remain readable for audit. Bridge-safe read.
-- `GET /workbench/authoring/runs/:runId/context` returns the original canonical dossier representation for every selected run session, in run order, plus the run's nonbinding artifact suggestions and pinned evidence revision. Bridge-safe read.
-- `GET /workbench/authoring/runs/:runId/evidence?sessionId=...` returns cursor-paginated canonical redacted evidence for one selected run session. Optional params are `cursor`, `limit` (1–250), `order=asc|desc`, `kind=all|user|assistant|tools|checkpoints|files|signals`, and `query` (or `q`). Bridge-safe read.
+- `GET /workbench/authoring/capabilities` advertises `workbench-authoring-v4`, policy
+  `guided-authoring-v1`, the instance-bound launcher, database/build/manifest identity, assignment
+  limits, and the guided operations `start`, `inspect`, `save`, `review`, and `finish`. Bridge-safe read.
+- `GET /workbench/authoring/requests/:requestId` returns one durable guided authoring request, its
+  assignments, campaign state, and single required next action. Bridge-safe read.
+- `GET /workbench/authoring/canaries/pending` returns staged V4 canary drafts awaiting operator review.
+  Bridge-safe read.
+- `GET /workbench/authoring/assignments/:assignmentId/inspect` returns the next canonical evidence
+  page and records complete-coverage progress only on the writable primary daemon.
+- `GET /workbench/authoring/assignments/:assignmentId/review` returns structured editorial findings
+  and the next required action. Bridge-safe read.
+- Legacy `GET /workbench/authoring/runs/:runId`, context, evidence, status, and completion-receipt reads
+  remain available for immutable V1, V2, and V3 audit history; they are not resumable authoring work.
 - `GET /live/state` returns latest live runtime-state reports. Optional query params include `runtime`, `sourceSessionId`, `canonicalSessionId`, and `freshOnly=0|1`.
 - `GET /projects` lists known projects.
 - `GET /imports` lists import jobs.
@@ -84,10 +93,23 @@ Write endpoints are local daemon operations. They are not exposed through MCP.
 - `POST /workbench/sessions/:sessionId/claim` claims a publish-path session for an operator. Optional body: `{ "claimedBy"?: string, "ttlSeconds"?: number }` (defaults `workbench_ui`, `900`). Returns `{ ok: true, claims: [...] }` with `claimId`. Primary-only; not bridge-safe.
 - `POST /workbench/claims/:claimId/release` releases an active claim. Optional body: `{ "reason"?: string }` (default `released`). Returns `{ ok: true, claim }` or `404` when the claim is missing. Primary-only; not bridge-safe.
 - `POST /workbench/sessions/:sessionId/quality` marks capture quality. Body is either `{ "status": "passed" | "failed", "reason"?: string, "actorId"?: string }` or `{ "mode": "precheck", "actorId"?: string }`. Precheck runs capture quality heuristics then marks pass/fail. Actor defaults to user `workbench_ui`. Failing quality on an already published session returns `409` with `cannot_fail_quality_on_published_session`. Primary-only; not bridge-safe.
-- `POST /workbench/authoring/suggestions` accepts `{ "sessionIds": ["..."] }` for 1–12 selected sessions and returns nonbinding `WorkbenchArtifactSuggestionDto[]`. This operation performs read-only domain analysis and is safe through the worktree bridge.
-- `POST /workbench/authoring/runs` opens or idempotently reuses one V3 run. Body: `{ "actorId": "...", "databaseId": "...", "sessionIds": ["..."] }` for 1–12 unique selected sessions. `candidateId` is rejected. A database mismatch or ineligible session fails before claims or output writes. Primary daemon only; blocked by the read-only bridge.
-- `POST /workbench/authoring/runs/:runId/submit` validates and stores one `workbench-authoring-v3` bundle `{ bundleVersion, runId, evidenceRevision, sessionEnrichments, artifacts }` plus structured findings. The agent must enrich every selected session and may author zero or more optional artifacts. Submit writes no output rows. The body limit is 5 MiB. Primary daemon only; blocked by the read-only bridge.
-- `POST /workbench/authoring/runs/:runId/finish` is the only normal dossier-publication path. It atomically applies current enrichment before rebuilding and publishing one canonical dossier per selected session, publishes any accepted optional artifacts, updates current-only search and pipeline state, releases claims, records Activity, and stores a V3 completion receipt. Retry returns the same receipt without duplicates. Historical V1/V2 runs are audit-only and cannot submit or finish. Primary daemon only; blocked by the read-only bridge.
+- `POST /workbench/authoring/requests` creates one durable V4 request from the Workbench selection and
+  campaign policy. The daemon plans assignments and a legal canary before committing anything. If it
+  cannot choose a complete strong group of at most three sessions or diverse dossier-only sessions,
+  it returns `guided_canary_not_constructible` and persists nothing. Primary daemon only.
+- `POST /workbench/authoring/requests/:requestId/start` claims and starts the released assignment.
+- `POST /workbench/authoring/assignments/:assignmentId/draft` validates and saves one grounded
+  `workbench-authoring-v4` draft after complete evidence traversal. It creates no Logbook rows.
+- `POST /workbench/authoring/requests/:requestId/canary-decision` records operator approval or rejection
+  of the staged three-session canary.
+- `POST /workbench/authoring/assignments/:assignmentId/finish` atomically applies enrichment, rebuilds
+  canonical dossiers, publishes accepted optional artifacts, records revisions and Activity, releases
+  claims, stores an idempotent receipt, and releases the next assignment. All V4 mutations verify
+  daemon URL, database ID, build SHA, canonical manifest path, and instance identity immediately before
+  calling the service. They are primary-only and blocked by the read-only bridge.
+- Legacy V3 `POST /workbench/authoring/runs`, submit, and finish mutations are audit-only endpoints.
+  They return HTTP 409 with `{ "code": "authoring_contract_retired" }` before opening claims or writing
+  enrichment, drafts, artifacts, or receipts. V1 and V2 mutations are retired on the same boundary.
 - `POST /imports/:importJobId/cancel` cancels an import job.
 - `POST /imports/:importJobId/retry` queues a retry.
 - `POST /imports/repair/preview` accepts `{ "importJobIds": ["..."] }` and returns a read-only,
@@ -119,7 +141,15 @@ npm run check:endpoint-matrix
 
 `npm run doctor:json` includes a `sources-pipeline` check with scan freshness, connected source count, transcript coverage, enrichment coverage, import failures, unrecognized-schema count, and repair recommendations. The check is read-only and reports warnings from observed daemon data only.
 
-`npm run doctor` also verifies `artifact_authoring` health capability, the complete authoring operation contract, the capabilities-reported executable command, and that the installed CLI reaches the same database identity. It checks focused live connector status, the Sources V2 `harness-connectors` snapshot (`GET /sources/connectors`; warns when any found harness is `needs_action`, `not_installed`, or `error`), live-state endpoint health, live capture kill-switch environment variables, recent normalized hook events that include transcript paths but still have no useful transcript messages or token rows, and that MCP exposes only read-only tools. A hook transcript warning usually means transcript import is not approved, the daemon was started with `MASTHEAD_HOOK_TRANSCRIPT_CATCHUP=0`, the recovery sweep has not run yet, or the referenced transcript file cannot be imported.
+`npm run doctor` also verifies `artifact_authoring` health capability, the complete guided operation
+contract, the instance-bound executable command, and equality of daemon URL, database ID, build SHA,
+and manifest identity. It checks focused live connector status, the Sources V2 `harness-connectors`
+snapshot (`GET /sources/connectors`; warns when any found harness is `needs_action`, `not_installed`,
+or `error`), live-state endpoint health, live capture kill-switch environment variables, recent
+normalized hook events that include transcript paths but still have no useful transcript messages or
+token rows, and that MCP exposes only read-only tools. A hook transcript warning usually means
+transcript import is not approved, the daemon was started with `MASTHEAD_HOOK_TRANSCRIPT_CATCHUP=0`,
+the recovery sweep has not run yet, or the referenced transcript file cannot be imported.
 
 ## Failed V1 recovery boundary
 

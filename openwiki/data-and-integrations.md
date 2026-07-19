@@ -41,9 +41,12 @@ Important contracts:
 - **`GET /logbook/search`** is an artifact-only compatibility alias. It returns `artifacts`, never session rows.
 - `GET /sessions` and session detail routes remain for evidence, Workbench, and compile — not the primary Logbook listing.
 - `GET /workbench/sessions` (and related Workbench reads) expose package-path pipeline state.
-- `GET /workbench/authoring/candidates` exposes keyset-paginated positive-evidence candidates and advances one bounded discovery page.
-- `POST /workbench/authoring/runs` opens one selection-scoped V3 run from `{ actorId, databaseId, sessionIds }`.
-- `POST /workbench/authoring/runs/:runId/finish` is the only normal dossier-publication path; it applies current agent enrichment before rebuilding canonical dossier snapshots.
+- V4 authoring request and assignment reads expose the durable campaign, current assignment, complete
+  evidence coverage, review state, and one required next action.
+- `POST /workbench/authoring/requests` creates one durable guided authoring request; assignment start,
+  draft, canary-decision, and finish mutations verify the instance manifest before writing.
+- Historical V1, V2, and V3 status and receipt reads remain available for audit. Legacy V3 open,
+  submit, and finish mutations return `authoring_contract_retired` before writing.
 - `GET /sources/connectors` and hook routes support Sources V2 live connect.
 - Write endpoints (`/ingest`, Workbench mutations, `/data/delete`, etc.) stay local to the daemon and are not exposed through MCP.
 
@@ -56,13 +59,18 @@ requires that exact unchanged hash. It preserves live/shared/manual/published st
 unsafe or drifted plan, and stages replacement imports only for eligible source/job plans. Always
 exercise repair against a disposable database copy before authorizing work on an active store.
 
-Workbench enrichment and optional-artifact authoring go through Workbench/CLI paths with receipts. Normal `mastheadctl workbench` authoring commands are thin daemon HTTP calls. A V3 run covers 1–12 selected sessions; the agent enriches every selected session and may submit zero or more grounded optional artifacts. There is **no Logbook bulk-enrich UI or primary bulk-enrich product path**.
+Workbench enrichment and optional-artifact authoring go through Workbench/CLI paths with receipts.
+Normal `mastheadctl workbench author` commands are thin daemon HTTP calls through an instance-bound
+launcher. A V4 request is split by the daemon into assignments of at most 12 sessions; the agent
+traverses complete evidence, enriches every assignment session, and may submit zero or more grounded
+optional artifacts. There is **no Logbook bulk-enrich UI or primary bulk-enrich product path**.
 
 The original dossier is different: the daemon snapshots `SessionDossierDto` as
 `canonical-session-dossier-v1`, and Logbook renders that immutable body through
 the original dossier presentation. An authoring agent has no dossier-body write
-path. Optional artifacts (`runbook`, `adr`, `incident_timeline`) exist only for
-positive-evidence candidates; no candidate means no optional work and no N/A prose.
+path. Knowledge opportunities for `runbook`, `adr`, and `incident_timeline` are nonbinding. High-signal
+opportunities require an evidence-backed disposition; low-signal or unsupported kinds create no
+artifact and no blanket N/A prose.
 
 ## MCP
 
@@ -86,10 +94,16 @@ Session/transcript tools remain for compile-time evidence. Full list: `docs/refe
 
 `src/enrichment/enrichmentCoordinator.ts` turns session facts into durable derived records (capsules, live summaries, search projections). The pipeline is evidence-sensitive: it fingerprints facts and avoids rewriting a current result when the fingerprint and provider match.
 
-Published knowledge reaches Logbook on two explicit paths: the daemon publishes
-canonical dossier snapshots, while a candidate-sized V2 run validates and
-atomically publishes one supported runbook, ADR, or incident timeline. Enrichment
-alone does not put a row in Logbook.
+Published knowledge reaches Logbook through accepted V4 assignments. The daemon rebuilds canonical
+dossier snapshots from grounded enrichment and atomically publishes them with any supported runbook,
+ADR, or incident timeline. Enrichment or a saved draft alone does not put a row in Logbook. The first
+accepted assignment is a three-session canary capped at three sessions and remains staged until
+operator approval.
+
+The planner chooses a complete strong opportunity group of at most three sessions or diverse
+dossier-only sessions for that canary. It never breaks a larger strong opportunity to fill the
+canary; if no legal canary exists, request creation returns `guided_canary_not_constructible` and
+persists nothing.
 
 ## Failed V1 recovery
 
@@ -99,8 +113,8 @@ the exact failed population. `prepare-v1-recovery --db <path> --json` acquires
 exclusive writer ownership and retains one verified SQLite-consistent backup.
 `invalidate-v1-generation --db <path> --audit-hash <sha256> --confirm --json`
 re-audits and removes only the hash-matched artifact/search/provenance rows in one
-transaction, resets affected sessions for canonical dossier publication and V2
-candidate discovery, releases matching claims, and preserves V1 runs and receipts.
+transaction, resets affected sessions for canonical dossier publication and current guided-authoring
+eligibility, releases matching claims, and preserves V1 runs and receipts.
 `restore-v1-recovery --db <active> --backup <sibling masthead.sqlite.backup-current>
 --audit-hash <sha256> --confirm --json` is the offline rollback command. It holds
 daemon-equivalent ownership through staged verification, atomic replacement, and
