@@ -995,7 +995,7 @@ Run:
 
 ```bash
 npx vitest run src/shared/__tests__/instanceIdentity.test.ts src/core/__tests__/daemonCompatibility.test.ts src/core/__tests__/liveDevLauncher.test.ts src/electron/__tests__/cliLauncher.test.ts src/electron/__tests__/daemonLauncher.test.ts src/electron/__tests__/mainCliLauncher.test.ts src/electron/__tests__/packagedCliCommand.test.ts src/electron/__tests__/productionLauncher.test.ts src/daemon/__tests__/healthService.test.ts src/daemon/__tests__/workbenchAuthoringApi.test.ts src/cli/__tests__/authoringCli.test.ts src/daemon/__tests__/doctorAuthoring.test.ts
-npm run rehearse:production-activation
+npm run rehearse:production-activation -- --bundle <absolute-packaged-bundle>
 ```
 
 Expected: PASS; tests prove simultaneous dev and production launchers cannot overwrite each other, Electron and `npm run dev` install launchers before primary spawn, the daemon alone publishes and conditionally removes its manifest after bind, health/protocol/current-capability/doctor checks expose one matching canonical identity, the pure guard rejects every current-identity mismatch, and the stable-binding predicate permits only a nonce/PID change across restart. Production tests spawn a real child and terminate it after every activation and finalization mutation boundary, then recover from a new process and prove the surface is wholly old or wholly committed candidate. Multi-process races prove all lifecycle commands share one lease, startup cannot continue from a rolled-back stale configuration, fake/stale/mismatched manifests and missing or changed writer guards cannot authorize cleanup, active-byte drift blocks finalization, and a crash during finalization can be retried to exactly one bundle with no receipt, journal, staged file, or stale helper left. `scripts/masthead-production-activation-rehearsal.js` repeats the operational CLI sequence and crash matrix against its own temporary home, production root, data directory, database, manifest, and dynamic port, refuses every live production path, and cleans up in `finally`; `package.json` exposes it as `rehearse:production-activation`. Tasks 8 and 9 add the zero-database-write and end-to-end request-continuation proofs once their service operations and HTTP routes exist.
@@ -1858,12 +1858,259 @@ git commit -m "feat: guide complete authoring evidence inspection"
 - Create: `src/workbench/authoring/guidedAuthoringQuality.ts`
 - Create: `src/workbench/authoring/__fixtures__/failedV3TemplateCampaign.ts`
 - Create: `src/workbench/authoring/__tests__/guidedAuthoringQuality.test.ts`
+- Modify: `src/shared/workbenchAuthoring.ts`
 - Modify: `src/workbench/authoring/artifactQuality.ts`
+- Modify: `src/workbench/authoring/authoringSchemas.ts`
+- Modify: `src/workbench/authoring/evidenceCatalog.ts`
 - Modify: `src/workbench/authoring/guidedAuthoringService.ts`
+- Modify: `src/workbench/authoring/__fixtures__/durableArtifactCorpus.ts`
+- Modify: `src/workbench/authoring/durableArtifactCorpusAcceptance.ts`
+- Modify: `src/workbench/authoring/__tests__/guidedAuthoringSchemas.test.ts`
+- Modify: `src/workbench/authoring/__tests__/evidenceCatalog.test.ts`
+- Modify: `src/workbench/authoring/__tests__/artifactQuality.test.ts`
+- Modify: `src/workbench/authoring/__tests__/guidedAuthoringService.test.ts`
+- Modify: `src/workbench/authoring/__tests__/durableArtifactCorpus.test.ts`
 
 **Interfaces:**
 - Consumes: V4 bundles, canonical pre-enrichment dossiers, evidence-by-ref, request-wide accepted drafts, evidence coverage, and opportunity definitions.
 - Produces: `validateGuidedAuthoringDraft()` and structured field-specific findings.
+
+Define the pure quality boundary exactly:
+
+```ts
+export type GuidedQualityOpportunity = {
+  opportunityId: string;
+  suggestedKind: WorkbenchAutomaticArtifactKind;
+  signalStrength: "high" | "medium";
+  summary: string;
+  evidenceRefs: string[];
+  provenanceSessionIds: string[];
+};
+
+export type GuidedAcceptedDraftForQuality = {
+  assignmentId: string;
+  draftRevision: number;
+  evidenceRevision: string;
+  draft: GuidedAuthoringBundleV4;
+};
+
+export type GuidedAuthoringValidationInput = {
+  bundle: GuidedAuthoringBundleV4;
+  assignment: Pick<
+    GuidedAuthoringAssignmentDto,
+    "assignmentId" | "requestId" | "evidenceRevision" | "sessionIds" | "opportunityIds"
+  >;
+  canonicalDossiersBySession: ReadonlyMap<string, SessionDossierDto>;
+  evidenceByRef: ReadonlyMap<string, WorkbenchValidationEvidence>;
+  coverage: GuidedEvidenceCoverageDto[];
+  opportunities: GuidedQualityOpportunity[];
+  /** Exact acceptedDraftRevision row from every other request assignment that still has one. */
+  requestAcceptedDrafts: GuidedAcceptedDraftForQuality[];
+};
+
+export const GUIDED_AUTHORING_FINDING_CODES = [
+  "guided_assignment_mismatch", "guided_evidence_revision_mismatch",
+  "missing_session_enrichment", "unexpected_session_enrichment",
+  "incomplete_evidence_inspection", "invalid_session_claim_path",
+  "missing_session_claim_support", "invalid_session_support_kind", "unsupported_claim_excerpt",
+  "evidence_outside_session", "claim_support_ref_not_declared", "negligible_enrichment_delta",
+  "unsupported_completion", "duplicate_session_template", "protocol_leakage",
+  "missing_opportunity_disposition", "unexpected_opportunity_disposition",
+  "invalid_opportunity_evidence", "invalid_opportunity_artifact_link", "invalid_opportunity_merge",
+  "unexpected_artifact_draft", "unsupported_opportunity_dismissal",
+  "incomplete_artifact_rubric", "artifact_requires_raw_evidence", "missing_claim_support",
+  "missing_required_support_kind", "missing_root_cause_support", "invalid_support_kind_evidence",
+  "invalid_timeline_order", "invalid_timeline_support", "duplicate_artifact_content"
+] as const;
+
+export type GuidedAuthoringFindingCode = typeof GUIDED_AUTHORING_FINDING_CODES[number];
+export type GuidedAuthoringFinding = Omit<WorkbenchAuthoringFinding, "code"> & {
+  code: GuidedAuthoringFindingCode;
+};
+
+export function validateGuidedAuthoringDraft(
+  input: GuidedAuthoringValidationInput
+): { accepted: boolean; findings: GuidedAuthoringFinding[] };
+
+// guidedAuthoringService.ts; orchestration helper, not part of the HTTP DTO.
+export function buildGuidedAuthoringValidationInput(
+  db: MastheadDatabase,
+  input: {
+    trustedAssignmentId: string;
+    loadedAssignment: GuidedAuthoringAssignmentDto;
+    bundle: GuidedAuthoringBundleV4;
+  }
+): GuidedAuthoringValidationInput;
+```
+
+`guidedAuthoringQuality.ts` remains pure and database-free. The builder is given the trusted route or
+mutation-envelope assignment ID and the assignment loaded from that ID; it never chooses what to load
+from `bundle.assignmentId`. It builds this input from the
+already persisted Task 3 plan and current Task 6 state:
+reuse Task 6's internal exact-revision coverage computation; call `getSessionDossier()` once per
+assignment member; call the new `getAuthoringValidationEvidenceByRef(db, sessionIds)` evidence-catalog
+helper; filter `listGuidedOpportunities(requestId)` by the persisted assignment opportunity IDs; then
+walk `getGuidedAssignments(requestId)` and select only each other assignment's exact
+`acceptedDraftRevision` row from `listGuidedDraftReviews()`. Do not include superseded reviews, the
+current assignment's own history, or a mutable detector rerun.
+
+The builder must not throw merely because `bundle.assignmentId` or `bundle.evidenceRevision` differs;
+it returns the trusted loaded assignment plus the submitted bundle so the pure validator emits
+`guided_assignment_mismatch` or `guided_evidence_revision_mismatch`. A mismatch between
+`trustedAssignmentId` and `loadedAssignment.assignmentId` is an internal service invariant failure,
+not an author finding. Task 8's `saveGuidedDraft()` must build this input and validate it inside its
+owned `BEGIN IMMEDIATE`, before inserting a draft review. If any expensive read is prepared before the
+transaction, save must re-read and compare the assignment row, exact-revision coverage, canonical
+dossiers/evidence hash, persisted opportunity set, and other assignments' accepted revisions inside
+the transaction before findings can persist.
+
+Add optional `artifactDraftId?: string` and `opportunityId?: string` to
+`WorkbenchAuthoringFinding`. All failures in this task have severity `error`; `accepted` is true exactly when no error finding
+exists. Emit findings in stable assignment-session order, then support path, persisted opportunity
+order, artifact draft order, and code. The total comparator is category rank
+`assignment/revision/coverage = 0`, `session grounding/delta/completion/duplicate/protocol = 1`,
+`opportunity = 2`, `artifact/rubric = 3`; then assignment session ordinal, opportunity ordinal,
+artifact array index, path, code, and message, with missing ordinals/paths sorting last. Use these codes rather than generic `invalid_bundle`:
+`guided_assignment_mismatch`, `guided_evidence_revision_mismatch`,
+`missing_session_enrichment`, `unexpected_session_enrichment`,
+`incomplete_evidence_inspection`, `invalid_session_claim_path`,
+`missing_session_claim_support`, `invalid_session_support_kind`, `unsupported_claim_excerpt`,
+`evidence_outside_session`, `claim_support_ref_not_declared`, `negligible_enrichment_delta`,
+`unsupported_completion`, `duplicate_session_template`, `protocol_leakage`,
+`missing_opportunity_disposition`, `unexpected_opportunity_disposition`,
+`invalid_opportunity_evidence`, `invalid_opportunity_artifact_link`, `invalid_opportunity_merge`,
+`unexpected_artifact_draft`, `unsupported_opportunity_dismissal`,
+`incomplete_artifact_rubric`, `artifact_requires_raw_evidence`, `missing_claim_support`,
+`missing_required_support_kind`, `missing_root_cause_support`, `invalid_support_kind_evidence`,
+`invalid_timeline_order`, `invalid_timeline_support`, and `duplicate_artifact_content`.
+
+Parser-detected duplicate session, opportunity, disposition, and artifact draft IDs remain schema errors and have
+no unreachable quality finding codes or quality tests. Map `ArtifactQualityFinding` deterministically:
+pass through `unsupported_claim_excerpt`, `missing_claim_support`,
+`missing_required_support_kind`, `missing_root_cause_support`, `invalid_support_kind_evidence`,
+`invalid_timeline_order`, and `invalid_timeline_support`; map
+`unsupported_authoring_protocol_language` and `authoring_protocol_leakage` to `protocol_leakage`; and
+map `duplicate_human_content` to `duplicate_artifact_content`. Convert the artifact-quality
+dot/bracket path segment-by-segment to RFC 6901, escape `~` and `/`, prefix it with
+`/artifacts/{index}/output`, and attach the draft's `seedSessionId`, `artifactDraftId`, and
+`artifactKind`. A missing source path maps to `/artifacts/{index}/output`. Never discard an
+artifact-quality error merely because the guided layer also emits a rubric finding.
+
+Finding identity is exact. Assignment-envelope findings use `/assignmentId` or `/evidenceRevision`.
+Coverage and missing-session findings use the assignment session's expected
+`/sessionEnrichments/{assignmentSessionIndex}` plus `sessionId`; unexpected-session findings use the
+submitted `/sessionEnrichments/{bundleIndex}` plus its submitted `sessionId`; every other session
+finding extends that submitted pointer and carries the same `sessionId`. Missing-opportunity findings
+use the expected `/opportunityDispositions/{assignmentOpportunityIndex}` plus `opportunityId`;
+unexpected and all other opportunity findings use the submitted disposition index plus
+`opportunityId`. Artifact-output quality, rubric, raw-evidence, and duplicate-content findings use
+`/artifacts/{index}/output/...` plus `sessionId: seedSessionId`, `artifactDraftId`, and `artifactKind`;
+artifact relationship findings use the exact disposition, envelope, or output pointer declared in the
+table below. All paths are canonical RFC 6901 pointers. Add an ordered-object test, rather than
+checking codes alone:
+
+Use this exhaustive violation-to-identity map. `S` is the submitted session-enrichment index, `C` is
+the submitted claim-support index, `O` is the submitted disposition index, `E` is its evidence-ref
+index, `A` is the submitted artifact index, and `P` is the artifact-quality source path converted to
+RFC 6901. Expected missing rows use the persisted assignment ordinal instead of a submitted index.
+No validator branch may select a different code or a less-specific pointer:
+
+| Violation | Code | Exact path | Required identity |
+| --- | --- | --- | --- |
+| Bundle assignment differs from the trusted assignment | `guided_assignment_mismatch` | `/assignmentId` | none |
+| Bundle evidence revision differs from the trusted assignment | `guided_evidence_revision_mismatch` | `/evidenceRevision` | none |
+| Expected assignment session is absent | `missing_session_enrichment` | `/sessionEnrichments/{assignmentSessionIndex}` | expected `sessionId` |
+| Submitted session is outside the assignment | `unexpected_session_enrichment` | `/sessionEnrichments/{S}` | submitted `sessionId` |
+| Expected coverage row is missing, repeated, stale, empty, partial, or incomplete | `incomplete_evidence_inspection` | `/sessionEnrichments/{assignmentSessionIndex}` | expected `sessionId` |
+| Claim-support path is unknown, noncanonical, unresolved, or a duplicate `(path,evidenceRef)` after its first occurrence | `invalid_session_claim_path` | `/sessionEnrichments/{S}/claimSupport/{C}/path` | submitted `sessionId` |
+| Populated claim-bearing enrichment field has no support | `missing_session_claim_support` | `/sessionEnrichments/{S}/enrichment{claimPointer}` | submitted `sessionId` |
+| Support kind differs from the exhaustive path/kind map | `invalid_session_support_kind` | `/sessionEnrichments/{S}/claimSupport/{C}/supportKind` | submitted `sessionId` |
+| Support excerpt is short or absent from canonical evidence | `unsupported_claim_excerpt` | `/sessionEnrichments/{S}/claimSupport/{C}/excerpt` | submitted `sessionId` |
+| Support ref is missing from canonical evidence or owned by another session | `evidence_outside_session` | `/sessionEnrichments/{S}/claimSupport/{C}/evidenceRef` | submitted `sessionId` |
+| Submitted durable evidence ref is missing from canonical evidence or owned by another session | `evidence_outside_session` | `/sessionEnrichments/{S}/enrichment{ownerPointer}/{refIndex}` | submitted `sessionId` |
+| Otherwise-valid claim support ref is absent from the field's declared durable ref owner | `claim_support_ref_not_declared` | `/sessionEnrichments/{S}/claimSupport/{C}/evidenceRef` | submitted `sessionId` |
+| Session lacks the required counted title/summary or dossier delta | `negligible_enrichment_delta` | `/sessionEnrichments/{S}/enrichment` | submitted `sessionId` |
+| Summary/verification state violates the completion matrix | `unsupported_completion` | `/sessionEnrichments/{S}/enrichment/sessionSummary/state` | submitted `sessionId` |
+| Session prose duplicates an earlier assignment-ordered submitted or accepted-request session | `duplicate_session_template` | `/sessionEnrichments/{S}/enrichment` | later submitted `sessionId` |
+| Unsupported guided protocol text occurs in enrichment | `protocol_leakage` | `/sessionEnrichments/{S}/enrichment{matchedClaimPointer}` | submitted `sessionId` |
+| Expected persisted opportunity has no disposition | `missing_opportunity_disposition` | `/opportunityDispositions/{assignmentOpportunityIndex}` | expected `opportunityId` |
+| Submitted disposition is outside the persisted assignment set | `unexpected_opportunity_disposition` | `/opportunityDispositions/{O}` | submitted `opportunityId` |
+| Disposition cites no evidence | `invalid_opportunity_evidence` | `/opportunityDispositions/{O}/evidenceRefs` | submitted `opportunityId` |
+| Disposition evidence ref is outside the opportunity or its provenance | `invalid_opportunity_evidence` | `/opportunityDispositions/{O}/evidenceRefs/{E}` | submitted `opportunityId` |
+| Authored/changed-kind link names no submitted draft, or a later disposition reuses an already-linked draft | `invalid_opportunity_artifact_link` | `/opportunityDispositions/{O}/artifactDraftId` | submitted `opportunityId` and linked `artifactDraftId` when present |
+| Authored/changed-kind link names the wrong kind | `invalid_opportunity_artifact_link` | `/opportunityDispositions/{O}/artifactKind` | submitted `opportunityId` and linked `artifactDraftId` |
+| Linked draft seed/provenance is outside the assignment, omits required opportunity provenance, or differs from output provenance | `invalid_opportunity_artifact_link` | the first offending `/artifacts/{A}/seedSessionId`, `/artifacts/{A}/provenanceSessionIds`, or `/artifacts/{A}/output/provenanceSessionIds` in that order | submitted `opportunityId`, `seedSessionId`, `artifactDraftId`, and `artifactKind` |
+| Changed-kind rationale does not justify both kinds | `unsupported_opportunity_dismissal` | `/opportunityDispositions/{O}/rationale` | submitted `opportunityId` |
+| Merge is self-referential, missing, cyclic, terminates in dismissal, or has incomplete terminal provenance | `invalid_opportunity_merge` | `/opportunityDispositions/{O}/mergedIntoOpportunityId` | submitted `opportunityId` |
+| Submitted draft is unlinked | `unexpected_artifact_draft` | `/artifacts/{A}` | `seedSessionId`, `artifactDraftId`, and `artifactKind` |
+| Dismissal rationale is unsupported, nonspecific, or duplicated | `unsupported_opportunity_dismissal` | `/opportunityDispositions/{O}/rationale` | submitted `opportunityId` |
+| Unsupported guided protocol text occurs in a disposition rationale | `protocol_leakage` | `/opportunityDispositions/{O}/rationale` | submitted `opportunityId` |
+| Guided rubric axis is absent | `incomplete_artifact_rubric` | `/artifacts/{A}/output{GUIDED_RUBRIC_AXIS_PATHS[kind][axis]}` | `seedSessionId`, `artifactDraftId`, and `artifactKind` |
+| Required field contains a raw-evidence placeholder | `artifact_requires_raw_evidence` | `/artifacts/{A}/output{placeholderPointer}` | `seedSessionId`, `artifactDraftId`, and `artifactKind` |
+| Artifact-quality finding has a source path | its deterministic pass-through/mapped code above | `/artifacts/{A}/output{P}` | `seedSessionId`, `artifactDraftId`, and `artifactKind` |
+| Artifact-quality finding has no source path | its deterministic pass-through/mapped code above | `/artifacts/{A}/output` | `seedSessionId`, `artifactDraftId`, and `artifactKind` |
+| Optional artifact duplicates submitted or accepted-request artifact content | `duplicate_artifact_content` | `/artifacts/{A}/output` | `seedSessionId`, `artifactDraftId`, and `artifactKind` |
+
+Define and export `GUIDED_RUBRIC_AXIS_PATHS` with these exact synthetic missing-field pointers so a
+missing axis still has stable field identity: runbook `trigger -> /problemSignature`, `preconditions ->
+/preconditions`, `performed_steps -> /fixSteps`, `expected_results_and_verification ->
+/validationChecks`, `failure_or_rollback_handling -> /risksOrGaps`; ADR `context -> /context`, `decision
+-> /decision`, `alternatives -> /alternatives`, `consequences -> /consequences`, `reversal_conditions
+-> /consequences`; incident `symptom_and_impact -> /impact`, `timeline -> /timeline`, `root_cause ->
+/rootCause`, `contributing_factors -> /contributingFactors`, `remediation -> /remediation`, and
+`recovery_verification -> /status`.
+
+Make the identity table executable through one ordered-object case per distinct violation variant and
+exact path, not merely one case per table row. Expand every combined `or` clause into separate cases
+even when the variants share a code and pointer. This includes all three linked-draft provenance
+pointers, every leaf of `GUIDED_RUBRIC_AXIS_PATHS`, the source-path and missing-source-path forms of
+every artifact-quality pass-through and mapped code, and every missing, wrong, reused, and unlinked
+artifact-relationship variant. Tests compare the whole result, not selected members:
+
+```ts
+test.each(GUIDED_FINDING_IDENTITY_CASES)("emits exact finding identity: $name", ({ input, expected }) => {
+  expect(validateGuidedAuthoringDraft(input).findings).toEqual(expected);
+});
+
+test("orders mixed failures by the declared total comparator", () => {
+  expect(validateGuidedAuthoringDraft(allFindingFamiliesInScrambledInput()).findings)
+    .toEqual(ALL_GUIDED_FINDINGS_IN_EXACT_ORDER);
+});
+```
+
+```ts
+expect(validateGuidedAuthoringDraft(mixedFailureInput()).findings).toEqual([
+  {
+    code: "guided_evidence_revision_mismatch",
+    message: "Bundle evidence revision does not match the assignment evidence revision.",
+    severity: "error",
+    path: "/evidenceRevision"
+  },
+  {
+    code: "missing_session_claim_support",
+    message: "Claim-bearing session field requires one valid purpose support.",
+    severity: "error",
+    path: "/sessionEnrichments/0/enrichment/sessionDossier/purpose",
+    sessionId: "session:a"
+  },
+  {
+    code: "invalid_opportunity_evidence",
+    message: "Disposition evidence must belong to the persisted opportunity.",
+    severity: "error",
+    path: "/opportunityDispositions/0/evidenceRefs/0",
+    opportunityId: "opportunity:a"
+  },
+  {
+    code: "missing_claim_support",
+    message: "Populated claim-bearing field requires canonical claim support: problemSignature.affectedScope.",
+    severity: "error",
+    path: "/artifacts/0/output/problemSignature/affectedScope",
+    sessionId: "session:a",
+    artifactDraftId: "draft:a",
+    artifactKind: "runbook"
+  }
+]);
+```
 
 - [ ] **Step 1: Encode the exact incident as an adversarial fixture**
 
@@ -1893,9 +2140,29 @@ export function failedV3TemplateBundle(input: FailedV3TemplateInput): GuidedAuth
 }
 ```
 
-Include protocol/setup text, empty decisions, completed summaries with unknown verification, and normalized template duplication.
+Include protocol/setup text, empty decisions, completed summaries with unknown verification, and
+normalized template duplication. `failedInput()` must pair that bundle with Task 6 coverage containing
+only the sampled first/last refs; claim-support sampling alone is not inspection coverage and cannot
+prevent `incomplete_evidence_inspection`.
 
-- [ ] **Step 2: Write failing adversarial and positive tests**
+- [ ] **Step 2: Move relationship semantics behind structured review**
+
+Keep `parseGuidedAuthoringBundleV4()` fail-closed for JSON shape, additional properties, nonblank
+fields, duplicate session/opportunity/draft IDs, and disposition-conditional fields:
+
+- `authored` and `changed_kind` require `artifactDraftId` plus `artifactKind` and forbid a merge target.
+- `merged` requires `mergedIntoOpportunityId` and forbids artifact linkage.
+- `dismissed` forbids both artifact and merge linkage.
+
+Remove only the parser checks that resolve a disposition against another submitted draft: draft
+existence, linked draft kind equality, and one-disposition-per-draft. Those relationships also depend
+on the persisted opportunity set and belong in Task 7 so draft save can return field-specific findings
+instead of throwing `invalid_guided_authoring_bundle`. Schema tests continue to prove malformed
+conditional fields throw, while missing/wrong/reused/unlinked draft relationships now parse and are
+rejected by `validateGuidedAuthoringDraft()` with `invalid_opportunity_artifact_link` or
+`unexpected_artifact_draft`.
+
+- [ ] **Step 3: Write the full failing quality matrix**
 
 ```ts
 test("rejects the production bulk-template failure shape", () => {
@@ -1928,9 +2195,105 @@ test("requires every authored disposition to resolve to one matching artifact dr
   const result = validateGuidedAuthoringDraft(authoredDispositionWithMissingDraft());
   expect(result.findings.map(({ code }) => code)).toContain("invalid_opportunity_artifact_link");
 });
+
+test.each(SUBSTANTIVE_SESSION_PATH_CASES)(
+  "requires one correctly typed, session-owned support for %s",
+  ({ path, supportKind }) => {
+    expect(codes(validateGuidedAuthoringDraft(withoutSupport(path))))
+      .toContain("missing_session_claim_support");
+    expect(codes(validateGuidedAuthoringDraft(withSupportKind(path, wrongKind(supportKind)))))
+      .toContain("invalid_session_support_kind");
+  }
+);
+
+test.each([
+  ["short excerpt", shortExcerptInput(), "unsupported_claim_excerpt"],
+  ["excerpt absent from evidence", absentExcerptInput(), "unsupported_claim_excerpt"],
+  ["evidence owned by another session", crossSessionSupportInput(), "evidence_outside_session"],
+  ["support ref missing from durable refs", undeclaredDurableRefInput(), "claim_support_ref_not_declared"]
+])("rejects %s", (_label, input, code) => {
+  expect(codes(validateGuidedAuthoringDraft(input))).toContain(code);
+});
+
+test.each([
+  ["identical baseline", identicalBaselineInput()],
+  ["boilerplate wrapper around baseline", wrappedBaselineInput()],
+  ["metadata-only changes", metadataOnlyDeltaInput()]
+])("rejects negligible enrichment delta: %s", (_label, input) => {
+  expect(codes(validateGuidedAuthoringDraft(input))).toContain("negligible_enrichment_delta");
+});
+
+test.each(COMPLETION_HONESTY_CASES)("enforces completion honesty: %s", ({ input, expectedCode }) => {
+  expect(codes(validateGuidedAuthoringDraft(input))).toContain(expectedCode);
+});
+
+test("rejects a template copied from an accepted earlier assignment", () => {
+  expect(codes(validateGuidedAuthoringDraft(duplicateOfAcceptedRequestDraft())))
+    .toContain("duplicate_session_template");
+});
+
+test.each([
+  missingDispositionInput(),
+  unexpectedDispositionInput(),
+  dispositionEvidenceOutsideSignalInput(),
+  authoredWrongKindInput(),
+  unchangedChangedKindInput(),
+  unlinkedArtifactInput(),
+  mergeMissingTargetInput(),
+  mergeCycleInput(),
+  mergeIntoDismissalInput()
+])("rejects invalid opportunity resolution", (input) => {
+  expect(validateGuidedAuthoringDraft(input).accepted).toBe(false);
+});
+
+test.each(["runbook", "adr", "incident_timeline"] as const)(
+  "accepts a specific supported %s dismissal and rejects its blanket copy",
+  (kind) => {
+    expect(codes(validateGuidedAuthoringDraft(supportedDismissalInput(kind))))
+      .not.toContain("unsupported_opportunity_dismissal");
+    expect(codes(validateGuidedAuthoringDraft(blanketDismissalInput(kind))))
+      .toContain("unsupported_opportunity_dismissal");
+  }
+);
+
+test.each(GUIDED_RUBRIC_FAILURE_CASES)("rejects missing %s rubric evidence", ({ input, axis }) => {
+  expect(validateGuidedAuthoringDraft(input).findings).toContainEqual(
+    expect.objectContaining({ code: "incomplete_artifact_rubric", message: expect.stringContaining(axis) })
+  );
+});
+
+test("service quality input uses only current persisted request state", () => {
+  seedSupersededAndAcceptedDraftReviews(db);
+  changeSuggestionDetectorOutputWithoutChangingPersistedOpportunities();
+  const loadedAssignment = getGuidedAssignment(db, "assignment:current");
+  const input = buildGuidedAuthoringValidationInput(db, {
+    trustedAssignmentId: "assignment:current",
+    loadedAssignment,
+    bundle: currentDraft()
+  });
+  expect(input.opportunities.map(({ opportunityId }) => opportunityId))
+    .toEqual(currentAssignmentPersistedOpportunityIds());
+  expect(input.requestAcceptedDrafts).toEqual([exactOtherAssignmentAcceptedRevision()]);
+  expect(input.coverage.every(({ evidenceRevision }) =>
+    evidenceRevision === input.assignment.evidenceRevision
+  )).toBe(true);
+});
+
+test("builder preserves envelope mismatches for pure structured validation", () => {
+  const loadedAssignment = getGuidedAssignment(db, "assignment:current");
+  const input = buildGuidedAuthoringValidationInput(db, {
+    trustedAssignmentId: "assignment:current",
+    loadedAssignment,
+    bundle: currentDraft({ assignmentId: "assignment:tampered", evidenceRevision: "revision:stale" })
+  });
+  expect(validateGuidedAuthoringDraft(input).findings).toEqual(expect.arrayContaining([
+    expect.objectContaining({ code: "guided_assignment_mismatch", path: "/assignmentId" }),
+    expect.objectContaining({ code: "guided_evidence_revision_mismatch", path: "/evidenceRevision" })
+  ]));
+});
 ```
 
-- [ ] **Step 3: Run the quality tests and verify failure**
+- [ ] **Step 4: Run the quality tests and verify failure**
 
 Run:
 
@@ -1940,52 +2303,499 @@ npx vitest run src/workbench/authoring/__tests__/guidedAuthoringQuality.test.ts
 
 Expected: FAIL because V4 quality validation does not exist.
 
-- [ ] **Step 4: Implement exact grounding and enrichment checks**
+- [ ] **Step 5: Implement exact session grounding and enrichment delta**
 
-Export:
+Treat support paths as RFC 6901 JSON Pointers. Decode `~0` and `~1`, reject noncanonical or
+out-of-bounds segments, and require the resolved value to be a nonblank string. Use this exhaustive
+claim-bearing path/kind map:
+
+| Submitted path | Required support kind | Durable evidence-ref owner |
+| --- | --- | --- |
+| `/sessionTitle/text` | `reuse` | `sessionTitle.evidenceRefs` |
+| `/sessionSummary/text` | `outcome` | `sessionSummary.evidenceRefs` |
+| `/sessionDossier/purpose` | `purpose` | `sessionDossier.evidenceRefs` |
+| `/sessionDossier/outcome` | `outcome` | `sessionDossier.evidenceRefs` |
+| Every nonblank `/sessionDossier/keyWork/{i}` | `change` | `sessionDossier.evidenceRefs` |
+| Every nonblank `/sessionDossier/decisions/{i}` | `decision` | `sessionDossier.evidenceRefs` |
+| Every nonblank `/sessionDossier/blockers/{i}` | `blocker` | `sessionDossier.evidenceRefs` |
+| `/sessionDossier/verification/summary` | `verification` | `sessionDossier.verification.evidenceRefs` |
+| Every nonblank `/sessionDossier/verification/commands/{i}` | `verification` | `sessionDossier.verification.evidenceRefs` |
+| Every nonblank `/sessionDossier/verification/failures/{i}` | `blocker` | `sessionDossier.verification.evidenceRefs` |
+| Nonblank continuation `nextStep`, `openQuestions/{i}`, and `constraints/{i}` | `continuation` | `sessionDossier.evidenceRefs` |
+
+Each assignment session appears exactly once in the bundle, coverage, and canonical dossier map; no
+other session may appear. Every coverage row must carry the exact assignment-wide evidence revision,
+have `totalItems > 0`, `accessedItems === totalItems`, and `complete: true`, otherwise emit
+`incomplete_evidence_inspection`.
+
+For every submitted support, require the path to resolve, the exact support kind above, an existing
+canonical evidence ref owned by the same session, and an excerpt of at least 20 characters after
+whitespace normalization that occurs verbatim after the same normalization in that evidence. The ref
+must also appear in the durable evidence-ref array named by the table. Reject unknown extra support
+paths, duplicate `(path,evidenceRef)` entries, refs owned by another session, and nested durable refs
+that are missing or cross-session. Reuse the canonical `WorkbenchValidationEvidence` representation;
+do not compare against raw/unredacted transcript text. Every evidence-ref membership check compares
+the `EvidenceRef.id` string, never object identity or serialized object equality. A verification
+command is claim-bearing because it says what was run; a failure is claim-bearing because it records
+what failed, so neither gets an unsupported nonclaim exemption.
+
+Define `negligible_enrichment_delta` mechanically. For each claim-bearing path, compare the submitted
+normalized string with the same path in the canonical dossier's pre-submission `durableEnrichment`.
+A canonical dossier with missing `durableEnrichment` has an empty baseline; this is not an input error,
+and every populated submitted claim-bearing path is compared against absence.
+A path counts as a session-specific delta only when:
+
+1. it has a valid typed support;
+2. it is neither equal to nor a normalized substring/superstring wrapper of the baseline whose extra
+   tokens are all from the fixed boilerplate set `canonical`, `evidence`, `record`, `records`,
+   `request`, `reviewed`, `selected`, `session`, `shows`, and `indicates`; and
+3. it shares at least two distinct non-stopword tokens of four or more characters with its own valid
+   support excerpts.
+
+Use one fixed stopword set for delta and rationale specificity: `a`, `an`, `and`, `are`, `as`, `at`,
+`be`, `by`, `for`, `from`, `in`, `is`, `it`, `of`, `on`, `or`, `that`, `the`, `this`, `to`, `was`,
+`were`, and `with`.
+
+Require at least one counted title-or-summary delta and at least one counted dossier delta per session.
+Changes only to confidence, basis, generated metadata, evidence-ref arrays, or template wrappers do not
+count. The sparse positive fixture still passes by grounding a specific title/summary and an honest
+purpose or continuation statement in its small evidence set.
+
+- [ ] **Step 6: Enforce completion honesty and request-wide duplication**
+
+Use the existing verification semantics and export the existing artifact-quality evidence predicate
+instead of forking tool/checkpoint/final-assistant success rules. Apply this exact state matrix:
+
+- `completed` plus `unknown`, `failed`, or `mixed` verification emits `unsupported_completion`.
+- `passed` requires a valid `/sessionDossier/verification/summary` support whose evidence satisfies
+  the positive verification predicate.
+- `completed` plus `missing` is allowed only when both `sessionSummary.text` and at least one dossier
+  warning match `not run`, `not verified`, `no verification`, `verification missing`, or `unverified`.
+- Any other `missing` or `unknown` verification must use the same explicit summary-and-warning
+  disclosure. `failed` or `mixed` must use a non-completed summary state and a supported verification
+  narrative that discloses the failure.
+
+For duplication, concatenate title, summary, purpose, outcome, key work, decisions, blockers,
+verification summary/commands/failures, continuation, and warnings in stable path order. Lowercase,
+normalize whitespace, tokenize Unicode letters/numbers, and form a set of consecutive five-token
+shingles. Compare every submitted session with every other submitted session and with every different
+session in `requestAcceptedDrafts`. When both sides have at least one shingle and
+`intersection / union > 0.82`, emit `duplicate_session_template` on the later submitted session.
+Never compare a session with its own historical draft, and keep optional-artifact exact fingerprint
+checks separate.
+
+- [ ] **Step 7: Detect only unsupported protocol leakage**
+
+Add an explicit detector policy without changing legacy behavior:
 
 ```ts
-export function validateGuidedAuthoringDraft(
-  input: GuidedAuthoringValidationInput
-): { accepted: boolean; findings: WorkbenchAuthoringFinding[] };
+export type ArtifactProtocolPolicy = "legacy" | "guided_v4";
+
+export type ArtifactProtocolField = { path: string; value: string };
+
+export function findUnsupportedProtocolFields(
+  fields: ArtifactProtocolField[],
+  options: {
+    policy: ArtifactProtocolPolicy;
+    findingCode: "unsupported_authoring_protocol_language" | "authoring_protocol_leakage";
+    isSupportedMatch: (input: { path: string; matchedText: string }) => boolean;
+  }
+): ArtifactQualityFinding[];
+
+export function findUnsupportedProtocolLanguage(
+  output: Record<string, unknown>,
+  supports: WorkbenchClaimSupport[],
+  evidenceByRef: Map<string, WorkbenchValidationEvidence>,
+  findingCode?: "unsupported_authoring_protocol_language" | "authoring_protocol_leakage",
+  options?: { policy?: ArtifactProtocolPolicy; provenanceSessionIds?: string[] }
+): ArtifactQualityFinding[];
 ```
 
-Require:
+The omitted/default policy is `legacy`; the existing four-argument call remains source-compatible,
+and its scan fields, phrase families, finding codes, paths, and suppression behavior remain
+byte-for-byte compatible for V1-V3. `validateArtifactQuality()` adds an optional
+`protocolPolicy?: ArtifactProtocolPolicy` and passes it through. The guided validator calls artifact
+quality with `protocolPolicy: "guided_v4"`, and calls `findUnsupportedProtocolFields()` directly for
+enrichment and disposition fields; all returned protocol codes map to `protocol_leakage` as declared
+above. Guided mode scans enrichment human prose, optional-artifact
+human prose including runbook commands, and disposition rationales, while excluding claim-support
+metadata, evidence excerpts/refs, IDs, and structural machine fields. Its narrow pattern families are:
+self-process claims about reading all evidence or limiting claims; literal guided commands such as
+`workbench author inspect` and `workbench author save`; next-action/handoff boilerplate; copied
+`<recommended_plugins>` blocks; copied AGENTS/system/developer directives; and agent setup text such
+as `You are Codex`. Generic words such as `CLI`, `prompt`, `plugin`, `agent`, `Masthead`, and real
+operational commands do not match by themselves.
 
-```text
-- Every assignment session has one enrichment and complete evidence coverage.
-- Every substantive field path resolves in the submitted enrichment.
-- Every support excerpt is at least 20 normalized characters and occurs verbatim in the referenced canonical evidence owned by that session.
-- Title, summary, purpose, outcome, every key-work item, every decision, every blocker, verification narrative, and continuation claims have support when present.
-- A completed summary cannot use unknown verification; missing verification must be stated explicitly in the summary and dossier warnings.
-- Normalized title, summary, and dossier prose must add session-specific information beyond the canonical baseline.
-- Request-wide normalized five-token shingles above 0.82 Jaccard similarity produce duplicate_session_template.
-- Unsupported copied machine-request prose, instruction boilerplate, plugin recommendations, AGENTS directives, and authoring commands produce `protocol_leakage`; the detector must not reject supported sessions whose actual user-requested work is to design or debug those protocols.
-- Every persisted high-signal opportunity has exactly one disposition. `authored` and `changed_kind` resolve to exactly one matching artifact draft; `merged` resolves to another persisted opportunity whose final disposition produces an artifact; dismissal and changed-kind rationales cite signal-specific evidence that supports the judgment.
-- Generic or materially duplicated dismissal rationales across distinct opportunities fail even when they each cite a real ref. Kind-specific tests must prove one supported dismissal and one unsupported blanket dismissal for runbook, ADR, and incident signals.
+Make the guided families executable constants and test each positive plus nearby negative prose:
+
+```ts
+export const GUIDED_V4_PROTOCOL_PATTERNS = [
+  /\b(?:i|we) (?:read|reviewed|inspected) (?:all|every) (?:the )?(?:evidence|session|transcript)s?\b/i,
+  /\b(?:i|we) (?:limited|restricted) (?:my|our|the) claims?\b/i,
+  /\b(?:masthead )?workbench author (?:start|inspect|save|review|finish)\b/i,
+  /\b(?:next action|handoff|continue in (?:a|the) next (?:task|session))\b/i,
+  /<recommended_plugins>[\s\S]*?<\/recommended_plugins>/i,
+  /\b(?:AGENTS\.md|system message|developer message|developer instructions)\b/i,
+  /\bYou are (?:Codex|an AI assistant)\b/i
+] as const;
 ```
 
-- [ ] **Step 5: Enforce the Task 5 independent-reuse rubrics**
+Run every pattern independently and report the exact matched substring as `matchedText`; do not use
+the broad legacy phrase list as a fallback in `guided_v4` mode.
 
-Consume `GUIDED_ARTIFACT_RUBRICS` from `guidedAuthoringPolicy.ts`; do not redefine the matrix in the
-quality module. Reuse existing typed optional-artifact schemas and claim-support validation, enforce
-every rubric entry for the relevant kind, and add a finding when a draft requires reopening raw
-evidence to understand or execute it.
+Suppression is field-specific and cannot be borrowed from a neighboring claim. For enrichment, the
+exact matched JSON-pointer field must have valid typed same-session support, and the matched phrase
+must occur inside its excerpt and the canonical evidence containing that excerpt. For an optional
+artifact, convert the artifact-quality dot/bracket path to the exact guided output pointer; that same
+artifact field must have valid `output.claimSupport`, its evidence owner must appear in the artifact's
+provenance, and the matched phrase must occur inside both excerpt and canonical evidence. A
+disposition rationale has no artifact claim-support path, so it suppresses only when the matched phrase
+occurs in the canonical text of one of that disposition's `evidenceRefs`, the ref is also in the
+persisted opportunity's evidence refs, and its owner is one of the opportunity's provenance sessions.
+Do not invent a rationale support path that the schema cannot express.
 
-- [ ] **Step 6: Run focused and corpus quality tests**
+Add table tests for every guided pattern family on enrichment, artifact, and disposition text; every
+nearby generic negative; same-field supported suppression; refusal to borrow support from an adjacent
+field; artifact provenance-owner mismatch; and disposition evidence that is real but absent from the
+persisted opportunity. Keep the existing legacy detector tests unchanged and add a compatibility test
+proving the omitted policy and `{ policy: "legacy" }` return identical findings.
+
+- [ ] **Step 8: Resolve persisted opportunities and merge graphs**
+
+The exact set of disposition IDs must equal the persisted `assignment.opportunityIds`, and the exact
+quality opportunity set must equal the same IDs. The parser has already rejected duplicate disposition
+IDs, so quality emits structured findings only for missing or unexpected resolution. Every disposition evidence ref must be in that opportunity's persisted
+`evidenceRefs` and owned by one of its persisted provenance sessions.
+
+- `authored` resolves to exactly one linked draft whose kind equals `suggestedKind`; the draft's
+  provenance must contain every persisted provenance session for that opportunity.
+- `changed_kind` resolves to exactly one linked draft whose kind differs from `suggestedKind`; its
+  rationale must name a deficiency axis for the suggested kind and an applicability axis for the new
+  kind, and the draft's provenance must contain every persisted provenance session for that
+  opportunity.
+- Every submitted draft is linked by exactly one `authored` or `changed_kind` disposition. Its seed and
+  provenance must be assignment members, seed must be in provenance, and envelope provenance must
+  exactly equal `output.provenanceSessionIds`.
+- A `merged` target must be another persisted assignment opportunity. Reject self-targets, missing
+  targets, and cycles. Following the graph must terminate at `authored` or `changed_kind`, never
+  `dismissed`, and the terminal artifact provenance must contain the merged opportunity provenance.
+  The terminal artifact must therefore contain the union of provenance session IDs from its terminal
+  authored/changed-kind opportunity and every opportunity merged into that terminal.
+
+Define supported dismissal/change rationale deterministically: at least 40 normalized characters;
+at least two distinct significant tokens shared with the opportunity summary or its cited canonical
+evidence; and at least one kind-specific axis token. Runbook axes are `trigger`, `precondition`,
+`step`, `procedure`, `repeat`, `verification`, `rollback`, `failure`, and `operational`; ADR axes are
+`decision`, `alternative`, `tradeoff`, `consequence`, `reversal`, and `durable`; incident axes are
+`incident`, `impact`, `timeline`, `root cause`, `remediation`, `recovery`, and `verification`.
+Fingerprints that are equal, or rationale five-token shingle Jaccard above 0.82 across distinct
+opportunities, emit `unsupported_opportunity_dismissal` even when every rationale cites a real ref.
+
+- [ ] **Step 9: Enforce V4-only independent-reuse rubrics**
+
+Call existing `validateArtifactQuality()` for every linked artifact so claim-path coverage, typed
+evidence classes, verification semantics, timeline ordering, root-cause uncertainty, join support,
+and protocol leakage remain one implementation. Compare optional artifacts in the submitted bundle
+and `requestAcceptedDrafts` with the existing `substantiveFingerprint()` so exact duplicate artifact
+content remains separate from session-template shingle detection. Apply
+`GUIDED_ARTIFACT_RUBRICS` only from the guided validator; do not tighten legacy V2/V3 validation.
+Map its axes to the existing artifact schema exactly:
+
+- Runbook: trigger = nonempty `problemSignature`; preconditions = `preconditions`; performed steps =
+  `fixSteps` or `commands`; expected results and verification = `validationChecks` with valid
+  verification support; failure/rollback handling = a nonempty `deadEnds`, `risksOrGaps`, or
+  `preventionNotes` entry containing failure, fallback, recovery, revert, or rollback guidance.
+- ADR: nonblank supported `decision` and `context`; nonempty supported `alternatives` and
+  `consequences`; reversal conditions = at least one consequence containing `revisit`, `reverse`,
+  `revert`, `replace`, `supersede`, `if`, `when`, `unless`, or `until`.
+- Incident timeline: supported symptom/impact; nonempty chronologically valid supported timeline;
+  supported root cause or the existing exact explicit-unknown form; nonempty supported contributing
+  factors and remediation; recovery verification = terminal status with valid verification support.
+
+Emit `incomplete_artifact_rubric` with the missing axis. Emit `artifact_requires_raw_evidence` when a
+required field uses placeholders such as `see transcript`, `see logs`, `as above`, `TBD`, or
+`refer to the session`, because the artifact then cannot be used independently.
+
+- [ ] **Step 10: Add a real V4 corpus path without changing V3 gates**
+
+Keep `runDurableArtifactCorpus()` and every existing V3 metric/assertion byte-for-byte in behavior.
+Extend `durableArtifactCorpus.ts` with V4 builders for: an honest sparse dossier-only assignment; a
+supported real Masthead protocol session; a complete reusable runbook, ADR, and incident; and the
+known 12-session template failure. Add this separate, executable V4 contract alongside the V3 runner:
+
+```ts
+export type GuidedQualityCorpusCaseResult = {
+  caseId: "sparse" | "supported_protocol" | "runbook" | "adr" | "incident" | "failed_v3_template";
+  accepted: boolean;
+  findingCodes: GuidedAuthoringFindingCode[];
+};
+
+export type GuidedArtifactReuseResult = {
+  kind: "runbook" | "adr" | "incident_timeline";
+  query: string;
+  expected: Record<string, unknown>;
+  derived: Record<string, unknown>;
+  toolCalls: [];
+  passed: boolean;
+};
+
+export type GuidedAuthoringQualityCorpusReport = {
+  cases: GuidedQualityCorpusCaseResult[];
+  reuseTasks: GuidedArtifactReuseResult[];
+  failures: string[];
+  passed: boolean;
+};
+
+export function deriveGuidedReuseAnswer(
+  kind: GuidedArtifactReuseResult["kind"],
+  output: Record<string, unknown>,
+  query: string
+): Record<string, unknown>;
+
+export function guidedAuthoringQualityCorpusFailures(
+  report: Omit<GuidedAuthoringQualityCorpusReport, "failures" | "passed">
+): string[];
+
+export type GuidedAuthoringQualityCorpusOptions = {
+  /** Test-only replacement for the accepted case output used by each reuse task. */
+  reuseOutputsByKind?: Partial<
+    Record<GuidedArtifactReuseResult["kind"], Record<string, unknown>>
+  >;
+};
+
+export function runGuidedAuthoringQualityCorpus(
+  options?: GuidedAuthoringQualityCorpusOptions
+): GuidedAuthoringQualityCorpusReport;
+
+export const FAILED_V3_TEMPLATE_EXPECTED_FINDING_CODES = [
+  "incomplete_evidence_inspection",
+  "negligible_enrichment_delta",
+  "unsupported_completion",
+  "duplicate_session_template",
+  "protocol_leakage",
+  "unsupported_opportunity_dismissal"
+] as const;
+```
+
+`deriveGuidedReuseAnswer()` is a pure projection over the supplied accepted artifact body. It has no
+database, MCP, transcript, session, or evidence-catalog parameter, and every result records the
+literal `toolCalls: []`. It must read the artifact body; returning fixture constants or branching only
+on `kind`/`query` is a test failure. Define these exact source projections:
+
+```ts
+export const GUIDED_REUSE_SOURCE_PATHS = {
+  runbook: {
+    trigger: "/problemSignature/affectedScope",
+    actions: "/fixSteps",
+    verification: "/validationChecks",
+    failureHandling: "/risksOrGaps"
+  },
+  adr: {
+    decision: "/decision",
+    rejectedAlternative: "/alternatives/0",
+    revisitWhen: "/consequences/0"
+  },
+  incident_timeline: {
+    impact: "/impact",
+    cause: "/rootCause",
+    recovery: "/remediation/0",
+    verification: "/timeline/-1/summary"
+  }
+} as const;
+```
+
+The corpus fixtures put the exact reusable answer at those paths. `deriveGuidedReuseAnswer()` decodes
+only those declared RFC 6901 paths, preserves arrays for runbook `actions`, `verification`, and
+`failureHandling`, and returns the keyed projection shown below. Scalar projections are valid only
+when they are nonblank strings. Array projections are valid only when they are nonempty arrays of
+nonblank strings; an empty array or any blank or wrongly typed member invalidates the whole projected
+key. `/-1/` is a corpus projection token
+meaning the last array element; it is not accepted by guided claim-support pointer parsing. A missing,
+wrongly typed, or blank projected value yields an absent result key rather than a fallback constant,
+so deep equality fails. The fixed query must equal that kind's declared query; an unknown query
+returns `{}`. Use these fixed queries and exact expected projections:
+
+```ts
+const GUIDED_REUSE_CASES = [
+  {
+    kind: "runbook",
+    query: "When migration 41 hits the existing-index failure, what should I do, verify, and use for rollback or failure handling?",
+    expected: {
+      trigger: "Migration 41 fails because the target index already exists.",
+      actions: ["Confirm the existing index definition matches migration 41, then mark the migration applied."],
+      verification: ["Run the migration smoke check and confirm schema version 41."],
+      failureHandling: ["If the definitions differ, stop, restore the pre-migration backup, and reconcile the index manually."]
+    }
+  },
+  {
+    kind: "adr",
+    query: "What local-first storage decision was made, what alternative was rejected, and when should it be revisited?",
+    expected: {
+      decision: "Keep the canonical Masthead session database local in SQLite.",
+      rejectedAlternative: "Make a hosted service the canonical session store.",
+      revisitWhen: "Revisit when multi-device concurrent writers become a supported product requirement."
+    }
+  },
+  {
+    kind: "incident_timeline",
+    query: "What happened during the writer-lease outage, what caused it, how was it recovered, and how was recovery verified?",
+    expected: {
+      impact: "Workbench publishing was unavailable while reads remained available.",
+      cause: "A stale writer lease survived an unclean daemon exit.",
+      recovery: "Validate the stale owner, clear the lease, and restart the production daemon.",
+      verification: "A canary draft saved and published once, and the database integrity check passed."
+    }
+  }
+] as const;
+```
+
+Add source-dependence tests before the report assertions. They must derive from a deep clone of each
+accepted artifact output, mutate the artifact rather than the result, and prove every declared source
+path controls its result key:
+
+```ts
+test.each(GUIDED_REUSE_SOURCE_MUTATION_CASES)(
+  "derives $kind.$resultKey from $sourcePath",
+  ({ kind, query, output, sourcePath, resultKey, sentinel }) => {
+    const changed = structuredClone(output);
+    setGuidedReuseSource(changed, sourcePath, sentinel);
+    expect(deriveGuidedReuseAnswer(kind, changed, query)[resultKey]).toEqual(sentinel);
+    expect(deriveGuidedReuseAnswer(kind, changed, query)).not.toEqual(
+      deriveGuidedReuseAnswer(kind, output, query)
+    );
+  }
+);
+
+test.each(GUIDED_REUSE_SOURCE_MUTATION_CASES)(
+  "fails independent reuse when $kind source $sourcePath is removed",
+  ({ kind, query, output, sourcePath }) => {
+    const missing = structuredClone(output);
+    deleteGuidedReuseSource(missing, sourcePath);
+    expect(deriveGuidedReuseAnswer(kind, missing, query)).not.toEqual(expectedGuidedReuse(kind));
+    expect(guidedReuseResult(kind, missing, query).passed).toBe(false);
+  }
+);
+
+test.each(GUIDED_REUSE_CASES)("does not answer an undeclared $kind query from constants", ({ kind }) => {
+  expect(deriveGuidedReuseAnswer(kind, guidedAcceptedArtifactOutput(kind), "different question"))
+    .toEqual({});
+});
+```
+
+`GUIDED_REUSE_SOURCE_MUTATION_CASES` contains one row for every leaf in
+`GUIDED_REUSE_SOURCE_PATHS`. Array-valued sentinels remain arrays, scalar sentinels remain strings, and
+the incident `/-1/summary` mutator changes the existing terminal timeline entry rather than appending
+one. These tests are part of the executable corpus gate and prevent a hardcoded kind/query switch from
+passing the independent-reuse proof.
+
+Add an invalid-projection matrix covering both type directions, both blank shapes, and invalid array
+member types. A scalar path set to `[]`, an array path set to a string, a scalar path set to whitespace,
+an array path set to `[]`, an array path containing a whitespace-only member, an array path containing
+a numeric member, and an array path containing a plain-object member must each omit that result key and
+fail its reuse result. Include at least one case for every artifact kind and exercise every invalid
+shape; the numeric-member and object-member rows must be separate cases so coercing arbitrary members
+to strings cannot satisfy the gate:
+
+```ts
+test.each(GUIDED_REUSE_INVALID_SOURCE_CASES)(
+  "omits $kind.$resultKey for $invalidShape",
+  ({ kind, query, output, sourcePath, resultKey, invalidValue }) => {
+    const invalid = structuredClone(output);
+    setGuidedReuseSource(invalid, sourcePath, invalidValue);
+    expect(deriveGuidedReuseAnswer(kind, invalid, query)).not.toHaveProperty(resultKey);
+    expect(guidedReuseResult(kind, invalid, query).passed).toBe(false);
+  }
+);
+```
+
+The zero-argument corpus call uses the exact `output` object from each corresponding accepted
+runbook, ADR, or incident case. `reuseOutputsByKind` is a test-only replacement for that reuse source
+after the case has been validated; it cannot replace `expected`, `query`, or `passed`. The runner must
+call `deriveGuidedReuseAnswer(kind, selectedOutput, fixedQuery)` and compute `passed` from the returned
+value, so it cannot manufacture fixed `derived` or success values. Make that runner-level dependency
+executable for every declared source leaf:
+
+```ts
+test.each(GUIDED_REUSE_SOURCE_MUTATION_CASES)(
+  "runner derives $kind.$resultKey from $sourcePath",
+  ({ kind, output, sourcePath, resultKey, sentinel }) => {
+    const changed = structuredClone(output);
+    setGuidedReuseSource(changed, sourcePath, sentinel);
+    const report = runGuidedAuthoringQualityCorpus({
+      reuseOutputsByKind: { [kind]: changed }
+    });
+    const task = report.reuseTasks.find((candidate) => candidate.kind === kind)!;
+    expect(task.derived[resultKey]).toEqual(sentinel);
+    expect(task.passed).toBe(false);
+    expect(report.failures).toContain(`guided_reuse_answer_mismatch:${kind}`);
+  }
+);
+
+test.each(GUIDED_REUSE_SOURCE_MUTATION_CASES)(
+  "runner fails $kind reuse when $sourcePath is absent",
+  ({ kind, output, sourcePath, resultKey }) => {
+    const missing = structuredClone(output);
+    deleteGuidedReuseSource(missing, sourcePath);
+    const report = runGuidedAuthoringQualityCorpus({
+      reuseOutputsByKind: { [kind]: missing }
+    });
+    const task = report.reuseTasks.find((candidate) => candidate.kind === kind)!;
+    expect(task.derived).not.toHaveProperty(resultKey);
+    expect(task.passed).toBe(false);
+    expect(report.failures).toContain(`guided_reuse_answer_mismatch:${kind}`);
+  }
+);
+```
+
+The V4 runner builds only public `GuidedAuthoringValidationInput` values. Cases appear in the exact
+order declared by `GuidedQualityCorpusCaseResult`; each case's finding codes preserve the validator's
+total order and are deduplicated by retaining the first occurrence of each code. It requires sparse, supported-protocol, runbook, ADR, and incident cases to be accepted
+with `findingCodes: []`; the failed template must be rejected with the exact ordered code list asserted
+by `FAILED_V3_TEMPLATE_EXPECTED_FINDING_CODES`. Reuse tasks appear in runbook/ADR/incident order, set `passed` only when
+`derived` deeply equals `expected` and `toolCalls` deeply equals `[]`, and may derive only from the
+corresponding accepted artifact's `output` plus its fixed query.
+
+`guidedAuthoringQualityCorpusFailures()` emits only these deterministic values, in this order:
+
+```ts
+"guided_sparse_case_rejected"
+"guided_supported_protocol_case_rejected"
+"guided_runbook_case_rejected"
+"guided_adr_case_rejected"
+"guided_incident_case_rejected"
+"guided_failed_template_accepted"
+`guided_failed_template_missing:${code}`
+`guided_failed_template_unexpected:${code}`
+`guided_reuse_answer_mismatch:${kind}`
+`guided_reuse_used_tool:${kind}`
+"guided_corpus_finding_order_unstable"
+```
+
+Emit missing/unexpected failed-template codes in the validator's declared code order and reuse
+failures in runbook/ADR/incident order; deduplicate exact failure strings without re-sorting them.
+`report.passed` is exactly `report.failures.length === 0`. Test the entire report with `toEqual`, then
+mutate each case/reuse result and assert the exact failure array, including a nonempty tool-call cast
+at the test boundary to prove `guided_reuse_used_tool:*` fires. Do not convert legacy V3 fixtures to
+V4, route V3 through this report, or weaken any existing V3 gate.
+
+- [ ] **Step 11: Run focused, schema, service, and both corpus gates**
 
 Run:
 
 ```bash
-npx vitest run src/workbench/authoring/__tests__/guidedAuthoringQuality.test.ts src/workbench/authoring/__tests__/authoringValidation.test.ts src/workbench/authoring/__tests__/durableArtifactCorpus.test.ts
+npx vitest run src/workbench/authoring/__tests__/guidedAuthoringQuality.test.ts src/workbench/authoring/__tests__/guidedAuthoringSchemas.test.ts src/workbench/authoring/__tests__/guidedAuthoringService.test.ts src/workbench/authoring/__tests__/evidenceCatalog.test.ts src/workbench/authoring/__tests__/artifactQuality.test.ts src/workbench/authoring/__tests__/authoringValidation.test.ts src/workbench/authoring/__tests__/durableArtifactCorpus.test.ts
 ```
 
-Expected: PASS; the failed template fixture is rejected and the sparse honest case passes.
+Expected: PASS. The failed production template is rejected for incomplete coverage, protocol leakage,
+negligible delta, request-wide duplication, dishonest completion, and blanket dismissal; sparse honest
+and supported protocol work pass; every relationship and rubric failure is field-specific; service
+tests prove validation input comes only from current persisted assignment/request state; the new V4
+corpus passes; and every existing V3 corpus/validation assertion remains unchanged.
 
-- [ ] **Step 7: Commit quality enforcement**
+- [ ] **Step 12: Commit quality enforcement**
 
 ```bash
-git add src/workbench/authoring/guidedAuthoringQuality.ts src/workbench/authoring/__fixtures__/failedV3TemplateCampaign.ts src/workbench/authoring/__tests__/guidedAuthoringQuality.test.ts src/workbench/authoring/artifactQuality.ts src/workbench/authoring/guidedAuthoringService.ts
+git add src/shared/workbenchAuthoring.ts src/workbench/authoring/guidedAuthoringQuality.ts src/workbench/authoring/__fixtures__/failedV3TemplateCampaign.ts src/workbench/authoring/__tests__/guidedAuthoringQuality.test.ts src/workbench/authoring/artifactQuality.ts src/workbench/authoring/authoringSchemas.ts src/workbench/authoring/evidenceCatalog.ts src/workbench/authoring/guidedAuthoringService.ts src/workbench/authoring/__fixtures__/durableArtifactCorpus.ts src/workbench/authoring/durableArtifactCorpusAcceptance.ts src/workbench/authoring/__tests__/guidedAuthoringSchemas.test.ts src/workbench/authoring/__tests__/evidenceCatalog.test.ts src/workbench/authoring/__tests__/artifactQuality.test.ts src/workbench/authoring/__tests__/guidedAuthoringService.test.ts src/workbench/authoring/__tests__/durableArtifactCorpus.test.ts
 git commit -m "feat: enforce guided authoring quality"
 ```
 
@@ -2284,7 +3094,89 @@ Expected: FAIL because V4 staging and finish do not exist.
 
 - [ ] **Step 3: Implement staged canary review**
 
-`saveGuidedDraft()` appends a draft/review revision and stores accepted canary drafts as `staged_canary`; it changes the request to `awaiting_canary_approval`. `approveGuidedCanary()` requires `reviewedBy`, nonempty notes, matching request and assignment IDs, the exact accepted draft revision, and current evidence revision. Rejection appends an operator review, changes the assignment to `needs_revision`, and returns the request to `open` without publishing. A later revision and approval append new rows rather than overwriting either rejection or draft history.
+`saveGuidedDraft()` opens its own `BEGIN IMMEDIATE`, loads the assignment by `input.assignmentId`,
+builds `GuidedAuthoringValidationInput` from that trusted loaded assignment, runs
+`validateGuidedAuthoringDraft()`, and only then appends the draft/review revision in the same
+transaction. The initial implementation has no prepared-validation input or cache: every assignment
+row, coverage row, canonical dossier/evidence row, persisted opportunity, and accepted revision is
+loaded after the write transaction begins. Do not add a pre-transaction preparation seam for Task 8.
+If a later task introduces an explicit preparation API, that API must carry hashes for all six
+components and `saveGuidedDraft()` must re-attest them inside its transaction before findings persist;
+that conditional future behavior is not part of this task's acceptance suite.
+
+Prove the actual boundary with separate WAL connections and real lock contention. Add a test-only,
+connection-scoped transaction probe in `guidedAuthoringService.ts`; the public service signature does
+not change. `saveGuidedDraft()` invokes the probe synchronously immediately after its owned `BEGIN
+IMMEDIATE` succeeds and before loading the assignment or performing any other validation-state read.
+The probe asserts that the connection is in a transaction, announces
+`transaction_open_before_validation_reads`, and pauses worker A on an `Atomics` barrier. The production
+default is a no-op, and tests assert exactly one probe invocation per save.
+
+Make that ordering executable rather than relying on source inspection. Route the initial assignment
+load and every coverage, canonical dossier, canonical evidence, persisted-opportunity, and accepted-
+revision read used to construct the validation input through one private validation-read observer
+immediately before the underlying database access. The production observer is a no-op. The WAL fixture
+installs a connection-scoped observer that refuses a read until the transaction probe has marked the
+barrier passed, assigns a monotonic event sequence, and announces `first_validation_state_read` on its
+first invocation. Assert that the transaction probe's sequence precedes the first-read sequence and
+that every declared validation-state family was observed. A save implementation that loads the
+assignment, prepares validation, or computes review state before `BEGIN IMMEDIATE` must therefore fail
+the test before it can append a review.
+
+For each competing writer kind `assignment`, `coverage`, `canonical_dossier`, `canonical_evidence`,
+`opportunity`, and `accepted_revision`, worker A installs that probe and calls the public
+`saveGuidedDraft()`. While A is paused before its first validation read, worker B opens a separate WAL
+connection, announces `write_slot_attempted`, and executes `BEGIN IMMEDIATE` followed by the
+corresponding canonical-state mutation. Use IPC plus bounded timeouts exactly as in the Task 6 WAL
+fixture: B must not report `write_slot_acquired` or `mutation_committed` before A is released. After
+release, A must perform all validation reads, append exactly one review derived from its locked
+snapshot, and commit; only then may B acquire the write slot and commit. The later mutation may
+invalidate that review through the normal evidence or request-state rules, but it can never interleave
+with validation or persistence.
+
+```ts
+test.each(GUIDED_VALIDATION_STATE_WRITERS)(
+  "serializes save validation and persistence against a $kind writer",
+  async ({ kind, mutate }) => {
+    const fixture = await openSharedWalGuidedSaveFixture({
+      pauseAfterOwnedBeginBeforeValidationReads: true,
+      timeoutMs: 2_000
+    });
+    const saver = fixture.spawnSaveWorker(validSaveInput());
+    const opened = await fixture.waitForMessage(saver, "transaction_open_before_validation_reads", {
+      timeoutMs: 2_000
+    });
+
+    const writer = fixture.spawnStateWriter(kind, mutate);
+    await fixture.waitForMessage(writer, "write_slot_attempted", { timeoutMs: 2_000 });
+    await expect(fixture.waitForMessage(writer, "write_slot_acquired", { timeoutMs: 100 }))
+      .rejects.toThrow("bounded_timeout");
+    await expect(fixture.waitForMessage(writer, "mutation_committed", { timeoutMs: 100 }))
+      .rejects.toThrow("bounded_timeout");
+
+    fixture.releaseWithAtomics(saver);
+    const firstRead = await fixture.waitForMessage(saver, "first_validation_state_read", {
+      timeoutMs: 2_000
+    });
+    const saved = await fixture.waitForMessage(saver, "review_committed", { timeoutMs: 2_000 });
+    const acquired = await fixture.waitForMessage(writer, "write_slot_acquired", { timeoutMs: 2_000 });
+    const mutated = await fixture.waitForMessage(writer, "mutation_committed", { timeoutMs: 2_000 });
+    expect(firstRead.sequence).toBeGreaterThan(opened.sequence);
+    expect(saved.observedValidationStateFamilies)
+      .toEqual(GUIDED_VALIDATION_STATE_WRITERS.map(({ kind }) => kind));
+    expect(acquired.sequence).toBeGreaterThan(saved.sequence);
+    expect(mutated.sequence).toBeGreaterThan(saved.sequence);
+    expect(listGuidedDraftReviews(fixture.openReader(), saved.assignmentId)).toHaveLength(1);
+  }
+);
+```
+
+Accepted canary drafts are stored as `staged_canary`; save changes the request to
+`awaiting_canary_approval`. `approveGuidedCanary()` requires `reviewedBy`, nonempty notes, matching
+request and assignment IDs, the exact accepted draft revision, and current evidence revision.
+Rejection appends an operator review, changes the assignment to `needs_revision`, and returns the
+request to `open` without publishing. A later revision and approval append new rows rather than
+overwriting either rejection or draft history.
 
 Use this mutation/status matrix; reject every unlisted transition before any operation-specific write:
 
@@ -2395,10 +3287,14 @@ composable. This guarantees a changed-revision sentinel commits in the public tr
 error and cannot be captured inside an outer transaction that later rolls it back. After the top-level
 assertion, each service calls `assertStableGuidedRequestBinding()` and
 `assertGuidedAuthoringExpectedIdentity(input.expectedIdentity, input.currentIdentity)` immediately
-before their owned transaction or first repository write; request lookup, validation, and review
-computation may happen first, but no durable state may change before both guards succeed. A safe
-restart may change only the current nonce and PID while the request's creation nonce remains unchanged
-audit evidence.
+before its owned transaction or first repository write. For approve, reject, and finish, request
+lookup, validation, and review computation may happen first, but no durable state may change before
+both guards succeed. `saveGuidedDraft()` is the explicit exception: only the minimal request lookup
+needed by `assertStableGuidedRequestBinding()` may precede its owned transaction. It must not load the
+assignment, coverage, canonical dossier/evidence, persisted opportunities, accepted revisions, or
+compute draft validation/review state until `BEGIN IMMEDIATE` has succeeded and the transaction probe
+has run. A safe restart may change only the current nonce and PID while the request's creation nonce
+remains unchanged audit evidence.
 
 - [ ] **Step 4: Store structured enrichment provenance and implement one-transaction finish**
 
