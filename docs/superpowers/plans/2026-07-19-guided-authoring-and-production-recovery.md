@@ -979,10 +979,13 @@ git commit -m "fix: bind authoring cli to one masthead instance"
 
 **Files:**
 - Create: `src/workbench/authoring/guidedAuthoringPolicy.ts`
+- Create: `src/workbench/authoring/guidedAuthoringPreflight.ts`
 - Create: `src/workbench/authoring/guidedAuthoringService.ts`
 - Modify: `src/workbench/authoring/advisorySuggestions.ts`
 - Modify: `src/workbench/authoring/artifactCandidates.ts`
 - Create: `src/workbench/authoring/__tests__/guidedAuthoringService.test.ts`
+- Modify: `src/workbench/authoring/__tests__/advisorySuggestions.test.ts`
+- Modify: `src/workbench/authoring/__tests__/artifactCandidates.test.ts`
 
 **Interfaces:**
 - Consumes: `getArtifactSuggestions`, canonical evidence manifests, V4 repository operations, and request session membership.
@@ -995,14 +998,16 @@ Add these cases:
 ```ts
 test("keeps a strong multi-session opportunity in one bounded assignment", () => {
   const plan = planGuidedAssignments(selection(18), suggestions(sharedAdrAcross("a", "b", "c")));
-  expect(plan.groups.find((group) => group.opportunityIds.length > 0)?.sessionIds)
-    .toEqual(["session:a", "session:b", "session:c"]);
+  expect(plan.groups.find((group) => group.opportunityIds.length > 0)).toMatchObject({
+    coverageClasses: ["artifact_signal", "artifact_signal", "artifact_signal"],
+    sessionIds: ["session:a", "session:b", "session:c"]
+  });
   expect(plan.groups.every((group) => group.sessionIds.length <= 12)).toBe(true);
 });
 
 test("uses dossier-only groups for sessions without strong joins", () => {
   const plan = planGuidedAssignments(selection(5), []);
-  expect(plan.groups.flatMap((group) => group.sessionIds)).toEqual(selectionIds(5));
+  expect([...plan.groups.flatMap((group) => group.sessionIds)].sort()).toEqual(selectionIds(5).sort());
   expect(plan.groups.flatMap((group) => group.opportunityIds)).toEqual([]);
 });
 
@@ -1012,13 +1017,34 @@ test("chooses a diverse canary with at most three sessions", () => {
   expect(new Set(plan.canary.coverageClasses)).toEqual(new Set(["artifact_signal", "tool_heavy", "ordinary"]));
 });
 
+test("classifies the tool-heavy boundary explicitly", () => {
+  expect(classifyPlanningSession(planningSession({ toolCallCount: 49 }), false)).toBe("ordinary");
+  expect(classifyPlanningSession(planningSession({ toolCallCount: 50 }), false)).toBe("tool_heavy");
+  expect(classifyPlanningSession(planningSession({ toolCallCount: 50 }), true)).toBe("artifact_signal");
+});
+
 test.each([4, 12])("does not split a %i-session strong opportunity to manufacture a canary", (size) => {
   expect(() => planGuidedAssignments(selectionInsideOneStrongOpportunity(size), oneStrongOpportunity(size)))
     .toThrow("guided_canary_not_constructible");
 });
 
+test.each([4, 12])("uses an unjoined dossier session as canary without splitting a %i-session strong group", (size) => {
+  const plan = planGuidedAssignments(selection(size + 1), oneStrongOpportunity(size));
+  expect(plan.canary.sessionIds).toEqual([`session:${size}`]);
+  expect(plan.groups.find(({ opportunityIds }) => opportunityIds.length === 1)?.sessionIds)
+    .toEqual(selectionIds(size));
+});
+
+test("constructs a dossier canary when the request has no opportunities", () => {
+  const plan = planGuidedAssignments(selection(5), []);
+  expect(plan.canary).toMatchObject({
+    opportunityIds: [],
+    sessionIds: ["session:0", "session:1", "session:2"]
+  });
+});
+
 test("rejects an over-limit strong group without persisting a partial request", () => {
-  expect(() => createGuidedRequest(db, selectionInsideOneStrongOpportunity(13)))
+  expect(() => createGuidedRequest(db, guidedRequestInput(selectionInsideOneStrongOpportunity(13))))
     .toThrow("guided_opportunity_group_too_large");
   expect(guidedRequestCounts(db)).toEqual(emptyGuidedRequestCounts());
 });
@@ -1032,6 +1058,61 @@ test("unions overlapping strong opportunities before applying the assignment lim
 test("rejects an overlapping strong-opportunity connected component above twelve", () => {
   expect(() => planGuidedAssignments(selection(13), chainedOverlappingSuggestions(13)))
     .toThrow("guided_opportunity_group_too_large");
+});
+
+test("is stable across opportunity, provenance, and evidence-ref input order", () => {
+  const forward = planGuidedAssignments(selection(8), stableSuggestions("forward"));
+  expect(forward).toEqual(planGuidedAssignments(selection(8), stableSuggestions("reverse")));
+  expect(forward.opportunities.map(({ opportunityId }) => opportunityId))
+    .toEqual([...forward.opportunities.map(({ opportunityId }) => opportunityId)].sort());
+  expect(forward.groups.every(({ opportunityIds }) =>
+    opportunityIds.join("\n") === [...opportunityIds].sort().join("\n")))
+    .toBe(true);
+});
+
+test("assigns every selected session and opportunity exactly once", () => {
+  const plan = planGuidedAssignments(selection(18), mixedSuggestions());
+  expect(occurrenceCounts(plan.groups.flatMap(({ sessionIds }) => sessionIds)))
+    .toEqual(Object.fromEntries(selectionIds(18).map((id) => [id, 1])));
+  expect(occurrenceCounts(plan.groups.flatMap(({ opportunityIds }) => opportunityIds)))
+    .toEqual(Object.fromEntries(plan.opportunities.map(({ opportunityId }) => [opportunityId, 1])));
+  expect(plan.groups.every(({ sessionIds }) => sessionIds.length <= 12)).toBe(true);
+});
+
+test("returns the persisted current plan after later-assignment detector evidence changes", async () => {
+  const created = createGuidedRequest(db, guidedRequestInput(selectionIds(6)));
+  const before = startGuidedAssignment(db, {
+    command: "/instance/bin/mastheadctl",
+    requestId: created.request.requestId
+  });
+  changeLaterAssignmentDetectorEvidence(db);
+  expect(startGuidedAssignment(db, {
+    command: "/instance/bin/mastheadctl",
+    requestId: created.request.requestId
+  }).editorialBrief.opportunities).toEqual(before.editorialBrief.opportunities);
+});
+
+test("refuses a stale canonical baseline when current-assignment evidence changes", async () => {
+  const created = createGuidedRequest(db, guidedRequestInput(selectionIds(6)));
+  changeCurrentAssignmentEvidence(db, created.request.currentAssignmentId!);
+  expect(() => startGuidedAssignment(db, {
+    command: "/instance/bin/mastheadctl",
+    requestId: created.request.requestId
+  })).toThrow("guided_assignment_evidence_changed");
+});
+
+test("rejects non-compile-ready selection membership before any guided write", async () => {
+  markSelectionSessionQualityUnchecked(db, "session:2");
+  expect(() => createGuidedRequest(db, guidedRequestInput(selectionIds(6))))
+    .toThrow("authoring_session_not_compile_ready:session:2");
+  expect(guidedRequestCounts(db)).toEqual(emptyGuidedRequestCounts());
+});
+
+test("rolls back the complete aggregate after an injected persistence failure", async () => {
+  injectGuidedPersistenceFailure(db, "after_opportunities");
+  expect(() => createGuidedRequest(db, guidedRequestInput(selectionIds(9))))
+    .toThrow("injected_guided_request_failure");
+  expect(guidedRequestCounts(db)).toEqual(emptyGuidedRequestCounts());
 });
 ```
 
@@ -1050,26 +1131,198 @@ Expected: FAIL because the policy and service modules do not exist.
 Export:
 
 ```ts
+export const GUIDED_TOOL_HEAVY_CALL_THRESHOLD = 50;
+
+export type GuidedCoverageClass = "artifact_signal" | "tool_heavy" | "ordinary";
+
+export type GuidedPlanningSession = {
+  sessionId: string;
+  ordinal: number;
+  toolCallCount: number;
+};
+
+export type NormalizedGuidedOpportunity = {
+  opportunityId: string;
+  suggestedKind: WorkbenchAutomaticArtifactKind;
+  signalStrength: "high" | "medium";
+  summary: string;
+  signatureKey?: string;
+  evidenceRefs: string[];
+  provenanceSessionIds: string[];
+};
+
+export type GuidedAssignmentGroup = {
+  groupKey: string;
+  sessionIds: string[];
+  opportunityIds: string[];
+  /** One entry per sessionId, in the same order. */
+  coverageClasses: GuidedCoverageClass[];
+};
+
+export type GuidedAssignmentPlan = {
+  opportunities: NormalizedGuidedOpportunity[];
+  groups: GuidedAssignmentGroup[];
+  canary: GuidedAssignmentGroup;
+};
+
+export function classifyPlanningSession(
+  session: GuidedPlanningSession,
+  ownsSingletonOpportunity: boolean
+): GuidedCoverageClass;
+
 export function planGuidedAssignments(
   sessions: GuidedPlanningSession[],
   opportunities: WorkbenchArtifactSuggestionDto[]
 ): GuidedAssignmentPlan;
+
+export const GUIDED_EVIDENCE_QUESTIONS = [
+  "What did the user actually ask for?",
+  "What concrete work was performed?",
+  "What changed or was produced?",
+  "Which decisions were made and why?",
+  "What verification ran and what did it prove?",
+  "What failed, remained blocked, or stayed unresolved?",
+  "What knowledge could another person reuse without this transcript?"
+] as const;
+
+export const GUIDED_ARTIFACT_RUBRICS = {
+  runbook: ["trigger", "preconditions", "performed steps", "expected results", "verification", "failure or rollback handling"],
+  adr: ["durable decision", "context", "alternatives actually considered", "consequences", "reversal conditions"],
+  incident_timeline: ["symptoms or impact", "ordered events", "root cause", "contributing factors", "remediation", "recovery verification"]
+} as const;
 ```
 
 The implementation must:
 
 ```text
-1. Normalize strong suggestion signatures, build the session-opportunity graph, and union every overlapping strong opportunity into one connected component.
-2. Reject the entire request before persistence when any connected component exceeds 12 sessions rather than truncating provenance or placing one session in two assignments.
-3. Turn each accepted connected component into one assignment group and attach all of its opportunities.
-4. Place remaining sessions into stable dossier-only groups ordered by original selection ordinal.
-5. Choose the canary as one complete strong group of at most three sessions when available; otherwise choose up to three diverse dossier-only sessions that belong to no larger strong group.
-6. If every selected session belongs to strong groups larger than three, reject the request with `guided_canary_not_constructible`; never split a strong opportunity or duplicate a session to manufacture a canary.
-7. Preserve every selected compile-ready session exactly once for every accepted plan.
-8. Persist the normalized opportunity definitions and complete assignment plan with the request in the one Task 3 transaction; never regenerate them when starting or reviewing an assignment.
+1. Reject duplicate, blank, noncontiguous, or out-of-selection input rather than silently deduplicating it; preserve original selection ordinal for every later ordering decision.
+2. Normalize suggestion provenance by selection ordinal and normalize evidence refs lexicographically. A suggestion with two or more provenance sessions is a strong join; singleton suggestions remain attached medium-signal opportunities but do not join assignments.
+3. Derive `opportunityId` with `stableRecordId("guided-opportunity", [kind, signatureKey ?? suggestionId, ...provenanceSessionIds, ...evidenceRefs])`. Multi-session strong opportunities are `high`; singleton opportunities are `medium`. Do not include mutable summary prose or caller iteration order in the signature.
+4. Build a disjoint-set union over selected session IDs and union every multi-session strong opportunity before checking size. Overlapping A-B-C and C-D-E opportunities form one five-session component containing both opportunities.
+5. Reject the entire request before persistence when any complete connected component exceeds 12 sessions. Never truncate provenance, split the component, or place a session in two assignments.
+6. Turn each accepted strong component into one assignment group, ordered internally by selection ordinal, and attach all strong opportunities plus singleton opportunities owned by its sessions. Every strong-component member has coverage class `artifact_signal`, aligned one-for-one with `sessionIds`.
+7. Classify the remaining fallback pool with priority `artifact_signal` when a session owns a singleton suggestion, otherwise `tool_heavy` when `toolCallCount >= GUIDED_TOOL_HEAVY_CALL_THRESHOLD`, otherwise `ordinary`. `coverageClasses` has one entry per `sessionId` in the same order.
+8. Choose the canary as the complete strong group of at most three whose lowest selection ordinal is earliest when one exists. Otherwise construct one dedicated fallback canary of up to three sessions, preferring one each in fixed class order `artifact_signal`, `tool_heavy`, `ordinary`, then filling remaining slots by selection ordinal. Remove those sessions and their singleton opportunities from the fallback pool before chunking the rest into stable groups of at most 12.
+9. Sort normalized `plan.opportunities` and every group's `opportunityIds` lexicographically by `opportunityId`. Derive every finished group's `groupKey` with `stableRecordId("guided-group", [...sessionIds, ...opportunityIds])` after both arrays are normalized. Opportunity input order, provenance order, and evidence-ref order must not change opportunity IDs, group keys, or the plan.
+10. A four- through twelve-session strong component is not itself a legal canary. If a fallback session exists, use the fallback canary and retain the strong component intact; reject with `guided_canary_not_constructible` only when every selected session is trapped in strong groups larger than three. A zero-opportunity request always has a dossier-only canary of up to three sessions.
+11. Put the chosen complete strong group or dedicated fallback canary at assignment ordinal zero without changing its membership or stable key. Assert every selected compile-ready session and normalized opportunity appears exactly once and every group is at most 12.
+12. Persist the normalized opportunity definitions and complete assignment plan with the request in the one Task 3 transaction; never regenerate them when starting, inspecting, or reviewing an assignment.
 ```
 
-- [ ] **Step 4: Return an editorial brief and one next action**
+- [ ] **Step 4: Preserve unbounded advisory membership without changing historical V2 candidates**
+
+`groupCandidateSeeds()` currently slices a strong-signature group to 12 before
+`getArtifactSuggestions()` can see it. Split the detector paths with an explicit internal member-limit
+option: advisory suggestion detection is unbounded so the planner can reject a 13-session component,
+while persisted V2 candidate reconciliation retains its historical 12-member cap and existing audit
+behavior. Add detector tests proving the advisory path returns all 13 normalized provenance members,
+selection order does not change its suggestion ID, and `discoverArtifactCandidates()` still persists
+only the first deterministic 12.
+
+```ts
+test("exposes every strong-signature member to guided planning while V2 remains capped", () => {
+  const selected = seedStrongSignatureSessions(db, 13);
+  const suggestion = getArtifactSuggestions(db, selected).find(isSharedSignature)!;
+  expect(suggestion.provenanceSessionIds).toEqual([...selected].sort());
+  expect(suggestion.provenanceSessionIds).toHaveLength(13);
+  expect(getArtifactSuggestions(db, [...selected].reverse()).find(isSharedSignature)?.suggestionId)
+    .toBe(suggestion.suggestionId);
+  expect(discoverArtifactCandidates(db, selected).find(isSharedSignature)?.provenanceSessionIds)
+    .toEqual([...selected].sort().slice(0, 12));
+});
+```
+
+- [ ] **Step 5: Preflight the complete selection and persist one immutable aggregate**
+
+Create a V4-scoped `assertGuidedSelectionCompileReady()` helper in
+`guidedAuthoringPreflight.ts`. It checks every selected session exists, remains on `publish_path`, has
+an available/imported transcript, passed quality, and has usable canonical redacted evidence. Do not
+export the private V3 helpers from the legacy `authoringService.ts` or couple guided planning to a V3
+run.
+
+Export the exact preflight contract:
+
+```ts
+export type GuidedCompileReadySession = {
+  sessionId: string;
+  ordinal: number;
+  dossier: SessionDossierDto;
+  evidence: WorkbenchAuthoringEvidenceManifest["sessions"][number];
+};
+
+export type GuidedSelectionPreflightResult = {
+  sessions: GuidedCompileReadySession[];
+  manifest: WorkbenchAuthoringEvidenceManifest;
+};
+
+export function assertGuidedSelectionCompileReady(
+  db: MastheadDatabase,
+  sessionIds: string[]
+): GuidedSelectionPreflightResult;
+```
+
+Preflight rejects a blank ID first, then the first duplicate ID, then visits sessions in caller order and returns the first missing, non-publish-path, unavailable-transcript, unchecked/failed-quality, or unusable-evidence failure. It reads the canonical evidence manifest once, maps its summaries back into caller order, and returns the dossiers and measured tool-call counts consumed by planning; `createGuidedRequest()` must not repeat those reads or invent a second preflight path.
+
+Export these exact service contracts:
+
+```ts
+export type CreateGuidedRequestInput = {
+  actorId: string;
+  command: string;
+  currentIdentity: GuidedAuthoringExpectedIdentity;
+  sessionIds: string[];
+};
+
+export type CreateGuidedRequestResult = {
+  request: GuidedAuthoringRequestDto;
+  nextAction: GuidedAuthoringNextAction & { kind: "claim_next" };
+};
+
+export function createGuidedRequest(
+  db: MastheadDatabase,
+  input: CreateGuidedRequestInput
+): CreateGuidedRequestResult;
+
+export type StartGuidedAssignmentResult = {
+  assignment: GuidedAuthoringAssignmentDto;
+  editorialBrief: {
+    objective: "Produce grounded knowledge reusable without reopening raw session evidence.";
+    sessions: SessionDossierDto[];
+    opportunities: GuidedAuthoringOpportunityRecord[];
+    rubrics: typeof GUIDED_ARTIFACT_RUBRICS;
+    evidenceQuestions: typeof GUIDED_EVIDENCE_QUESTIONS;
+  };
+  nextAction: GuidedAuthoringNextAction & { kind: "inspect" };
+};
+
+export function startGuidedAssignment(
+  db: MastheadDatabase,
+  input: { requestId: string; command: string }
+): StartGuidedAssignmentResult;
+```
+
+`createGuidedRequest()` validates and measures the entire selection, calls
+`getArtifactSuggestions()` once, and computes the request ID, complete plan, stable assignment IDs,
+and every assignment-wide `authoringEvidenceRevision` before calling the single Task 3
+`createGuidedAuthoringRequest()` transaction. Map `currentIdentity.instanceId` to immutable
+`creationInstanceId`; Task 9 adds the expected-versus-current mutation guard at the route boundary.
+An abort trigger after opportunity insertion must leave every Task 3 guided table empty.
+
+Build each `GuidedPlanningSession.toolCallCount` from the canonical evidence manifest's
+`coverage.toolCalls`; no detector-specific count or production-sampling label participates in canary
+classification. After putting the canary first, order remaining strong and fallback groups by their
+lowest original selection ordinal.
+
+Use `guided-request:${randomUUID()}` for the durable request ID and
+`stableRecordId("guided-assignment", [requestId, groupKey])` for assignment IDs. The request is a new
+campaign identity, while opportunity IDs, group keys, and assignment membership remain deterministic
+inside that request.
+
+The successful create response returns exactly one `claim_next` action whose command is
+`${command} workbench author start --request ${request.requestId} --json` and whose reason is
+`"The canary assignment is ready to start."`.
+
+- [ ] **Step 6: Return a persisted-plan editorial brief and one next action**
 
 `startGuidedAssignment()` must return:
 
@@ -1091,9 +1344,16 @@ The implementation must:
 }
 ```
 
-`createGuidedRequest()` computes the plan before opening a write transaction, then passes the complete immutable plan to `createGuidedAuthoringRequest()`. `startGuidedAssignment()` reads the already-persisted next assignment and opportunities. An injected persistence failure leaves no request, membership, opportunity, assignment, or canary rows.
+`startGuidedAssignment()` is read-only in Task 5; Task 9 adds current-instance guards and ownership or
+claim behavior at the public mutation boundary. It reads `currentAssignmentId`, bounded membership,
+and opportunity IDs from Task 3 state, filters the persisted request opportunities, and never invokes
+the detector or planner. Before returning current canonical dossier baselines, it requires
+`authoringEvidenceRevision(db, assignment.sessionIds) === assignment.evidenceRevision`; assignment
+evidence revision is the baseline-drift boundary, and Task 6 owns advancing it after a changed-evidence
+inspection. A detector-output change that does not change canonical assignment evidence must not alter
+the persisted editorial brief.
 
-- [ ] **Step 5: Run planning and detector tests**
+- [ ] **Step 7: Run planning and detector tests**
 
 Run:
 
@@ -1101,12 +1361,14 @@ Run:
 npx vitest run src/workbench/authoring/__tests__/guidedAuthoringService.test.ts src/workbench/authoring/__tests__/advisorySuggestions.test.ts src/workbench/authoring/__tests__/artifactCandidates.test.ts
 ```
 
-Expected: PASS with every selection member assigned exactly once.
+Expected: PASS with every selection member and normalized opportunity assigned exactly once, stable
+signatures and group keys, unbounded advisory membership, capped historical V2 candidates, legal
+dossier and diverse canaries, atomic aggregate rollback, and persisted-plan-only start behavior.
 
-- [ ] **Step 6: Commit campaign planning**
+- [ ] **Step 8: Commit campaign planning**
 
 ```bash
-git add src/workbench/authoring/guidedAuthoringPolicy.ts src/workbench/authoring/guidedAuthoringService.ts src/workbench/authoring/advisorySuggestions.ts src/workbench/authoring/artifactCandidates.ts src/workbench/authoring/__tests__/guidedAuthoringService.test.ts
+git add src/workbench/authoring/guidedAuthoringPolicy.ts src/workbench/authoring/guidedAuthoringPreflight.ts src/workbench/authoring/guidedAuthoringService.ts src/workbench/authoring/advisorySuggestions.ts src/workbench/authoring/artifactCandidates.ts src/workbench/authoring/__tests__/guidedAuthoringService.test.ts src/workbench/authoring/__tests__/advisorySuggestions.test.ts src/workbench/authoring/__tests__/artifactCandidates.test.ts
 git commit -m "feat: plan guided authoring assignments"
 ```
 
@@ -1116,7 +1378,6 @@ git commit -m "feat: plan guided authoring assignments"
 
 **Files:**
 - Modify: `src/shared/guidedAuthoring.ts`
-- Modify: `src/workbench/authoring/guidedAuthoringPolicy.ts`
 - Modify: `src/workbench/authoring/guidedAuthoringService.ts`
 - Modify: `src/daemon/db/guidedAuthoringRepository.ts`
 - Modify: `src/workbench/authoring/__tests__/guidedAuthoringService.test.ts`
@@ -1190,21 +1451,11 @@ The inspection response contains exactly the canonical page that advanced covera
 
 Default to the first session with unread evidence, ascending canonical order, and 100 items. Record only refs actually returned. Reject `query`, `kind`, and descending inspection as completion-bearing operations; those remain supplementary reads and do not advance complete-evidence coverage. The assignment stores one revision over all assignment sessions, while an evidence page reports its session revision. Before and after every page read, recompute and compare the assignment-wide revision; never compare a session-only page revision directly with the multi-session assignment revision. If any member changes, reject the read, advance the assignment to the fresh revision, and compute current coverage only from access rows carrying that revision. Preserve older revision rows as audit history, but never count them toward current completion.
 
-- [ ] **Step 4: Return tailored editorial questions**
+- [ ] **Step 4: Consume the Task 5 editorial questions**
 
-For each session return these unresolved questions until its draft contains supported answers:
-
-```ts
-export const GUIDED_EVIDENCE_QUESTIONS = [
-  "What did the user actually ask for?",
-  "What concrete work was performed?",
-  "What changed or was produced?",
-  "Which decisions were made and why?",
-  "What verification ran and what did it prove?",
-  "What failed, remained blocked, or stayed unresolved?",
-  "What knowledge could another person reuse without this transcript?"
-] as const;
-```
+Use `GUIDED_EVIDENCE_QUESTIONS` from `guidedAuthoringPolicy.ts`; do not redefine or fork the list in
+the inspection service. For each session return those questions as unresolved until its draft
+contains supported answers.
 
 When all sessions reach `accessedItems === totalItems`, return `nextAction.kind = "save"`; otherwise return the exact next unread cursor.
 
@@ -1221,7 +1472,7 @@ Expected: PASS, including stale evidence revision rejection and idempotent repea
 - [ ] **Step 6: Commit guided inspection**
 
 ```bash
-git add src/shared/guidedAuthoring.ts src/workbench/authoring/guidedAuthoringPolicy.ts src/workbench/authoring/guidedAuthoringService.ts src/daemon/db/guidedAuthoringRepository.ts src/workbench/authoring/__tests__/guidedAuthoringService.test.ts
+git add src/shared/guidedAuthoring.ts src/workbench/authoring/guidedAuthoringService.ts src/daemon/db/guidedAuthoringRepository.ts src/workbench/authoring/__tests__/guidedAuthoringService.test.ts
 git commit -m "feat: guide complete authoring evidence inspection"
 ```
 
@@ -1340,19 +1591,12 @@ Require:
 - Generic or materially duplicated dismissal rationales across distinct opportunities fail even when they each cite a real ref. Kind-specific tests must prove one supported dismissal and one unsupported blanket dismissal for runbook, ADR, and incident signals.
 ```
 
-- [ ] **Step 5: Encode independent-reuse rubrics**
+- [ ] **Step 5: Enforce the Task 5 independent-reuse rubrics**
 
-Add these mandatory quality matrices:
-
-```ts
-export const GUIDED_ARTIFACT_RUBRICS = {
-  runbook: ["trigger", "preconditions", "performed steps", "expected results", "verification", "failure or rollback handling"],
-  adr: ["durable decision", "context", "alternatives actually considered", "consequences", "reversal conditions"],
-  incident_timeline: ["symptoms or impact", "ordered events", "root cause", "contributing factors", "remediation", "recovery verification"]
-} as const;
-```
-
-Reuse existing typed optional-artifact schemas and claim-support validation; add a finding when a draft requires reopening raw evidence to understand or execute it.
+Consume `GUIDED_ARTIFACT_RUBRICS` from `guidedAuthoringPolicy.ts`; do not redefine the matrix in the
+quality module. Reuse existing typed optional-artifact schemas and claim-support validation, enforce
+every rubric entry for the relevant kind, and add a finding when a draft requires reopening raw
+evidence to understand or execute it.
 
 - [ ] **Step 6: Run focused and corpus quality tests**
 
