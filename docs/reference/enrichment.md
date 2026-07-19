@@ -1,15 +1,19 @@
 # Workbench Guided Artifact Authoring
 
-Masthead authoring is agent-authored and daemon-owned. Workbench is the human collaboration surface;
-the writable daemon owns durable requests, assignment planning, evidence coverage, validation,
-editorial review, claims, identity checks, publication, and receipts. The installed CLI is a thin
-HTTP adapter and never opens SQLite for normal authoring.
+This reference defines the accepted `workbench-authoring-v4` target and remains pending
+implementation. Under that target, Masthead authoring is agent-authored and daemon-owned: Workbench is
+the human collaboration surface, while the writable daemon owns durable requests, assignment planning,
+evidence coverage, validation, editorial review, claims, identity checks, publication, and receipts.
+The instance-bound CLI will remain a thin HTTP adapter and will not open SQLite for normal authoring.
 
-See [ADR 0015](../adr/0015-guided-authoring-campaigns.md) for the current decision. V1, V2, and V3
-remain audit-only; legacy records and receipts may be read, but mutation attempts fail with
-`authoring_contract_retired`.
+The installed runtime still advertises selection-scoped `workbench-authoring-v3` with a shared CLI,
+run/context/evidence reads, and primary-daemon open, submit, and finish mutations. That compatibility
+runtime does not provide V4 guidance and must not be used for a new bulk or production enrichment
+campaign. At V4 cutover, V1, V2, and V3 remain audit-only: legacy records and receipts stay readable,
+but mutation attempts fail with `authoring_contract_retired`. See
+[ADR 0015](../adr/0015-guided-authoring-campaigns.md) for the accepted decision.
 
-## Human handoff
+## Accepted V4 human handoff — pending implementation
 
 People select compile-ready sessions and choose **Copy Agent Prompt**. Workbench first creates one
 durable guided authoring request, then copies only its opaque request ID and one instance-bound start
@@ -35,7 +39,7 @@ Next action = the single command Masthead requires from the agent at the current
 
 ## Request planning and canary
 
-The current bundle version is `workbench-authoring-v4` and the policy is `guided-authoring-v1`. The
+The target bundle version is `workbench-authoring-v4` and the policy is `guided-authoring-v1`. The
 daemon groups a request into assignments of at most 12 sessions, using strong artifact-opportunity
 joins first and dossier-only groups second. The agent receives one assignment and one required next
 action; it never receives the full selection to partition.

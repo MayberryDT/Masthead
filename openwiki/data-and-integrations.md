@@ -41,14 +41,23 @@ Important contracts:
 - **`GET /logbook/search`** is an artifact-only compatibility alias. It returns `artifacts`, never session rows.
 - `GET /sessions` and session detail routes remain for evidence, Workbench, and compile — not the primary Logbook listing.
 - `GET /workbench/sessions` (and related Workbench reads) expose package-path pipeline state.
-- V4 authoring request and assignment reads expose the durable campaign, current assignment, complete
-  evidence coverage, review state, and one required next action.
-- `POST /workbench/authoring/requests` creates one durable guided authoring request; assignment start,
-  draft, canary-decision, and finish mutations verify the instance manifest before writing.
-- Historical V1, V2, and V3 status and receipt reads remain available for audit. Legacy V3 open,
-  submit, and finish mutations return `authoring_contract_retired` before writing.
 - `GET /sources/connectors` and hook routes support Sources V2 live connect.
 - Write endpoints (`/ingest`, Workbench mutations, `/data/delete`, etc.) stay local to the daemon and are not exposed through MCP.
+
+### Current authoring runtime during V4 implementation
+
+The installed daemon advertises `workbench-authoring-v3`: capabilities, run status/context/evidence,
+and suggestions are readable, while open, submit, and finish are primary-daemon mutations. This is
+compatibility behavior during the cutover, not the accepted target, and it must not be used for a new
+bulk or production enrichment campaign.
+
+### Accepted V4 target — pending implementation
+
+V4 request and assignment reads will expose the durable campaign, current assignment, complete
+evidence coverage, review state, and one required next action. Request creation, assignment start,
+progress-recording inspect, draft save, canary decision, and finish will verify instance identity
+before writing. At cutover, V1, V2, and V3 status and receipt reads remain available for audit, while
+legacy mutations return `authoring_contract_retired` before writing.
 
 `POST /ingest` uses the runtime query parameter or `x-masthead-runtime` header. Connector tests use a validation-only ingest variant so installer/test flows can verify the hook path without mutating the store when appropriate.
 
@@ -59,11 +68,12 @@ requires that exact unchanged hash. It preserves live/shared/manual/published st
 unsafe or drifted plan, and stages replacement imports only for eligible source/job plans. Always
 exercise repair against a disposable database copy before authorizing work on an active store.
 
-Workbench enrichment and optional-artifact authoring go through Workbench/CLI paths with receipts.
-Normal `mastheadctl workbench author` commands are thin daemon HTTP calls through an instance-bound
-launcher. A V4 request is split by the daemon into assignments of at most 12 sessions; the agent
-traverses complete evidence, enriches every assignment session, and may submit zero or more grounded
-optional artifacts. There is **no Logbook bulk-enrich UI or primary bulk-enrich product path**.
+The accepted V4 target keeps Workbench enrichment and optional-artifact authoring behind daemon HTTP
+with receipts. Pending implementation, `mastheadctl workbench author` will use an instance-bound
+launcher, and the daemon will split each request into assignments of at most 12 sessions. The agent
+will traverse complete evidence, enrich every assignment session, and may submit zero or more grounded
+optional artifacts. The installed V3 runtime does not provide these guided guarantees. There is **no
+Logbook bulk-enrich UI or primary bulk-enrich product path**.
 
 The original dossier is different: the daemon snapshots `SessionDossierDto` as
 `canonical-session-dossier-v1`, and Logbook renders that immutable body through
@@ -94,7 +104,7 @@ Session/transcript tools remain for compile-time evidence. Full list: `docs/refe
 
 `src/enrichment/enrichmentCoordinator.ts` turns session facts into durable derived records (capsules, live summaries, search projections). The pipeline is evidence-sensitive: it fingerprints facts and avoids rewriting a current result when the fingerprint and provider match.
 
-Published knowledge reaches Logbook through accepted V4 assignments. The daemon rebuilds canonical
+After V4 cutover, published knowledge reaches Logbook through accepted assignments. The daemon rebuilds canonical
 dossier snapshots from grounded enrichment and atomically publishes them with any supported runbook,
 ADR, or incident timeline. Enrichment or a saved draft alone does not put a row in Logbook. The first
 accepted assignment is a three-session canary capped at three sessions and remains staged until
@@ -103,7 +113,7 @@ operator approval.
 The planner chooses a complete strong opportunity group of at most three sessions or diverse
 dossier-only sessions for that canary. It never breaks a larger strong opportunity to fill the
 canary; if no legal canary exists, request creation returns `guided_canary_not_constructible` and
-persists nothing.
+persists nothing. This is the accepted target and remains pending implementation.
 
 ## Failed V1 recovery
 

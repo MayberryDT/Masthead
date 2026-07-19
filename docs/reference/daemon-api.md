@@ -63,7 +63,8 @@ Clients should reject a daemon that does not identify `product: "masthead"` with
 - `GET /workbench/authoring/canaries/pending` returns staged V4 canary drafts awaiting operator review.
   Pending implementation; bridge-safe after cutover.
 - `GET /workbench/authoring/assignments/:assignmentId/inspect` returns the next canonical evidence
-  page. Pending implementation; the V4 bridge permits this route under the accepted policy.
+  page and records returned refs as evidence-coverage progress. Pending implementation; primary-only
+  and never forwarded by the read-only worktree bridge.
 - `GET /workbench/authoring/assignments/:assignmentId/review` returns structured editorial findings
   and the next required action. Pending implementation; bridge-safe after cutover.
 - Legacy `GET /workbench/authoring/runs/:runId`, context, evidence, status, and completion-receipt reads

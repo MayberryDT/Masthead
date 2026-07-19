@@ -150,9 +150,9 @@ run status/context/evidence, and advisory-suggestion reads while blocking open, 
 That is compatibility behavior during the cutover, not the desired authoring contract.
 
 The accepted V4 bridge policy is pending implementation: it allows capabilities, guided-request
-status, pending-canary discovery, assignment inspect, and assignment review. It blocks guided-request
-creation, assignment start/claim, draft save, canary decisions, and assignment finish. Legacy V3
-status and receipt reads remain audit-only after cutover; V3 mutations return
+status, pending-canary discovery, and assignment review. It blocks guided-request creation,
+assignment start/claim, progress-recording assignment inspect, draft save, canary decisions, and
+assignment finish. Legacy V3 status and receipt reads remain audit-only after cutover; V3 mutations return
 `authoring_contract_retired`.
 
 ## Anti-patterns for agents
