@@ -776,6 +776,9 @@ git commit -m "feat: persist guided authoring state"
 - Modify: `scripts/masthead-doctor.js`
 - Modify: `scripts/masthead-production.js`
 - Modify: `scripts/masthead-production.d.ts`
+- Create: `scripts/masthead-production-activation-rehearsal.js`
+- Modify: `package.json`
+- Modify: `docs/reference/production-cold-activation.md`
 - Create: `src/shared/__tests__/instanceIdentity.test.ts`
 - Modify: `src/core/__tests__/daemonCompatibility.test.ts`
 - Create: `src/core/__tests__/liveDevLauncher.test.ts`
@@ -786,11 +789,12 @@ git commit -m "feat: persist guided authoring state"
 - Modify: `src/daemon/__tests__/workbenchAuthoringApi.test.ts`
 - Modify: `src/cli/__tests__/authoringCli.test.ts`
 - Modify: `src/electron/__tests__/productionLauncher.test.ts`
+- Create: `src/electron/__tests__/fixtures/productionActivationCrashChild.mjs`
 - Modify: `src/daemon/__tests__/doctorAuthoring.test.ts`
 
 **Interfaces:**
 - Consumes: Electron instance data directory, daemon base URL, database ID, build SHA, PID, and a fresh per-daemon instance nonce.
-- Produces: `MastheadInstanceManifest`, per-instance launcher path, `GuidedAuthoringExpectedIdentity`, stable-request binding and current-instance guard primitives, identity-bearing current capabilities, and a staged production-installation receipt that is activated only after the old daemon stops.
+- Produces: `MastheadInstanceManifest`, per-instance launcher path, `GuidedAuthoringExpectedIdentity`, stable-request binding and current-instance guard primitives, identity-bearing current capabilities, and a crash-recoverable staged production-installation receipt plus activation journal that is activated only after the old daemon stops.
 
 - [ ] **Step 1: Write failing launcher, identity, restart-policy, and stage-only tests**
 
@@ -872,6 +876,31 @@ test("filesystem activation installs the staged target without runtime or databa
   expect(await readFile(activeInstanceLauncherPath, "utf8")).toContain("masthead-instance.json");
   await expect(access(receipt.instanceManifestPath)).rejects.toMatchObject({ code: "ENOENT" });
 });
+
+test.each(["current", "instance-launcher", "lifecycle-launcher", "desktop", "activation-commit"])(
+  "recovers an activation process crash after %s before another lifecycle command runs",
+  async (crashAfter) => {
+    const receipt = await stageInChildProcess();
+    await runActivationCrashChild(receipt.receiptPath, crashAfter);
+    const recovered = await runProductionCliInNewProcess(["activate", "--receipt", receipt.receiptPath, "--json"]);
+    expect(recovered.recovery).toMatchObject({ mixedSurface: false, journalRecovered: true });
+    await expectEveryActiveSurfaceToMatchOneAttestedGeneration();
+  }
+);
+
+test("serializes stage, activate, finalize, start, stop, and install through one lifecycle lease", async () => {
+  const contenders = await raceProductionLifecycleCommands();
+  expect(contenders.filter(({ enteredCriticalSection }) => enteredCriticalSection)).toHaveLength(1);
+  await expectEveryActiveSurfaceToMatchOneAttestedGeneration();
+});
+
+test("finalize requires exact active bytes and one matching live daemon that owns the manifest guard", async () => {
+  const receipt = await activateAndStartStagedProduction();
+  await expect(finalizeWithFakeManifest(receipt)).rejects.toThrow("production_startup_proof_invalid");
+  await expect(finalizeWithMissingWriterGuard(receipt)).rejects.toThrow("production_startup_guard_missing");
+  await expect(finalizeStagedProductionInstallation(receipt)).resolves.toMatchObject({ finalized: true });
+  expect(await versionedProductionBundles()).toEqual([receipt.target]);
+});
 ```
 
 The tests in this task are deliberately primitive-level. Request creation, `start`, `save`, canary decisions, and `finish` do not all exist until Tasks 5, 8, and 9, so their end-to-end safe-restart and zero-write identity-swap proofs belong there. Task 4 proves the shared predicates and lifecycle ordering those later tests must call.
@@ -948,13 +977,17 @@ async assertAuthoringIdentity(expected: GuidedAuthoringExpectedIdentity): Promis
 
 Also export the server-side guard primitive that accepts `GuidedAuthoringExpectedIdentity` and the immutable current daemon identity. Update `scripts/masthead-doctor.js` to reject a command, manifest, health response, or current V3 capability DTO whose identity fields disagree. Do not claim that Task 4 has authorized nonexistent V4 mutations: the client capabilities check is fast feedback only, and the guard is not effective until Tasks 8 and 9 invoke it immediately at each service mutation boundary before the first database write.
 
-- [ ] **Step 6: Add a separate production stage-only receipt and post-stop activation**
+- [ ] **Step 6: Add a crash-recoverable staged production lifecycle**
 
-Export `stageProductionInstallation()` and type it in `scripts/masthead-production.d.ts`. It copies the candidate into an immutable versioned target, verifies the packaged manifest and pinned digest after the copy, validates the packaged CLI entry, and writes a staged instance-launcher file plus an immutable receipt containing the source digest, target, previous current target, production instance directory, canonical manifest destination, active launcher destination, staged launcher path, build SHA, and a random staging nonce.
+Export `stageProductionInstallation()` and type it in `scripts/masthead-production.d.ts`. It copies the candidate into an immutable versioned target, verifies the packaged manifest and pinned digest after the copy, validates the packaged CLI entry, and writes a staged instance-launcher file plus an immutable receipt containing the source digest, target, previous current target, production root, production instance/data directory, canonical database path, production port and base URL, resolved shared lifecycle-lease path, canonical manifest destination, active launcher destination, staged launcher path, build SHA, random staging nonce, exact pre-activation snapshots, and hashes plus modes for every staged and active surface. The receipt also attests the rollback bundle's release version, build SHA, manifest digest, and resolved target path. Stage never opens the application database; database ID is bound later by recovery/start proof, but every independent phase has enough immutable path and endpoint identity to acquire the same lease and reject a different database, port, or rollback generation.
 
-Staging returns `{ staged: true, launched: false, databaseOpened: false }` and must not acquire the SQLite lifecycle lease, read or migrate the application database, change `current`, replace the active instance launcher or desktop entry, create a live manifest, delete any bundle, spawn Masthead, or probe health. Keep the staged launcher outside the active `<instanceDir>/bin/mastheadctl` destination so the still-running old daemon retains its launcher until activation.
+Use one external production lifecycle lease for `stage`, `activate`, `finalize`, `start`, `stop`, and both normal and cold `install`; no command may use a private activation lock or enter its filesystem critical section outside that lease. The lease is coordination state outside the application database and is the only lease staging may acquire. Staging returns `{ staged: true, launched: false, databaseOpened: false }` and must not open or migrate the application database, acquire its writer/maintenance ownership leases, change `current`, replace the active instance launcher or desktop entry, create a live manifest, delete any bundle, spawn Masthead, or probe health. Keep the staged launcher outside the active `<instanceDir>/bin/mastheadctl` destination so the still-running old daemon retains its launcher until activation.
 
-Export `activateStagedProductionInstallation(receipt)` as a filesystem-only operation. Its caller must first prove the old daemon is stopped. Activation revalidates the receipt, candidate digest, and previous-current filesystem binding, then atomically switches `current`, installs the staged instance launcher and production desktop surface, and performs disk-hygiene cleanup. It must not open SQLite or the lifecycle lease, run maintenance, probe health or ownership, spawn Masthead, or write a live instance manifest. `transitionProduction()` may compose stage-only installation, stop/offline proof, filesystem activation, database maintenance, and start as separate ordered operations, but `activateStagedProductionInstallation()` itself remains incapable of the latter three. Task 15 uses the same split so the filesystem activation cannot accidentally open or migrate production before the explicit recovery commands.
+Persist a separate activation journal beside the receipt before the first filesystem mutation. The journal records the receipt hash, old and candidate targets, exact rollback snapshots, every intended/completed surface transition, and one durable `activation_committed` point. Before each mutation, fsync the intent; after it, re-attest the resulting bytes and fsync completion. Every lifecycle command first recovers a pending journal under the shared lease. A journal without the durable commit point restores `current` and every active surface to the exact old attestation, verifies that no mixed generation remains, and exits without continuing from stale command configuration; rerunning `activate` then starts from the clean staged receipt. A committed journal rolls forward by verifying the candidate `current` target and every active attestation. Abrupt process death must therefore be recoverable in a fresh process after every mutation boundary, rather than only through an in-process `catch` block.
+
+Export `activateStagedProductionInstallation(receipt)` as an offline filesystem-transition operation and expose `stage --bundle ...`, `activate --receipt ...`, and `finalize --receipt ...` as independent operational CLI commands whose JSON output includes the receipt, journal, recovery state, and exact build identity. Under the shared lifecycle lease and before its first filesystem mutation, activation repeats the offline proof itself: the recorded production process/start identity is gone, the health endpoint is unreachable, the recorded port is unoccupied, the application database writer/ownership sentinel is absent, and the live manifest is absent. A caller-side stop check alone never authorizes activation, and a stale receipt for another path/port/lease is rejected. Activation then revalidates the immutable receipt, candidate and rollback-bundle digests/releases, previous-current binding, and unchanged old active surface before the journaled transition switches `current` and installs the staged instance launcher and production desktop surface. It retains the previous bundle, receipt, journal, and staged attestations as the rollback generation. It must not open or mutate the application database, run maintenance, spawn Masthead, write a live instance manifest, or perform final disk-hygiene deletion; its health/port/process/writer checks are read-only fail-closed liveness proof. `transitionProduction()` may compose stage, stop/offline proof, activation, database maintenance, start, and finalize as separately journaled operations, but Task 15 uses the split commands so activation cannot access production data before the explicit recovery commands.
+
+`finalizeStagedProductionInstallation(receipt)` runs under the same lifecycle lease and only after the activation commit. It re-verifies the candidate bundle digest and release identity, `current`, and the exact bytes plus modes of the active instance launcher, lifecycle launcher, and desktop entry. It then requires a fresh post-activation manifest and compatible health response with identical build SHA, database ID, base URL, instance directory, canonical manifest and authoring-command paths, PID, and instance nonce; strict process inspection must bind that PID/start identity and executable/argv/environment to the current candidate. Prove the canonical manifest-writer guard is actively held at the final boundary, and fail closed if the daemon exits, health changes, the guard becomes acquirable, or any active byte changes during proof. Only after that exact live proof may finalization delete the rollback bundle and stale helper artifacts, remove the staged files, journal, and receipt, and assert that `current` plus exactly one versioned production bundle remain. Finalization itself is idempotently recoverable after process death and must never accept manifest-shaped JSON written by a test or unrelated process as startup proof. Document the three commands and rerun-after-crash behavior in `docs/reference/production-cold-activation.md`.
 
 - [ ] **Step 7: Run identity, launcher, packaged-command, doctor, and production tests**
 
@@ -962,15 +995,16 @@ Run:
 
 ```bash
 npx vitest run src/shared/__tests__/instanceIdentity.test.ts src/core/__tests__/daemonCompatibility.test.ts src/core/__tests__/liveDevLauncher.test.ts src/electron/__tests__/cliLauncher.test.ts src/electron/__tests__/daemonLauncher.test.ts src/electron/__tests__/mainCliLauncher.test.ts src/electron/__tests__/packagedCliCommand.test.ts src/electron/__tests__/productionLauncher.test.ts src/daemon/__tests__/healthService.test.ts src/daemon/__tests__/workbenchAuthoringApi.test.ts src/cli/__tests__/authoringCli.test.ts src/daemon/__tests__/doctorAuthoring.test.ts
+npm run rehearse:production-activation
 ```
 
-Expected: PASS; tests prove simultaneous dev and production launchers cannot overwrite each other, Electron and `npm run dev` install launchers before primary spawn, the daemon alone publishes and conditionally removes its manifest after bind, health/protocol/current-capability/doctor checks expose one matching canonical identity, the pure guard rejects every current-identity mismatch, the stable-binding predicate permits only a nonce/PID change across restart, production staging leaves the old current target and all live state untouched, and successful filesystem activation changes only the staged filesystem surface. Tasks 8 and 9 add the zero-database-write and end-to-end request-continuation proofs once their service operations and HTTP routes exist.
+Expected: PASS; tests prove simultaneous dev and production launchers cannot overwrite each other, Electron and `npm run dev` install launchers before primary spawn, the daemon alone publishes and conditionally removes its manifest after bind, health/protocol/current-capability/doctor checks expose one matching canonical identity, the pure guard rejects every current-identity mismatch, and the stable-binding predicate permits only a nonce/PID change across restart. Production tests spawn a real child and terminate it after every activation and finalization mutation boundary, then recover from a new process and prove the surface is wholly old or wholly committed candidate. Multi-process races prove all lifecycle commands share one lease, startup cannot continue from a rolled-back stale configuration, fake/stale/mismatched manifests and missing or changed writer guards cannot authorize cleanup, active-byte drift blocks finalization, and a crash during finalization can be retried to exactly one bundle with no receipt, journal, staged file, or stale helper left. `scripts/masthead-production-activation-rehearsal.js` repeats the operational CLI sequence and crash matrix against its own temporary home, production root, data directory, database, manifest, and dynamic port, refuses every live production path, and cleans up in `finally`; `package.json` exposes it as `rehearse:production-activation`. Tasks 8 and 9 add the zero-database-write and end-to-end request-continuation proofs once their service operations and HTTP routes exist.
 
-- [ ] **Step 8: Commit instance binding and stage-only installation**
+- [ ] **Step 8: Commit instance binding and the crash-safe staged lifecycle**
 
 ```bash
-git add src/shared/instanceIdentity.ts src/shared/guidedAuthoring.ts src/shared/protocol.ts src/shared/workbenchAuthoring.ts fixtures/protocol/current-health.json src/shared/__tests__/instanceIdentity.test.ts src/core/__tests__/daemonCompatibility.test.ts src/core/__tests__/liveDevLauncher.test.ts src/electron/cliLauncher.ts src/electron/daemonLauncher.ts src/electron/main.ts src/daemon/main.ts src/daemon/server.ts src/daemon/healthService.ts src/daemon/workbenchAuthoringApi.ts src/cli/authoringClient.ts src/cli/workbenchAuthoring.ts scripts/masthead-live-dev.js scripts/masthead-doctor.js scripts/masthead-production.js scripts/masthead-production.d.ts src/electron/__tests__/cliLauncher.test.ts src/electron/__tests__/daemonLauncher.test.ts src/electron/__tests__/mainCliLauncher.test.ts src/daemon/__tests__/healthService.test.ts src/daemon/__tests__/workbenchAuthoringApi.test.ts src/electron/__tests__/productionLauncher.test.ts src/cli/__tests__/authoringCli.test.ts src/daemon/__tests__/doctorAuthoring.test.ts
-git commit -m "fix: bind authoring cli to one masthead instance"
+git add src/shared/instanceIdentity.ts src/shared/guidedAuthoring.ts src/shared/protocol.ts src/shared/workbenchAuthoring.ts fixtures/protocol/current-health.json src/shared/__tests__/instanceIdentity.test.ts src/core/__tests__/daemonCompatibility.test.ts src/core/__tests__/liveDevLauncher.test.ts src/electron/cliLauncher.ts src/electron/daemonLauncher.ts src/electron/main.ts src/daemon/main.ts src/daemon/server.ts src/daemon/healthService.ts src/daemon/workbenchAuthoringApi.ts src/cli/authoringClient.ts src/cli/workbenchAuthoring.ts scripts/masthead-live-dev.js scripts/masthead-doctor.js scripts/masthead-production.js scripts/masthead-production.d.ts scripts/masthead-production-activation-rehearsal.js package.json docs/reference/production-cold-activation.md src/electron/__tests__/cliLauncher.test.ts src/electron/__tests__/daemonLauncher.test.ts src/electron/__tests__/mainCliLauncher.test.ts src/daemon/__tests__/healthService.test.ts src/daemon/__tests__/workbenchAuthoringApi.test.ts src/electron/__tests__/productionLauncher.test.ts src/electron/__tests__/fixtures/productionActivationCrashChild.mjs src/cli/__tests__/authoringCli.test.ts src/daemon/__tests__/doctorAuthoring.test.ts
+git commit -m "fix: bind authoring and harden production activation"
 ```
 
 ---
@@ -3155,15 +3189,17 @@ git commit -m "test: gate guided authoring recovery"
 
 - [ ] **Step 1: Stop unless execution-time authority is explicit**
 
-Before any production mutation, obtain Tyler's explicit approval for the exact scope: install the verified build, stop the production daemon, create one backup, invalidate the audited 3,230 V3 dossier artifacts, reset those sessions to Workbench, restart, and publish only the reviewed canary. Approval to implement this plan does not authorize this step.
+Before any production mutation, obtain Tyler's explicit approval for the exact scope: stage and activate the verified build, stop and restart the production daemon, create one backup, invalidate the audited 3,230 V3 dossier artifacts, reset those sessions to Workbench, finalize the verified installation by deleting the rollback bundle, and publish only the reviewed canary. Approval to implement this plan does not authorize this step.
 
 - [ ] **Step 2: Stage and verify the packaged build without launching it**
 
-Use the repository's production installer in its no-launch/staged mode. Copy and verify the package version, build SHA, future launcher target, expected production manifest path, and signed release commit from bundle files without starting the new daemon, opening the production database, changing `current`, rewriting the active launcher, or deleting the old bundle.
+First run `npm run rehearse:production-activation -- --bundle <absolute-packaged-bundle>` and require its full crash-boundary, restart-recovery, finalization, and lease-race matrix to pass in isolated temporary paths; this rehearsal must refuse the live production root, data directory, database, and manifest. Then use the repository's operational `stage --bundle ... --bundle-digest ... --data-dir /home/tyler/.config/masthead-production --db-path /home/tyler/.config/masthead-production/masthead.sqlite --port 17373 --production-root /home/tyler/.local/share/masthead-production --json` command. Record the rehearsal result, immutable receipt path, activation-journal path, resolved lifecycle-lease path, database path, port/base URL, candidate and rollback bundle release/digest identities, package version, build SHA, future launcher target, expected production manifest path, and signed release commit from verified bundle files. Staging may acquire only the external production lifecycle lease; it must not start the new daemon, open the production database, change `current`, rewrite an active launcher, or delete the old bundle.
 
-- [ ] **Step 3: Stop production and prove the offline CLI target**
+- [ ] **Step 3: Stop production and activate the filesystem while offline**
 
-Stop the old installed production daemon through the supported application lifecycle and verify no owner remains before calling filesystem activation. Consume the staged receipt to atomically switch `current`, install the staged instance launcher, verify that `/home/tyler/.config/masthead-production/bin/mastheadctl` resolves into that bundle and exports only `/home/tyler/.config/masthead-production/masthead-instance.json`, and remove every other production bundle as required by disk hygiene. Confirm the staged build SHA from the verified bundle and activation receipt, without opening SQLite or the lifecycle lease, running maintenance, probing health, launching Masthead, or generating `/home/tyler/.config/masthead-production/masthead-instance.json`. The production manifest must remain absent while production is offline; the new daemon owns its creation after the eventual Step 6 bind.
+Run the supported `stop` command, which shares the same external lifecycle lease as stage and activation, and verify the exact production process set, health endpoint, port, application-database ownership, and live manifest are absent before activation. Run `activate --receipt <absolute-receipt-path> --json`; under that same resolved lease it must independently repeat every process, health, port, writer-ownership, and manifest absence check before mutation, recover any interrupted journal first, then commit one completely attested filesystem generation or restore the old generation and require a clean rerun. Record the durable activation commit and verify that `current`, `/home/tyler/.config/masthead-production/bin/mastheadctl`, the lifecycle launcher, and desktop entry all name the staged bundle, while the instance launcher exports only `/home/tyler/.config/masthead-production/masthead-instance.json`. Confirm the build SHA from the bundle, receipt, journal, and active bytes without opening the application database, running maintenance, launching Masthead, or generating the live manifest. Activation must retain the old bundle, receipt, journal, and staged attestations as the rollback generation; disk-hygiene deletion happens only after Step 7 proves the new daemon. The production manifest must remain absent while production is offline.
+
+If stage, stop, activation, either recovery command, start, or finalization is interrupted, do not inspect or repair the active files by hand. Rerun the same supported lifecycle command so it acquires the shared lease and recovers the durable activation journal first; record the recovery result and re-prove the expected boundary before continuing.
 
 - [ ] **Step 4: Prepare recovery before any new-daemon database access**
 
@@ -3189,15 +3225,19 @@ Invalidation must retain exclusive ownership, validate the unchanged prepared by
 
 - [ ] **Step 6: Restart and verify coherent surfaces**
 
-Start production normally for the first time on the recovered database. Require the daemon to publish `/home/tyler/.config/masthead-production/masthead-instance.json` only after it binds with complete health identity, then run `/home/tyler/.config/masthead-production/bin/mastheadctl workbench capabilities --json` and require the production database ID, installed build SHA, `workbench-authoring-v4`, `guided-authoring-v1`, canonical manifest path, production base URL, and the same fresh runtime `instanceId`. Without another restart, require Logbook to remove the invalidated dossiers and Workbench to show the recovered sessions within one revision-poll interval. Verify no stale 3,230-item selection remains and all five latency budgets pass against production read endpoints.
+Start production normally for the first time on the recovered database. `start` must acquire the shared lifecycle lease and recover or refuse any incomplete activation journal before using its configuration. Require the daemon to publish `/home/tyler/.config/masthead-production/masthead-instance.json` only after it binds with complete health identity, then run `/home/tyler/.config/masthead-production/bin/mastheadctl workbench capabilities --json` and require the production database ID, installed build SHA, `workbench-authoring-v4`, `guided-authoring-v1`, canonical manifest path, production base URL, and the same fresh runtime `instanceId`. Strictly bind the manifest and health PID/start identity, executable, arguments, environment, active launcher bytes, and held canonical manifest-writer guard to the activated bundle. Without another restart, require Logbook to remove the invalidated dossiers and Workbench to show the recovered sessions within one revision-poll interval. Verify no stale 3,230-item selection remains and all five latency budgets pass against production read endpoints. Keep the rollback bundle and staged lifecycle evidence until this entire proof passes.
 
-- [ ] **Step 7: Publish only the production canary**
+- [ ] **Step 7: Finalize the verified installation and prove disk hygiene**
 
-From Workbench, select the three signed canary sessions recorded in the acceptance document, copy the V4 prompt, complete guided inspection and draft review, inspect the staged dossier and optional-artifact drafts in the Activity rail, and approve only if every item is specific, grounded, independently reusable where applicable, and free of repeated template language.
+Run `finalize --receipt <absolute-receipt-path> --json`. Finalization must acquire the shared lifecycle lease, re-attest the candidate bundle and every active launcher/desktop byte, repeat the exact live health, manifest, process, and held-writer-guard proof from Step 6, and refuse fake manifest-shaped JSON or any identity drift. Only then may it delete the rollback bundle and stale helper artifacts and remove the staged files, activation journal, and receipt. Require `current` to resolve to the verified candidate, exactly one versioned production bundle to remain under `/home/tyler/.local/share/masthead-production/`, no staged/receipt/journal/helper artifact to remain, and production health plus capabilities to retain the same daemon identity after cleanup.
 
-- [ ] **Step 8: Hold the full rollout for explicit approval**
+- [ ] **Step 8: Publish only the production canary**
 
-Record the canary request ID, assignment ID, artifact IDs, human review notes, artifact-only reuse results, revisions, and endpoint timings. Do not release the remaining recovered sessions until Tyler explicitly approves full campaign continuation from this evidence.
+From Workbench, select the three signed canary sessions recorded in the acceptance document, copy the V4 prompt, complete guided inspection and draft review, inspect the staged dossier and optional-artifact drafts in the Activity rail, and approve only if every item is specific, grounded, independently reusable where applicable, and free of repeated template language. Do not begin the canary while two bundles remain or before the finalization evidence in Step 7 is recorded.
+
+- [ ] **Step 9: Hold the full rollout for explicit approval**
+
+Record the staged receipt and activation-journal hashes, any crash-recovery result, finalization receipt, one-bundle disk inventory, daemon identity proof, canary request ID, assignment ID, artifact IDs, human review notes, artifact-only reuse results, revisions, and endpoint timings. Do not release the remaining recovered sessions until Tyler explicitly approves full campaign continuation from this evidence.
 
 ---
 
