@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { createServer } from "node:net";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, posix, resolve, win32 } from "node:path";
 import {
   assertGuidedAuthoringExpectedIdentity,
   canonicalInstancePaths,
@@ -469,8 +469,9 @@ export async function verifyInstanceLauncher(launcherPath: string, manifestPath:
   }
 }
 
-function cliEntryForTarget(target: DaemonLaunchTarget): string {
-  return target.entryPath.replace(/\/daemon\/main\.(?:js|ts)$/u, "/cli/mastheadctl.js");
+export function cliEntryForTarget(target: Pick<DaemonLaunchTarget, "entryPath">, platform: NodeJS.Platform = process.platform): string {
+  const paths = platform === "win32" ? win32 : posix;
+  return paths.join(paths.dirname(paths.dirname(target.entryPath)), "cli", "mastheadctl.js");
 }
 
 async function stopSpawnedChild(child: ChildProcess, graceMs = 5_000): Promise<void> {
@@ -486,11 +487,13 @@ async function stopSpawnedChild(child: ChildProcess, graceMs = 5_000): Promise<v
     };
     child.once("exit", onExit);
   });
+  const termExit = waitForExactExit(graceMs);
   if (!child.kill("SIGTERM")) throw new Error(`Could not stop spawned Masthead collector ${child.pid ?? "unknown"}`);
-  if (await waitForExactExit(graceMs)) return;
+  if (await termExit) return;
   if (child.exitCode !== null || child.signalCode !== null) return;
+  const killExit = waitForExactExit(graceMs);
   if (!child.kill("SIGKILL")) throw new Error(`Could not kill spawned Masthead collector ${child.pid ?? "unknown"} after SIGTERM timeout`);
-  if (!(await waitForExactExit(graceMs))) throw new Error(`Spawned Masthead collector ${child.pid ?? "unknown"} did not exit after identity-bound SIGKILL`);
+  if (!(await killExit)) throw new Error(`Spawned Masthead collector ${child.pid ?? "unknown"} did not exit after identity-bound SIGKILL`);
 }
 
 async function waitForCompatibleCollector(

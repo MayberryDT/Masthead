@@ -7,6 +7,7 @@ import currentHealth from "../../../fixtures/protocol/current-health.json";
 import type { ChildProcess } from "node:child_process";
 import {
   buildDaemonEnv,
+  cliEntryForTarget,
   connectorBaseUrl,
   parseCompatibleHealth,
   resolveDaemonLaunchTarget,
@@ -19,6 +20,10 @@ afterEach(() => {
 });
 
 describe("Electron daemon launcher policy", () => {
+  test("derives the packaged CLI entry with Windows path semantics", () => {
+    expect(cliEntryForTarget({ entryPath: "C:\\Masthead\\dist\\src\\daemon\\main.js" }, "win32"))
+      .toBe("C:\\Masthead\\dist\\src\\cli\\mastheadctl.js");
+  });
   test("verifies the exact manifest assignment rather than a matching comment", async () => {
     const directory = await mkdtemp(join(tmpdir(), "masthead-launcher-verify-"));
     const launcher = join(directory, "mastheadctl");

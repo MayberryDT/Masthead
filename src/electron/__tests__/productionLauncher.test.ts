@@ -174,7 +174,7 @@ async function publishStartupManifest(receipt: any) {
   await writeFile(persisted.instanceManifestPath, JSON.stringify({
     schemaVersion: 1,
     instanceId: "instance:test",
-    baseUrl: "http://127.0.0.1:28383",
+    baseUrl: persisted.baseUrl,
     databaseId: "database:test",
     buildSha: persisted.buildSha,
     pid: 12345,
@@ -248,6 +248,8 @@ describe("production lifecycle launcher", () => {
     await activateStagedProductionInstallation(receipt, { assertOffline: async () => undefined, runDesktopDatabaseCommand: () => undefined });
     expect(await realpath(join(productionRoot, "current"))).toBe(candidate.target);
 
+    await rm(join(productionRoot, ".masthead-install-activation.journal.json"));
+    await rm(receipt.receiptPath);
     await rm(join(productionRoot, "current"));
     await symlink(oldTarget, join(productionRoot, "current"));
     const tampered = await stage();
@@ -315,7 +317,45 @@ describe("production lifecycle launcher", () => {
     await expect(lstat(join(productionRoot, ".masthead-install-activation.journal.json"))).resolves.toBeDefined();
     await expect(activateStagedProductionInstallation(receipt.receiptPath, { assertOffline: async () => undefined, runDesktopDatabaseCommand: () => undefined }))
       .resolves.toMatchObject({ activated: true, target: candidate.target });
-    await expect(lstat(join(productionRoot, ".masthead-install-activation.journal.json"))).rejects.toMatchObject({ code: "ENOENT" });
+    expect(JSON.parse(await readFile(join(productionRoot, ".masthead-install-activation.journal.json"), "utf8"))).toMatchObject({ phase: "activation-committed" });
+    expect(await realpath(join(productionRoot, "current"))).toBe(candidate.target);
+  });
+
+  test.skipIf(process.platform === "win32")("recovers a real SIGKILL activation in a fresh process", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const receipt = await stageProductionInstallation({
+      bundleDigest: candidate.bundleDigest,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot,
+      sourceBundlePath: candidate.target
+    });
+    const moduleUrl = new URL("../../../scripts/masthead-production.js", import.meta.url).href;
+    const crashSource = [
+      `import { activateStagedProductionInstallation } from ${JSON.stringify(moduleUrl)};`,
+      "await activateStagedProductionInstallation(process.argv[1], {",
+      "  assertOffline: async () => undefined,",
+      "  runDesktopDatabaseCommand: () => undefined,",
+      "  onStep(step) { if (step === 'instance-launcher') process.kill(process.pid, 'SIGKILL'); }",
+      "});"
+    ].join("\n");
+    const crash = spawn(process.execPath, ["--input-type=module", "-e", crashSource, receipt.receiptPath], { stdio: "ignore" });
+    const [crashCode, crashSignal] = await once(crash, "close");
+    expect(crashCode).toBeNull();
+    expect(crashSignal).toBe("SIGKILL");
+
+    const recoveryResultPath = `${receipt.receiptPath}.recovered.json`;
+    const recoverSource = [
+      `import { activateStagedProductionInstallation } from ${JSON.stringify(moduleUrl)};`,
+      "import { writeFile } from 'node:fs/promises';",
+      "const result = await activateStagedProductionInstallation(process.argv[1], { assertOffline: async () => undefined, runDesktopDatabaseCommand: () => undefined });",
+      "await writeFile(process.argv[2], JSON.stringify(result));"
+    ].join("\n");
+    const recover = spawn(process.execPath, ["--input-type=module", "-e", recoverSource, receipt.receiptPath, recoveryResultPath], { stdio: "inherit" });
+    const [recoverCode] = await once(recover, "close");
+    expect(recoverCode).toBe(0);
+    expect(JSON.parse(await readFile(recoveryResultPath, "utf8"))).toMatchObject({ activated: true, target: candidate.target });
     expect(await realpath(join(productionRoot, "current"))).toBe(candidate.target);
   });
 
@@ -344,6 +384,29 @@ describe("production lifecycle launcher", () => {
     await expect(activateStagedProductionInstallation(receipt.receiptPath)).rejects.toThrow("already running");
     await expect(finalizeStagedProductionInstallation(receipt.receiptPath)).rejects.toThrow("already running");
     await held.release();
+  });
+
+  test("releases the cold-activation lease when the pending-activation gate refuses entry", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const receipt = await stageProductionInstallation({
+      bundleDigest: candidate.bundleDigest,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot,
+      sourceBundlePath: candidate.target
+    });
+    await activateStagedProductionInstallation(receipt.receiptPath, { assertOffline: async () => undefined, runDesktopDatabaseCommand: () => undefined });
+    await expect(coldActivateProduction({
+      bundleDigest: candidate.bundleDigest,
+      bundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      databasePath: config.databasePath,
+      homeDir,
+      productionRoot
+    })).rejects.toThrow("Pending activation must be finalized");
+    const lease = await acquireLifecycleLease(receipt.lifecycleLeasePath);
+    await lease.release();
   });
 
   test("cleans the copied candidate and staged files when staging fails before a receipt is durable", async () => {
@@ -383,6 +446,79 @@ describe("production lifecycle launcher", () => {
     expect((await readdir(productionRoot)).filter((name) => name.startsWith("Masthead-linux-x64-"))).toEqual([candidate.target.split("/").at(-1)]);
     await expect(lstat(receipt.receiptPath)).rejects.toMatchObject({ code: "ENOENT" });
   });
+
+  test("refuses finalization when an activated surface keeps the bytes but changes mode", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const receipt = await stageProductionInstallation({
+      bundleDigest: candidate.bundleDigest,
+      sourceBundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot
+    });
+    await activateStagedProductionInstallation(receipt.receiptPath, { assertOffline: async () => undefined, runDesktopDatabaseCommand: () => undefined });
+    await chmod(receipt.activeInstanceLauncherPath, 0o600);
+    await expect(finalizeStagedProductionInstallation(receipt.receiptPath, { verifyLiveProof: async () => undefined }))
+      .rejects.toThrow("mode does not match staged attestation");
+  });
+
+  test("refuses finalization while another staged receipt remains in the production root", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const receipt = await stageProductionInstallation({
+      bundleDigest: candidate.bundleDigest,
+      sourceBundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot
+    });
+    await activateStagedProductionInstallation(receipt.receiptPath, { assertOffline: async () => undefined, runDesktopDatabaseCommand: () => undefined });
+    await writeFile(join(productionRoot, ".masthead-install-other.receipt.json"), "{}\n");
+    await expect(finalizeStagedProductionInstallation(receipt.receiptPath, { verifyLiveProof: async () => undefined }))
+      .rejects.toThrow("stale artifacts");
+  });
+
+  test("binds finalization proof to the receipt base URL before process inspection", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const receipt = await stageProductionInstallation({
+      bundleDigest: candidate.bundleDigest,
+      sourceBundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot
+    });
+    await activateStagedProductionInstallation(receipt.receiptPath, { assertOffline: async () => undefined, runDesktopDatabaseCommand: () => undefined });
+    await publishStartupManifest(receipt);
+    const manifest = JSON.parse(await readFile(receipt.instanceManifestPath, "utf8"));
+    manifest.baseUrl = "http://127.0.0.1:1";
+    await writeFile(receipt.instanceManifestPath, JSON.stringify(manifest));
+    await expect(finalizeStagedProductionInstallation(receipt.receiptPath)).rejects.toThrow("startup manifest does not prove");
+  });
+
+  test.each(["artifact-Masthead-linux-x64-0.1.0-deadbeef", "staged-0", "staged-1", "staged-2", "receipt"])(
+    "resumes finalization after process death following the %s deletion",
+    async (failedStep) => {
+      const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+      const candidate = await secondBundle(productionRoot, oldTarget);
+      const receipt = await stageProductionInstallation({
+        bundleDigest: candidate.bundleDigest,
+        sourceBundlePath: candidate.target,
+        dataDirectory: config.dataDirectory,
+        homeDir,
+        productionRoot
+      });
+      await activateStagedProductionInstallation(receipt.receiptPath, { assertOffline: async () => undefined, runDesktopDatabaseCommand: () => undefined });
+      await expect(finalizeStagedProductionInstallation(receipt.receiptPath, {
+        verifyLiveProof: async () => undefined,
+        onFinalizeStep: async (step: string) => { if (step === failedStep) throw new Error(`process died after ${step}`); }
+      })).rejects.toThrow(`process died after ${failedStep}`);
+      await expect(finalizeStagedProductionInstallation(receipt.receiptPath, { verifyLiveProof: async () => undefined }))
+        .resolves.toMatchObject({ finalized: true, recovered: true, receiptRemoved: true });
+      expect((await readdir(productionRoot)).sort()).toEqual(["current", basename(candidate.target)].sort());
+    }
+  );
 
   test("exposes stage, activate, and finalize as separate public CLI operations", async () => {
     const { config, homeDir, productionRoot, target: oldTarget } = await fixture();

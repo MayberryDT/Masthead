@@ -83,6 +83,7 @@ export async function installProductionLauncher(input, dependencyOverrides = {})
   const homeDir = resolve(input.homeDir || homedir());
   const lease = await acquireLifecycleLease(resolve(input.lifecycleLeasePath || join(homeDir, ".local", "state", "masthead-production", "launcher.lease.sqlite")));
   try {
+    await gatePendingProductionLifecycle(resolve(input.productionRoot || join(homeDir, ".local", "share", "masthead-production")), "install");
     return await installProductionLauncherUnlocked(input, dependencyOverrides);
   } finally {
     await lease.release();
@@ -215,7 +216,16 @@ export async function coldActivateProduction(input, dependencyOverrides = {}) {
   await attestCandidate(config);
   const noLifecycleLease = async () => ({ release: async () => undefined });
   const dependencies = {
-    acquireLease: () => acquireLifecycleLease(config.lifecycleLeasePath),
+    acquireLease: async () => {
+      const lease = await acquireLifecycleLease(config.lifecycleLeasePath);
+      try {
+        await gatePendingProductionLifecycle(config.productionRoot, "cold-activate");
+        return lease;
+      } catch (error) {
+        await lease.release();
+        throw error;
+      }
+    },
     assertLegacyIdentity: (identity) => assertLegacyTargetIdentity(identity, productionRoot),
     assertOffline: () => assertColdProductionOffline(config),
     attestCandidate: () => attestCandidate(config),
@@ -316,6 +326,7 @@ export async function transitionProduction(input, dependencyOverrides = {}) {
   let staged;
   let oldTarget;
   try {
+    await gatePendingProductionLifecycle(productionRoot, "transition");
     if (!dependencyOverrides.stageLaunchers) {
       try {
         preparedInstallation = await stageProductionInstallationUnlocked(
@@ -475,6 +486,8 @@ export async function stageProductionInstallation(input) {
   const lifecycleLeasePath = resolve(input.lifecycleLeasePath || join(homeDir, ".local", "state", "masthead-production", "launcher.lease.sqlite"));
   const lease = await acquireLifecycleLease(lifecycleLeasePath);
   try {
+    const pending = await gatePendingProductionLifecycle(productionRoot, "stage");
+    if (pending === "completed") throw new Error("A previous staged activation must be finalized before staging another bundle.");
     return await stageProductionInstallationUnlocked(input, { dataDirectory, databasePath, homeDir, lifecycleLeasePath, port, productionRoot });
   } catch (error) {
     await cleanupSafeStageOrphans(productionRoot).catch(() => undefined);
@@ -576,6 +589,10 @@ async function stageProductionInstallationUnlocked(input, identity) {
 export async function loadStagedProductionInstallation(receiptPathInput) {
   const receiptPath = resolve(required(receiptPathInput, "staged production receipt path"));
   const record = JSON.parse(await readFile(receiptPath, "utf8"));
+  return hydrateStagedReceiptRecord(record, receiptPath);
+}
+
+function hydrateStagedReceiptRecord(record, receiptPath) {
   if (record?.receiptVersion !== "masthead-production-stage-v1" || record?.staged !== true || record.receiptPath !== receiptPath) {
     throw new Error("Invalid staged production installation receipt.");
   }
@@ -598,7 +615,7 @@ export async function activateStagedProductionInstallation(receiptInput, depende
   const preliminaryReceipt = await loadStagedProductionInstallation(receiptPath);
   const lease = await acquireLifecycleLease(preliminaryReceipt.lifecycleLeasePath);
   try {
-    if (await recoverInterruptedProductionActivation(preliminaryReceipt) === "completed") {
+    if (await gatePendingProductionLifecycle(preliminaryReceipt.productionRoot, "activate", preliminaryReceipt.receiptPath) === "completed") {
       return { activated: true, launched: false, databaseOpened: false, currentPath: preliminaryReceipt.currentPath, target: preliminaryReceipt.target };
     }
     return await activateStagedProductionInstallationUnlocked(receiptPath, dependencyOverrides);
@@ -609,6 +626,11 @@ export async function activateStagedProductionInstallation(receiptInput, depende
 
 async function activateStagedProductionInstallationUnlocked(receiptPath, dependencyOverrides) {
   const receipt = await loadStagedProductionInstallation(receiptPath);
+  await verifyPinnedBundle(receipt.rollbackBundle.path, receipt.rollbackBundle.bundleDigest);
+  const rollbackRelease = await readRelease(receipt.rollbackBundle.path);
+  if (rollbackRelease.gitSha !== receipt.rollbackBundle.buildSha || rollbackRelease.version !== receipt.rollbackBundle.version) {
+    throw new Error("Staged rollback bundle release identity changed before activation.");
+  }
   await (dependencyOverrides.assertOffline ?? assertStagedActivationOffline)(receipt);
   const currentTarget = await realpath(receipt.currentPath);
   if (currentTarget !== receipt.previousCurrentTarget) {
@@ -651,7 +673,7 @@ async function activateStagedProductionInstallationUnlocked(receiptPath, depende
     refreshDesktopDatabase(dirname(receipt.stagedSurface.desktopPath), dependencyOverrides.runDesktopDatabaseCommand);
     receipt.activatedAt = new Date().toISOString();
     await persistStagedReceipt(receipt);
-    await rm(activationJournalPath, { force: true });
+    await writeActivationJournal(activationJournalPath, receipt, "activation-committed");
   } catch (error) {
     if (error?.code === "simulated_activation_process_death") throw error;
     let rollbackError;
@@ -692,7 +714,64 @@ function productionActivationJournalPath(productionRoot) {
 }
 
 async function writeActivationJournal(path, receipt, phase) {
-  await atomicWrite(path, `${JSON.stringify({ schemaVersion: 1, receiptPath: receipt.receiptPath, stagingNonce: receipt.stagingNonce, phase, updatedAt: new Date().toISOString() }, null, 2)}\n`, 0o600);
+  const receiptRecord = stagedReceiptRecord(receipt);
+  const receiptHash = createHash("sha256").update(JSON.stringify(receiptRecord)).digest("hex");
+  const existing = await readFile(path, "utf8").then(JSON.parse).catch(() => undefined);
+  const transitions = [...(Array.isArray(existing?.transitions) ? existing.transitions : []), { phase, completedAt: new Date().toISOString() }];
+  await atomicWrite(path, `${JSON.stringify({
+    schemaVersion: 2,
+    receiptPath: receipt.receiptPath,
+    receiptHash,
+    stagingNonce: receipt.stagingNonce,
+    phase,
+    before: {
+      current: receipt.previousCurrentTarget,
+      instanceLauncher: snapshotForReceipt(receipt.previousInstanceLauncher),
+      lifecycleLauncher: snapshotForReceipt(receipt.previousLauncher),
+      desktop: snapshotForReceipt(receipt.previousDesktop)
+    },
+    after: receipt.stagedFiles,
+    build: { buildSha: receipt.buildSha, buildVersion: receipt.buildVersion, sourceDigest: receipt.sourceDigest },
+    recovery: { rollbackBundle: receipt.rollbackBundle },
+    receipt: receiptRecord,
+    transitions,
+    updatedAt: new Date().toISOString()
+  }, null, 2)}\n`, 0o600);
+}
+
+async function gatePendingProductionLifecycle(productionRoot, command, expectedReceiptPath) {
+  const path = productionActivationJournalPath(productionRoot);
+  let journal;
+  try {
+    journal = JSON.parse(await readFile(path, "utf8"));
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "ENOENT") return "none";
+    throw error;
+  }
+  if (![1, 2].includes(journal?.schemaVersion) || typeof journal.receiptPath !== "string") throw new Error("Production lifecycle journal is malformed.");
+  if (expectedReceiptPath && journal.receiptPath !== expectedReceiptPath) throw new Error("Production lifecycle journal belongs to a different staged receipt.");
+  let receipt;
+  try {
+    receipt = await loadStagedProductionInstallation(journal.receiptPath);
+  } catch (error) {
+    if (!(error && typeof error === "object" && error.code === "ENOENT") || !journal.receipt) throw error;
+    receipt = hydrateStagedReceiptRecord(journal.receipt, journal.receiptPath);
+  }
+  if (journal.schemaVersion === 2) {
+    const receiptHash = createHash("sha256").update(JSON.stringify(stagedReceiptRecord(receipt))).digest("hex");
+    if (receiptHash !== journal.receiptHash) throw new Error("Production lifecycle journal receipt hash mismatch.");
+  }
+  if (command === "finalize" && (journal.phase.startsWith("finalize-cleanup-") || journal.phase === "finalize-after-stage-cleanup")) {
+    return "resume-finalization";
+  }
+  const result = await recoverInterruptedProductionActivation(receipt);
+  if (result === "completed" && ["stage", "install", "cold-activate", "transition"].includes(command)) {
+    throw new Error(`Pending activation must be finalized before ${command}.`);
+  }
+  if (result === "rolled_back" && command !== "activate") {
+    throw new Error(`Recovered an interrupted activation before ${command}; rerun activation before continuing.`);
+  }
+  return result;
 }
 
 async function recoverInterruptedProductionActivation(receipt) {
@@ -704,7 +783,7 @@ async function recoverInterruptedProductionActivation(receipt) {
     if (error && typeof error === "object" && error.code === "ENOENT") return false;
     throw error;
   }
-  if (journal?.schemaVersion !== 1 || journal.receiptPath !== receipt.receiptPath || journal.stagingNonce !== receipt.stagingNonce) {
+  if (![1, 2].includes(journal?.schemaVersion) || journal.receiptPath !== receipt.receiptPath || journal.stagingNonce !== receipt.stagingNonce) {
     throw new Error("Production activation journal does not match the staged receipt.");
   }
   const current = await realpath(receipt.currentPath);
@@ -718,7 +797,6 @@ async function recoverInterruptedProductionActivation(receipt) {
       assertActiveMatchesStaged(receipt.stagedSurface.launcherPath, stagedFileAttestation(receipt, receipt.stagedSurface.launcherStage)),
       assertActiveMatchesStaged(receipt.stagedSurface.desktopPath, stagedFileAttestation(receipt, receipt.stagedSurface.desktopStage))
     ]);
-    await rm(journalPath);
     return "completed";
   }
   await Promise.all([
@@ -738,7 +816,7 @@ async function recoverInterruptedProductionActivation(receipt) {
 
 export async function finalizeStagedProductionInstallation(receiptInput, dependencyOverrides = {}) {
   const receiptPath = typeof receiptInput === "string" ? receiptInput : receiptInput?.receiptPath;
-  const preliminaryReceipt = await loadStagedProductionInstallation(receiptPath);
+  const preliminaryReceipt = await loadFinalizationReceipt(receiptPath);
   const lease = await acquireLifecycleLease(preliminaryReceipt.lifecycleLeasePath);
   try {
     return await finalizeStagedProductionInstallationUnlocked(receiptPath, dependencyOverrides);
@@ -748,21 +826,105 @@ export async function finalizeStagedProductionInstallation(receiptInput, depende
 }
 
 async function finalizeStagedProductionInstallationUnlocked(receiptPath, dependencyOverrides = {}) {
-    const preliminaryReceipt = await loadStagedProductionInstallation(receiptPath);
-    await recoverInterruptedProductionActivation(preliminaryReceipt);
+    const preliminaryReceipt = await loadFinalizationReceipt(receiptPath);
+    const pending = await gatePendingProductionLifecycle(preliminaryReceipt.productionRoot, "finalize", preliminaryReceipt.receiptPath);
+    if (pending === "resume-finalization") {
+      await assertResumableFinalizationProof(preliminaryReceipt, dependencyOverrides);
+      await continueFinalizationCleanup(preliminaryReceipt, dependencyOverrides);
+      return { finalized: true, recovered: true, target: preliminaryReceipt.target, receiptRemoved: true };
+    }
     const receipt = await loadStagedProductionInstallation(receiptPath);
     if (await realpath(receipt.currentPath) !== receipt.target) throw new Error("Cannot finalize a staged installation that is not current.");
-    await verifyPinnedBundle(receipt.target, receipt.sourceDigest);
+    await verifyStagedCandidateIdentity(receipt);
     await Promise.all([
       assertActiveMatchesStaged(receipt.activeInstanceLauncherPath, stagedFileAttestation(receipt, receipt.stagedInstanceLauncherPath)),
       assertActiveMatchesStaged(receipt.stagedSurface.launcherPath, stagedFileAttestation(receipt, receipt.stagedSurface.launcherStage)),
       assertActiveMatchesStaged(receipt.stagedSurface.desktopPath, stagedFileAttestation(receipt, receipt.stagedSurface.desktopStage))
     ]);
-    await (dependencyOverrides.verifyLiveProof ?? assertSuccessfulStagedStartup)(receipt, dependencyOverrides);
-    await cleanupProductionInstallArtifacts(receipt.productionRoot, receipt.target);
-    await discardStagedLaunchers(receipt);
-    await rm(receipt.receiptPath);
+    const verifyLiveProof = dependencyOverrides.verifyLiveProof ?? assertSuccessfulStagedStartup;
+    await verifyLiveProof(receipt, dependencyOverrides);
+    const journalPath = productionActivationJournalPath(receipt.productionRoot);
+    await writeActivationJournal(journalPath, receipt, "finalize-before-artifact-cleanup");
+    await verifyStagedCandidateIdentity(receipt);
+    await Promise.all([
+      assertActiveMatchesStaged(receipt.activeInstanceLauncherPath, stagedFileAttestation(receipt, receipt.stagedInstanceLauncherPath)),
+      assertActiveMatchesStaged(receipt.stagedSurface.launcherPath, stagedFileAttestation(receipt, receipt.stagedSurface.launcherStage)),
+      assertActiveMatchesStaged(receipt.stagedSurface.desktopPath, stagedFileAttestation(receipt, receipt.stagedSurface.desktopStage))
+    ]);
+    await verifyLiveProof(receipt, dependencyOverrides);
+    await assertNoOtherLifecycleArtifacts(receipt);
+    await continueFinalizationCleanup(receipt, dependencyOverrides);
     return { finalized: true, target: receipt.target, receiptRemoved: true };
+}
+
+async function loadFinalizationReceipt(receiptPathInput) {
+  const receiptPath = resolve(required(receiptPathInput, "staged production receipt path"));
+  try {
+    return await loadStagedProductionInstallation(receiptPath);
+  } catch (error) {
+    if (!(error && typeof error === "object" && error.code === "ENOENT")) throw error;
+    const journal = JSON.parse(await readFile(productionActivationJournalPath(dirname(receiptPath)), "utf8"));
+    if (!journal?.receipt || journal.receiptPath !== receiptPath || !String(journal.phase).startsWith("finalize-cleanup-")) throw error;
+    return hydrateStagedReceiptRecord(journal.receipt, receiptPath);
+  }
+}
+
+async function assertResumableFinalizationProof(receipt, dependencyOverrides) {
+  if (await realpath(receipt.currentPath) !== receipt.target) throw new Error("Cannot resume finalization for a production installation that is not current.");
+  await verifyStagedCandidateIdentity(receipt);
+  await Promise.all([
+    assertActiveMatchesAttestation(receipt.activeInstanceLauncherPath, stagedFileAttestation(receipt, receipt.stagedInstanceLauncherPath)),
+    assertActiveMatchesAttestation(receipt.stagedSurface.launcherPath, stagedFileAttestation(receipt, receipt.stagedSurface.launcherStage)),
+    assertActiveMatchesAttestation(receipt.stagedSurface.desktopPath, stagedFileAttestation(receipt, receipt.stagedSurface.desktopStage))
+  ]);
+  await (dependencyOverrides.verifyLiveProof ?? assertSuccessfulStagedStartup)(receipt, dependencyOverrides);
+  await assertNoOtherLifecycleArtifacts(receipt);
+}
+
+async function continueFinalizationCleanup(receipt, dependencyOverrides) {
+  const journalPath = productionActivationJournalPath(receipt.productionRoot);
+  const removeWithJournal = async (path, options, label) => {
+    await writeActivationJournal(journalPath, receipt, `finalize-cleanup-before-${label}`);
+    await rm(path, options);
+    await writeActivationJournal(journalPath, receipt, `finalize-cleanup-after-${label}`);
+    await dependencyOverrides.onFinalizeStep?.(label);
+  };
+  await cleanupProductionInstallArtifacts(receipt.productionRoot, receipt.target, removeWithJournal);
+  for (const [index, path] of [receipt.stagedInstanceLauncherPath, receipt.stagedSurface.launcherStage, receipt.stagedSurface.desktopStage].entries()) {
+    await removeWithJournal(path, { force: true }, `staged-${index}`);
+  }
+  await writeActivationJournal(journalPath, receipt, "finalize-after-stage-cleanup");
+  await assertFinalizedProductionHygiene(receipt);
+  await writeActivationJournal(journalPath, receipt, "finalize-cleanup-before-receipt");
+  await rm(receipt.receiptPath, { force: true });
+  await writeActivationJournal(journalPath, receipt, "finalize-cleanup-after-receipt");
+  await dependencyOverrides.onFinalizeStep?.("receipt");
+  await rm(journalPath);
+}
+
+async function assertFinalizedProductionHygiene(receipt) {
+  const entries = await readdir(receipt.productionRoot);
+  const bundles = entries.filter((name) => VERSIONED_TARGET.test(name));
+  if (bundles.length !== 1 || bundles[0] !== basename(receipt.target)) throw new Error("Finalized production hygiene did not retain exactly one bundle.");
+  const currentReceipt = basename(receipt.receiptPath);
+  const forbidden = entries.filter((name) =>
+    name.endsWith(".staged") ||
+    (name.endsWith(".receipt.json") && name !== currentReceipt) ||
+    /^(?:previous|backup-|helper)/u.test(name) ||
+    name === "app-menu-icons"
+  );
+  if (forbidden.length > 0) throw new Error(`Finalized production hygiene left stale artifacts: ${forbidden.join(", ")}`);
+}
+
+async function assertNoOtherLifecycleArtifacts(receipt) {
+  const currentReceipt = basename(receipt.receiptPath);
+  const currentJournal = basename(productionActivationJournalPath(receipt.productionRoot));
+  const entries = await readdir(receipt.productionRoot);
+  const forbidden = entries.filter((name) =>
+    (name.endsWith(".receipt.json") && name !== currentReceipt) ||
+    (name.endsWith(".journal.json") && name !== currentJournal)
+  );
+  if (forbidden.length > 0) throw new Error(`Finalized production hygiene left stale artifacts: ${forbidden.join(", ")}`);
 }
 
 function stagedReceiptRecord(receipt) {
@@ -822,6 +984,7 @@ async function assertSuccessfulStagedStartup(receipt) {
   if (
     manifest?.schemaVersion !== 1 ||
     manifest.buildSha !== receipt.buildSha ||
+    manifest.baseUrl !== receipt.baseUrl ||
     manifest.instanceDir !== receipt.instanceDir ||
     !Number.isSafeInteger(manifest.pid) || manifest.pid < 1 ||
     typeof manifest.instanceId !== "string" || !manifest.instanceId ||
@@ -840,7 +1003,7 @@ async function assertSuccessfulStagedStartup(receipt) {
   if (
     health?.runtime?.mode !== "primary" || health.runtime.writable !== true ||
     health.runtime.pid !== manifest.pid || health.runtime.daemonInstanceId !== manifest.instanceId ||
-    health.runtime.baseUrl !== manifest.baseUrl || health.runtime.instanceDir !== receipt.instanceDir ||
+    health.runtime.baseUrl !== receipt.baseUrl || health.runtime.instanceDir !== receipt.instanceDir ||
     health.runtime.instanceManifest !== receipt.instanceManifestPath || health.runtime.authoringCommand !== receipt.activeInstanceLauncherPath ||
     health.data?.dataDirectory !== receipt.dataDirectory || health.data?.databasePath !== receipt.databasePath ||
     health.data?.databaseId !== manifest.databaseId || health.buildSha !== receipt.buildSha
@@ -853,6 +1016,9 @@ async function assertStagedActivationOffline(receipt) {
   if (processes.length > 0) throw new Error(`Staged activation requires an empty production process set: ${formatProcesses(processes)}.`);
   if (await fetchHealth(receipt.port)) throw new Error("Staged activation requires production health to be absent.");
   if (!(await portBindable(receipt.port))) throw new Error(`Staged activation requires port ${receipt.port} to be bindable.`);
+  const databaseLease = await acquireLifecycleLease(`${receipt.databasePath}.lease.sqlite`);
+  await databaseLease.release();
+  await probeExclusiveOwnership(receipt);
   for (const path of [receipt.instanceManifestPath, join(receipt.dataDirectory, "runtime", "database.lock")]) {
     try {
       await access(path);
@@ -893,8 +1059,17 @@ async function readAttestedStagedFile(attestation) {
 }
 
 async function assertActiveMatchesStaged(activePath, attestation) {
-  const [activeBody, stagedBody] = await Promise.all([readFile(activePath), readAttestedStagedFile(attestation)]);
+  const [activeBody, activeInfo, stagedBody] = await Promise.all([readFile(activePath), stat(activePath), readAttestedStagedFile(attestation)]);
   if (!activeBody.equals(stagedBody)) throw new Error(`Active production surface does not match staged attestation: ${activePath}`);
+  if ((activeInfo.mode & 0o777) !== attestation.mode) throw new Error(`Active production surface mode does not match staged attestation: ${activePath}`);
+}
+
+async function assertActiveMatchesAttestation(activePath, attestation) {
+  const [activeBody, activeInfo] = await Promise.all([readFile(activePath), stat(activePath)]);
+  if (createHash("sha256").update(activeBody).digest("hex") !== attestation.sha256) {
+    throw new Error(`Active production surface does not match staged attestation: ${activePath}`);
+  }
+  if ((activeInfo.mode & 0o777) !== attestation.mode) throw new Error(`Active production surface mode does not match staged attestation: ${activePath}`);
 }
 
 function stagedFileAttestation(receipt, path) {
@@ -1055,6 +1230,7 @@ export async function startProduction(configInput, dependencyOverrides = {}) {
   const dependencies = { ...defaultDependencies(config), ...dependencyOverrides };
   const lease = await dependencies.acquireLease();
   try {
+    await gatePendingProductionLifecycle(config.productionRoot, "start");
     let interruptedStart;
     const pending = await dependencies.readMaintenanceJournal();
     if ((pending?.schemaVersion === 2 || pending?.rollbackMode === "offline_only") && !config.transitionNonce) {
@@ -1140,6 +1316,7 @@ export async function stopProduction(configInput, dependencyOverrides = {}) {
   const dependencies = { ...defaultDependencies(config), ...dependencyOverrides };
   const lease = await dependencies.acquireLease();
   try {
+    await gatePendingProductionLifecycle(config.productionRoot, "stop");
     return await stopInsideLifecycleLease(config, dependencies);
   } finally {
     await lease.release();
@@ -1358,14 +1535,14 @@ async function cleanupOldProductionBundles(productionRoot, target) {
   }
 }
 
-async function cleanupProductionInstallArtifacts(productionRoot, target) {
+async function cleanupProductionInstallArtifacts(productionRoot, target, remove = (path, options) => rm(path, options)) {
   const retainedName = basename(target);
   const entries = await readdir(productionRoot, { withFileTypes: true });
   for (const entry of entries) {
     const staleBundle = VERSIONED_TARGET.test(entry.name) && entry.name !== retainedName;
     const staleInstallArtifact = /^(?:previous|backup-)/u.test(entry.name) || entry.name === "app-menu-icons" || /^helper(?:-|$)/u.test(entry.name);
     if (!staleBundle && !staleInstallArtifact) continue;
-    await rm(join(productionRoot, entry.name), { force: true, recursive: true });
+    await remove(join(productionRoot, entry.name), { force: true, recursive: true }, `artifact-${entry.name}`);
   }
 }
 
@@ -2853,6 +3030,14 @@ async function verifyPinnedBundle(target, expectedDigest) {
     throw new Error("Packaged content manifest does not match the pinned bundle digest.");
   }
   return manifest;
+}
+
+async function verifyStagedCandidateIdentity(receipt) {
+  await verifyPinnedBundle(receipt.target, receipt.sourceDigest);
+  const release = await readRelease(receipt.target);
+  if (release.gitSha !== receipt.buildSha || release.version !== receipt.buildVersion) {
+    throw new Error("Staged production candidate release identity changed after staging.");
+  }
 }
 
 function required(value, label) {
