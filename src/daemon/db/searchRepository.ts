@@ -105,8 +105,11 @@ export function removeSessionSearchDocument(db: MastheadDatabase, sessionId: str
   const mapping = db
     .prepare("SELECT search_rowid AS searchRowid FROM session_search_rowids WHERE session_id = ?")
     .get(sessionId) as { searchRowid: number } | undefined;
-  if (!mapping) return;
-  db.prepare("DELETE FROM session_search WHERE rowid = ?").run(mapping.searchRowid);
+  if (mapping) {
+    db.prepare("DELETE FROM session_search WHERE rowid = ?").run(mapping.searchRowid);
+  } else {
+    db.prepare("DELETE FROM session_search WHERE session_id = ?").run(sessionId);
+  }
   db.prepare("DELETE FROM session_search_rowids WHERE session_id = ?").run(sessionId);
 }
 
