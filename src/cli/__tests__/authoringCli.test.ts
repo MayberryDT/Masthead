@@ -32,6 +32,7 @@ const daemons: MastheadDaemon[] = [];
 const execFileAsync = promisify(execFile);
 let exactCliRecoveryTemplatePromise: Promise<ExactCliRecoveryTemplate> | undefined;
 const SMALL_RECOVERY_AUDIT_HASH = "b".repeat(64);
+const SMALL_ALTERED_RECOVERY_AUDIT_HASH = "c".repeat(64);
 
 function validCliV3Bundle(runId: string, evidenceRevision: string, sessionId: string) {
   const evidenceRef = {
@@ -763,51 +764,79 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
     expect(readCliRecoveryCounts(dbPath)).toEqual({ artifacts: 1, runs: 1 });
   });
 
-  test("invalidates only the exact generation with unchanged identity, population, and hash", async () => {
+  test("refuses invalidation when a small recovery backup has another database identity", async () => {
+    useSmallCliRecoveryAudit();
+    const { backupPath, dbPath } = await makeSmallCliRecoveryFixture(
+      "masthead-cli-v1-invalidation-identity-"
+    );
+    const backup = new DatabaseSync(backupPath);
+    backup.prepare(
+      "UPDATE app_settings SET setting_json = ? WHERE setting_key = 'database_identity'"
+    ).run(JSON.stringify({ databaseId: "wrong-database-id" }));
+    backup.close();
+
+    const refused = await runMastheadCli(
+      [
+        "workbench", "invalidate-v1-generation", "--db", dbPath,
+        "--audit-hash", SMALL_RECOVERY_AUDIT_HASH, "--confirm", "--json"
+      ],
+      { env: {} }
+    );
+    expect(JSON.parse(refused.stderr)).toMatchObject({
+      error: { code: "v1_recovery_refused", message: expect.stringContaining("database_invalidation_identity_mismatch") },
+      ok: false
+    });
+    expect(readCliRecoveryCounts(dbPath)).toEqual({ artifacts: 1, runs: 1 });
+  });
+
+  test("refuses invalidation when a small prepared backup population changes", async () => {
+    useSmallCliRecoveryAudit();
+    const { backupPath, dbPath } = await makeSmallCliRecoveryFixture(
+      "masthead-cli-v1-invalidation-backup-population-"
+    );
+    const backup = new DatabaseSync(backupPath);
+    backup.prepare(
+      "UPDATE workbench_session_state SET adr_status = 'required' WHERE session_id = 'session:cli-failed:0000'"
+    ).run();
+    backup.close();
+
+    const refused = await runMastheadCli(
+      [
+        "workbench", "invalidate-v1-generation", "--db", dbPath,
+        "--audit-hash", SMALL_RECOVERY_AUDIT_HASH, "--confirm", "--json"
+      ],
+      { env: {} }
+    );
+    expect(JSON.parse(refused.stderr)).toMatchObject({
+      error: { code: "v1_recovery_refused", message: expect.stringContaining("database_invalidation_backup_audit_hash_mismatch") },
+      ok: false
+    });
+    expect(readCliRecoveryCounts(dbPath)).toEqual({ artifacts: 1, runs: 1 });
+  });
+
+  test("refuses invalidation when a valid requested hash differs from the small audit", async () => {
+    useSmallCliRecoveryAudit();
+    const { dbPath } = await makeSmallCliRecoveryFixture("masthead-cli-v1-invalidation-valid-hash-");
+
+    const refused = await runMastheadCli(
+      [
+        "workbench", "invalidate-v1-generation", "--db", dbPath,
+        "--audit-hash", "0".repeat(64), "--confirm", "--json"
+      ],
+      { env: {} }
+    );
+    expect(JSON.parse(refused.stderr)).toMatchObject({
+      error: { code: "v1_recovery_refused", message: expect.stringContaining("database_invalidation_active_audit_hash_mismatch") },
+      ok: false
+    });
+    expect(readCliRecoveryCounts(dbPath)).toEqual({ artifacts: 1, runs: 1 });
+  });
+
+  test("invalidates the exact generation while preserving its verified backup", async () => {
     const { auditHash, backupPath, databaseId, dbPath, tempDir } = await makeExactCliRecoveryFixture(
       "masthead-cli-v1-invalidation-success-",
       { backup: true }
     );
-    const safeBackupBytes = await readFile(backupPath);
-
-    const wrongIdentityBackup = new DatabaseSync(backupPath);
-    wrongIdentityBackup.prepare(
-      "UPDATE app_settings SET setting_json = ? WHERE setting_key = 'database_identity'"
-    ).run(JSON.stringify({ databaseId: "wrong-database-id" }));
-    wrongIdentityBackup.close();
-    const wrongIdentity = await runMastheadCli(
-      ["workbench", "invalidate-v1-generation", "--db", dbPath, "--audit-hash", auditHash, "--confirm", "--json"],
-      { env: {} }
-    );
-    expect(JSON.parse(wrongIdentity.stderr)).toMatchObject({
-      error: { code: "v1_recovery_refused", message: expect.stringContaining("database_invalidation_identity_mismatch") },
-      ok: false
-    });
-    expect(readCliRecoveryCounts(dbPath)).toEqual({ artifacts: 1_283, runs: 66 });
-    await writeFile(backupPath, safeBackupBytes);
-
-    const wrongPopulationBackup = new DatabaseSync(backupPath);
-    wrongPopulationBackup.prepare(
-      "UPDATE workbench_session_state SET adr_status = 'required' WHERE session_id = 'session:cli-failed:0000'"
-    ).run();
-    wrongPopulationBackup.close();
-    const wrongPopulation = await runMastheadCli(
-      ["workbench", "invalidate-v1-generation", "--db", dbPath, "--audit-hash", auditHash, "--confirm", "--json"],
-      { env: {} }
-    );
-    expect(JSON.parse(wrongPopulation.stderr)).toMatchObject({
-      error: { code: "v1_recovery_refused", message: expect.stringContaining("database_invalidation_backup_audit_hash_mismatch") },
-      ok: false
-    });
-    expect(readCliRecoveryCounts(dbPath)).toEqual({ artifacts: 1_283, runs: 66 });
-    await writeFile(backupPath, safeBackupBytes);
-
-    const wrongHash = await runMastheadCli(
-      ["workbench", "invalidate-v1-generation", "--db", dbPath, "--audit-hash", "0".repeat(64), "--confirm", "--json"],
-      { env: {} }
-    );
-    expect(JSON.parse(wrongHash.stderr)).toMatchObject({ error: { code: "v1_recovery_refused" }, ok: false });
-    expect(readCliRecoveryCounts(dbPath)).toEqual({ artifacts: 1_283, runs: 66 });
 
     const invalidated = await runMastheadCli(
       ["workbench", "invalidate-v1-generation", "--db", dbPath, "--audit-hash", auditHash, "--confirm", "--json"],
@@ -1047,10 +1076,13 @@ function useSmallCliRecoveryAudit(): void {
       "SELECT COUNT(*) AS count FROM session_artifacts"
     ).get() as { count: number }).count);
     if (artifacts !== 1) return realAudit(database);
+    const alteredPopulation = Number((database.prepare(
+      "SELECT COUNT(*) AS count FROM workbench_session_state WHERE adr_status = 'required'"
+    ).get() as { count: number }).count) > 0;
     return {
       actorId: "failed-agent",
       adrs: 0,
-      auditHash: SMALL_RECOVERY_AUDIT_HASH,
+      auditHash: alteredPopulation ? SMALL_ALTERED_RECOVERY_AUDIT_HASH : SMALL_RECOVERY_AUDIT_HASH,
       contractVersion: "workbench-authoring-v1",
       counts: {
         byKind: { session_dossier: 1 },
