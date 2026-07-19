@@ -480,6 +480,14 @@ function validateGuidedBundleSemantics(bundle: GuidedAuthoringBundleV4): void {
     const artifact = bundle.artifacts[index]!;
     const path = `artifacts[${index}]`;
     requireNonBlank(artifact.draftId, `${path}.draftId`);
+    requireNonBlank(artifact.seedSessionId, `${path}.seedSessionId`);
+    const provenanceSessionIds = new Set<string>();
+    for (let provenanceIndex = 0; provenanceIndex < artifact.provenanceSessionIds.length; provenanceIndex += 1) {
+      const provenanceSessionId = artifact.provenanceSessionIds[provenanceIndex]!;
+      const provenancePath = `${path}.provenanceSessionIds[${provenanceIndex}]`;
+      requireNonBlank(provenanceSessionId, provenancePath);
+      requireUnique(provenanceSessionIds, provenanceSessionId, provenancePath);
+    }
     if (artifactsById.has(artifact.draftId)) throw invalidGuidedBundle(`${path}.draftId`);
     artifactsById.set(artifact.draftId, artifact);
   }

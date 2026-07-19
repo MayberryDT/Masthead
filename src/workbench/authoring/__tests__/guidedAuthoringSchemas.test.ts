@@ -46,6 +46,21 @@ describe("guided authoring V4 schema", () => {
     expect(parseGuidedAuthoringBundleV4(bundle)).toEqual(bundle);
   });
 
+  test("accepts a changed-kind opportunity linked to one artifact draft of the new kind", () => {
+    const bundle = validGuidedBundle();
+    bundle.artifacts = [validAdrDraft()];
+    bundle.opportunityDispositions = [changedKindDisposition()];
+
+    expect(parseGuidedAuthoringBundleV4(bundle)).toEqual(bundle);
+  });
+
+  test("accepts an opportunity merged into another persisted opportunity", () => {
+    const bundle = validGuidedBundle();
+    bundle.opportunityDispositions = [mergedDisposition()];
+
+    expect(parseGuidedAuthoringBundleV4(bundle)).toEqual(bundle);
+  });
+
   test("accepts an empty disposition array for an assignment with no opportunities", () => {
     const bundle = validGuidedBundle({ opportunities: [] });
 
@@ -169,6 +184,26 @@ describe("guided authoring V4 schema", () => {
 
     expect(() => parseGuidedAuthoringBundleV4(bundle)).toThrow("invalid_guided_authoring_bundle");
   });
+
+  test.each([
+    ["blank seed session ID", (draft: GuidedAuthoringBundleV4["artifacts"][number]) => {
+      draft.seedSessionId = " ";
+    }],
+    ["blank provenance session ID", (draft: GuidedAuthoringBundleV4["artifacts"][number]) => {
+      draft.provenanceSessionIds = ["session:a", ""];
+    }],
+    ["duplicate provenance session ID", (draft: GuidedAuthoringBundleV4["artifacts"][number]) => {
+      draft.provenanceSessionIds = ["session:a", "session:a"];
+    }]
+  ])("rejects an artifact draft with a %s", (_label, mutate) => {
+    const bundle = validGuidedBundle();
+    const draft = validAdrDraft();
+    mutate(draft);
+    bundle.artifacts = [draft];
+    bundle.opportunityDispositions = [authoredDisposition()];
+
+    expect(() => parseGuidedAuthoringBundleV4(bundle)).toThrow("invalid_guided_authoring_bundle");
+  });
 });
 
 function validGuidedBundle(
@@ -186,7 +221,9 @@ function validGuidedBundle(
         support("/sessionSummary/text", "outcome", "The selected session was converted into durable, evidence-backed knowledge."),
         support("/sessionDossier/purpose", "purpose", "The user asked for guided authoring that produces reusable artifacts."),
         support("/sessionDossier/outcome", "outcome", "The implementation defined one fail-closed V4 authoring contract."),
-        support("/sessionDossier/keyWork/0", "change", "The V4 bundle records typed support for each substantive session claim.")
+        support("/sessionDossier/keyWork/0", "change", "The V4 bundle records typed support for each substantive session claim."),
+        support("/sessionDossier/blockers/0", "blocker", "No unresolved implementation blocker remained after the schema contract passed."),
+        support("/sessionDossier/continuation/constraints/0", "continuation", "Future authoring must keep legacy V1 through V3 records audit-only.")
       ],
       enrichment: durableEnrichment(),
       sessionId: "session:a"
