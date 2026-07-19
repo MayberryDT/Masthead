@@ -1,15 +1,61 @@
 #!/usr/bin/env node
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { cp, lstat, mkdir, mkdtemp, readFile, realpath, readdir, rm, symlink } from "node:fs/promises";
+import { cp, lstat, mkdir, mkdtemp, readFile, realpath, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { resolvePackagedBundleLayout, verifyPackagedBundleManifest } from "./packaged-bundle-manifest.js";
-import { readOwnedProcessStrict } from "./masthead-production.js";
+import {
+  resolvePackagedBundleLayout,
+  verifyPackagedBundleManifest,
+  writePackagedBundleManifest
+} from "./packaged-bundle-manifest.js";
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
+const MATRIX_STAGE_STEPS = ["candidate-copy", "instance-stage", "surface-stage", "receipt-publication", "intent-removal"];
+const MATRIX_ACTIVATION_STEPS = [
+  "current", "instance-launcher", "lifecycle-launcher", "desktop", "activation-pre-commit", "activation-commit", "activation-receipt"
+];
+const MATRIX_FINALIZATION_STEPS = ["rollback-bundle", "staged-0", "staged-1", "staged-2", "receipt", "journal"];
+const PACKAGE_BOUND_MATRIX_REQUIRED_IDS = [
+  "stage:candidate-copy:SIGKILL",
+  "stage:instance-stage:SIGKILL",
+  "stage:surface-stage:SIGKILL",
+  "stage:receipt-publication:SIGKILL",
+  "stage:intent-removal:SIGKILL",
+  "activate:current:SIGKILL",
+  "activate:instance-launcher:SIGKILL",
+  "activate:lifecycle-launcher:SIGKILL",
+  "activate:desktop:SIGKILL",
+  "activate:activation-pre-commit:SIGKILL",
+  "activate:activation-commit:SIGKILL",
+  "activate:activation-receipt:SIGKILL",
+  "finalize:rollback-bundle:SIGKILL",
+  "finalize:rollback-bundle:exit",
+  "finalize:staged-0:SIGKILL",
+  "finalize:staged-0:exit",
+  "finalize:staged-1:SIGKILL",
+  "finalize:staged-1:exit",
+  "finalize:staged-2:SIGKILL",
+  "finalize:staged-2:exit",
+  "finalize:receipt:SIGKILL",
+  "finalize:receipt:exit",
+  "finalize:journal:SIGKILL",
+  "finalize:journal:exit"
+];
+const PACKAGE_BOUND_MATRIX_CASES = [
+  ...MATRIX_STAGE_STEPS.map((step) => ({ id: `stage:${step}:SIGKILL`, operation: "stage", step, termination: "SIGKILL" })),
+  ...MATRIX_ACTIVATION_STEPS.map((step) => ({ id: `activate:${step}:SIGKILL`, operation: "activate", step, termination: "SIGKILL" })),
+  ...MATRIX_FINALIZATION_STEPS.flatMap((step) => ["SIGKILL", "exit"].map((termination) => ({
+    id: `finalize:${step}:${termination}`, operation: "finalize", step, termination
+  })))
+];
+const PACKAGE_BOUND_MATRIX_MINIMUM_CASES = 24;
+const MATRIX_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+  "base64"
+);
 
 export async function validateRehearsalBundle(argv, environment = process.env) {
   const bundleIndex = argv.indexOf("--bundle");
@@ -102,8 +148,8 @@ export async function runProductionActivationRehearsal(argv = process.argv.slice
     }
     if (await fetch(receipt.baseUrl).catch(() => undefined)) throw new Error("Operational candidate health endpoint remained reachable after stop.");
     await assertPortBindable(port);
-    runCrashRaceMatrix(environment);
-    return { ok: true, bundle: verified.bundle, isolated: true, matrix: true };
+    const matrix = await runPackageBoundCrashMatrix(verified, environment, temporaryParent);
+    return { ok: true, bundle: verified.bundle, isolated: true, matrix };
   } finally {
     if (rehearsalRoot) {
       if (installedLauncher && lifecycleEnvironment) {
@@ -148,24 +194,6 @@ async function retryTransientProcessScan(operation) {
   }
 }
 
-export async function stopChild(child, adapters = {}) {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  const readProcess = adapters.readProcess ?? readOwnedProcessStrict;
-  const captured = await readProcess(child.pid);
-  if (!captured?.starttime) throw new Error("Rehearsal cleanup could not capture the spawned process identity.");
-  const closeAfterTerm = once(child, "close");
-  child.kill("SIGTERM");
-  const result = await Promise.race([closeAfterTerm, new Promise((resolvePromise) => setTimeout(() => resolvePromise(undefined), adapters.termTimeoutMs ?? 5_000))]);
-  if (result) return;
-  const current = await readProcess(child.pid);
-  if (!current || current.starttime !== captured.starttime) {
-    throw new Error("Rehearsal cleanup refused SIGKILL because the spawned PID identity changed.");
-  }
-  const closeAfterKill = once(child, "close");
-  child.kill("SIGKILL");
-  await closeAfterKill;
-}
-
 async function runPackagedLifecycleCommand(verified, args, environment) {
   const lifecycleScript = join(verified.layout.resourcesPath, "daemon", "scripts", "masthead-production.js");
   return runLifecycleSubprocess(verified.layout.nodePath, [lifecycleScript, ...args, "--json"], environment);
@@ -193,14 +221,274 @@ async function runLifecycleSubprocess(executable, args, environment) {
   }
 }
 
-function runCrashRaceMatrix(environment) {
-  process.stdout.write("Running the synthetic-fixture crash/race matrix after the supplied bundle completed the operational sequence.\n");
-  const result = spawnSync(process.execPath, [
-    join(dirname(SCRIPT_PATH), "..", "node_modules", "vitest", "vitest.mjs"),
-    "run", "src/electron/__tests__/productionLauncher.test.ts", "-t",
-    "unreceipted stage|stage receipt publication|real SIGKILL activation|repairs the staged receipt|resumes finalization in a fresh process|same crash-safe lifecycle lease|serializes real runCli lifecycle commands|foreign staged artifact|completion marker|symbolic-link substitution"
-  ], { cwd: join(dirname(SCRIPT_PATH), ".."), env: environment, stdio: "inherit" });
-  if (result.status !== 0) throw new Error(`Production activation crash/race matrix failed with exit ${result.status ?? "unknown"}.`);
+export function assertPackageBoundMatrixCoverage(executedCaseIds, expectedCaseIds = PACKAGE_BOUND_MATRIX_REQUIRED_IDS) {
+  if (executedCaseIds.length !== expectedCaseIds.length) {
+    throw new Error(`Package-bound crash matrix executed ${executedCaseIds.length} of ${expectedCaseIds.length} required cases.`);
+  }
+  if (
+    new Set(executedCaseIds).size !== executedCaseIds.length ||
+    executedCaseIds.some((id, index) => id !== expectedCaseIds[index])
+  ) {
+    throw new Error("Package-bound crash matrix case set changed; missing, duplicated, or renamed cases cannot be certified.");
+  }
+}
+
+export async function runPackageBoundCrashMatrix(verified, environment = process.env, temporaryParent) {
+  const definedCaseIds = PACKAGE_BOUND_MATRIX_CASES.map(({ id }) => id);
+  assertPackageBoundMatrixCoverage(definedCaseIds, PACKAGE_BOUND_MATRIX_REQUIRED_IDS);
+  if (PACKAGE_BOUND_MATRIX_REQUIRED_IDS.length !== PACKAGE_BOUND_MATRIX_MINIMUM_CASES) {
+    throw new Error(`Package-bound crash matrix contract has ${PACKAGE_BOUND_MATRIX_REQUIRED_IDS.length} cases; expected exactly ${PACKAGE_BOUND_MATRIX_MINIMUM_CASES}.`);
+  }
+  const executedCaseIds = [];
+  process.stdout.write(`Running ${PACKAGE_BOUND_MATRIX_REQUIRED_IDS.length} fresh-process crash cases through the supplied packaged lifecycle module.\n`);
+  for (const definition of PACKAGE_BOUND_MATRIX_CASES) {
+    try {
+      await executePackageBoundCrashCase(definition, {
+        environment,
+        temporaryParent,
+        verified
+      });
+    } catch (error) {
+      throw new Error(
+        `Package-bound crash matrix case ${definition.id} failed after ${executedCaseIds.length} of ${PACKAGE_BOUND_MATRIX_REQUIRED_IDS.length} cases.`,
+        { cause: error }
+      );
+    }
+    executedCaseIds.push(definition.id);
+  }
+  assertPackageBoundMatrixCoverage(executedCaseIds, PACKAGE_BOUND_MATRIX_REQUIRED_IDS);
+  return {
+    source: "supplied-package",
+    executedCaseCount: executedCaseIds.length,
+    expectedCaseCount: PACKAGE_BOUND_MATRIX_REQUIRED_IDS.length,
+    minimumCaseCount: PACKAGE_BOUND_MATRIX_MINIMUM_CASES,
+    caseIds: executedCaseIds
+  };
+}
+
+async function executePackageBoundCrashCase(definition, context) {
+  const temporaryParent = resolve(context.temporaryParent || context.environment.TMPDIR || tmpdir());
+  const root = await mkdtemp(join(temporaryParent, "masthead-package-bound-matrix-"));
+  try {
+    const fixture = await createPackageBoundMatrixFixture(root, definition, context);
+    if (definition.operation === "stage") await executeStageCrashCase(definition, fixture);
+    else if (definition.operation === "activate") await executeActivationCrashCase(definition, fixture);
+    else await executeFinalizationCrashCase(definition, fixture);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+}
+
+async function createPackageBoundMatrixFixture(root, definition, context) {
+  const homeDir = join(root, "home");
+  const productionRoot = join(root, "production");
+  const dataDirectory = join(root, "data");
+  const databasePath = join(dataDirectory, "masthead.sqlite");
+  const lifecycleLeasePath = join(homeDir, ".local", "state", "masthead-production", "launcher.lease.sqlite");
+  const baseline = join(productionRoot, "Masthead-linux-x64-matrix-baseline");
+  const candidateSource = join(root, "candidate-source");
+  await Promise.all([
+    createSyntheticMatrixBundle(baseline, { gitSha: "a".repeat(40), version: "matrix-baseline" }),
+    createSyntheticMatrixBundle(candidateSource, { gitSha: "b".repeat(40), version: "matrix-candidate" }),
+    mkdir(dataDirectory, { recursive: true }),
+    mkdir(homeDir, { recursive: true })
+  ]);
+  await symlink(baseline, join(productionRoot, "current"));
+  const candidateManifest = await verifyPackagedBundleManifest(await resolvePackagedBundleLayout(candidateSource, process.platform));
+  const lifecycleScript = join(context.verified.layout.resourcesPath, "daemon", "scripts", "masthead-production.js");
+  return {
+    baseline,
+    candidateSource,
+    definition,
+    environment: isolatedEnvironment(context.environment, homeDir),
+    input: {
+      bundleDigest: candidateManifest.bundleDigest,
+      dataDirectory,
+      databasePath,
+      homeDir,
+      lifecycleLeasePath,
+      port: 29000,
+      productionRoot,
+      sourceBundlePath: candidateSource
+    },
+    lifecycleModuleUrl: pathToFileURL(lifecycleScript).href,
+    nodePath: context.verified.layout.nodePath,
+    productionRoot,
+    root
+  };
+}
+
+async function createSyntheticMatrixBundle(bundleRoot, release) {
+  const daemonRoot = join(bundleRoot, "resources", "daemon");
+  const scriptsRoot = join(daemonRoot, "scripts");
+  const distRoot = join(daemonRoot, "dist", "src");
+  await Promise.all([
+    mkdir(scriptsRoot, { recursive: true }),
+    mkdir(join(distRoot, "daemon"), { recursive: true }),
+    mkdir(join(distRoot, "cli"), { recursive: true }),
+    mkdir(join(distRoot, "core"), { recursive: true }),
+    mkdir(join(distRoot, "shared"), { recursive: true })
+  ]);
+  await Promise.all([
+    writeFile(join(bundleRoot, process.platform === "win32" ? "masthead.exe" : "masthead"), "matrix executable\n", { mode: 0o755 }),
+    writeFile(join(bundleRoot, "resources", "app.asar"), "matrix app\n"),
+    writeFile(join(bundleRoot, "resources", "masthead-logo-sail.png"), MATRIX_PNG),
+    writeFile(join(daemonRoot, process.platform === "win32" ? "node.exe" : "node"), "matrix node\n", { mode: 0o755 }),
+    writeFile(join(daemonRoot, "release.json"), `${JSON.stringify(release)}\n`),
+    ...["packaged-bundle-manifest.js", "masthead-production-cold-activation.js", "masthead-production.js", "masthead-hook.js", "resolve-hook-runtime.js"]
+      .map((name) => writeFile(join(scriptsRoot, name), "export {};\n")),
+    writeFile(join(distRoot, "daemon", "main.js"), "export {};\n"),
+    writeFile(join(distRoot, "daemon", "productionTransitionMaintenance.js"), "export {};\n"),
+    writeFile(join(distRoot, "cli", "mastheadctl.js"), "export {};\n"),
+    writeFile(join(distRoot, "core", "daemonOwnership.js"), "export {};\n"),
+    writeFile(join(distRoot, "shared", "protocol.js"), "export {};\n")
+  ]);
+  return writePackagedBundleManifest(await resolvePackagedBundleLayout(bundleRoot, process.platform));
+}
+
+async function executeStageCrashCase(definition, fixture) {
+  await expectMatrixCrash(definition, fixture, {
+    operation: "stage",
+    input: fixture.input,
+    step: definition.step,
+    termination: definition.termination
+  });
+  const receipt = await runMatrixOperation(fixture, { operation: "stage", input: fixture.input });
+  if (receipt?.staged !== true || !receipt.receiptPath) throw new Error("Fresh-process stage recovery did not return a durable receipt.");
+  const entries = await readdir(fixture.productionRoot);
+  if (entries.includes(".masthead-install-stage.intent.json") || entries.includes(".masthead-install-stage.pending.json")) {
+    throw new Error("Fresh-process stage recovery left its intent or pending receipt record behind.");
+  }
+  if (entries.filter((name) => name.endsWith(".receipt.json")).length !== 1) {
+    throw new Error("Fresh-process stage recovery did not leave exactly one durable receipt.");
+  }
+}
+
+async function executeActivationCrashCase(definition, fixture) {
+  const receipt = await runMatrixOperation(fixture, { operation: "stage", input: fixture.input });
+  await expectMatrixCrash(definition, fixture, {
+    operation: "activate",
+    receiptPath: receipt.receiptPath,
+    step: definition.step,
+    termination: definition.termination
+  });
+  const recovered = await runMatrixOperation(fixture, { operation: "activate", receiptPath: receipt.receiptPath });
+  if (recovered?.activated !== true || await realpath(receipt.currentPath) !== receipt.target) {
+    throw new Error("Fresh-process activation recovery did not restore the candidate as current.");
+  }
+  const durableReceipt = JSON.parse(await readFile(receipt.receiptPath, "utf8"));
+  if (typeof durableReceipt.activatedAt !== "string" || !durableReceipt.activatedAt) {
+    throw new Error("Fresh-process activation recovery did not commit activation to the durable receipt.");
+  }
+}
+
+async function executeFinalizationCrashCase(definition, fixture) {
+  const receipt = await runMatrixOperation(fixture, { operation: "stage", input: fixture.input });
+  await runMatrixOperation(fixture, { operation: "activate", receiptPath: receipt.receiptPath });
+  const hookStep = definition.step === "rollback-bundle" ? `artifact-${basename(receipt.rollbackBundle.path)}` : definition.step;
+  await expectMatrixCrash(definition, fixture, {
+    operation: "finalize",
+    receiptPath: receipt.receiptPath,
+    step: hookStep,
+    termination: definition.termination
+  });
+  const recovered = await runMatrixOperation(fixture, { operation: "finalize", receiptPath: receipt.receiptPath });
+  if (recovered?.finalized !== true || recovered.receiptRemoved !== true) {
+    throw new Error("Fresh-process finalization recovery did not commit.");
+  }
+  const entries = (await readdir(fixture.productionRoot)).sort();
+  if (entries.length !== 2 || !entries.includes("current") || !entries.includes(basename(receipt.target))) {
+    throw new Error(`Fresh-process finalization recovery left unexpected install artifacts: ${entries.join(", ")}`);
+  }
+}
+
+async function expectMatrixCrash(definition, fixture, payload) {
+  const result = await runMatrixWorker(fixture, payload);
+  if (result.timedOut) throw new Error(`Packaged lifecycle hook timed out at ${definition.id}.`);
+  const expected = definition.termination === "SIGKILL"
+    ? result.code === null && result.signal === "SIGKILL"
+    : result.code === 86 && result.signal === null;
+  if (!expected) {
+    throw new Error(
+      `Packaged lifecycle hook did not terminate at ${definition.id}; code=${result.code}, signal=${result.signal || "none"}, stderr=${result.stderr || "empty"}.`
+    );
+  }
+}
+
+async function runMatrixOperation(fixture, payload) {
+  const resultPath = join(fixture.root, `.matrix-result-${process.pid}-${Date.now()}.json`);
+  const result = await runMatrixWorker(fixture, { ...payload, resultPath, termination: undefined });
+  if (result.timedOut) throw new Error(`Packaged lifecycle ${payload.operation} recovery timed out.`);
+  if (result.code !== 0 || result.signal) {
+    throw new Error(`Packaged lifecycle recovery failed (${result.signal || result.code}): ${result.stderr || result.stdout}`);
+  }
+  try {
+    return JSON.parse(await readFile(resultPath, "utf8"));
+  } catch (error) {
+    throw new Error(
+      `Packaged lifecycle recovery did not persist JSON; code=${result.code}, signal=${result.signal || "none"}, stdout=${JSON.stringify(result.stdout)}, stderr=${JSON.stringify(result.stderr)}.`,
+      { cause: error }
+    );
+  } finally {
+    await rm(resultPath, { force: true });
+  }
+}
+
+const MATRIX_WORKER_SOURCE = [
+  "import { writeFile } from 'node:fs/promises';",
+  "const lifecycle = await import(process.argv[1]);",
+  "const payload = JSON.parse(process.argv[2]);",
+  "const terminate = (step) => {",
+  "  if (!payload.termination || step !== payload.step) return;",
+  "  if (payload.termination === 'SIGKILL') process.kill(process.pid, 'SIGKILL');",
+  "  process['exit'](86);",
+  "};",
+  "let result;",
+  "if (payload.operation === 'stage') {",
+  "  result = await lifecycle.stageProductionInstallation({ ...payload.input, onStageStep: terminate });",
+  "} else if (payload.operation === 'activate') {",
+  "  result = await lifecycle.activateStagedProductionInstallation(payload.receiptPath, { assertOffline: async () => undefined, runDesktopDatabaseCommand: () => undefined, onStep: terminate });",
+  "} else {",
+  "  result = await lifecycle.finalizeStagedProductionInstallation(payload.receiptPath, { verifyLiveProof: async () => undefined, onFinalizeStep: terminate });",
+  "}",
+  "if (payload.resultPath) await writeFile(payload.resultPath, `${JSON.stringify(result)}\\n`, 'utf8');"
+].join("\n");
+
+async function runMatrixWorker(fixture, payload) {
+  const child = spawn(fixture.nodePath, [
+    "--input-type=module", "-e", MATRIX_WORKER_SOURCE, fixture.lifecycleModuleUrl, JSON.stringify(payload)
+  ], { env: fixture.environment, stdio: ["ignore", "pipe", "pipe"] });
+  const stdoutPromise = readChildStream(child.stdout);
+  const stderrPromise = readChildStream(child.stderr);
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    child.kill("SIGKILL");
+  }, 30_000);
+  let closed;
+  try {
+    closed = await Promise.all([
+      once(child, "close"),
+      stdoutPromise,
+      stderrPromise
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+  const [[code, signal], stdout, stderr] = closed;
+  return {
+    code,
+    signal,
+    timedOut,
+    stdout,
+    stderr: stderr.trim()
+  };
+}
+
+async function readChildStream(stream) {
+  const chunks = [];
+  for await (const chunk of stream) chunks.push(chunk);
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 async function reserveDynamicPort() {

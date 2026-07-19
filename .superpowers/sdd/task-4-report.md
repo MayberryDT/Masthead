@@ -132,7 +132,7 @@ The final gate now treats receipt publication itself as durable pending lifecycl
 
 All real CLI entrypoints now carry `MASTHEAD_LIFECYCLE_LEASE`, including stage, normal install, and cold install. Two six-child `runCli` races prove normal transition and cold activation contend on the same custom lease as stage, activate, finalize, start, and stop. Finalization markers are stored in canonical, non-symlink, production-root-namespaced directories; rotation removes only markers whose embedded ownership matches that root. Candidate and rollback bundles are revalidated as canonical non-symlink direct children immediately before activation, recovery, finalization, and deletion.
 
-The operational rehearsal validates its canonical temporary parent before allocation, rejects any parent inside live production state, and keeps allocation inside cleanup control. It drives the supplied package through JSON subprocess commands for stage, activate, start, finalize, and identity-bound stop, then proves the process set, health, port, and ownership are offline. Its fallback SIGKILL path captures PID/start identity and refuses escalation after identity changes. Strict finalization retains exact protocol classification and adds only a short bounded retry when health is temporarily unavailable.
+The operational rehearsal validates its canonical temporary parent before allocation, rejects any parent inside live production state, and keeps allocation inside cleanup control. It drives the supplied package through JSON subprocess commands for stage, activate, start, finalize, and identity-bound stop, then proves the process set, health, port, and ownership are offline. Strict finalization retains exact protocol classification and adds only a short bounded retry when health is temporarily unavailable.
 
 Fresh security-closeout verification from review base `57556c48c4cede141e90ca7df4ef5a8471cccf99`:
 
@@ -144,3 +144,18 @@ Fresh security-closeout verification from review base `57556c48c4cede141e90ca7df
 - Installed production runtime, data, processes, and installation were not touched.
 
 Security-closeout commit: `fix: harden lifecycle terminal boundaries`.
+
+## Package-bound recovery certification and exclusive stage files
+
+The three nonce-bound staging files are now created with exclusive filesystem opens. A preallocated file or symbolic link at the instance-launcher, lifecycle-launcher, or desktop staging path fails closed, remains unchanged, and is excluded from recovery cleanup; the remaining paths owned by the failed staging request are still reconciled.
+
+The operational recovery matrix no longer invokes workspace tests or reports a boolean result. It dynamically imports the supplied bundle's lifecycle module with the supplied packaged Node runtime and executes an independently pinned set of 24 fresh-process crash cases: five staging boundaries, seven activation boundaries, and six finalization deletions under both `SIGKILL` and abrupt exit. Certification rejects a missing, duplicated, reordered, renamed, shortened, non-crashing, or broken-package case, and reports the exact source and executed IDs.
+
+Fresh verification from review base `6f270659`:
+
+- Focused production lifecycle and rehearsal suite: 2 files, 211/211 tests passed, exit 0.
+- Complete Task 4 regression: 17 files, 458/458 tests passed, exit 0.
+- `npm run typecheck`, JavaScript syntax checks, and `git diff --check`: passed.
+- `npm run package:electron`: passed; the bundled production lifecycle source is byte-identical to the workspace source.
+- Operational rehearsal against the absolute rebuilt package: passed, exit 0, with `source: "supplied-package"` and all 24/24 independently required cases executed.
+- Installed production runtime, data, processes, and installation were not touched.

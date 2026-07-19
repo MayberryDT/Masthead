@@ -36,6 +36,13 @@ const PRODUCTION_MAINTENANCE_TIMEOUT_MS = 43_200_000;
 const PRODUCTION_MAINTENANCE_EXIT_GRACE_MS = 30_000;
 const VERSIONED_TARGET = /^Masthead-linux-x64-[A-Za-z0-9][A-Za-z0-9._+-]*$/u;
 
+class ProductionStagePathCollision extends Error {
+  constructor(path, surface, cause) {
+    super(`Production ${surface} stage path already exists: ${path}`, { cause });
+    this.path = path;
+  }
+}
+
 export function productionHealthPollPolicy() {
   return {
     intervalMs: PRODUCTION_HEALTH_INTERVAL_MS,
@@ -510,7 +517,8 @@ export async function stageProductionInstallation(input) {
     }
     return await stageProductionInstallationUnlocked(input, { dataDirectory, databasePath, homeDir, lifecycleLeasePath, port, productionRoot });
   } catch (error) {
-    await reconcileProductionStageIntent(productionRoot, lifecycleLeasePath).catch(() => undefined);
+    const preservePaths = error instanceof ProductionStagePathCollision ? [error.path] : [];
+    await reconcileProductionStageIntent(productionRoot, lifecycleLeasePath, { preservePaths }).catch(() => undefined);
     throw error;
   } finally {
     await lease.release();
@@ -580,8 +588,7 @@ async function stageProductionInstallationUnlocked(input, identity) {
     instanceManifestPath,
     node: runtime.node
   });
-  await writeFile(stagedInstanceLauncherPath, instanceLauncher, { encoding: "utf8", mode: 0o755 });
-  await chmod(stagedInstanceLauncherPath, 0o755);
+  await writeExclusiveStageFile(stagedInstanceLauncherPath, instanceLauncher, 0o755, "instance");
   await input.onStageStep?.("instance-stage");
   const stagedSurface = await stageProductionLaunchers({
     ...input,
@@ -1748,9 +1755,8 @@ async function stageProductionLaunchers(input) {
   const launcherStage = `${launcherPath}.${token}.staged`;
   const desktopStage = `${desktopPath}.${token}.staged`;
   const [previousLauncher, previousDesktop] = await Promise.all([snapshotFile(launcherPath), snapshotFile(desktopPath)]);
-  await writeFile(launcherStage, wrapper, { encoding: "utf8", mode: 0o755 });
-  await chmod(launcherStage, 0o755);
-  await writeFile(desktopStage, desktop, { encoding: "utf8", mode: 0o644 });
+  await writeExclusiveStageFile(launcherStage, wrapper, 0o755, "lifecycle");
+  await writeExclusiveStageFile(desktopStage, desktop, 0o644, "desktop");
   return { desktopPath, desktopStage, launcherPath, launcherStage, previousDesktop, previousLauncher };
 }
 
@@ -1969,7 +1975,7 @@ function validateProductionStageIntent(intent, productionRootInput, lifecycleLea
   return intent;
 }
 
-async function reconcileProductionStageIntent(productionRootInput, lifecycleLeasePath) {
+async function reconcileProductionStageIntent(productionRootInput, lifecycleLeasePath, options = {}) {
   const productionRoot = resolve(productionRootInput);
   const intentPath = productionStageIntentPath(productionRoot);
   let source;
@@ -2021,7 +2027,9 @@ async function reconcileProductionStageIntent(productionRootInput, lifecycleLeas
   if (intent.ownsCandidate && currentTarget === intent.target) {
     throw new Error("Production stage intent candidate is current and cannot be reconciled safely.");
   }
+  const preservedPaths = new Set((options.preservePaths || []).map((path) => resolve(path)));
   for (const path of [intent.temporaryTarget, intent.stagedInstanceLauncherPath, intent.launcherStage, intent.desktopStage]) {
+    if (preservedPaths.has(resolve(path))) continue;
     await rm(path, { force: true, recursive: true });
   }
   if (intent.ownsCandidate) await rm(intent.target, { force: true, recursive: true });
@@ -3465,6 +3473,25 @@ async function atomicWrite(path, body, mode) {
   } finally {
     await handle?.close().catch(() => undefined);
     await rm(temporaryPath, { force: true });
+  }
+}
+
+async function writeExclusiveStageFile(path, body, mode, surface) {
+  let handle;
+  try {
+    handle = await open(path, "wx", mode);
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "EEXIST") {
+      throw new ProductionStagePathCollision(path, surface, error);
+    }
+    throw error;
+  }
+  try {
+    await handle.writeFile(body, typeof body === "string" ? "utf8" : undefined);
+    await handle.chmod(mode);
+    await handle.sync();
+  } finally {
+    await handle.close();
   }
 }
 

@@ -21,17 +21,23 @@ export function validateRehearsalBundle(
 export function runProductionActivationRehearsal(
   argv?: string[],
   environment?: NodeJS.ProcessEnv
-): Promise<{ ok: true; bundle: string; isolated: true; matrix: true }>;
+): Promise<{ ok: true; bundle: string; isolated: true; matrix: PackageBoundMatrixResult }>;
 
-export function stopChild(
-  child: {
-    exitCode: number | null;
-    kill(signal: NodeJS.Signals): boolean;
-    pid?: number;
-    signalCode: NodeJS.Signals | null;
-  },
-  adapters?: {
-    readProcess?: (pid: number) => Promise<{ starttime?: string } | undefined>;
-    termTimeoutMs?: number;
-  }
-): Promise<void>;
+export interface PackageBoundMatrixResult {
+  source: "supplied-package";
+  executedCaseCount: number;
+  expectedCaseCount: number;
+  minimumCaseCount: number;
+  caseIds: string[];
+}
+
+export function assertPackageBoundMatrixCoverage(
+  executedCaseIds: string[],
+  expectedCaseIds?: string[]
+): void;
+
+export function runPackageBoundCrashMatrix(
+  verified: RehearsalBundleValidation,
+  environment?: NodeJS.ProcessEnv,
+  temporaryParent?: string
+): Promise<PackageBoundMatrixResult>;

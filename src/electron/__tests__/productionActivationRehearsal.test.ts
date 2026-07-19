@@ -1,5 +1,4 @@
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { EventEmitter } from "node:events";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { tmpdir } from "node:os";
@@ -7,8 +6,9 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
 import {
+  assertPackageBoundMatrixCoverage,
+  runPackageBoundCrashMatrix,
   runProductionActivationRehearsal,
-  stopChild,
   validateRehearsalBundle
 } from "../../../scripts/masthead-production-activation-rehearsal.js";
 
@@ -16,6 +16,19 @@ const TEST_PATH = fileURLToPath(import.meta.url);
 const PROJECT_ROOT = resolve(dirname(TEST_PATH), "../../..");
 const SCRIPT_PATH = join(PROJECT_ROOT, "scripts", "masthead-production-activation-rehearsal.js");
 const cleanup: string[] = [];
+const EXPECTED_PACKAGE_BOUND_CASE_IDS = [
+  "stage:candidate-copy:SIGKILL", "stage:instance-stage:SIGKILL", "stage:surface-stage:SIGKILL",
+  "stage:receipt-publication:SIGKILL", "stage:intent-removal:SIGKILL",
+  "activate:current:SIGKILL", "activate:instance-launcher:SIGKILL", "activate:lifecycle-launcher:SIGKILL",
+  "activate:desktop:SIGKILL", "activate:activation-pre-commit:SIGKILL", "activate:activation-commit:SIGKILL",
+  "activate:activation-receipt:SIGKILL",
+  "finalize:rollback-bundle:SIGKILL", "finalize:rollback-bundle:exit",
+  "finalize:staged-0:SIGKILL", "finalize:staged-0:exit",
+  "finalize:staged-1:SIGKILL", "finalize:staged-1:exit",
+  "finalize:staged-2:SIGKILL", "finalize:staged-2:exit",
+  "finalize:receipt:SIGKILL", "finalize:receipt:exit",
+  "finalize:journal:SIGKILL", "finalize:journal:exit"
+];
 
 afterEach(async () => {
   await Promise.all(cleanup.splice(0).map((path) => rm(path, { force: true, recursive: true })));
@@ -161,20 +174,58 @@ describe("production activation rehearsal CLI", () => {
     expect(source).not.toContain("await stopChild(daemon)");
   });
 
-  test("fallback cleanup refuses SIGKILL after spawned PID identity changes", async () => {
-    const signals: string[] = [];
-    const child = Object.assign(new EventEmitter(), {
-      exitCode: null,
-      kill(signal: string) { signals.push(signal); return true; },
-      pid: 4242,
-      signalCode: null
-    });
-    let reads = 0;
-
-    await expect(stopChild(child as any, {
-      readProcess: async () => ({ pid: 4242, starttime: ++reads === 1 ? "original" : "replacement" }),
-      termTimeoutMs: 1
-    })).rejects.toThrow("refused SIGKILL because the spawned PID identity changed");
-    expect(signals).toEqual(["SIGTERM"]);
+  test("pins the exact 24 package-bound crash boundaries independently of the generated matrix", async () => {
+    expect(EXPECTED_PACKAGE_BOUND_CASE_IDS).toHaveLength(24);
+    expect(new Set(EXPECTED_PACKAGE_BOUND_CASE_IDS).size).toBe(24);
+    expect(() => assertPackageBoundMatrixCoverage(EXPECTED_PACKAGE_BOUND_CASE_IDS)).not.toThrow();
+    const source = await readFile(SCRIPT_PATH, "utf8");
+    expect(source).toContain("await import(process.argv[1])");
+    expect(source).not.toContain("node_modules\", \"vitest");
+    expect(source).not.toContain("executeCase:");
   });
+
+  test("rejects zero, missing, duplicated, and renamed package-bound matrix cases", () => {
+    expect(() => assertPackageBoundMatrixCoverage([])).toThrow("executed 0 of 24 required cases");
+    expect(() => assertPackageBoundMatrixCoverage(["stage:candidate-copy:SIGKILL"])).toThrow(
+      "executed 1 of 24 required cases"
+    );
+    const valid = Array.from({ length: 24 }, (_, index) => `case-${index}`);
+    expect(() => assertPackageBoundMatrixCoverage(valid.slice(0, -1), valid)).toThrow("executed 23 of 24 required cases");
+    expect(() => assertPackageBoundMatrixCoverage([...valid.slice(0, -1), valid[0]], valid)).toThrow("matrix case set changed");
+    expect(() => assertPackageBoundMatrixCoverage([...valid.slice(0, -1), "renamed-case"], valid)).toThrow(
+      "matrix case set changed"
+    );
+  });
+
+  test("cannot certify a supplied package whose lifecycle module no longer crashes at a required hook", async () => {
+    const root = await temporaryDirectory("masthead-rehearsal-broken-package-");
+    const resourcesPath = join(root, "resources");
+    const scriptsPath = join(resourcesPath, "daemon", "scripts");
+    await mkdir(scriptsPath, { recursive: true });
+    await writeFile(join(scriptsPath, "masthead-production.js"), [
+      "export async function stageProductionInstallation() { return { staged: true }; }",
+      "export async function activateStagedProductionInstallation() { return { activated: true }; }",
+      "export async function finalizeStagedProductionInstallation() { return { finalized: true }; }",
+      ""
+    ].join("\n"));
+    const verified = {
+      bundle: root,
+      layout: {
+        bundleRoot: root,
+        executablePath: join(root, "masthead"),
+        nodePath: process.execPath,
+        resourcesPath
+      },
+      manifest: {
+        bundleDigest: "a".repeat(64),
+        release: { gitSha: "b".repeat(40), version: "0.1.0" }
+      },
+      livePaths: []
+    };
+
+    await expect(runPackageBoundCrashMatrix(verified, process.env)).rejects.toThrow(
+      "stage:candidate-copy:SIGKILL"
+    );
+  });
+
 });

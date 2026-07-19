@@ -744,6 +744,51 @@ describe("production lifecycle launcher", () => {
     expect(entries.filter((entry) => entry.startsWith("Masthead-linux-x64-"))).toEqual([basename(oldTarget)]);
   });
 
+  test.each([
+    ["instance", "file"], ["instance", "symlink"],
+    ["lifecycle", "file"], ["lifecycle", "symlink"],
+    ["desktop", "file"], ["desktop", "symlink"]
+  ] as const)("refuses a preallocated %s stage %s without changing it or its target", async (surface, allocation) => {
+    const { config, homeDir, productionRoot, root, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    let stagePath = "";
+    let redirectedTarget = "";
+    let intent: any;
+
+    await expect(stageProductionInstallation({
+      bundleDigest: candidate.bundleDigest,
+      sourceBundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot,
+      onStageStep: async (step: string) => {
+        if (step !== "candidate-copy") return;
+        intent = JSON.parse(await readFile(join(productionRoot, ".masthead-install-stage.intent.json"), "utf8"));
+        stagePath = surface === "instance"
+          ? intent.stagedInstanceLauncherPath
+          : surface === "lifecycle" ? intent.launcherStage : intent.desktopStage;
+        if (allocation === "file") {
+          await writeFile(stagePath, `preallocated-${surface}`);
+          return;
+        }
+        redirectedTarget = join(root, `outside-${surface}-stage`);
+        await writeFile(redirectedTarget, `outside-${surface}`);
+        await symlink(redirectedTarget, stagePath);
+      }
+    })).rejects.toThrow(`Production ${surface} stage path already exists`);
+
+    if (allocation === "file") {
+      await expect(readFile(stagePath, "utf8")).resolves.toBe(`preallocated-${surface}`);
+    } else {
+      expect((await lstat(stagePath)).isSymbolicLink()).toBe(true);
+      await expect(readFile(redirectedTarget, "utf8")).resolves.toBe(`outside-${surface}`);
+    }
+    await expect(lstat(join(productionRoot, ".masthead-install-stage.intent.json"))).rejects.toMatchObject({ code: "ENOENT" });
+    for (const ownedPath of [intent.stagedInstanceLauncherPath, intent.launcherStage, intent.desktopStage]) {
+      if (ownedPath !== stagePath) await expect(lstat(ownedPath)).rejects.toMatchObject({ code: "ENOENT" });
+    }
+  });
+
   test.each(["candidate-copy", "instance-stage", "surface-stage"])(
     "a fresh process sweeps an unreceipted stage after SIGKILL at %s",
     async (failedStep) => {

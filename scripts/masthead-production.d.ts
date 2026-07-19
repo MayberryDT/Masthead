@@ -186,6 +186,7 @@ export function stageProductionInstallation(input: {
   productionRoot?: string;
   lifecycleLeasePath?: string;
   onLifecycleLeaseAcquired?: () => void | Promise<void>;
+  onStageStep?: (step: string) => void | Promise<void>;
 }): Promise<StagedProductionInstallationReceipt>;
 export function activateStagedProductionInstallation(
   receipt: StagedProductionInstallationReceipt | string,
