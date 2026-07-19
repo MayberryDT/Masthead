@@ -7,20 +7,26 @@ import { migrateTestDatabaseThrough } from "./schemaTestHelpers.ts";
 import { seedSession as seedCanonicalSession } from "./sessionTestHelpers.ts";
 import {
   completeGuidedAssignment,
+  completeGuidedAssignmentInTransaction,
   createGuidedAuthoringRequest,
+  createGuidedAuthoringRequestInTransaction,
   getGuidedAssignment,
   getGuidedAssignments,
+  getGuidedAuthoringRequest,
   listGuidedDraftReviews,
   listGuidedEvidenceAccess,
   listGuidedOperatorReviews,
   listGuidedOpportunities,
   recordCanaryDecision,
+  recordCanaryDecisionInTransaction,
   recordGuidedEvidenceAccess,
+  recordGuidedEvidenceAccessInTransaction,
   storeGuidedDraftReview,
+  storeGuidedDraftReviewInTransaction,
   type CreateGuidedAuthoringRequestInput
 } from "../guidedAuthoringRepository.ts";
 import { migrateDatabase } from "../schema.ts";
-import { openMastheadDatabase, type MastheadDatabase } from "../sqlite.ts";
+import { openMastheadDatabase, type MastheadDatabase, withImmediateTransaction } from "../sqlite.ts";
 
 const tempDirs: string[] = [];
 
@@ -137,6 +143,76 @@ describe("guided authoring repository", () => {
     ]);
   });
 
+  test("keeps canary approval pending until finish and refuses a post-approval draft", async () => {
+    const db = await createdDb();
+    storeGuidedDraftReview(db, { assignmentId: "assignment:one:0", draft: draft(1), findings: [] });
+
+    const approved = recordCanaryDecision(db, decision(1, "approved"));
+
+    expect(approved.status).toBe("awaiting_canary_approval");
+    expect(() => storeGuidedDraftReview(db, {
+      assignmentId: "assignment:one:0",
+      draft: draft(2),
+      findings: []
+    })).toThrow("guided_canary_review_locked");
+    expect(getGuidedAssignment(db, "assignment:one:0")).toMatchObject({
+      acceptedDraftRevision: 1,
+      currentDraftRevision: 1,
+      status: "staged_canary"
+    });
+
+    completeGuidedAssignment(db, "assignment:one:0", receipt());
+    expect(getGuidedAuthoringRequest(db, "request:one")?.status).toBe("active");
+  });
+
+  test("requires an approved operator review for the exact accepted canary draft", async () => {
+    const db = await createdDb();
+    storeGuidedDraftReview(db, { assignmentId: "assignment:one:0", draft: draft(1), findings: [] });
+    recordCanaryDecision(db, decision(1, "approved"));
+    db.prepare(
+      `INSERT INTO guided_authoring_draft_reviews
+       (assignment_id, revision, evidence_revision, draft_json, findings_json, accepted, created_at)
+       VALUES (?, ?, ?, ?, '[]', 1, ?)`
+    ).run("assignment:one:0", 2, "evidence:one:0", JSON.stringify(draft(2)), "2026-07-19T12:01:00.000Z");
+    db.prepare(
+      `UPDATE guided_authoring_assignments
+       SET current_draft_revision = 2, accepted_draft_revision = 2 WHERE assignment_id = ?`
+    ).run("assignment:one:0");
+
+    expect(() => completeGuidedAssignment(db, "assignment:one:0", { ...receipt(), draftRevision: 2 }))
+      .toThrow("guided_assignment_not_ready");
+    expect(getGuidedAssignment(db, "assignment:one:0")?.status).toBe("staged_canary");
+    expect(getGuidedAuthoringRequest(db, "request:one")?.status).toBe("awaiting_canary_approval");
+    expect(listGuidedOperatorReviews(db, "assignment:one:0").map(({ draftRevision }) => draftRevision)).toEqual([1]);
+  });
+
+  test("composes all in-transaction mutations under one outer rollback", async () => {
+    const db = await testDb(3);
+
+    expect(() => withImmediateTransaction(db, () => {
+      createGuidedAuthoringRequestInTransaction(db, requestInput(3));
+      recordGuidedEvidenceAccessInTransaction(db, {
+        assignmentId: "assignment:one:0",
+        evidenceRefs: ["message:a:1"],
+        evidenceRevision: "evidence:one:0",
+        requestId: "request:one",
+        sessionId: "session:0"
+      });
+      storeGuidedDraftReviewInTransaction(db, {
+        assignmentId: "assignment:one:0",
+        draft: draft(1),
+        findings: []
+      });
+      recordCanaryDecisionInTransaction(db, decision(1, "approved"));
+      completeGuidedAssignmentInTransaction(db, "assignment:one:0", receipt());
+      throw new Error("injected_after_guided_completion");
+    })).toThrow("injected_after_guided_completion");
+
+    for (const table of guidedTables) {
+      expect(db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get()).toEqual({ count: 0 });
+    }
+  });
+
   test("scopes repeated opportunity IDs by request and rejects cross-request linkage", async () => {
     const db = await testDb(6);
     createGuidedAuthoringRequest(db, requestInput(3));
@@ -158,7 +234,10 @@ describe("guided authoring repository", () => {
     }],
     ["invalid canary", (input: CreateGuidedAuthoringRequestInput) => { input.assignments[1]!.canary = true; }],
     ["duplicate membership", (input: CreateGuidedAuthoringRequestInput) => { input.assignments[1]!.sessionIds[0] = "session:0"; }],
-    ["missing opportunity", (input: CreateGuidedAuthoringRequestInput) => { input.assignments[0]!.opportunityIds = ["opportunity:missing"]; }]
+    ["missing opportunity", (input: CreateGuidedAuthoringRequestInput) => { input.assignments[0]!.opportunityIds = ["opportunity:missing"]; }],
+    ["opportunity provenance outside its assignment", (input: CreateGuidedAuthoringRequestInput) => {
+      input.opportunities[1]!.provenanceSessionIds = ["session:0"];
+    }]
   ])("validates %s before writing", async (_label, mutate) => {
     const db = await testDb(14);
     const input = requestInput(14);

@@ -368,6 +368,13 @@ export function storeGuidedDraftReviewInTransaction(
 ): GuidedAuthoringAssignmentDto {
   const assignment = getAssignmentRow(db, input.assignmentId);
   if (!assignment) throw new Error("guided_assignment_not_found");
+  const approvedCanaryReview = assignment.canary === 1
+    ? db.prepare(
+      `SELECT 1 AS found FROM guided_authoring_operator_reviews
+       WHERE assignment_id = ? AND decision = 'approved' LIMIT 1`
+    ).get(assignment.assignmentId)
+    : undefined;
+  if (approvedCanaryReview) throw new Error("guided_canary_review_locked");
   if (
     assignment.status === "completed" ||
     input.draft.assignmentId !== assignment.assignmentId ||
@@ -491,7 +498,7 @@ export function recordCanaryDecisionInTransaction(
   if (input.decision === "approved") {
     db.prepare(
       `UPDATE guided_authoring_requests
-       SET status = 'active', canary_approved_at = ?, canary_approved_by = ?, updated_at = ?
+       SET status = 'awaiting_canary_approval', canary_approved_at = ?, canary_approved_by = ?, updated_at = ?
        WHERE request_id = ?`
     ).run(now, input.reviewedBy, now, input.requestId);
   } else {
@@ -536,8 +543,17 @@ export function completeGuidedAssignmentInTransaction(
   if (!assignment) throw new Error("guided_assignment_not_found");
   if (assignment.status === "completed" && assignment.receiptJson) return parseJson(assignment.receiptJson);
   const request = getGuidedAuthoringRequest(db, assignment.requestId);
+  const approvedCanaryReview = assignment.acceptedDraftRevision === null
+    ? undefined
+    : db.prepare(
+      `SELECT 1 AS found FROM guided_authoring_operator_reviews
+       WHERE assignment_id = ? AND draft_revision = ? AND decision = 'approved' LIMIT 1`
+    ).get(assignment.assignmentId, assignment.acceptedDraftRevision);
   const ready = assignment.status === "ready_to_finish" || (
-    assignment.canary === 1 && assignment.status === "staged_canary" && Boolean(request?.canaryApprovedAt)
+    assignment.canary === 1 &&
+    assignment.status === "staged_canary" &&
+    request?.status === "awaiting_canary_approval" &&
+    Boolean(approvedCanaryReview)
   );
   if (!ready) throw new Error("guided_assignment_not_ready");
   const sessionIds = assignmentMembership(db, assignmentId, "guided_authoring_assignment_sessions", "session_id");
@@ -665,6 +681,11 @@ function validateRequestPlan(db: MastheadDatabase, input: CreateGuidedAuthoringR
       if (new Set(assignment.opportunityIds).size !== assignment.opportunityIds.length) fail();
       if (assignment.sessionIds.some((id) => !sessionIds.has(id))) fail();
       if (assignment.opportunityIds.some((id) => !opportunityIds.has(id))) fail();
+      const assignmentSessionIds = new Set(assignment.sessionIds);
+      for (const opportunityId of assignment.opportunityIds) {
+        const opportunity = input.opportunities.find((candidate) => candidate.opportunityId === opportunityId);
+        if (!opportunity || opportunity.provenanceSessionIds.some((id) => !assignmentSessionIds.has(id))) fail();
+      }
       assignedSessions.push(...assignment.sessionIds);
       assignedOpportunities.push(...assignment.opportunityIds);
     }
