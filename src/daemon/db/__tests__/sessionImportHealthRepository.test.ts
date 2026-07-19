@@ -66,6 +66,27 @@ describe("session import health repository", () => {
       total: 2
     });
     expect(countRepairRequiredSessions(db, "import-health-1")).toBe(1);
+    expect(summarizeCurrentSessionImportHealth(db)).toMatchObject({
+      importJobIds: ["import-health-1"],
+      reasons: [{ count: 1, reason: "partial_parse" }],
+      repairRequired: 1
+    });
+
+    seedFollowupImportProvenance(db);
+    recordSessionImportHealth(db, {
+      evidenceRevision: "sha256:complete",
+      importJobId: "import-health-2",
+      sessionId: "session:repair",
+      status: "complete",
+      updatedAt: "2026-07-01T00:00:07.000Z",
+      workUnitId: "unit-health-3"
+    });
+    expect(summarizeCurrentSessionImportHealth(db)).toEqual({
+      importJobIds: [],
+      reasons: [],
+      repairImports: [],
+      repairRequired: 0
+    });
     db.close();
   });
 
@@ -89,6 +110,15 @@ describe("session import health repository", () => {
       updatedAt: "2026-07-01T00:00:05.000Z",
       workUnitId: "unit-health-1"
     });
+    cloneHealthWorkUnit(db, "unit-health-2");
+    recordSessionImportHealth(db, {
+      evidenceRevision: "sha256:empty-2",
+      importJobId: "import-health-1",
+      reason: "missing_identity",
+      status: "repair_required",
+      updatedAt: "2026-07-01T00:00:06.000Z",
+      workUnitId: "unit-health-2"
+    });
 
     expect(record.sessionId).toBeUndefined();
     expect(readImportWorkUnitHealth(db, "unit-health-1")).toEqual(record);
@@ -101,22 +131,22 @@ describe("session import health repository", () => {
         severity: "error"
       }],
       partial: 0,
-      reasons: [{ count: 1, reason: "missing_identity" }],
-      repairRequired: 1,
-      total: 1
+      reasons: [{ count: 2, reason: "missing_identity" }],
+      repairRequired: 2,
+      total: 2
     });
     expect(countRepairRequiredSessions(db, "import-health-1")).toBe(0);
     expect(summarizeCurrentSessionImportHealth(db)).toEqual({
       importJobIds: ["import-health-1"],
       repairImports: [{
         importJobId: "import-health-1",
-        reasons: [{ count: 1, reason: "missing_identity" }],
-        repairRequired: 1,
+        reasons: [{ count: 2, reason: "missing_identity" }],
+        repairRequired: 2,
         runtime: "opencode",
         sourceId: "source:health"
       }],
-      reasons: [{ count: 1, reason: "missing_identity" }],
-      repairRequired: 1
+      reasons: [{ count: 2, reason: "missing_identity" }],
+      repairRequired: 2
     });
     db.close();
   });
@@ -156,4 +186,29 @@ function cloneHealthWorkUnit(db: Awaited<ReturnType<typeof openMastheadDatabase>
     FROM import_work_units
     WHERE work_unit_id = 'unit-health-1'`
   ).run(workUnitId, `/tmp/${workUnitId}.jsonl`);
+}
+
+function seedFollowupImportProvenance(db: Awaited<ReturnType<typeof openMastheadDatabase>>): void {
+  db.prepare(
+    `INSERT INTO import_jobs (import_job_id, source_id, import_kind, status, updated_at)
+     VALUES (?, ?, ?, ?, ?)`
+  ).run("import-health-2", "source:health", "transcript", "succeeded", "2026-07-01T00:00:07.000Z");
+  db.prepare(
+    `INSERT INTO import_manifests (
+      manifest_id, import_job_id, source_id, runtime_kind, import_kind, scope_json,
+      generated_at, total_units, included_units, capped_units, excluded_units, total_bytes
+    ) SELECT ?, ?, source_id, runtime_kind, import_kind, scope_json,
+      ?, total_units, included_units, capped_units, excluded_units, total_bytes
+    FROM import_manifests
+    WHERE manifest_id = 'manifest-health-1'`
+  ).run("manifest-health-2", "import-health-2", "2026-07-01T00:00:07.000Z");
+  db.prepare(
+    `INSERT INTO import_work_units (
+      work_unit_id, manifest_id, import_job_id, source_id, runtime_kind, source_kind,
+      confidence, unit_kind, source_path, status, timestamp_basis
+    ) SELECT ?, ?, ?, source_id, runtime_kind, source_kind,
+      confidence, unit_kind, ?, 'succeeded', timestamp_basis
+    FROM import_work_units
+    WHERE work_unit_id = 'unit-health-1'`
+  ).run("unit-health-3", "manifest-health-2", "import-health-2", "/tmp/unit-health-3.jsonl");
 }

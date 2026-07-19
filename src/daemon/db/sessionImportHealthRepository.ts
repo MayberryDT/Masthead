@@ -156,6 +156,21 @@ export function summarizeCurrentSessionImportHealth(db: MastheadDatabase): {
     JOIN import_jobs jobs ON jobs.import_job_id = health.import_job_id
     JOIN ingest_sources sources ON sources.source_id = jobs.source_id
     WHERE health.status = 'repair_required'
+      AND (
+        health.session_id IS NULL
+        OR NOT EXISTS (
+          SELECT 1
+          FROM session_import_health newer_health
+          WHERE newer_health.session_id = health.session_id
+            AND (
+              newer_health.updated_at > health.updated_at
+              OR (
+                newer_health.updated_at = health.updated_at
+                AND newer_health.work_unit_id > health.work_unit_id
+              )
+            )
+        )
+      )
       AND NOT EXISTS (
         SELECT 1
         FROM import_repair_replacements replacements
