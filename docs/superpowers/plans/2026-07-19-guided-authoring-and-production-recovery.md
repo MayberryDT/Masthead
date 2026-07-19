@@ -758,21 +758,41 @@ git commit -m "feat: persist guided authoring state"
 ### Task 4: Make CLI launchers instance-bound and fail closed
 
 **Files:**
+- Create: `src/shared/instanceIdentity.ts`
+- Modify: `src/shared/guidedAuthoring.ts`
+- Modify: `src/shared/protocol.ts`
+- Modify: `src/shared/workbenchAuthoring.ts`
+- Modify: `fixtures/protocol/current-health.json`
 - Modify: `src/electron/cliLauncher.ts`
+- Modify: `src/electron/daemonLauncher.ts`
 - Modify: `src/electron/main.ts`
+- Modify: `src/daemon/main.ts`
+- Modify: `src/daemon/server.ts`
+- Modify: `src/daemon/healthService.ts`
+- Modify: `src/daemon/workbenchAuthoringApi.ts`
 - Modify: `src/cli/authoringClient.ts`
 - Modify: `src/cli/workbenchAuthoring.ts`
+- Modify: `scripts/masthead-live-dev.js`
+- Modify: `scripts/masthead-doctor.js`
 - Modify: `scripts/masthead-production.js`
+- Modify: `scripts/masthead-production.d.ts`
+- Create: `src/shared/__tests__/instanceIdentity.test.ts`
+- Modify: `src/core/__tests__/daemonCompatibility.test.ts`
+- Create: `src/core/__tests__/liveDevLauncher.test.ts`
 - Modify: `src/electron/__tests__/cliLauncher.test.ts`
+- Modify: `src/electron/__tests__/daemonLauncher.test.ts`
 - Modify: `src/electron/__tests__/mainCliLauncher.test.ts`
+- Modify: `src/daemon/__tests__/healthService.test.ts`
+- Modify: `src/daemon/__tests__/workbenchAuthoringApi.test.ts`
 - Modify: `src/cli/__tests__/authoringCli.test.ts`
 - Modify: `src/electron/__tests__/productionLauncher.test.ts`
+- Modify: `src/daemon/__tests__/doctorAuthoring.test.ts`
 
 **Interfaces:**
 - Consumes: Electron instance data directory, daemon base URL, database ID, build SHA, PID, and a fresh per-daemon instance nonce.
-- Produces: `MastheadInstanceManifest`, per-instance launcher path, `GuidedAuthoringExpectedIdentity`, and fail-closed client plus daemon-bound mutation identity.
+- Produces: `MastheadInstanceManifest`, per-instance launcher path, `GuidedAuthoringExpectedIdentity`, stable-request binding and current-instance guard primitives, identity-bearing current capabilities, and a staged production-installation receipt that is activated only after the old daemon stops.
 
-- [ ] **Step 1: Write failing collision and mismatch tests**
+- [ ] **Step 1: Write failing launcher, identity, restart-policy, and stage-only tests**
 
 Add tests proving:
 
@@ -784,52 +804,91 @@ test("production and dev resolve different launcher paths", () => {
   expect(development.launcherPath).toBe("/state/masthead-dev/bin/mastheadctl");
 });
 
-test("refuses a mutation when the manifest database differs", async () => {
-  server.capabilities.databaseId = "database:other";
-  await expect(client.open({ actorId: "codex", databaseId: "database:expected", sessionIds: ["session:a"] }))
-    .rejects.toMatchObject({ code: "database_identity_mismatch" });
-  expect(server.mutationCount).toBe(0);
+test("installs the instance launcher before spawn and waits for the daemon-owned manifest", async () => {
+  const events: string[] = [];
+  await startLiveConnector(input, origins, children, lifecycleRecording(events));
+  expect(events).toEqual(["install-launcher", "spawn", "daemon-bind", "daemon-write-manifest", "compatible-health"]);
+});
+
+test("npm run dev prepares the instance launcher before a non-Electron primary spawn", async () => {
+  const events = await runLiveDevPrimaryWithLifecycleRecorder();
+  expect(events).toEqual(["install-launcher", "spawn-daemon", "compatible-health", "start-ui"]);
+  expect(await readManifest()).toMatchObject({ instanceId: events.health.runtime.daemonInstanceId });
+});
+
+test("the daemon removes only the manifest owned by its instance nonce", async () => {
+  await daemon.close();
+  await expect(access(instanceManifestPath)).rejects.toMatchObject({ code: "ENOENT" });
+  await writeManifestFor("instance:new");
+  await oldDaemon.close();
+  expect(await readManifest()).toMatchObject({ instanceId: "instance:new" });
 });
 
 test.each([
-  ["base URL", "base_url_identity_mismatch"],
-  ["build SHA", "build_identity_mismatch"],
-  ["manifest path", "manifest_identity_mismatch"],
-  ["instance nonce", "instance_identity_mismatch"]
-])("refuses a mutation when the %s differs", async (_label, code) => {
-  server.swapIdentityAfterCapabilities(_label);
-  await expect(client.mutate(validMutation())).rejects.toMatchObject({ code });
-  expect(server.mutationCount).toBe(0);
+  ["baseUrl", "base_url_identity_mismatch"],
+  ["databaseId", "database_identity_mismatch"],
+  ["buildSha", "build_identity_mismatch"],
+  ["instanceManifest", "manifest_identity_mismatch"],
+  ["instanceId", "instance_identity_mismatch"]
+])("the mutation guard rejects a mismatched %s", (field, code) => {
+  expect(() => assertGuidedAuthoringExpectedIdentity(currentIdentity(), changedIdentity(field)))
+    .toThrow(expect.objectContaining({ code }));
 });
 
-test("stages a production bundle and instance launcher without starting or opening the database", async () => {
+test("allows a new daemon nonce only when the persisted request binding is otherwise stable", () => {
+  expect(() => assertStableGuidedRequestBinding(requestCreatedBy("instance:old"), currentIdentity("instance:new")))
+    .not.toThrow();
+  expect(requestCreatedBy("instance:old").creationInstanceId).toBe("instance:old");
+});
+
+test("stages a production bundle and launcher without activating or touching live state", async () => {
   const previousCurrent = await readlink(currentPath);
-  const result = await stageProduction({ launch: false, openDatabase: forbiddenDatabaseOpen });
+  const previousLauncher = await readFile(activeInstanceLauncherPath, "utf8");
+  const result = await stageProductionInstallation({
+    sourceBundlePath,
+    openDatabase: forbiddenDatabaseOpen,
+    launch: forbiddenLaunch,
+    probe: forbiddenProbe,
+    cleanupBundles: forbiddenCleanup
+  });
   expect(result).toMatchObject({ launched: false, databaseOpened: false, staged: true });
   expect(await readlink(result.currentPath)).toBe(previousCurrent);
-  expect(await readFile(result.instanceLauncherPath, "utf8")).toContain("masthead-instance.json");
+  expect(await readFile(activeInstanceLauncherPath, "utf8")).toBe(previousLauncher);
+  expect(await readFile(result.stagedInstanceLauncherPath, "utf8")).toContain("masthead-instance.json");
+  await expect(access(result.instanceManifestPath)).rejects.toMatchObject({ code: "ENOENT" });
 });
 
-test("continues a stably bound request after a safe daemon restart", async () => {
-  const request = await client.createRequest(currentIdentity());
-  restartDaemonWithNewInstanceId();
-  await expect(client.start(request.requestId)).resolves.toMatchObject({ assignment: expect.any(Object) });
+test("filesystem activation installs the staged target without runtime or database side effects", async () => {
+  const receipt = await stageProductionInstallation(stageInput());
+  const result = await activateStagedProductionInstallation(receipt, {
+    openDatabase: forbiddenDatabaseOpen,
+    runMaintenance: forbiddenMaintenance,
+    launch: forbiddenLaunch,
+    probe: forbiddenProbe,
+    writeManifest: forbiddenManifestWrite
+  });
+  expect(result).toMatchObject({ activated: true, launched: false, databaseOpened: false });
+  expect(await realpath(currentPath)).toBe(receipt.target);
+  expect(await readFile(activeInstanceLauncherPath, "utf8")).toContain("masthead-instance.json");
+  await expect(access(receipt.instanceManifestPath)).rejects.toMatchObject({ code: "ENOENT" });
 });
 ```
+
+The tests in this task are deliberately primitive-level. Request creation, `start`, `save`, canary decisions, and `finish` do not all exist until Tasks 5, 8, and 9, so their end-to-end safe-restart and zero-write identity-swap proofs belong there. Task 4 proves the shared predicates and lifecycle ordering those later tests must call.
 
 - [ ] **Step 2: Run focused launcher tests and verify failure**
 
 Run:
 
 ```bash
-npx vitest run src/electron/__tests__/cliLauncher.test.ts src/electron/__tests__/mainCliLauncher.test.ts src/cli/__tests__/authoringCli.test.ts
+npx vitest run src/shared/__tests__/instanceIdentity.test.ts src/core/__tests__/daemonCompatibility.test.ts src/core/__tests__/liveDevLauncher.test.ts src/electron/__tests__/cliLauncher.test.ts src/electron/__tests__/daemonLauncher.test.ts src/electron/__tests__/mainCliLauncher.test.ts src/daemon/__tests__/healthService.test.ts src/daemon/__tests__/workbenchAuthoringApi.test.ts src/cli/__tests__/authoringCli.test.ts src/electron/__tests__/productionLauncher.test.ts
 ```
 
-Expected: FAIL because every instance still targets `~/.local/bin/mastheadctl`.
+Expected: FAIL because every instance still targets `~/.local/bin/mastheadctl`, `npm run dev` does not prepare an instance launcher, health and current capabilities do not carry complete instance identity, the daemon does not own manifest publication/removal, and production installation has no independently callable stage-only operation.
 
-- [ ] **Step 3: Define and write the instance manifest**
+- [ ] **Step 3: Define one canonical identity module and its two comparison rules**
 
-Add:
+Create `src/shared/instanceIdentity.ts` and keep parsing, normalization, and comparison in this one deep module:
 
 ```ts
 export type MastheadInstanceManifest = {
@@ -842,50 +901,75 @@ export type MastheadInstanceManifest = {
   instanceDir: string;
   updatedAt: string;
 };
+
+export type GuidedAuthoringExpectedIdentity = Pick<
+  MastheadInstanceManifest,
+  "baseUrl" | "databaseId" | "buildSha" | "instanceId"
+> & { instanceManifest: string };
+
+export function assertGuidedAuthoringExpectedIdentity(
+  actual: GuidedAuthoringExpectedIdentity,
+  expected: GuidedAuthoringExpectedIdentity
+): void;
+
+export function assertStableGuidedRequestBinding(
+  request: Pick<GuidedAuthoringRequestDto,
+    "baseUrl" | "databaseId" | "buildSha" | "instanceManifest" | "creationInstanceId"
+  >,
+  current: GuidedAuthoringExpectedIdentity
+): void;
 ```
 
-Generate a cryptographically random `instanceId` for every daemon process, write the manifest atomically to `<instanceDir>/masthead-instance.json`, and publish the same ID plus the canonical manifest path and base URL in capabilities. Place the launcher at `<instanceDir>/bin/mastheadctl`; the wrapper passes `MASTHEAD_INSTANCE_MANIFEST` to the CLI and never embeds another instance's URL.
+Normalize the base URL without a trailing slash and require absolute canonical instance-directory, manifest, launcher, runtime, and CLI-entry paths. `assertGuidedAuthoringExpectedIdentity()` compares all five current fields and returns the exact mismatch codes from Step 1. `assertStableGuidedRequestBinding()` compares only base URL, database ID, build SHA, and canonical manifest path; `creationInstanceId` is immutable audit evidence and is intentionally ignored for safe-restart authorization. Export `GuidedAuthoringExpectedIdentity` from the shared contract rather than redefining it in clients or services.
 
-Add a production installer staged/no-launch mode that copies and verifies the packaged bundle and prepares its instance launcher without changing `current`, deleting the old bundle, spawning Masthead, probing the daemon, opening SQLite, or generating a live instance manifest. After the old daemon stops, the existing activation operation atomically switches `current`, installs the staged launcher, and performs disk-hygiene cleanup. This staged mode is the only installation mode Task 15 may use before the old daemon stops.
+- [ ] **Step 4: Make launcher and manifest publication a two-phase lifecycle**
 
-- [ ] **Step 4: Verify identity before every authoring mutation**
+Generate the existing cryptographically random `daemonInstanceId` once per daemon process and expose it, the daemon PID, bound base URL, database ID, build SHA, canonical manifest path, and absolute instance launcher path through `MastheadHealthDto` and the current authoring capabilities context. Update `src/shared/protocol.ts`, the current-health fixture, and compatibility tests so a daemon missing or contradicting these identity fields is malformed rather than compatible. The current `WorkbenchAuthoringCapabilitiesDto` may temporarily carry these identity fields for V3; Task 9 replaces its operation contract with `GuidedAuthoringCapabilitiesDto` but preserves the identity fields unchanged.
 
-Implement this client method and call it before request creation, start, save, canary decisions, and finish. Offline recovery commands verify the database and backup identities directly because the target daemon must be stopped:
+Resolve `<instanceDir>/bin/mastheadctl` and `<instanceDir>/masthead-instance.json` before daemon spawn. Atomically install the instance launcher before spawn so `MASTHEAD_CLI_COMMAND` is an absolute path the daemon can advertise, but make the wrapper export only `MASTHEAD_INSTANCE_MANIFEST`; it must not embed `MASTHEAD_DAEMON_URL`, copy identity values, or touch `~/.local/bin/mastheadctl`.
+
+The daemon owns the live manifest lifecycle. After its server has bound and the same complete runtime identity returned by health is available, `src/daemon/main.ts` atomically writes the manifest before the daemon is considered compatible. On graceful shutdown it removes the manifest only when the file still contains its own `instanceId`, so a stopping old process cannot delete a replacement daemon's manifest. Electron never writes or removes the live manifest: `startLiveConnector()` installs the launcher before spawn, waits for compatible health, and verifies the daemon-owned manifest exactly matches that health before returning. An already-running compatible daemon must already own a matching manifest.
+
+Remove the Electron-ready write to the shared global launcher. Apply the same pre-spawn launcher contract in `scripts/masthead-live-dev.js` for primary and isolated-primary `npm run dev` starts, passing the absolute instance launcher and manifest paths to the daemon before spawn and verifying the daemon-owned manifest after compatible health. Bridge mode neither installs a launcher nor writes a manifest because it is not a writable primary instance. Cover Electron and non-Electron primary startup, safe restart replacement, nonce-conditional shutdown cleanup, and launcher/manifest mismatch. If `~/.local/bin/mastheadctl` already exists, leave it untouched and never advertise it in health or capabilities.
+
+- [ ] **Step 5: Bind the client to the manifest and expose the reusable mutation guard**
+
+The CLI loads and validates `MASTHEAD_INSTANCE_MANIFEST`, derives its daemon URL from that file, and verifies the current capabilities before a mutation. It must reload the manifest for every later mutation so a safe daemon restart uses the new current `instanceId`; it must never cache `creationInstanceId` as the expected runtime nonce. Offline recovery commands remain exempt from daemon capabilities because their target daemon must be stopped, and instead verify active-database and backup identities directly.
+
+Implement the early-feedback method now:
 
 ```ts
-async assertAuthoringIdentity(expected: {
-  baseUrl: string;
-  databaseId: string;
-  buildSha: string;
-  instanceManifest: string;
-  instanceId: string;
-}): Promise<GuidedAuthoringCapabilitiesDto> {
+async assertAuthoringIdentity(expected: GuidedAuthoringExpectedIdentity): Promise<WorkbenchAuthoringCapabilitiesDto> {
   const actual = await this.capabilities();
-  if (actual.baseUrl !== expected.baseUrl) throw identityError("base_url_identity_mismatch", expected.baseUrl, actual.baseUrl);
-  if (actual.databaseId !== expected.databaseId) throw identityError("database_identity_mismatch", expected.databaseId, actual.databaseId);
-  if (actual.buildSha !== expected.buildSha) throw identityError("build_identity_mismatch", expected.buildSha, actual.buildSha);
-  if (actual.instanceManifest !== expected.instanceManifest) throw identityError("manifest_identity_mismatch", expected.instanceManifest, actual.instanceManifest);
-  if (actual.instanceId !== expected.instanceId) throw identityError("instance_identity_mismatch", expected.instanceId, actual.instanceId);
+  assertGuidedAuthoringExpectedIdentity(identityFromCapabilities(actual), expected);
   return actual;
 }
 ```
 
-Define `GuidedAuthoringExpectedIdentity` with those five fields and include it in every authoring mutation request. The client performs the early capabilities check for fast feedback, but Tasks 8 and 9 must pass the envelope to the service and verify it again immediately before database mutation; a capabilities check is never authorization by itself. Remove Electron startup writes to the shared global launcher. If `~/.local/bin/mastheadctl` already exists, leave it untouched and never advertise it in capabilities.
+Also export the server-side guard primitive that accepts `GuidedAuthoringExpectedIdentity` and the immutable current daemon identity. Update `scripts/masthead-doctor.js` to reject a command, manifest, health response, or current V3 capability DTO whose identity fields disagree. Do not claim that Task 4 has authorized nonexistent V4 mutations: the client capabilities check is fast feedback only, and the guard is not effective until Tasks 8 and 9 invoke it immediately at each service mutation boundary before the first database write.
 
-- [ ] **Step 5: Run launcher, packaged-command, and doctor tests**
+- [ ] **Step 6: Add a separate production stage-only receipt and post-stop activation**
+
+Export `stageProductionInstallation()` and type it in `scripts/masthead-production.d.ts`. It copies the candidate into an immutable versioned target, verifies the packaged manifest and pinned digest after the copy, validates the packaged CLI entry, and writes a staged instance-launcher file plus an immutable receipt containing the source digest, target, previous current target, production instance directory, canonical manifest destination, active launcher destination, staged launcher path, build SHA, and a random staging nonce.
+
+Staging returns `{ staged: true, launched: false, databaseOpened: false }` and must not acquire the SQLite lifecycle lease, read or migrate the application database, change `current`, replace the active instance launcher or desktop entry, create a live manifest, delete any bundle, spawn Masthead, or probe health. Keep the staged launcher outside the active `<instanceDir>/bin/mastheadctl` destination so the still-running old daemon retains its launcher until activation.
+
+Export `activateStagedProductionInstallation(receipt)` as a filesystem-only operation. Its caller must first prove the old daemon is stopped. Activation revalidates the receipt, candidate digest, and previous-current filesystem binding, then atomically switches `current`, installs the staged instance launcher and production desktop surface, and performs disk-hygiene cleanup. It must not open SQLite or the lifecycle lease, run maintenance, probe health or ownership, spawn Masthead, or write a live instance manifest. `transitionProduction()` may compose stage-only installation, stop/offline proof, filesystem activation, database maintenance, and start as separate ordered operations, but `activateStagedProductionInstallation()` itself remains incapable of the latter three. Task 15 uses the same split so the filesystem activation cannot accidentally open or migrate production before the explicit recovery commands.
+
+- [ ] **Step 7: Run identity, launcher, packaged-command, doctor, and production tests**
 
 Run:
 
 ```bash
-npx vitest run src/electron/__tests__/cliLauncher.test.ts src/electron/__tests__/mainCliLauncher.test.ts src/electron/__tests__/packagedCliCommand.test.ts src/electron/__tests__/productionLauncher.test.ts src/cli/__tests__/authoringCli.test.ts src/daemon/__tests__/doctorAuthoring.test.ts
+npx vitest run src/shared/__tests__/instanceIdentity.test.ts src/core/__tests__/daemonCompatibility.test.ts src/core/__tests__/liveDevLauncher.test.ts src/electron/__tests__/cliLauncher.test.ts src/electron/__tests__/daemonLauncher.test.ts src/electron/__tests__/mainCliLauncher.test.ts src/electron/__tests__/packagedCliCommand.test.ts src/electron/__tests__/productionLauncher.test.ts src/daemon/__tests__/healthService.test.ts src/daemon/__tests__/workbenchAuthoringApi.test.ts src/cli/__tests__/authoringCli.test.ts src/daemon/__tests__/doctorAuthoring.test.ts
 ```
 
-Expected: PASS; tests prove simultaneous dev and production manifests cannot overwrite each other, a manifest swapped after the preliminary capabilities read still produces zero mutations, and a request with unchanged database/build/manifest/base binding continues after restart using the new current `instanceId`.
+Expected: PASS; tests prove simultaneous dev and production launchers cannot overwrite each other, Electron and `npm run dev` install launchers before primary spawn, the daemon alone publishes and conditionally removes its manifest after bind, health/protocol/current-capability/doctor checks expose one matching canonical identity, the pure guard rejects every current-identity mismatch, the stable-binding predicate permits only a nonce/PID change across restart, production staging leaves the old current target and all live state untouched, and successful filesystem activation changes only the staged filesystem surface. Tasks 8 and 9 add the zero-database-write and end-to-end request-continuation proofs once their service operations and HTTP routes exist.
 
-- [ ] **Step 6: Commit instance binding**
+- [ ] **Step 8: Commit instance binding and stage-only installation**
 
 ```bash
-git add src/electron/cliLauncher.ts src/electron/main.ts src/cli/authoringClient.ts src/cli/workbenchAuthoring.ts scripts/masthead-production.js src/electron/__tests__/cliLauncher.test.ts src/electron/__tests__/mainCliLauncher.test.ts src/electron/__tests__/productionLauncher.test.ts src/cli/__tests__/authoringCli.test.ts src/daemon/__tests__/doctorAuthoring.test.ts
+git add src/shared/instanceIdentity.ts src/shared/guidedAuthoring.ts src/shared/protocol.ts src/shared/workbenchAuthoring.ts fixtures/protocol/current-health.json src/shared/__tests__/instanceIdentity.test.ts src/core/__tests__/daemonCompatibility.test.ts src/core/__tests__/liveDevLauncher.test.ts src/electron/cliLauncher.ts src/electron/daemonLauncher.ts src/electron/main.ts src/daemon/main.ts src/daemon/server.ts src/daemon/healthService.ts src/daemon/workbenchAuthoringApi.ts src/cli/authoringClient.ts src/cli/workbenchAuthoring.ts scripts/masthead-live-dev.js scripts/masthead-doctor.js scripts/masthead-production.js scripts/masthead-production.d.ts src/electron/__tests__/cliLauncher.test.ts src/electron/__tests__/daemonLauncher.test.ts src/electron/__tests__/mainCliLauncher.test.ts src/daemon/__tests__/healthService.test.ts src/daemon/__tests__/workbenchAuthoringApi.test.ts src/electron/__tests__/productionLauncher.test.ts src/cli/__tests__/authoringCli.test.ts src/daemon/__tests__/doctorAuthoring.test.ts
 git commit -m "fix: bind authoring cli to one masthead instance"
 ```
 
@@ -1332,6 +1416,17 @@ test("rejects a manifest swap at the mutation boundary", () => {
   expect(() => finishGuidedAssignment(db, input)).toThrow("instance_identity_mismatch");
   expect(publicationCounts(db)).toEqual(beforeCounts);
 });
+
+test.each(["save", "approve", "reject", "finish"])(
+  "%s invokes the current-instance guard before its first database mutation",
+  (operation) => {
+    const before = guidedAuthoringCounts(db);
+    rotateDaemonInstanceIdentity();
+    expect(() => invokeGuidedMutation(operation, identityFromPreviousCapabilities()))
+      .toThrow("instance_identity_mismatch");
+    expect(guidedAuthoringCounts(db)).toEqual(before);
+  }
+);
 ```
 
 - [ ] **Step 2: Run focused service tests and verify failure**
@@ -1339,7 +1434,7 @@ test("rejects a manifest swap at the mutation boundary", () => {
 Run:
 
 ```bash
-npx vitest run src/workbench/authoring/__tests__/guidedAuthoringService.test.ts -t "canary|atomic"
+npx vitest run src/workbench/authoring/__tests__/guidedAuthoringService.test.ts -t "canary|atomic|identity|guard"
 ```
 
 Expected: FAIL because V4 staging and finish do not exist.
@@ -1348,12 +1443,14 @@ Expected: FAIL because V4 staging and finish do not exist.
 
 `saveGuidedDraft()` appends a draft/review revision and stores accepted canary drafts as `staged_canary`; it changes the request to `awaiting_canary_approval`. `approveGuidedCanary()` requires `reviewedBy`, nonempty notes, matching request and assignment IDs, the exact accepted draft revision, and current evidence revision. Rejection appends an operator review, changes the assignment to `needs_revision`, and returns the request to `open` without publishing. A later revision and approval append new rows rather than overwriting either rejection or draft history.
 
+Every public write service in this task accepts `GuidedAuthoringExpectedIdentity` and the immutable current daemon identity. `saveGuidedDraft()`, `approveGuidedCanary()`, and `rejectGuidedCanary()` call `assertGuidedAuthoringExpectedIdentity()` immediately before their transaction or first repository write; request lookup, validation, and review computation may happen first, but no durable state may change before the guard succeeds. Each operation also calls `assertStableGuidedRequestBinding()` so a safe restart may change only the current nonce and PID while the request's creation nonce remains unchanged audit evidence.
+
 - [ ] **Step 4: Implement one-transaction finish**
 
 Within one `BEGIN IMMEDIATE` transaction:
 
 ```text
-1. Revalidate request and assignment; compare the request's persisted base URL/database/build/manifest binding with the daemon; compare the mutation envelope's current instance nonce with the daemon's current nonce; treat the request's creation nonce as audit-only; then verify evidence revision, complete inspection, accepted draft revision/findings, and canary approval.
+1. Revalidate request and assignment, then immediately before `BEGIN IMMEDIATE` call `assertStableGuidedRequestBinding()` and `assertGuidedAuthoringExpectedIdentity()` against the immutable current daemon identity. The request's creation nonce is audit-only, while the mutation envelope must contain the current nonce reloaded by the client. Only after both guards succeed may the service verify evidence revision, complete inspection, accepted draft revision/findings, and canary approval inside the transaction.
 2. Apply each session's durable enrichment, with request ID, assignment ID, source, and policy version stamped by the daemon so later recovery can identify the exact authoring provenance.
 3. Rebuild and stage each canonical dossier snapshot.
 4. Stage optional artifacts and provenance.
@@ -1365,7 +1462,7 @@ Within one `BEGIN IMMEDIATE` transaction:
 
 Return the stored receipt unchanged on finish retry.
 
-The outer service owns the one `BEGIN IMMEDIATE` and calls only transaction-composable repository/publication helpers; no helper may open a nested transaction. On approved-canary finish the request becomes `active`; on final-assignment finish it becomes `completed`. Idempotent retries look up the stored receipt before attempting a new transition, verify its request and stable binding, and verify the retry envelope against the current daemon; the receipt's historical publication instance nonce need not equal a restarted daemon's current nonce.
+The outer service owns the one `BEGIN IMMEDIATE` and calls only transaction-composable repository/publication helpers; no helper may open a nested transaction. On approved-canary finish the request becomes `active`; on final-assignment finish it becomes `completed`. Idempotent retries may look up the stored receipt before attempting a new transition, but must still invoke both identity guards before returning it. They verify the request's stable binding and the retry envelope against the current daemon; the receipt's historical publication instance nonce and the request's creation nonce need not equal a safely restarted daemon's current nonce.
 
 - [ ] **Step 5: Run acceptance and rollback tests**
 
@@ -1395,11 +1492,14 @@ git commit -m "feat: stage and publish guided authoring assignments"
 - Modify: `src/daemon/server.ts`
 - Modify: `src/daemon/healthService.ts`
 - Modify: `src/daemon/settingsService.ts`
+- Modify: `src/workbench/authoring/guidedAuthoringService.ts`
 - Modify: `src/cli/authoringClient.ts`
 - Modify: `src/cli/workbenchAuthoring.ts`
 - Modify: `src/cli/mastheadctl.ts`
 - Modify: `src/core/worktreeConnector.ts`
+- Modify: `scripts/masthead-doctor.js`
 - Modify: `src/daemon/__tests__/workbenchAuthoringApi.test.ts`
+- Modify: `src/daemon/__tests__/doctorAuthoring.test.ts`
 - Modify: `src/cli/__tests__/authoringCli.test.ts`
 - Modify: `src/core/__tests__/worktreeConnector.test.ts`
 - Modify: `src/daemon/__tests__/endpointMatrix.test.ts`
@@ -1420,7 +1520,18 @@ mastheadctl workbench author review --assignment assignment:one --json
 mastheadctl workbench author finish --assignment assignment:one --json
 ```
 
-Add tests that every successful agent workflow command response contains exactly one `nextAction`, every mutation rejects an expected identity swapped after capabilities with zero writes, pending-canary discovery survives a simulated renderer restart, and legacy `open`, `submit`, and `finish` mutations return `authoring_contract_retired` for V3.
+Add tests that every successful agent workflow command response contains exactly one `nextAction`, every mutation rejects an expected identity swapped after capabilities with zero writes, a stably bound request continues after a daemon restart by reloading the same manifest's new current nonce, pending-canary discovery survives a simulated renderer restart, and legacy `open`, `submit`, and `finish` mutations return `authoring_contract_retired` for V3. Treat progress-recording `inspect` as a mutation even though its route uses `GET`: it must execute the same current-instance and stable-request guards before recording evidence access.
+
+Add an endpoint-matrix test that the worktree bridge forwards only non-mutating authoring reads and rejects everything that records progress or writes state:
+
+```ts
+expect(bridgeAllows("GET", "/workbench/authoring/capabilities")).toBe(true);
+expect(bridgeAllows("GET", "/workbench/authoring/requests/request%3Aone")).toBe(true);
+expect(bridgeAllows("GET", "/workbench/authoring/canaries/pending")).toBe(true);
+expect(bridgeAllows("GET", "/workbench/authoring/assignments/assignment%3Aone/review")).toBe(true);
+expect(bridgeAllows("GET", "/workbench/authoring/assignments/assignment%3Aone/inspect")).toBe(false);
+expect(allGuidedAuthoringPostRoutes.every((path) => !bridgeAllows("POST", path))).toBe(true);
+```
 
 - [ ] **Step 2: Run API and CLI tests and verify failure**
 
@@ -1448,11 +1559,13 @@ POST /workbench/authoring/requests/:requestId/canary-decision
 POST /workbench/authoring/assignments/:assignmentId/finish
 ```
 
-The read-only bridge permits capabilities, request status, pending-canary discovery, inspect, and review; it rejects request creation, start/claim, draft save, canary decisions, and finish. Update the method-aware matcher in `src/core/worktreeConnector.ts`, its focused tests, and the endpoint matrix in the same task; do not rely on `viteConnectorManager` tests to cover route authorization.
+The read-only bridge forwards only authoring operations that cannot record progress: capabilities, request status, pending-canary discovery, assignment review, and the existing audit-only run status/context/evidence-preview reads. It must reject progress-recording assignment `inspect` even though that route uses `GET`, and it must reject request creation, start/claim, draft save, canary decisions, finish, and every other authoring `POST`. Remove the current bridge exception for authoring suggestions rather than treating a `POST` as a forwarded preview. Update the method-aware matcher in `src/core/worktreeConnector.ts`, its focused tests, and the endpoint matrix in the same task; do not rely on `viteConnectorManager` tests to cover route authorization.
 
 - [ ] **Step 4: Add nested CLI dispatch and next-action rendering**
 
-`runGuidedAuthoringCli(args, options)` parses the subcommand after `author`, verifies the manifest before mutations, includes `GuidedAuthoringExpectedIdentity` in the mutation body, prints human-readable guidance by default, and returns the exact DTO under `--json`. Every mutation handler compares that envelope with the daemon's current base URL, database ID, build SHA, canonical manifest path, and instance nonce immediately before calling the service. It must not provide a command that accepts multiple request IDs, assignment IDs, or a session list.
+`runGuidedAuthoringCli(args, options)` parses the subcommand after `author`, reloads and verifies the manifest before every mutation, includes `GuidedAuthoringExpectedIdentity` in each `POST` body, and sends the same five fields in canonical authoring-identity headers for progress-recording `GET inspect`. It prints human-readable guidance by default and returns the exact DTO under `--json`. The preliminary capabilities check is fast feedback only. Each route passes the envelope and immutable current daemon identity into the service, and each service invokes `assertGuidedAuthoringExpectedIdentity()` plus `assertStableGuidedRequestBinding()` immediately before its first database mutation. Request creation has no persisted request binding yet, so it invokes only the current-identity guard; start, inspect, save, canary decisions, and finish invoke both. It must not provide a command that accepts multiple request IDs, assignment IDs, or a session list.
+
+For safe restart, request creation persists the original `creationInstanceId`, while each later command rereads the same canonical manifest and sends its new current `instanceId`. End-to-end tests restart the daemon with unchanged base URL, database ID, build SHA, and manifest path, require `start` to succeed, and require the stored creation nonce to remain unchanged. Changing any stable field or sending the previous nonce must fail before a write.
 
 - [ ] **Step 5: Retire unsafe V3 mutations**
 
@@ -1466,6 +1579,8 @@ policyVersion: "guided-authoring-v1"
 
 Keep V1-V3 status and receipt reads for audit. Return HTTP 409 with `{ code: "authoring_contract_retired" }` before opening or mutating a V3 run.
 
+Update Doctor in the same cutover so it validates the exact `GuidedAuthoringCapabilitiesDto`: V4 bundle version, guided policy version, ordered `start/inspect/save/review/finish` operations, instance command, base URL, database ID, build SHA, canonical manifest path, and current instance ID. The temporary identity-bearing V3 compatibility check introduced in Task 4 must not survive as the installed health gate after V4 becomes current.
+
 - [ ] **Step 6: Run API, CLI, bridge, and doctor tests**
 
 Run:
@@ -1474,12 +1589,12 @@ Run:
 npx vitest run src/daemon/__tests__/workbenchAuthoringApi.test.ts src/cli/__tests__/authoringCli.test.ts src/daemon/__tests__/doctorAuthoring.test.ts src/core/__tests__/worktreeConnector.test.ts src/daemon/__tests__/endpointMatrix.test.ts
 ```
 
-Expected: PASS with a complete V4 operation contract and no V3 write path.
+Expected: PASS with a complete V4 operation contract, no V3 write path, zero writes after every identity swap, safe restart continuity with the historical creation nonce preserved, and no bridge route that can record inspection progress or mutate authoring state.
 
 - [ ] **Step 7: Commit adapters**
 
 ```bash
-git add src/daemon/guidedAuthoringApi.ts src/cli/guidedAuthoring.ts src/daemon/workbenchAuthoringApi.ts src/daemon/server.ts src/daemon/healthService.ts src/daemon/settingsService.ts src/cli/authoringClient.ts src/cli/workbenchAuthoring.ts src/cli/mastheadctl.ts src/core/worktreeConnector.ts src/daemon/__tests__/workbenchAuthoringApi.test.ts src/cli/__tests__/authoringCli.test.ts src/core/__tests__/worktreeConnector.test.ts src/daemon/__tests__/endpointMatrix.test.ts
+git add src/daemon/guidedAuthoringApi.ts src/cli/guidedAuthoring.ts src/daemon/workbenchAuthoringApi.ts src/daemon/server.ts src/daemon/healthService.ts src/daemon/settingsService.ts src/workbench/authoring/guidedAuthoringService.ts src/cli/authoringClient.ts src/cli/workbenchAuthoring.ts src/cli/mastheadctl.ts src/core/worktreeConnector.ts scripts/masthead-doctor.js src/daemon/__tests__/workbenchAuthoringApi.test.ts src/daemon/__tests__/doctorAuthoring.test.ts src/cli/__tests__/authoringCli.test.ts src/core/__tests__/worktreeConnector.test.ts src/daemon/__tests__/endpointMatrix.test.ts
 git commit -m "feat: expose guided authoring workflow"
 ```
 
@@ -2082,11 +2197,11 @@ Use the repository's production installer in its no-launch/staged mode. Copy and
 
 - [ ] **Step 3: Stop production and prove the offline CLI target**
 
-Stop the old installed production daemon through the supported application lifecycle and verify no owner remains. Only then atomically switch `current` to the staged bundle, install the staged instance launcher, verify that `/home/tyler/.config/masthead-production/bin/mastheadctl` resolves into that bundle and exports only `/home/tyler/.config/masthead-production/masthead-instance.json`, and remove every other production bundle as required by disk hygiene. Confirm the staged build SHA in offline maintenance mode. Do not start the new daemon merely to obtain capabilities before the recovery backup exists; the prepare command acquires and releases exclusive maintenance itself.
+Stop the old installed production daemon through the supported application lifecycle and verify no owner remains before calling filesystem activation. Consume the staged receipt to atomically switch `current`, install the staged instance launcher, verify that `/home/tyler/.config/masthead-production/bin/mastheadctl` resolves into that bundle and exports only `/home/tyler/.config/masthead-production/masthead-instance.json`, and remove every other production bundle as required by disk hygiene. Confirm the staged build SHA from the verified bundle and activation receipt, without opening SQLite or the lifecycle lease, running maintenance, probing health, launching Masthead, or generating `/home/tyler/.config/masthead-production/masthead-instance.json`. The production manifest must remain absent while production is offline; the new daemon owns its creation after the eventual Step 6 bind.
 
 - [ ] **Step 4: Prepare recovery before any new-daemon database access**
 
-With production still stopped, run:
+With production still stopped after filesystem activation, run:
 
 ```bash
 /home/tyler/.config/masthead-production/bin/mastheadctl workbench prepare-v3-template-recovery --db /home/tyler/.config/masthead-production/masthead.sqlite --incident-contract docs/acceptance/guided-authoring-v3-incident-contract.json --receipt /tmp/masthead-v3-recovery-prepared.json --json
@@ -2108,7 +2223,7 @@ Invalidation must retain exclusive ownership, validate the unchanged prepared by
 
 - [ ] **Step 6: Restart and verify coherent surfaces**
 
-Start production normally for the first time on the recovered database. Now run `/home/tyler/.config/masthead-production/bin/mastheadctl workbench capabilities --json` and require the production database ID, installed build SHA, `workbench-authoring-v4`, `guided-authoring-v1`, canonical manifest path, production base URL, and the fresh runtime `instanceId`. Without another restart, require Logbook to remove the invalidated dossiers and Workbench to show the recovered sessions within one revision-poll interval. Verify no stale 3,230-item selection remains and all five latency budgets pass against production read endpoints.
+Start production normally for the first time on the recovered database. Require the daemon to publish `/home/tyler/.config/masthead-production/masthead-instance.json` only after it binds with complete health identity, then run `/home/tyler/.config/masthead-production/bin/mastheadctl workbench capabilities --json` and require the production database ID, installed build SHA, `workbench-authoring-v4`, `guided-authoring-v1`, canonical manifest path, production base URL, and the same fresh runtime `instanceId`. Without another restart, require Logbook to remove the invalidated dossiers and Workbench to show the recovered sessions within one revision-poll interval. Verify no stale 3,230-item selection remains and all five latency budgets pass against production read endpoints.
 
 - [ ] **Step 7: Publish only the production canary**
 
