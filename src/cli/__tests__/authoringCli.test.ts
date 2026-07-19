@@ -24,13 +24,14 @@ import {
   restoreFailedV1RecoveryBackupInsideExclusiveMaintenance,
   withExclusiveDatabaseMaintenance
 } from "../../daemon/databaseBackup.ts";
-import { auditFailedV1Generation } from "../../daemon/db/sessionArtifactRepository.ts";
+import * as sessionArtifactRepository from "../../daemon/db/sessionArtifactRepository.ts";
 
 const tempDirs: string[] = [];
 const suiteTempDirs: string[] = [];
 const daemons: MastheadDaemon[] = [];
 const execFileAsync = promisify(execFile);
 let exactCliRecoveryTemplatePromise: Promise<ExactCliRecoveryTemplate> | undefined;
+const SMALL_RECOVERY_AUDIT_HASH = "b".repeat(64);
 
 function validCliV3Bundle(runId: string, evidenceRevision: string, sessionId: string) {
   const evidenceRef = {
@@ -639,9 +640,12 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
       error: { code: "v1_recovery_refused", message: expect.stringContaining("database_invalidation_backup_sidecar_present") },
       ok: false
     });
+    await rm(`${backupPath}-wal`);
 
     const activeBytes = await readFile(dbPath);
     const backupBytes = await readFile(backupPath);
+    const backupSidecars = ["-wal", "-shm", "-journal"].map((suffix) => `${backupPath}${suffix}`);
+    for (const sidecarPath of backupSidecars) await writeFile(sidecarPath, "");
     const restoreSidecar = await runMastheadCli(
       [
         "workbench", "restore-v1-recovery", "--db", dbPath, "--backup", backupPath,
@@ -655,7 +659,8 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
     });
     expect(await readFile(dbPath)).toEqual(activeBytes);
     expect(await readFile(backupPath)).toEqual(backupBytes);
-    await rm(`${backupPath}-wal`);
+    for (const sidecarPath of backupSidecars) expect(await readFile(sidecarPath)).toEqual(Buffer.alloc(0));
+    await Promise.all(backupSidecars.map((sidecarPath) => rm(sidecarPath)));
 
     const outside = await runMastheadCli(
       [
@@ -711,72 +716,98 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
     } finally {
       await legacyGuard.release();
     }
+
+    const staleSentinelPath = join(tempDir, "runtime", "database.lock");
+    const staleSentinel = JSON.stringify({ createdAt: "2026-07-01T00:00:00.000Z", pid: 999_999_999, token: "stale" });
+    await writeFile(staleSentinelPath, staleSentinel, "utf8");
+    const staleGuard = await runMastheadCli(
+      [
+        "workbench", "restore-v1-recovery", "--db", dbPath, "--backup", backupPath,
+        "--audit-hash", auditHash, "--confirm", "--json"
+      ],
+      { env: {} }
+    );
+    expect(JSON.parse(staleGuard.stderr)).toMatchObject({ error: { code: "v1_recovery_refused" }, ok: false });
+    expect(await readFile(staleSentinelPath, "utf8")).toBe(staleSentinel);
+    await rm(staleSentinelPath);
     expect(readCliRecoveryCounts(dbPath)).toEqual({ artifacts: 0, runs: 0 });
   });
 
-  test("refuses invalidation when the recovery backup has another database identity", async () => {
-    const { auditHash, backupPath, dbPath } = await makeExactCliRecoveryFixture(
-      "masthead-cli-v1-invalidation-identity-",
-      { backup: true }
-    );
-    const backup = new DatabaseSync(backupPath);
-    backup.prepare(
-      "UPDATE app_settings SET setting_json = ? WHERE setting_key = 'database_identity'"
-    ).run(JSON.stringify({ databaseId: "wrong-database-id" }));
-    backup.close();
+  test("rejects malformed invalidation hashes before auditing population rows", async () => {
+    const { dbPath, tempDir } = await makeEmptyCliRecoveryFixture("masthead-cli-v1-invalidation-hash-");
+    const backupPath = join(tempDir, "masthead.sqlite.backup-current");
+    await createNormalizedCliBackup(dbPath, backupPath);
 
     const refused = await runMastheadCli(
-      ["workbench", "invalidate-v1-generation", "--db", dbPath, "--audit-hash", auditHash, "--confirm", "--json"],
+      ["workbench", "invalidate-v1-generation", "--db", dbPath, "--audit-hash", "not-sha256", "--confirm", "--json"],
       { env: {} }
     );
     expect(JSON.parse(refused.stderr)).toMatchObject({
-      error: { code: "v1_recovery_refused", message: expect.stringContaining("database_invalidation_identity_mismatch") },
+      error: { code: "v1_recovery_refused", message: "failed_v1_recovery_audit_hash_invalid" },
       ok: false
     });
-    expect(readCliRecoveryCounts(dbPath)).toEqual({ artifacts: 1_283, runs: 66 });
-  }, 120_000);
+    expect(readCliRecoveryCounts(dbPath)).toEqual({ artifacts: 0, runs: 0 });
+  });
 
-  test("refuses invalidation when the prepared backup population changes", async () => {
-    const { auditHash, backupPath, dbPath } = await makeExactCliRecoveryFixture(
-      "masthead-cli-v1-invalidation-population-",
-      { backup: true }
-    );
-    const backup = new DatabaseSync(backupPath);
-    backup.prepare(
-      "UPDATE workbench_session_state SET adr_status = 'required' WHERE session_id = 'session:cli-failed:0000'"
-    ).run();
-    backup.close();
+  test("refuses an altered non-exact V1 population with the smallest generation", async () => {
+    const { dbPath } = await makeSmallCliRecoveryFixture("masthead-cli-v1-invalidation-population-");
 
     const refused = await runMastheadCli(
-      ["workbench", "invalidate-v1-generation", "--db", dbPath, "--audit-hash", auditHash, "--confirm", "--json"],
+      ["workbench", "invalidate-v1-generation", "--db", dbPath, "--audit-hash", "a".repeat(64), "--confirm", "--json"],
       { env: {} }
     );
     expect(JSON.parse(refused.stderr)).toMatchObject({
-      error: { code: "v1_recovery_refused", message: expect.stringContaining("database_invalidation_backup_audit_hash_mismatch") },
+      error: { code: "v1_recovery_refused", message: "failed_v1_generation_not_exact:1:1283" },
       ok: false
     });
-    expect(readCliRecoveryCounts(dbPath)).toEqual({ artifacts: 1_283, runs: 66 });
-  }, 120_000);
+    expect(readCliRecoveryCounts(dbPath)).toEqual({ artifacts: 1, runs: 1 });
+  });
 
-  test("refuses invalidation when the requested audit hash does not match", async () => {
-    const { backupPath: _backupPath, dbPath } = await makeExactCliRecoveryFixture(
-      "masthead-cli-v1-invalidation-hash-",
-      { backup: true }
-    );
-
-    const refused = await runMastheadCli(
-      ["workbench", "invalidate-v1-generation", "--db", dbPath, "--audit-hash", "0".repeat(64), "--confirm", "--json"],
-      { env: {} }
-    );
-    expect(JSON.parse(refused.stderr)).toMatchObject({ error: { code: "v1_recovery_refused" }, ok: false });
-    expect(readCliRecoveryCounts(dbPath)).toEqual({ artifacts: 1_283, runs: 66 });
-  }, 120_000);
-
-  test("invalidates the exact generation while preserving its verified backup", async () => {
+  test("invalidates only the exact generation with unchanged identity, population, and hash", async () => {
     const { auditHash, backupPath, databaseId, dbPath, tempDir } = await makeExactCliRecoveryFixture(
       "masthead-cli-v1-invalidation-success-",
       { backup: true }
     );
+    const safeBackupBytes = await readFile(backupPath);
+
+    const wrongIdentityBackup = new DatabaseSync(backupPath);
+    wrongIdentityBackup.prepare(
+      "UPDATE app_settings SET setting_json = ? WHERE setting_key = 'database_identity'"
+    ).run(JSON.stringify({ databaseId: "wrong-database-id" }));
+    wrongIdentityBackup.close();
+    const wrongIdentity = await runMastheadCli(
+      ["workbench", "invalidate-v1-generation", "--db", dbPath, "--audit-hash", auditHash, "--confirm", "--json"],
+      { env: {} }
+    );
+    expect(JSON.parse(wrongIdentity.stderr)).toMatchObject({
+      error: { code: "v1_recovery_refused", message: expect.stringContaining("database_invalidation_identity_mismatch") },
+      ok: false
+    });
+    expect(readCliRecoveryCounts(dbPath)).toEqual({ artifacts: 1_283, runs: 66 });
+    await writeFile(backupPath, safeBackupBytes);
+
+    const wrongPopulationBackup = new DatabaseSync(backupPath);
+    wrongPopulationBackup.prepare(
+      "UPDATE workbench_session_state SET adr_status = 'required' WHERE session_id = 'session:cli-failed:0000'"
+    ).run();
+    wrongPopulationBackup.close();
+    const wrongPopulation = await runMastheadCli(
+      ["workbench", "invalidate-v1-generation", "--db", dbPath, "--audit-hash", auditHash, "--confirm", "--json"],
+      { env: {} }
+    );
+    expect(JSON.parse(wrongPopulation.stderr)).toMatchObject({
+      error: { code: "v1_recovery_refused", message: expect.stringContaining("database_invalidation_backup_audit_hash_mismatch") },
+      ok: false
+    });
+    expect(readCliRecoveryCounts(dbPath)).toEqual({ artifacts: 1_283, runs: 66 });
+    await writeFile(backupPath, safeBackupBytes);
+
+    const wrongHash = await runMastheadCli(
+      ["workbench", "invalidate-v1-generation", "--db", dbPath, "--audit-hash", "0".repeat(64), "--confirm", "--json"],
+      { env: {} }
+    );
+    expect(JSON.parse(wrongHash.stderr)).toMatchObject({ error: { code: "v1_recovery_refused" }, ok: false });
+    expect(readCliRecoveryCounts(dbPath)).toEqual({ artifacts: 1_283, runs: 66 });
 
     const invalidated = await runMastheadCli(
       ["workbench", "invalidate-v1-generation", "--db", dbPath, "--audit-hash", auditHash, "--confirm", "--json"],
@@ -816,16 +847,97 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
     for (const suffix of ["-wal", "-shm", "-journal"]) {
       await expect(access(`${backupPath}${suffix}`)).rejects.toMatchObject({ code: "ENOENT" });
     }
-  }, 120_000);
+  });
 
-  test("refuses restore for changed identity, hash, or corrupt backup bytes", async () => {
-    const { auditHash, backupPath, dbPath } = await makeExactCliRecoveryFixture(
-      "masthead-cli-v1-restore-verification-",
-      { backup: true }
+  test("refuses restore before population audit for invalid hash, missing identity, or corrupt bytes", async () => {
+    const { databaseId, dbPath, tempDir } = await makeEmptyCliRecoveryFixture(
+      "masthead-cli-v1-restore-verification-"
     );
+    const backupPath = join(tempDir, "masthead.sqlite.backup-current");
+    await createNormalizedCliBackup(dbPath, backupPath);
+    const activeBytes = await readFile(dbPath);
+
+    const invalidHash = await runMastheadCli(
+      [
+        "workbench", "restore-v1-recovery", "--db", dbPath, "--backup", backupPath,
+        "--audit-hash", "not-sha256", "--confirm", "--json"
+      ],
+      { env: {} }
+    );
+    expect(JSON.parse(invalidHash.stderr)).toMatchObject({
+      error: { code: "v1_recovery_refused", message: "failed_v1_recovery_audit_hash_invalid" },
+      ok: false
+    });
+    expect(await readFile(dbPath)).toEqual(activeBytes);
+
+    const active = new DatabaseSync(dbPath);
+    active.prepare("DELETE FROM app_settings WHERE setting_key = 'database_identity'").run();
+    active.close();
+    const missingIdentityBytes = await readFile(dbPath);
+    const missingIdentity = await runMastheadCli(
+      [
+        "workbench", "restore-v1-recovery", "--db", dbPath, "--backup", backupPath,
+        "--audit-hash", "a".repeat(64), "--confirm", "--json"
+      ],
+      { env: {} }
+    );
+    expect(JSON.parse(missingIdentity.stderr)).toMatchObject({
+      error: { code: "v1_recovery_refused", message: "database_backup_identity_missing" },
+      ok: false
+    });
+    expect(await readFile(dbPath)).toEqual(missingIdentityBytes);
+
+    const resetIdentity = new DatabaseSync(dbPath);
+    resetIdentity.prepare(
+      "INSERT INTO app_settings (setting_key, setting_json, updated_at) VALUES ('database_identity', ?, ?)"
+    ).run(JSON.stringify({ databaseId }), "2026-07-19T12:00:00.000Z");
+    resetIdentity.close();
+    await writeFile(backupPath, "not a sqlite database", "utf8");
+    const corrupt = await runMastheadCli(
+      [
+        "workbench", "restore-v1-recovery", "--db", dbPath, "--backup", backupPath,
+        "--audit-hash", "a".repeat(64), "--confirm", "--json"
+      ],
+      { env: {} }
+    );
+    expect(JSON.parse(corrupt.stderr)).toMatchObject({ error: { code: "v1_recovery_refused" }, ok: false });
+    expect(readCliRecoveryCounts(dbPath)).toEqual({ artifacts: 0, runs: 0 });
+  });
+
+  test("keeps active and backup bytes unchanged when restore fails before promotion", async () => {
+    useSmallCliRecoveryAudit();
+    const { backupPath, dbPath, tempDir } = await makeSmallCliRecoveryFixture("masthead-cli-v1-restore-rollback-");
     clearCliPublishedRecoveryState(dbPath);
     const activeBytes = await readFile(dbPath);
-    const safeBackupBytes = await readFile(backupPath);
+    const backupBytes = await readFile(backupPath);
+
+    await expect(
+      withExclusiveDatabaseMaintenance(dbPath, (ownership) =>
+        restoreFailedV1RecoveryBackupInsideExclusiveMaintenance(
+          dbPath,
+          backupPath,
+          SMALL_RECOVERY_AUDIT_HASH,
+          ownership,
+          {
+            onBoundary(boundary) {
+              if (boundary === "before_promotion") throw new Error("injected:before_promotion");
+            }
+          }
+        )
+      )
+    ).rejects.toThrow("injected:before_promotion");
+    expect(await readFile(dbPath)).toEqual(activeBytes);
+    expect(await readFile(backupPath)).toEqual(backupBytes);
+    expect(readCliRecoveryCounts(dbPath)).toEqual({ artifacts: 0, runs: 1 });
+    expect((await readdir(tempDir)).some((name) => name.includes("restore-stage"))).toBe(false);
+  });
+
+  test("restores a verified failed generation from the preserved sibling backup", async () => {
+    useSmallCliRecoveryAudit();
+    const { backupPath, databaseId, dbPath, tempDir } = await makeSmallCliRecoveryFixture(
+      "masthead-cli-v1-restore-success-"
+    );
+    clearCliPublishedRecoveryState(dbPath);
 
     const backup = new DatabaseSync(backupPath);
     const originalIdentity = backup.prepare(
@@ -838,12 +950,12 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
     const wrongIdentity = await runMastheadCli(
       [
         "workbench", "restore-v1-recovery", "--db", dbPath, "--backup", backupPath,
-        "--audit-hash", auditHash, "--confirm", "--json"
+        "--audit-hash", SMALL_RECOVERY_AUDIT_HASH, "--confirm", "--json"
       ],
       { env: {} }
     );
     expect(JSON.parse(wrongIdentity.stderr)).toMatchObject({ error: { code: "v1_recovery_refused" }, ok: false });
-    expect(await readFile(dbPath)).toEqual(activeBytes);
+    expect(readCliRecoveryCounts(dbPath)).toEqual({ artifacts: 0, runs: 1 });
 
     const resetIdentity = new DatabaseSync(backupPath);
     resetIdentity.prepare(
@@ -858,63 +970,14 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
       { env: {} }
     );
     expect(JSON.parse(wrongHash.stderr)).toMatchObject({ error: { code: "v1_recovery_refused" }, ok: false });
-    expect(await readFile(dbPath)).toEqual(activeBytes);
+    expect(readCliRecoveryCounts(dbPath)).toEqual({ artifacts: 0, runs: 1 });
 
-    await writeFile(backupPath, "not a sqlite database", "utf8");
-    const corrupt = await runMastheadCli(
-      [
-        "workbench", "restore-v1-recovery", "--db", dbPath, "--backup", backupPath,
-        "--audit-hash", auditHash, "--confirm", "--json"
-      ],
-      { env: {} }
-    );
-    expect(JSON.parse(corrupt.stderr)).toMatchObject({ error: { code: "v1_recovery_refused" }, ok: false });
-    expect(await readFile(dbPath)).toEqual(activeBytes);
-    await writeFile(backupPath, safeBackupBytes);
-  }, 120_000);
-
-  test("keeps active and backup bytes unchanged when restore fails before promotion", async () => {
-    const { auditHash, backupPath, dbPath, tempDir } = await makeExactCliRecoveryFixture(
-      "masthead-cli-v1-restore-rollback-",
-      { backup: true }
-    );
-    clearCliPublishedRecoveryState(dbPath);
-    const activeBytes = await readFile(dbPath);
-    const backupBytes = await readFile(backupPath);
-
-    await expect(
-      withExclusiveDatabaseMaintenance(dbPath, (ownership) =>
-        restoreFailedV1RecoveryBackupInsideExclusiveMaintenance(
-          dbPath,
-          backupPath,
-          auditHash,
-          ownership,
-          {
-            onBoundary(boundary) {
-              if (boundary === "before_promotion") throw new Error("injected:before_promotion");
-            }
-          }
-        )
-      )
-    ).rejects.toThrow("injected:before_promotion");
-    expect(await readFile(dbPath)).toEqual(activeBytes);
-    expect(await readFile(backupPath)).toEqual(backupBytes);
-    expect(readCliRecoveryCounts(dbPath)).toEqual({ artifacts: 0, runs: 66 });
-    expect((await readdir(tempDir)).some((name) => name.includes("restore-stage"))).toBe(false);
-  }, 120_000);
-
-  test("restores the exact failed generation from the preserved sibling backup", async () => {
-    const { auditHash, backupPath, databaseId, dbPath, tempDir } = await makeExactCliRecoveryFixture(
-      "masthead-cli-v1-restore-success-",
-      { backup: true }
-    );
-    clearCliPublishedRecoveryState(dbPath);
     for (const suffix of ["-wal", "-shm", "-journal"]) await writeFile(`${dbPath}${suffix}`, "");
 
     const restored = await runMastheadCli(
       [
         "workbench", "restore-v1-recovery", "--db", dbPath, "--backup", backupPath,
-        "--audit-hash", auditHash, "--confirm", "--json"
+        "--audit-hash", SMALL_RECOVERY_AUDIT_HASH, "--confirm", "--json"
       ],
       { env: {} }
     );
@@ -923,24 +986,24 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
       databasePath: dbPath,
       ok: true,
       receipt: {
-        artifactsRestored: 1_283,
-        auditHash,
+        artifactsRestored: 1,
+        auditHash: SMALL_RECOVERY_AUDIT_HASH,
         backupPath,
         backupPreserved: true,
         databaseId,
         integrityResult: "ok",
-        runsRestored: 66,
-        sessionsRestored: 1_283
+        runsRestored: 1,
+        sessionsRestored: 1
       }
     });
-    expect(readCliRecoveryCounts(dbPath)).toEqual({ artifacts: 1_283, runs: 66 });
+    expect(readCliRecoveryCounts(dbPath)).toEqual({ artifacts: 1, runs: 1 });
     expect((await readdir(tempDir)).filter((name) => name.startsWith("masthead.sqlite.backup-"))).toEqual([
       "masthead.sqlite.backup-current"
     ]);
     for (const suffix of ["-wal", "-shm", "-journal"]) {
       await expect(access(`${dbPath}${suffix}`)).rejects.toMatchObject({ code: "ENOENT" });
     }
-  }, 120_000);
+  });
 
   test("audits the exact failed V1 generation through the CLI on schema 21", async () => {
     const tempDir = await makeTempDir("masthead-cli-v1-schema21-audit-");
@@ -977,6 +1040,40 @@ type ExactCliRecoveryTemplate = {
   databasePath: string;
 };
 
+function useSmallCliRecoveryAudit(): void {
+  const realAudit = sessionArtifactRepository.auditFailedV1Generation;
+  vi.spyOn(sessionArtifactRepository, "auditFailedV1Generation").mockImplementation((database) => {
+    const artifacts = Number((database.prepare(
+      "SELECT COUNT(*) AS count FROM session_artifacts"
+    ).get() as { count: number }).count);
+    if (artifacts !== 1) return realAudit(database);
+    return {
+      actorId: "failed-agent",
+      adrs: 0,
+      auditHash: SMALL_RECOVERY_AUDIT_HASH,
+      contractVersion: "workbench-authoring-v1",
+      counts: {
+        byKind: { session_dossier: 1 },
+        byRun: { "run:cli-failed-v1:000": 1 },
+        bySession: { "session:cli-failed:0000": 1 },
+        byStatus: { "current/published": 1 }
+      },
+      createdBy: ["workbench_authoring:failed-agent"],
+      dossiers: 1,
+      generationFingerprint: "small-recovery-generation",
+      generationWindow: { from: "2026-07-11T08:00:00.000Z", to: "2026-07-11T09:00:00.000Z" },
+      incidentTimelines: 0,
+      publicationWindow: { from: "2026-07-11T08:30:00.000Z", to: "2026-07-11T08:30:00.000Z" },
+      runbooks: 0,
+      schemaVersions: ["session_dossier-v2"],
+      templateFingerprint: "small-recovery-template",
+      totalArtifacts: 1,
+      totalRuns: 1,
+      totalSessions: 1
+    };
+  });
+}
+
 async function exactCliRecoveryTemplate(): Promise<ExactCliRecoveryTemplate> {
   exactCliRecoveryTemplatePromise ??= (async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-cli-v1-template-"));
@@ -986,7 +1083,7 @@ async function exactCliRecoveryTemplate(): Promise<ExactCliRecoveryTemplate> {
     migrateDatabase(database);
     const databaseId = getOrCreateDatabaseIdentity(database);
     seedCliFailedV1Generation(database);
-    const auditHash = auditFailedV1Generation(database).auditHash;
+    const auditHash = sessionArtifactRepository.auditFailedV1Generation(database).auditHash;
     database.close();
     return { auditHash, databaseId, databasePath };
   })();
@@ -1008,15 +1105,7 @@ async function makeExactCliRecoveryFixture(
   const dbPath = join(tempDir, "masthead.sqlite");
   const backupPath = join(tempDir, "masthead.sqlite.backup-current");
   await copyFile(template.databasePath, dbPath);
-  if (options.backup) {
-    await copyFile(template.databasePath, backupPath);
-    const backup = new DatabaseSync(backupPath);
-    try {
-      backup.exec("PRAGMA journal_mode = DELETE;");
-    } finally {
-      backup.close();
-    }
-  }
+  if (options.backup) await createNormalizedCliBackup(dbPath, backupPath);
   return {
     auditHash: template.auditHash,
     backupPath,
@@ -1038,6 +1127,31 @@ async function makeEmptyCliRecoveryFixture(prefix: string): Promise<{
   const databaseId = getOrCreateDatabaseIdentity(database);
   database.close();
   return { databaseId, dbPath, tempDir };
+}
+
+async function makeSmallCliRecoveryFixture(prefix: string): Promise<{
+  backupPath: string;
+  databaseId: string;
+  dbPath: string;
+  tempDir: string;
+}> {
+  const { databaseId, dbPath, tempDir } = await makeEmptyCliRecoveryFixture(prefix);
+  const database = await openMastheadDatabase(dbPath);
+  seedCliFailedV1Generation(database, { dossierCount: 1 });
+  database.close();
+  const backupPath = join(tempDir, "masthead.sqlite.backup-current");
+  await createNormalizedCliBackup(dbPath, backupPath);
+  return { backupPath, databaseId, dbPath, tempDir };
+}
+
+async function createNormalizedCliBackup(databasePath: string, backupPath: string): Promise<void> {
+  await copyFile(databasePath, backupPath);
+  const backup = new DatabaseSync(backupPath);
+  try {
+    backup.exec("PRAGMA journal_mode = DELETE;");
+  } finally {
+    backup.close();
+  }
 }
 
 function clearCliPublishedRecoveryState(databasePath: string): void {
@@ -1103,7 +1217,7 @@ function authoringOutputCounts(db: Awaited<ReturnType<typeof openMastheadDatabas
 
 function seedCliFailedV1Generation(
   db: Awaited<ReturnType<typeof openMastheadDatabase>>,
-  options: { schema21?: boolean } = {}
+  options: { dossierCount?: number; schema21?: boolean } = {}
 ): void {
   const createdAt = "2026-07-11T08:00:00.000Z";
   const publishedAt = "2026-07-11T08:30:00.000Z";
@@ -1150,7 +1264,7 @@ function seedCliFailedV1Generation(
   const publishedArtifactIds: string[] = [];
   const resolvedSessionIds: string[] = [];
   const members: Array<{ claimId: string; sessionId: string }> = [];
-  for (let index = 0; index < 1_283; index += 1) {
+  for (let index = 0; index < (options.dossierCount ?? 1_283); index += 1) {
     const suffix = String(index).padStart(4, "0");
     const sessionId = `session:cli-failed:${suffix}`;
     const claimId = `claim:cli-failed:${suffix}`;
