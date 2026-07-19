@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { createServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import {
@@ -16,6 +16,8 @@ import {
   isWorkbenchAuthoringCapabilitiesDto
 } from "../shared/workbenchAuthoring";
 import { packagedDaemonPaths } from "./pathPolicy";
+import { renderLiveDevInstanceLauncher } from "../core/liveDevLauncher";
+import { classifyDaemonHealth } from "../shared/protocol";
 
 const DEFAULT_CONNECTOR_PORT = 17373;
 const REQUIRED_CAPABILITIES = [
@@ -105,7 +107,8 @@ export type StartLiveConnectorOptions = {
   spawnChild?: typeof spawn;
   waitForCollector?: typeof waitForCompatibleCollector;
   warmConnector?: (baseUrl: string) => Promise<void>;
-  verifyAuthoringLauncher?: (launcherPath: string, manifestPath: string) => Promise<void>;
+  verifyAuthoringLauncher?: (launcherPath: string, manifestPath: string, nodePath: string, cliEntry: string) => Promise<void>;
+  childTerminationGraceMs?: number;
 };
 
 export function connectorBaseUrl(port: number): string {
@@ -120,6 +123,10 @@ export function resolveDaemonLaunchTarget(input: ResolveDaemonLaunchTargetInput)
   const instancePaths = canonicalInstancePaths(resolve(input.env.MASTHEAD_INSTANCE_DIR || dataDirectory));
   const instanceManifest = resolve(input.env.MASTHEAD_INSTANCE_MANIFEST || instancePaths.instanceManifest);
   const cliCommand = resolve(input.env.MASTHEAD_CLI_COMMAND || instancePaths.launcherPath);
+  const canonicalPaths = canonicalInstancePaths(dataDirectory);
+  if (instancePaths.instanceDir !== dataDirectory || instanceManifest !== canonicalPaths.instanceManifest || cliCommand !== canonicalPaths.launcherPath) {
+    throw new Error("Masthead instance directory, manifest, and CLI command must be derived exactly from MASTHEAD_DATA_DIR");
+  }
   const mcpEntryOverride = input.env.MASTHEAD_MCP_ENTRY;
 
   if (input.env.MASTHEAD_DAEMON_ENTRY) {
@@ -186,6 +193,7 @@ export function buildDaemonEnv(input: {
 }
 
 export function parseCompatibleHealth(value: unknown): MastheadHealthSummary | undefined {
+  if (classifyDaemonHealth(value).state !== "compatible") return undefined;
   if (!value || typeof value !== "object") return undefined;
   const record = value as Record<string, unknown>;
   if (record.ok !== true || record.product !== "masthead") return undefined;
@@ -234,7 +242,7 @@ export async function startLiveConnector(
   if (initialProbe.state === "compatible") {
     const baseUrl = connectorBaseUrl(target.port);
     await options.prepareAuthoringLauncher?.({ baseUrl, port: target.port, instanceManifest: target.instanceManifest, launcherPath: target.cliCommand });
-    await (options.verifyAuthoringLauncher ?? verifyInstanceLauncher)(target.cliCommand, target.instanceManifest);
+    await (options.verifyAuthoringLauncher ?? verifyInstanceLauncher)(target.cliCommand, target.instanceManifest, target.nodePath, cliEntryForTarget(target));
     await (options.verifyAuthoringManifest ?? verifyDaemonOwnedManifest)(target.instanceManifest, initialProbe.health);
     await (options.warmConnector ?? warmProjection)(baseUrl);
     return connectorStartResult(false, baseUrl, "Local Masthead collector is already running.", initialProbe.health);
@@ -249,7 +257,7 @@ export async function startLiveConnector(
     : target.port;
   const baseUrl = connectorBaseUrl(port);
   await options.prepareAuthoringLauncher?.({ baseUrl, port, instanceManifest: target.instanceManifest, launcherPath: target.cliCommand });
-  await (options.verifyAuthoringLauncher ?? verifyInstanceLauncher)(target.cliCommand, target.instanceManifest);
+  await (options.verifyAuthoringLauncher ?? verifyInstanceLauncher)(target.cliCommand, target.instanceManifest, target.nodePath, cliEntryForTarget(target));
   const env = buildDaemonEnv({
     allowedOrigins,
     cliCommand,
@@ -279,7 +287,11 @@ export async function startLiveConnector(
     await (options.warmConnector ?? warmProjection)(baseUrl);
     return connectorStartResult(true, baseUrl, "Started local Masthead collector.", health);
   } catch (error) {
-    await stopSpawnedChild(child);
+    try {
+      await stopSpawnedChild(child, options.childTerminationGraceMs);
+    } catch (cleanupError) {
+      throw new Error(`${error instanceof Error ? error.message : String(error)}; spawned child cleanup failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`, { cause: error });
+    }
     throw error;
   }
 }
@@ -372,7 +384,13 @@ async function probeCollector(
   if (
     !health ||
     observedIdentity.databasePath !== expectedDatabasePath ||
-    observedIdentity.dataDirectory !== expectedDataDirectory
+    observedIdentity.dataDirectory !== expectedDataDirectory ||
+    health.mode !== "primary" ||
+    health.baseUrl !== connectorBaseUrl(port) ||
+    health.dataDirectory !== expectedDataDirectory ||
+    health.databasePath !== expectedDatabasePath ||
+    health.instanceManifest !== join(expectedDataDirectory, "masthead-instance.json") ||
+    health.authoringCommand !== expectedCliCommand
   ) return { state: "incompatible" };
 
   try {
@@ -443,35 +461,36 @@ async function warmProjection(baseUrl: string): Promise<void> {
   await response.arrayBuffer();
 }
 
-export async function verifyInstanceLauncher(launcherPath: string, manifestPath: string): Promise<void> {
-  const body = await readFile(launcherPath, "utf8");
-  const exactBinding = process.platform === "win32"
-    ? `@set "MASTHEAD_INSTANCE_MANIFEST=${manifestPath.replace(/%/gu, "%%")}"`
-    : `exec env MASTHEAD_INSTANCE_MANIFEST='${manifestPath.replace(/'/gu, `'"'"'`)}'`;
-  const hasExactBinding = body.split(/\r?\n/u).some((line) => process.platform === "win32" ? line === exactBinding : line.startsWith(`${exactBinding} `));
-  if (!hasExactBinding || body.includes("MASTHEAD_DAEMON_URL")) {
+export async function verifyInstanceLauncher(launcherPath: string, manifestPath: string, nodePath: string, cliEntry: string): Promise<void> {
+  const [body, info] = await Promise.all([readFile(launcherPath, "utf8"), stat(launcherPath)]);
+  const expected = renderLiveDevInstanceLauncher({ cliEntry, instanceManifest: manifestPath, nodePath, platform: process.platform });
+  if (body !== expected || (process.platform !== "win32" && (info.mode & 0o777) !== 0o755)) {
     throw new Error(`Masthead instance launcher does not bind ${manifestPath}`);
   }
 }
 
-async function stopSpawnedChild(child: ChildProcess): Promise<void> {
+function cliEntryForTarget(target: DaemonLaunchTarget): string {
+  return target.entryPath.replace(/\/daemon\/main\.(?:js|ts)$/u, "/cli/mastheadctl.js");
+}
+
+async function stopSpawnedChild(child: ChildProcess, graceMs = 5_000): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return;
-  await new Promise<void>((resolveExit, reject) => {
+  const waitForExactExit = (timeoutMs: number) => new Promise<boolean>((resolveExit) => {
     const timeout = setTimeout(() => {
       child.off("exit", onExit);
-      reject(new Error(`Spawned Masthead collector ${child.pid ?? "unknown"} did not exit after SIGTERM`));
-    }, 5_000);
+      resolveExit(false);
+    }, timeoutMs);
     const onExit = () => {
       clearTimeout(timeout);
-      resolveExit();
+      resolveExit(true);
     };
     child.once("exit", onExit);
-    if (!child.kill("SIGTERM")) {
-      clearTimeout(timeout);
-      child.off("exit", onExit);
-      reject(new Error(`Could not stop spawned Masthead collector ${child.pid ?? "unknown"}`));
-    }
   });
+  if (!child.kill("SIGTERM")) throw new Error(`Could not stop spawned Masthead collector ${child.pid ?? "unknown"}`);
+  if (await waitForExactExit(graceMs)) return;
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  if (!child.kill("SIGKILL")) throw new Error(`Could not kill spawned Masthead collector ${child.pid ?? "unknown"} after SIGTERM timeout`);
+  if (!(await waitForExactExit(graceMs))) throw new Error(`Spawned Masthead collector ${child.pid ?? "unknown"} did not exit after identity-bound SIGKILL`);
 }
 
 async function waitForCompatibleCollector(

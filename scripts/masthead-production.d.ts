@@ -149,6 +149,13 @@ export type StagedProductionInstallationReceipt = {
   stagingNonce: string;
   sourceDigest: string;
   buildSha: string;
+  buildVersion: string;
+  baseUrl: string;
+  dataDirectory: string;
+  databasePath: string;
+  port: number;
+  lifecycleLeasePath: string;
+  rollbackBundle: { path: string; buildSha: string; version: string; bundleDigest: string };
   target: string;
   productionRoot: string;
   currentPath: string;
@@ -172,6 +179,7 @@ export function stageProductionInstallation(input: {
   homeDir?: string;
   port?: number;
   productionRoot?: string;
+  lifecycleLeasePath?: string;
 }): Promise<StagedProductionInstallationReceipt>;
 export function activateStagedProductionInstallation(
   receipt: StagedProductionInstallationReceipt | string,
@@ -179,6 +187,7 @@ export function activateStagedProductionInstallation(
 ): Promise<Record<string, unknown>>;
 export function loadStagedProductionInstallation(receiptPath: string): Promise<StagedProductionInstallationReceipt>;
 export function finalizeStagedProductionInstallation(
-  receipt: StagedProductionInstallationReceipt | string
+  receipt: StagedProductionInstallationReceipt | string,
+  dependencies?: Record<string, unknown>
 ): Promise<Record<string, unknown>>;
-export function runCli(argv?: string[], environment?: NodeJS.ProcessEnv): Promise<Record<string, unknown>>;
+export function runCli(argv?: string[], environment?: NodeJS.ProcessEnv, dependencies?: Record<string, unknown>): Promise<Record<string, unknown>>;

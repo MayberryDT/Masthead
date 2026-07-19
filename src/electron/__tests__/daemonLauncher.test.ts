@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { EventEmitter } from "node:events";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import currentHealth from "../../../fixtures/protocol/current-health.json";
 import type { ChildProcess } from "node:child_process";
 import {
   buildDaemonEnv,
@@ -24,9 +25,14 @@ describe("Electron daemon launcher policy", () => {
     const manifest = join(directory, "masthead-instance.json");
     try {
       await writeFile(launcher, `#!/bin/sh\nexec env MASTHEAD_INSTANCE_MANIFEST='${manifest}' '/usr/bin/node' '/app/cli.js' "$@"\n`);
-      await expect(verifyInstanceLauncher(launcher, manifest)).resolves.toBeUndefined();
+      await chmod(launcher, 0o755);
+      await expect(verifyInstanceLauncher(launcher, manifest, "/usr/bin/node", "/app/cli.js")).resolves.toBeUndefined();
+      await writeFile(launcher, `#!/bin/sh\nexec env MASTHEAD_INSTANCE_MANIFEST='${manifest}' '/usr/bin/node' '/app/cli.js' "$@"\necho extra\n`);
+      await expect(verifyInstanceLauncher(launcher, manifest, "/usr/bin/node", "/app/cli.js")).rejects.toThrow("does not bind");
+      await writeFile(launcher, `#!/bin/sh\nexec env MASTHEAD_INSTANCE_MANIFEST='${manifest}' '/usr/bin/node' '/wrong/cli.js' "$@"\n`);
+      await expect(verifyInstanceLauncher(launcher, manifest, "/usr/bin/node", "/app/cli.js")).rejects.toThrow("does not bind");
       await writeFile(launcher, `# ${manifest}\nexec env MASTHEAD_INSTANCE_MANIFEST='/wrong/manifest.json' '/usr/bin/node' '/app/cli.js' "$@"\n`);
-      await expect(verifyInstanceLauncher(launcher, manifest)).rejects.toThrow("does not bind");
+      await expect(verifyInstanceLauncher(launcher, manifest, "/usr/bin/node", "/app/cli.js")).rejects.toThrow("does not bind");
     } finally {
       await rm(directory, { force: true, recursive: true });
     }
@@ -36,28 +42,12 @@ describe("Electron daemon launcher policy", () => {
   });
 
   test("parses compatible Masthead health and rejects incompatible responses", () => {
-    const compatible = parseCompatibleHealth({
-      ok: true,
-      product: "masthead",
-      apiVersion: 1,
-      buildSha: "development",
-      capabilities: ["live_projection", "canonical_sessions", "logbook_search", "source_discovery", "adapter_inventory", "mcp_status", "settings", "artifact_authoring"],
-      data: {
-        databaseId: "db",
-        databasePath: "/tmp/masthead/masthead.sqlite",
-        cliCommand: "/home/test/.local/bin/mastheadctl",
-        instanceDir: "/tmp/masthead",
-        instanceManifest: "/tmp/masthead/masthead-instance.json",
-        dataDirectory: "/tmp/masthead",
-        migrationState: "ready"
-      },
-      runtime: { mode: "primary" }
-    });
+    const compatible = parseCompatibleHealth(compatibleHealth("/tmp/masthead"));
 
     expect(compatible).toMatchObject({
       apiVersion: 1,
       buildSha: "development",
-      databaseId: "db",
+      databaseId: "database:test",
       databasePath: "/tmp/masthead/masthead.sqlite",
       dataDirectory: "/tmp/masthead",
       mode: "primary"
@@ -155,6 +145,18 @@ describe("Electron daemon launcher policy", () => {
     });
   });
 
+  test.each(["MASTHEAD_INSTANCE_DIR", "MASTHEAD_INSTANCE_MANIFEST", "MASTHEAD_CLI_COMMAND"])(
+    "rejects an independent %s override before launcher write or spawn",
+    (field) => {
+      expect(() => resolveDaemonLaunchTarget({
+        currentDir: "/repo",
+        env: { MASTHEAD_DATA_DIR: "/tmp/masthead", [field]: "/tmp/other" },
+        resourcesPath: "/opt/Masthead/resources",
+        userDataDir: "/tmp/masthead"
+      })).toThrow("derived exactly");
+    }
+  );
+
   test("resolves packaged hook script from daemon resources", () => {
     expect(
       resolveDaemonLaunchTarget({
@@ -178,14 +180,14 @@ describe("Electron daemon launcher policy", () => {
       events.push(`fetch:${url.pathname}`);
       if (url.pathname === "/health") return jsonResponse(compatibleHealth("/tmp/masthead"));
       if (url.pathname === "/workbench/authoring/capabilities") {
-        return jsonResponse(authoringCapabilities("/home/test/.local/bin/mastheadctl"));
+        return jsonResponse(authoringCapabilities("/tmp/masthead/bin/mastheadctl"));
       }
       return new Response("{}", { status: 200 });
     }));
     const owned = new Set<never>();
 
     const result = await startLiveConnector(
-      connectorInput("/home/test/.local/bin/mastheadctl"),
+      connectorInput("/tmp/masthead/bin/mastheadctl"),
       ["masthead://app"],
       owned,
       {
@@ -210,7 +212,7 @@ describe("Electron daemon launcher policy", () => {
   test.each([
     ["bare command", authoringCapabilities("mastheadctl")],
     ["wrong absolute command", authoringCapabilities("/other/mastheadctl")],
-    ["incomplete contract", { ...authoringCapabilities("/home/test/.local/bin/mastheadctl"), operations: ["open"] }]
+    ["incomplete contract", { ...authoringCapabilities("/tmp/masthead/bin/mastheadctl"), operations: ["open"] }]
   ])("refuses a same-database collector with %s without starting a duplicate", async (_label, capabilities) => {
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
       const url = new URL(String(input));
@@ -222,7 +224,7 @@ describe("Electron daemon launcher policy", () => {
     const prepare = vi.fn();
 
     await expect(
-      startLiveConnector(connectorInput("/home/test/.local/bin/mastheadctl"), ["masthead://app"], owned, {
+      startLiveConnector(connectorInput("/tmp/masthead/bin/mastheadctl"), ["masthead://app"], owned, {
         prepareAuthoringLauncher: prepare,
         findAvailablePort: async () => 17374
       })
@@ -238,7 +240,7 @@ describe("Electron daemon launcher policy", () => {
     const owned = new Set<never>();
 
     await expect(
-      startLiveConnector(connectorInput("/home/test/.local/bin/mastheadctl"), ["masthead://app"], owned)
+      startLiveConnector(connectorInput("/tmp/masthead/bin/mastheadctl"), ["masthead://app"], owned)
     ).rejects.toThrow("same database");
     expect(owned.size).toBe(0);
   });
@@ -252,7 +254,7 @@ describe("Electron daemon launcher policy", () => {
     const owned = new Set<never>();
 
     await expect(
-      startLiveConnector(connectorInput("/home/test/.local/bin/mastheadctl"), ["masthead://app"], owned)
+      startLiveConnector(connectorInput("/tmp/masthead/bin/mastheadctl"), ["masthead://app"], owned)
     ).rejects.toThrow("same database");
     expect(owned.size).toBe(0);
   });
@@ -264,7 +266,7 @@ describe("Electron daemon launcher policy", () => {
     const owned = new Set<never>();
 
     await expect(
-      startLiveConnector(connectorInput("/home/test/.local/bin/mastheadctl"), ["masthead://app"], owned, {
+      startLiveConnector(connectorInput("/tmp/masthead/bin/mastheadctl"), ["masthead://app"], owned, {
         prepareAuthoringLauncher: async () => {
           throw new Error("launcher write failed");
         }
@@ -281,7 +283,7 @@ describe("Electron daemon launcher policy", () => {
 
     await expect(
       startLiveConnector(
-        connectorInput("/home/test/.local/bin/mastheadctl", {
+        connectorInput("/tmp/masthead/bin/mastheadctl", {
           MASTHEAD_DB_PATH: "/tmp/shared/../shared/masthead.sqlite"
         }),
         ["masthead://app"],
@@ -301,7 +303,7 @@ describe("Electron daemon launcher policy", () => {
     });
 
     await expect(
-      startLiveConnector(connectorInput("/home/test/.local/bin/mastheadctl"), ["masthead://app"], owned, {
+      startLiveConnector(connectorInput("/tmp/masthead/bin/mastheadctl"), ["masthead://app"], owned, {
         prepareAuthoringLauncher: prepare,
         findAvailablePort: async () => 17374
       })
@@ -334,7 +336,7 @@ describe("Electron daemon launcher policy", () => {
         }
       };
       await expect(startLiveConnector(
-        connectorInput("/home/test/.local/bin/mastheadctl"),
+        connectorInput("/tmp/masthead/bin/mastheadctl"),
         ["masthead://app"],
         owned,
         options
@@ -344,9 +346,25 @@ describe("Electron daemon launcher policy", () => {
       expect(owned.size).toBe(0);
     }
   );
+
+  test("escalates the exact owned child to SIGKILL when it ignores SIGTERM", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("offline"); }));
+    const child = fakeChild(true);
+    const owned = new Set<ChildProcess>();
+    await expect(startLiveConnector(connectorInput("/tmp/masthead/bin/mastheadctl"), ["masthead://app"], owned, {
+      childTerminationGraceMs: 1,
+      prepareAuthoringLauncher: async () => undefined,
+      verifyAuthoringLauncher: async () => undefined,
+      spawnChild: (() => child.value) as typeof import("node:child_process").spawn,
+      waitForCollector: async () => { throw new Error("original health failure"); }
+    })).rejects.toThrow("original health failure");
+    expect(child.signals).toEqual(["SIGTERM", "SIGKILL"]);
+    expect(child.exited).toBe(true);
+    expect(owned.size).toBe(0);
+  });
 });
 
-function fakeChild(): { exited: boolean; signals: string[]; value: ChildProcess } {
+function fakeChild(ignoreTerm = false): { exited: boolean; signals: string[]; value: ChildProcess } {
   const emitter = new EventEmitter() as ChildProcess;
   const state = { exited: false, signals: [] as string[], value: emitter };
   Object.defineProperties(emitter, {
@@ -356,6 +374,7 @@ function fakeChild(): { exited: boolean; signals: string[]; value: ChildProcess 
   });
   emitter.kill = ((signal?: NodeJS.Signals | number) => {
     state.signals.push(String(signal));
+    if (ignoreTerm && signal === "SIGTERM") return true;
     queueMicrotask(() => {
       state.exited = true;
       emitter.emit("exit", 0, signal);
@@ -382,19 +401,21 @@ function connectorInput(cliCommand: string, env: Record<string, string> = {}) {
 
 function compatibleHealth(dataDirectory: string, databasePath = `${dataDirectory}/masthead.sqlite`) {
   return {
-    apiVersion: 1,
+    ...currentHealth,
     buildSha: "development",
-    capabilities: ["live_projection", "canonical_sessions", "logbook_search", "source_discovery", "adapter_inventory", "mcp_status", "settings", "artifact_authoring"],
-    data: { databaseId: "database:test", databasePath, dataDirectory, migrationState: "ready" },
-    ok: true,
-    product: "masthead",
+    data: { ...currentHealth.data, databaseId: "database:test", databasePath, dataDirectory, migrationState: "ready" },
     runtime: {
-      authoringCommand: "/home/test/.local/bin/mastheadctl",
+      ...currentHealth.runtime,
+      authoringCommand: `${dataDirectory}/bin/mastheadctl`,
       baseUrl: "http://127.0.0.1:17373",
       daemonInstanceId: "instance:test",
-      instanceManifest: "/tmp/masthead/masthead-instance.json",
+      instanceManifest: `${dataDirectory}/masthead-instance.json`,
+      instanceDir: dataDirectory,
+      host: "127.0.0.1",
       mode: "primary",
-      pid: process.pid
+      pid: process.pid,
+      port: 17373,
+      writable: true
     }
   };
 }
