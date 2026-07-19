@@ -1380,34 +1380,210 @@ git commit -m "feat: plan guided authoring assignments"
 - Modify: `src/shared/guidedAuthoring.ts`
 - Modify: `src/workbench/authoring/guidedAuthoringService.ts`
 - Modify: `src/daemon/db/guidedAuthoringRepository.ts`
+- Modify: `src/daemon/db/__tests__/guidedAuthoringRepository.test.ts`
 - Modify: `src/workbench/authoring/__tests__/guidedAuthoringService.test.ts`
 
 **Interfaces:**
 - Consumes: `getAuthoringEvidencePage`, evidence manifests, and the evidence-access repository.
-- Produces: `inspectGuidedAssignment()` with sequential unread pages, coverage, editorial questions, and a deterministic next action.
+- Produces: `inspectGuidedAssignment()` and read-only `reviewGuidedAssignment()` with sequential unread pages, revisioned coverage, supplementary previews, editorial questions, and one deterministic next action.
 
 - [ ] **Step 1: Write failing evidence-coverage tests**
 
 ```ts
 test("does not permit drafting after first and last message sampling", () => {
   inspectGuidedAssignment(db, inspectInput({ cursor: undefined, limit: 1 }));
-  inspectGuidedAssignment(db, inspectInput({ order: "desc", limit: 1 }));
-  const review = reviewGuidedAssignment(db, "assignment:one");
+  const supplementary = inspectGuidedAssignment(db, inspectInput({ order: "desc", limit: 1 }));
+  const review = reviewGuidedAssignment(db, reviewInput("assignment:one"));
+  expect(supplementary.progressRecorded).toBe(false);
   expect(review.nextAction.kind).toBe("inspect");
   expect(review.coverage[0]).toMatchObject({ accessedItems: 1, complete: false, totalItems: 8 });
 });
 
 test("moves to save only after every canonical evidence item was returned", () => {
-  inspectAllPages(db, "assignment:one", "session:a");
-  expect(reviewGuidedAssignment(db, "assignment:one").nextAction.kind).toBe("save");
+  inspectAllAssignmentPages(db, "assignment:one");
+  expect(reviewGuidedAssignment(db, reviewInput("assignment:one")).nextAction.kind).toBe("save");
 });
 
 test("invalidates assignment-wide coverage when another member's evidence changes", () => {
-  inspectAllPages(db, "assignment:one", "session:a");
+  inspectAllAssignmentPages(db, "assignment:one");
+  const previousRevision = getGuidedAssignment(db, "assignment:one")!.evidenceRevision;
   appendCanonicalEvidence(db, "session:b");
   expect(() => inspectGuidedAssignment(db, inspectInput({ sessionId: "session:a" })))
     .toThrow("evidence_revision_changed");
-  expect(reviewGuidedAssignment(db, "assignment:one").coverage.every(({ complete }) => !complete)).toBe(true);
+  expect(getGuidedAssignment(db, "assignment:one")!.evidenceRevision).not.toBe(previousRevision);
+  expect(reviewGuidedAssignment(db, reviewInput("assignment:one")).coverage.every(({ accessedItems, complete }) =>
+    accessedItems === 0 && !complete
+  )).toBe(true);
+  expect(listGuidedEvidenceAccess(db, "assignment:one", previousRevision).length).toBeGreaterThan(0);
+});
+
+test.each([
+  { query: "verification" },
+  { kind: "tools" as const },
+  { order: "desc" as const }
+])("keeps $query$kind$order supplementary reads out of coverage", (supplementary) => {
+  const before = reviewGuidedAssignment(db, reviewInput("assignment:one"));
+  const inspected = inspectGuidedAssignment(db, inspectInput(supplementary));
+  expect(inspected.progressRecorded).toBe(false);
+  expect(inspected.coverage).toEqual(before.coverage);
+  expect(listGuidedEvidenceAccess(db, "assignment:one")).toEqual([]);
+});
+
+test("keeps assignment-wide and session-only evidence revisions distinct", () => {
+  const inspected = inspectGuidedAssignment(db, inspectInput({ limit: 1 }));
+  expect(inspected.evidenceRevision).toBe(authoringEvidenceRevision(db, ["session:a", "session:b"]));
+  expect(inspected.evidence.evidenceRevision).toBe(authoringEvidenceRevision(db, [inspected.sessionId]));
+  expect(inspected.evidenceRevision).not.toBe(inspected.evidence.evidenceRevision);
+  expect(inspected.coverage.every(({ evidenceRevision }) =>
+    evidenceRevision === inspected.evidenceRevision
+  )).toBe(true);
+  expect(listGuidedEvidenceAccess(db, "assignment:one").every(({ evidenceRevision }) =>
+    evidenceRevision === inspected.evidenceRevision
+  )).toBe(true);
+});
+
+test("returns the exact first unread cursor even after an explicit skipped page", () => {
+  inspectGuidedAssignment(db, inspectInput({ cursor: "4", limit: 1, sessionId: "session:a" }));
+  expect(reviewGuidedAssignment(db, reviewInput("assignment:one")).nextAction).toEqual({
+    kind: "inspect",
+    command: "masthead workbench author inspect --assignment assignment:one --session session:a --cursor 0 --json",
+    reason: "Session session:a still has unread canonical evidence."
+  });
+});
+
+test("chooses the earliest incomplete member in persisted assignment order", () => {
+  seedAssignmentMembership(db, "assignment:one", ["session:z", "session:a"]);
+  inspectAllSessionPages(db, "assignment:one", "session:z");
+  expect(reviewGuidedAssignment(db, reviewInput("assignment:one")).nextAction.command)
+    .toContain("--session session:a --cursor 0");
+});
+
+test("derives unread offsets from canonical observedAt/itemId order, not lexical item IDs", () => {
+  seedTranscriptItems(db, "session:a", [
+    { itemId: "item:z", observedAt: "2026-07-19T10:00:00.000Z" },
+    { itemId: "item:a", observedAt: "2026-07-19T10:01:00.000Z" }
+  ]);
+  const inspected = inspectGuidedAssignment(db, inspectInput({ sessionId: "session:a", limit: 1 }));
+  expect(inspected.evidence.items[0]?.itemId).toBe("item:z");
+  expect(inspected.nextAction.command).toContain("--session session:a --cursor 1");
+});
+
+test.each(["", " ", "NaN", "-1", "1.5", "9007199254740992", "999"])(
+  "rejects invalid cursor %j for completion and supplementary reads",
+  (cursor) => {
+    expect(() => inspectGuidedAssignment(db, inspectInput({ cursor })))
+      .toThrow("guided_inspection_cursor_invalid");
+    expect(() => inspectGuidedAssignment(db, inspectInput({ cursor, query: "verification" })))
+      .toThrow("guided_inspection_cursor_invalid");
+    expect(listGuidedEvidenceAccess(db, "assignment:one")).toEqual([]);
+  }
+);
+
+test("repeated explicit page reads are idempotent", () => {
+  const input = inspectInput({ cursor: "0", limit: 2, sessionId: "session:a" });
+  const first = inspectGuidedAssignment(db, input);
+  const repeated = inspectGuidedAssignment(db, input);
+  expect(repeated.coverage).toEqual(first.coverage);
+});
+
+test("serializes default inspectors across two WAL connections before page selection", async () => {
+  const fixture = await openSharedWalWorkerFixture({ timeoutMs: 2_000 });
+  const workerA = fixture.spawnInspectionWorker({ pauseAfterSelection: true });
+  await fixture.waitForMessage(workerA, "page_selected", { timeoutMs: 2_000 });
+  const workerB = fixture.spawnInspectionWorker({ pauseAfterSelection: false });
+  await fixture.waitForMessage(workerB, "transaction_attempted", { timeoutMs: 2_000 });
+  await expect(fixture.waitForMessage(workerB, "page_selected", { timeoutMs: 100 }))
+    .rejects.toThrow("bounded_timeout");
+  fixture.releaseWithAtomics(workerA);
+  const committed = await fixture.waitForMessage(workerA, "committed", { timeoutMs: 2_000 });
+  const secondSelected = await fixture.waitForMessage(workerB, "page_selected", { timeoutMs: 2_000 });
+  expect(secondSelected.sequence).toBeGreaterThan(committed.sequence);
+  const [first, second] = await fixture.collectResults(workerA, workerB);
+  expect(first.evidence.items[0]?.itemId).not.toBe(second.evidence.items[0]?.itemId);
+  expect(second.coverage[0]?.accessedItems).toBe(2);
+});
+
+test("refuses nested inspection so revision reset cannot be rolled back by an outer caller", () => {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    expect(() => inspectGuidedAssignment(db, inspectInput({ limit: 1 })))
+      .toThrow("guided_inspection_requires_top_level_transaction");
+  } finally {
+    db.exec("ROLLBACK");
+  }
+  expect(listGuidedEvidenceAccess(db, "assignment:one")).toEqual([]);
+});
+
+test.each(["query", "kind", "order"])("supplementary %s does not change revision, status, or access rows", (mode) => {
+  const before = getGuidedAssignment(db, "assignment:one");
+  inspectGuidedAssignment(db, supplementaryInspectInput(mode));
+  expect(getGuidedAssignment(db, "assignment:one")).toEqual(before);
+  expect(listGuidedEvidenceAccess(db, "assignment:one")).toEqual([]);
+});
+
+test.each(["staged_canary", "ready_to_finish", "completed"] as const)(
+  "does not reset a %s assignment during inspection",
+  (status) => {
+    setAssignmentStatus(db, "assignment:one", status);
+    appendCanonicalEvidence(db, "session:b");
+    expect(() => inspectGuidedAssignment(db, inspectInput({}))).toThrow("guided_assignment_evidence_locked");
+    expect(getGuidedAssignment(db, "assignment:one")?.status).toBe(status);
+  }
+);
+
+test("rejects stale-revision evidence access in the repository", () => {
+  expect(() => recordGuidedEvidenceAccess(db, evidenceAccess({ evidenceRevision: "stale" })))
+    .toThrow("guided_evidence_revision_mismatch");
+  expect(listGuidedEvidenceAccess(db, "assignment:one")).toEqual([]);
+});
+
+test("advances evidence revision by compare-and-swap and preserves old audit rows", () => {
+  recordGuidedEvidenceAccess(db, evidenceAccess({ evidenceRevision: "evidence:old" }));
+  const advanced = advanceGuidedAssignmentEvidenceRevision(db, {
+    assignmentId: "assignment:one",
+    expectedEvidenceRevision: "evidence:old",
+    nextEvidenceRevision: "evidence:new"
+  });
+  expect(advanced).toMatchObject({
+    acceptedDraftRevision: undefined,
+    currentDraftRevision: 2,
+    evidenceRevision: "evidence:new",
+    status: "investigating"
+  });
+  expect(listGuidedEvidenceAccess(db, "assignment:one", "evidence:old")).toHaveLength(1);
+  expect(() => advanceGuidedAssignmentEvidenceRevision(db, {
+    assignmentId: "assignment:one",
+    expectedEvidenceRevision: "evidence:old",
+    nextEvidenceRevision: "evidence:newer"
+  })).toThrow("guided_evidence_revision_conflict");
+});
+
+test("keeps review read-only when live evidence is newer than the assignment revision", () => {
+  const stored = getGuidedAssignment(db, "assignment:one")!;
+  appendCanonicalEvidence(db, "session:b");
+  const reviewed = reviewGuidedAssignment(db, reviewInput("assignment:one"));
+  expect(reviewed.evidenceRevision).not.toBe(stored.evidenceRevision);
+  expect(reviewed.coverage.every(({ accessedItems, complete }) => accessedItems === 0 && !complete))
+    .toBe(true);
+  expect(reviewed.nextAction.kind).toBe("inspect");
+  expect(getGuidedAssignment(db, "assignment:one")).toEqual(stored);
+});
+
+test("hides stale draft data after revision reset and leaves every question unresolved", () => {
+  storeRejectedDraftAtCurrentEvidence(db, "assignment:one");
+  const oldDraftRevision = getGuidedAssignment(db, "assignment:one")!.currentDraftRevision;
+  appendCanonicalEvidence(db, "session:b");
+  expect(() => inspectGuidedAssignment(db, inspectInput({ limit: 1 })))
+    .toThrow("evidence_revision_changed");
+  const reviewed = reviewGuidedAssignment(db, reviewInput("assignment:one"));
+  expect(reviewed).toMatchObject({
+    draftRevision: undefined,
+    draft: undefined,
+    findings: [],
+    editorialQuestions: GUIDED_EVIDENCE_QUESTIONS
+  });
+  expect(listGuidedDraftReviews(db, "assignment:one").map(({ revision }) => revision))
+    .toContain(oldDraftRevision);
 });
 ```
 
@@ -1416,7 +1592,7 @@ test("invalidates assignment-wide coverage when another member's evidence change
 Run:
 
 ```bash
-npx vitest run src/workbench/authoring/__tests__/guidedAuthoringService.test.ts -t "evidence"
+npx vitest run src/workbench/authoring/__tests__/guidedAuthoringService.test.ts src/daemon/db/__tests__/guidedAuthoringRepository.test.ts -t "evidence"
 ```
 
 Expected: FAIL because inspection is not tracked.
@@ -1426,53 +1602,217 @@ Expected: FAIL because inspection is not tracked.
 Export:
 
 ```ts
-export function inspectGuidedAssignment(
-  db: MastheadDatabase,
-  input: {
-    assignmentId: string;
-    sessionId?: string;
-    cursor?: string;
-    limit?: number;
-  }
-): GuidedInspectionDto;
-
 export type GuidedInspectionDto = {
   assignmentId: string;
+  /** Assignment-wide revision over every assignment member. */
   evidenceRevision: string;
   sessionId: string;
+  /** Its evidenceRevision is session-only and is never compared with the assignment revision. */
   evidence: WorkbenchAuthoringEvidencePage;
+  progressRecorded: boolean;
   editorialQuestions: string[];
   coverage: GuidedEvidenceCoverageDto[];
   nextAction: GuidedAuthoringNextAction;
 };
+
+export type GuidedAuthoringReviewDto = {
+  requestId: string;
+  assignmentId: string;
+  status: GuidedAuthoringAssignmentStatus;
+  evidenceRevision: string;
+  draftRevision?: number;
+  draft?: GuidedAuthoringBundleV4;
+  findings: WorkbenchAuthoringFinding[];
+  editorialQuestions: string[];
+  coverage: GuidedEvidenceCoverageDto[];
+  operatorReviews: GuidedAuthoringOperatorReviewDto[];
+  nextAction: GuidedAuthoringNextAction;
+};
+
+export function inspectGuidedAssignment(
+  db: MastheadDatabase,
+  input: {
+    assignmentId: string;
+    command: string;
+    sessionId?: string;
+    cursor?: string;
+    limit?: number;
+    kind?: SessionTranscriptKindFilter;
+    query?: string;
+    order?: SessionTranscriptOrder;
+  }
+): GuidedInspectionDto;
+
+export function reviewGuidedAssignment(
+  db: MastheadDatabase,
+  input: { assignmentId: string; command: string }
+): GuidedAuthoringReviewDto;
 ```
 
-The inspection response contains exactly the canonical page that advanced coverage, the assignment-wide revision checked before and after that read, the bounded session identity, unresolved editorial questions, current assignment coverage, and one next action. It never embeds the full assignment or request selection.
+Task 6 adds that `editorialQuestions: string[]` member in the shared DTO scope. In both inspection and
+review responses, every `GuidedEvidenceCoverageDto.evidenceRevision` is the assignment-wide revision
+over all assignment members. It is the same revision stored on access rows and must never be populated
+from the selected page's session-only `evidence.evidenceRevision`.
 
-Default to the first session with unread evidence, ascending canonical order, and 100 items. Record only refs actually returned. Reject `query`, `kind`, and descending inspection as completion-bearing operations; those remain supplementary reads and do not advance complete-evidence coverage. The assignment stores one revision over all assignment sessions, while an evidence page reports its session revision. Before and after every page read, recompute and compare the assignment-wide revision; never compare a session-only page revision directly with the multi-session assignment revision. If any member changes, reject the read, advance the assignment to the fresh revision, and compute current coverage only from access rows carrying that revision. Preserve older revision rows as audit history, but never count them toward current completion.
+- [ ] **Step 4: Bind access rows to the current assignment revision**
 
-- [ ] **Step 4: Consume the Task 5 editorial questions**
+`recordGuidedEvidenceAccessInTransaction()` must select the owning assignment's
+`evidence_revision` and reject an input revision that does not match it with
+`guided_evidence_revision_mismatch`. Add transaction-owning and composable revision-advance helpers:
+
+```ts
+export function advanceGuidedAssignmentEvidenceRevision(
+  db: MastheadDatabase,
+  input: {
+    assignmentId: string;
+    expectedEvidenceRevision: string;
+    nextEvidenceRevision: string;
+  }
+): GuidedAuthoringAssignmentDto;
+
+export function advanceGuidedAssignmentEvidenceRevisionInTransaction(
+  db: MastheadDatabase,
+  input: {
+    assignmentId: string;
+    expectedEvidenceRevision: string;
+    nextEvidenceRevision: string;
+  }
+): GuidedAuthoringAssignmentDto;
+```
+
+The update is a compare-and-swap on `assignment_id`, `expectedEvidenceRevision`, and a status in
+`investigating`, `drafting`, or `needs_revision`. It sets the fresh evidence revision, resets status to
+`investigating`, clears `accepted_draft_revision`, and preserves `current_draft_revision`, draft-review
+rows, and older evidence-access rows as append-only audit history. A stale expected revision fails
+with `guided_evidence_revision_conflict`. `staged_canary`, `ready_to_finish`, and `completed` fail with
+`guided_assignment_evidence_locked`; Task 8 owns invalidating staged or approved work safely.
+
+- [ ] **Step 5: Serialize progress and commit revision advancement before throwing**
+
+The public `inspectGuidedAssignment()` is deliberately non-composable and always owns one
+`withImmediateTransaction()`. It must assert `!db.isTransaction` before doing any work and fail with
+`guided_inspection_requires_top_level_transaction` if a caller tries to nest it; do not export an
+inspection `*InTransaction` variant. This ensures its revision-reset sentinel always reaches a real
+commit before the public error is thrown. Inside its owned transaction, reload the assignment and
+membership, compute `authoringEvidenceRevision(db, assignment.sessionIds)` before the page read, read
+the page, compute the same assignment-wide revision again, record access through only repository
+`*InTransaction` helpers, and compute coverage. Never compare the page's session-only
+`evidence.evidenceRevision` with the assignment-wide revision.
+
+If either assignment-wide check differs from stored/current state, advance the assignment through the
+CAS helper and return a private `{ changedRevision: true }` sentinel from the transaction callback.
+Only after `withImmediateTransaction()` commits may the public service throw
+`evidence_revision_changed`; throwing inside the callback would roll back the required revision reset.
+No evidence refs from the rejected page are recorded.
+
+`BEGIN IMMEDIATE` serializes progress writers. Prove this with two worker threads or child processes,
+each opening its own `DatabaseSync` connection to the same temporary WAL database. Use IPC plus an
+`Atomics` barrier to pause worker A after page selection and before commit, start worker B, and apply
+bounded timeouts to every signal so a broken lock cannot deadlock the test runner. B must report its
+transaction attempt but no page selection before A's committed signal; after release, its page-selected
+IPC sequence must be later than A's commit, and it must reload coverage and choose the next unread
+page. Two synchronous connections driven on one JavaScript thread or a same-connection sequential test
+is insufficient. An
+explicit repeat uses `INSERT OR IGNORE` and does not double-count. A concurrent evidence writer either
+lands before the lock and is found by the first hash, or waits until commit and is found on the next
+inspection; the after-read hash remains a required defensive check.
+
+- [ ] **Step 6: Compute revisioned coverage and exact unread cursors**
+
+The inspection response contains one bounded evidence page, assignment membership identity,
+assignment-wide revision, current-revision coverage, `progressRecorded`, unresolved questions, and
+one next action. It never embeds the full request selection.
+
+Use `getAuthoringEvidenceManifest()` for current totals, then restore assignment membership order
+because the catalog sorts session IDs. For each member, filter access rows by the exact current
+assignment-wide revision, stamp that revision into `GuidedEvidenceCoverageDto.evidenceRevision`,
+count distinct refs, and set `complete` only when `totalItems > 0` and
+`accessedItems === totalItems`. Build the unread sequence with
+`iterateSessionTranscriptItems(db, { sessionId, order: "asc" })`, whose canonical key is
+`(observedAt, itemId)`, and choose the offset of the first returned item whose `itemId` has no access
+row. Never sort item IDs alone, and do not assume `accessedItems` is the next cursor because explicit
+reads can leave holes.
+
+Default to the first incomplete assignment session, its first unread offset, ascending canonical
+order, and 100 items. Validate every supplied cursor before deciding whether the read is completion
+bearing or supplementary. It must be a nonblank, whitespace-free decimal string representing a
+nonnegative safe integer within that session's canonical unfiltered range; blank/whitespace, `NaN`,
+negative, fractional, overflow, and out-of-range values all fail with
+`guided_inspection_cursor_invalid`. Never inherit `sessionTranscriptRepository`'s invalid-cursor-to-zero
+behavior. Record exactly the returned `itemId` values. Explicit skipped or repeated valid pages may
+record their refs, but the next action always returns to the earliest hole, so sampling cannot
+manufacture completion.
+
+A read is completion-bearing only when `order` is absent/`asc`, `kind` is absent/`all`, and `query` is
+absent/blank. Filtered, searched, or descending reads return evidence with
+`progressRecorded: false`, never insert access rows, and leave assignment status and revision
+unchanged when evidence is current. They still return coverage and the canonical first-unread next
+action. If assignment evidence has changed, the same serialized revision-reset rule applies before a
+supplementary page can be trusted.
+
+The read-only `reviewGuidedAssignment()` never advances a revision and remains bridge-safe. When live
+evidence differs from stored state for `investigating`, `drafting`, or `needs_revision`, it reports the
+live assignment-wide revision with zero current coverage and an inspect next action; the next
+progress-bearing inspect performs the durable reset. For stale `staged_canary` or `ready_to_finish`,
+review must not return an inspect action that Task 6 is guaranteed to reject. It returns the existing
+`await_operator` or `finish` action; that Task 8 mutation performs the locked invalidation, commits,
+throws `evidence_revision_changed`, and the following review returns inspect. A `completed` assignment
+remains immutable and returns its idempotent historical completion state even if canonical evidence is
+later appended.
+
+After a reset, review exposes `draftRevision`, `draft`, and `findings` only when the selected
+draft-review row's `evidence_revision` exactly equals the assignment's current evidence revision.
+Older rows remain queryable history but contribute no current draft, findings, resolved questions, or
+next-action decision; all Task 5 questions remain unresolved until a current-revision draft exists.
+
+- [ ] **Step 7: Return exact next actions and the Task 5 questions**
+
+When coverage is incomplete, return:
+
+```ts
+{
+  kind: "inspect",
+  command: `${command} workbench author inspect --assignment ${assignmentId} --session ${sessionId} --cursor ${firstUnreadOffset} --json`,
+  reason: `Session ${sessionId} still has unread canonical evidence.`
+}
+```
+
+Always include the numeric first-unread cursor, including `--cursor 0`, so the returned command is
+an exact, replayable continuation rather than relying on a CLI default. When every assignment
+session is complete, return:
+
+```ts
+{
+  kind: "save",
+  command: `${command} workbench author save --assignment ${assignmentId} --file <draft.json> --json`,
+  reason: "Every assignment session has complete canonical evidence coverage."
+}
+```
 
 Use `GUIDED_EVIDENCE_QUESTIONS` from `guidedAuthoringPolicy.ts`; do not redefine or fork the list in
-the inspection service. For each session return those questions as unresolved until its draft
-contains supported answers.
+the inspection service. Task 6 always returns the full list because validated persisted draft fields
+do not exist yet; Task 8 filters resolved questions after save/review has structured findings.
 
-When all sessions reach `accessedItems === totalItems`, return `nextAction.kind = "save"`; otherwise return the exact next unread cursor.
-
-- [ ] **Step 5: Run service tests**
+- [ ] **Step 8: Run service and repository tests**
 
 Run:
 
 ```bash
-npx vitest run src/workbench/authoring/__tests__/guidedAuthoringService.test.ts
+npx vitest run src/workbench/authoring/__tests__/guidedAuthoringService.test.ts src/daemon/db/__tests__/guidedAuthoringRepository.test.ts
 ```
 
-Expected: PASS, including stale evidence revision rejection and idempotent repeated page reads.
+Expected: PASS with assignment-wide before/after revision checks, committed reset-before-throw,
+revision-filtered audit history, stale-access refusal, exact first-unread cursors, idempotent repeats,
+two-connection WAL serialization before page selection, nested-inspection refusal, validation of every
+completion and supplementary cursor, nonrecording supplementary reads, assignment-wide coverage/access
+revision labels, session-versus-assignment revision separation, stale-draft hiding, unresolved-question
+preservation, canonical `(observedAt,itemId)` unread offsets with nonlexical IDs, and staged/completed
+reset refusal.
 
-- [ ] **Step 6: Commit guided inspection**
+- [ ] **Step 9: Commit guided inspection**
 
 ```bash
-git add src/shared/guidedAuthoring.ts src/workbench/authoring/guidedAuthoringService.ts src/daemon/db/guidedAuthoringRepository.ts src/workbench/authoring/__tests__/guidedAuthoringService.test.ts
+git add src/shared/guidedAuthoring.ts src/workbench/authoring/guidedAuthoringService.ts src/daemon/db/guidedAuthoringRepository.ts src/daemon/db/__tests__/guidedAuthoringRepository.test.ts src/workbench/authoring/__tests__/guidedAuthoringService.test.ts
 git commit -m "feat: guide complete authoring evidence inspection"
 ```
 
@@ -1620,10 +1960,17 @@ git commit -m "feat: enforce guided authoring quality"
 ### Task 8: Stage canaries and publish accepted assignments atomically
 
 **Files:**
+- Modify: `src/shared/guidedAuthoring.ts`
+- Create: `src/daemon/db/migrations/032_guided_enrichment_provenance.sql`
+- Modify: `src/daemon/db/schema.ts`
+- Modify: `src/daemon/db/enrichmentRepository.ts`
 - Modify: `src/workbench/authoring/guidedAuthoringService.ts`
 - Modify: `src/workbench/authoring/authoringService.ts`
 - Modify: `src/daemon/db/guidedAuthoringRepository.ts`
 - Modify: `src/daemon/db/workbenchPipelineRepository.ts`
+- Modify: `src/daemon/db/__tests__/schema.test.ts`
+- Modify: `src/daemon/db/__tests__/enrichmentRepository.test.ts`
+- Modify: `src/daemon/db/__tests__/guidedAuthoringRepository.test.ts`
 - Modify: `src/workbench/authoring/__tests__/guidedAuthoringService.test.ts`
 - Modify: `src/workbench/authoring/__tests__/agentLedAuthoringAcceptance.test.ts`
 
@@ -1631,27 +1978,119 @@ git commit -m "feat: enforce guided authoring quality"
 - Consumes: accepted V4 drafts, canary decisions, existing enrichment application, dossier snapshot, optional-artifact publication, and Workbench claims.
 - Produces: `saveGuidedDraft`, `reviewGuidedAssignment`, `approveGuidedCanary`, `rejectGuidedCanary`, and `finishGuidedAssignment` with immutable receipts.
 
+Export these exact object-input service contracts; do not retain positional overloads:
+
+```ts
+export type GuidedMutationIdentityInput = {
+  expectedIdentity: GuidedAuthoringExpectedIdentity;
+  currentIdentity: GuidedAuthoringExpectedIdentity;
+};
+
+export type SaveGuidedDraftInput = GuidedMutationIdentityInput & {
+  assignmentId: string;
+  command: string;
+  draft: GuidedAuthoringBundleV4;
+};
+
+export type GuidedCanaryDecisionInput = GuidedMutationIdentityInput & {
+  requestId: string;
+  assignmentId: string;
+  draftRevision: number;
+  evidenceRevision: string;
+  command: string;
+  notes: string;
+  reviewedBy: string;
+};
+
+export type FinishGuidedAssignmentInput = GuidedMutationIdentityInput & {
+  assignmentId: string;
+  command: string;
+};
+
+export type FinishGuidedAssignmentResult = {
+  receipt: GuidedAuthoringReceiptDto;
+  nextAction: GuidedAuthoringNextAction & { kind: "claim_next" | "complete" };
+};
+
+export function saveGuidedDraft(
+  db: MastheadDatabase,
+  input: SaveGuidedDraftInput
+): GuidedAuthoringReviewDto;
+export function approveGuidedCanary(
+  db: MastheadDatabase,
+  input: GuidedCanaryDecisionInput
+): GuidedAuthoringReviewDto;
+export function rejectGuidedCanary(
+  db: MastheadDatabase,
+  input: GuidedCanaryDecisionInput
+): GuidedAuthoringReviewDto;
+export function finishGuidedAssignment(
+  db: MastheadDatabase,
+  input: FinishGuidedAssignmentInput
+): FinishGuidedAssignmentResult;
+```
+
 - [ ] **Step 1: Write failing canary and atomicity tests**
 
 ```ts
 test("stages an accepted canary without publishing", () => {
   saveCompleteValidDraft(db, "assignment:canary");
-  expect(reviewGuidedAssignment(db, "assignment:canary").status).toBe("staged_canary");
+  expect(reviewGuidedAssignment(db, reviewInput("assignment:canary")).status).toBe("staged_canary");
   expect(searchLogbookArtifacts(db, {}).total).toBe(0);
+});
+
+test("approval alone writes review state but no enrichment, publication, or Workbench completion", () => {
+  saveCompleteValidCanary(db);
+  const before = publicationBoundaryCounts(db);
+  approveGuidedCanary(db, approvalInput());
+  expect(publicationBoundaryCounts(db)).toEqual(before);
+  expect(searchLogbookArtifacts(db, {}).total).toBe(0);
+});
+
+test("stores typed guided provenance for every finished enrichment row", () => {
+  const { receipt } = finishReadyAssignment(db);
+  expect(listGuidedEnrichmentProvenance(db, receipt.assignmentId)).toEqual(
+    expect.arrayContaining(receipt.sessionIds.flatMap((sessionId) =>
+      expectedGuidedProvenanceForSession(receipt, sessionId)
+    ))
+  );
+});
+
+test("associates one stable identical enrichment with two guided assignments", () => {
+  const first = finishAssignmentWithIdenticalEnrichment(db, "request:one", "assignment:one");
+  const second = finishAssignmentWithIdenticalEnrichment(db, "request:two", "assignment:two");
+  expect(second.enrichmentId).toBe(first.enrichmentId);
+  expect(listGuidedEnrichmentProvenanceByEnrichment(db, first.enrichmentId)
+    .map(({ assignmentId }) => assignmentId).sort())
+    .toEqual(["assignment:one", "assignment:two"]);
 });
 
 test("publishes the approved canary and releases the next assignment", () => {
   approveGuidedCanary(db, approvalInput());
-  const receipt = finishGuidedAssignment(db, "assignment:canary");
-  expect(receipt.publishedArtifacts.length).toBeGreaterThan(0);
-  expect(getGuidedRequest(db, receipt.requestId)?.status).toBe("active");
-  expect(startGuidedAssignment(db, receipt.requestId).assignment.ordinal).toBe(1);
+  const result = finishGuidedAssignment(db, finishInput({ assignmentId: "assignment:canary" }));
+  expect(result.receipt.publishedArtifacts.length).toBeGreaterThan(0);
+  expect(result.nextAction.kind).toBe("claim_next");
+  expect(getGuidedRequest(db, result.receipt.requestId)?.status).toBe("active");
+  expect(startGuidedAssignment(db, {
+    requestId: result.receipt.requestId,
+    command: "masthead"
+  }).assignment.ordinal).toBe(1);
 });
 
-test("rolls back enrichment, artifacts, revisions, session state, and receipt together", () => {
-  injectPublicationFailure("after_optional_artifacts");
-  expect(() => finishGuidedAssignment(db, "assignment:one")).toThrow("injected_publication_failure");
-  expect(publicationCounts(db)).toEqual(beforeCounts);
+test.each([
+  "after_enrichment",
+  "after_dossier_staging",
+  "after_optional_staging",
+  "after_artifact_publish",
+  "after_session_claim_reset",
+  "after_receipt_insert",
+  "after_request_or_next_assignment_transition"
+] as const)("rolls back the entire finish boundary at %s", (failurePoint) => {
+  injectPublicationFailure(failurePoint);
+  const before = publicationCounts(db);
+  expect(() => finishGuidedAssignment(db, finishInput({ assignmentId: "assignment:one" })))
+    .toThrow("injected_publication_failure");
+  expect(publicationCounts(db)).toEqual(before);
 });
 
 test("rejects a manifest swap at the mutation boundary", () => {
@@ -1671,6 +2110,132 @@ test.each(["save", "approve", "reject", "finish"])(
     expect(guidedAuthoringCounts(db)).toEqual(before);
   }
 );
+
+test.each(["save", "approve", "reject", "finish"] as const)(
+  "refuses nested public %s before validation or mutation",
+  (operation) => {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      expect(() => invokeValidGuidedMutation(db, operation))
+        .toThrow("guided_authoring_public_mutation_requires_top_level_transaction");
+    } finally {
+      db.exec("ROLLBACK");
+    }
+  }
+);
+
+test("cannot let an outer transaction roll back locked revision invalidation", () => {
+  seedApprovedCanaryWithChangedEvidence(db);
+  const before = getGuidedAssignment(db, "assignment:canary")!;
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    expect(() => finishGuidedAssignment(db, finishInput({ assignmentId: before.assignmentId })))
+      .toThrow("guided_authoring_public_mutation_requires_top_level_transaction");
+  } finally {
+    db.exec("ROLLBACK");
+  }
+  expect(getGuidedAssignment(db, before.assignmentId)).toEqual(before);
+  expect(() => finishGuidedAssignment(db, finishInput({ assignmentId: before.assignmentId })))
+    .toThrow("evidence_revision_changed");
+  expect(getGuidedAssignment(db, before.assignmentId)).toMatchObject({
+    acceptedDraftRevision: undefined,
+    status: "investigating"
+  });
+});
+
+test.each(["staged_canary", "ready_to_finish"] as const)(
+  "invalidates %s against changed evidence before accepting another mutation",
+  (status) => {
+    setAcceptedAssignmentStatus(db, status);
+    const oldRevision = getGuidedAssignment(db, "assignment:one")!.evidenceRevision;
+    appendCanonicalEvidence(db, "session:a");
+    expect(() => invokeNextGuidedMutation(db, status)).toThrow("evidence_revision_changed");
+    expect(getGuidedAssignment(db, "assignment:one")).toMatchObject({
+      acceptedDraftRevision: undefined,
+      status: "investigating"
+    });
+    expect(listGuidedDraftReviews(db, "assignment:one").some(({ evidenceRevision }) =>
+      evidenceRevision === oldRevision
+    )).toBe(true);
+  }
+);
+
+test("locked revision invalidation is one exact status/revision CAS", () => {
+  const before = getGuidedAssignment(db, "assignment:one")!;
+  expect(() => withImmediateTransaction(db, () =>
+    invalidateLockedGuidedAssignmentEvidenceInTransaction(db, {
+      assignmentId: before.assignmentId,
+      expectedStatus: "ready_to_finish",
+      expectedEvidenceRevision: "stale",
+      nextEvidenceRevision: "evidence:new"
+    })
+  )).toThrow("guided_evidence_revision_conflict");
+  expect(getGuidedAssignment(db, before.assignmentId)).toEqual(before);
+});
+
+test("historical approval does not lock a fresh evidence revision", () => {
+  seedApprovedCanaryRevision(db, { draftRevision: 1, evidenceRevision: "evidence:old" });
+  seedFreshInvestigatingRevision(db, { currentDraftRevision: 1, evidenceRevision: "evidence:new" });
+  expect(() => storeGuidedDraftReview(db, freshRevisionDraft())).not.toThrow();
+});
+
+test.each([
+  ["staged_canary", "await_operator"],
+  ["ready_to_finish", "finish"]
+] as const)("does not direct stale locked %s review to inspect", (status, nextKind) => {
+  setAcceptedAssignmentStatus(db, status);
+  appendCanonicalEvidence(db, "session:a");
+  expect(reviewGuidedAssignment(db, reviewInput("assignment:one")).nextAction.kind).toBe(nextKind);
+});
+
+test("keeps stale approved canary on finish until finish commits its invalidation", () => {
+  saveCompleteValidCanary(db);
+  approveGuidedCanary(db, approvalInput());
+  appendCanonicalEvidence(db, "session:a");
+  expect(reviewGuidedAssignment(db, reviewInput("assignment:canary")).nextAction.kind).toBe("finish");
+  expect(() => finishGuidedAssignment(db, finishInput({ assignmentId: "assignment:canary" })))
+    .toThrow("evidence_revision_changed");
+  expect(reviewGuidedAssignment(db, reviewInput("assignment:canary"))).toMatchObject({
+    draft: undefined,
+    findings: [],
+    nextAction: { kind: "inspect" }
+  });
+});
+
+test("resumes fresh authoring after changed evidence invalidates an approved canary", () => {
+  saveCompleteValidCanary(db);
+  approveGuidedCanary(db, approvalInput());
+  appendCanonicalEvidence(db, "session:a");
+  expect(() => finishGuidedAssignment(db, finishInput({ assignmentId: "assignment:canary" })))
+    .toThrow("evidence_revision_changed");
+  expect(reviewGuidedAssignment(db, reviewInput("assignment:canary")).nextAction.kind).toBe("inspect");
+  inspectAllAssignmentPages(db, "assignment:canary");
+  const revised = saveGuidedDraft(db, saveInput({ draft: freshCurrentRevisionDraft() }));
+  expect(revised.draft?.evidenceRevision).toBe(getGuidedAssignment(db, "assignment:canary")!.evidenceRevision);
+  expect(revised.status).toBe("staged_canary");
+});
+
+test("completed finish retry returns the immutable receipt and terminal next action", () => {
+  const first = finishGuidedAssignment(db, finishInput({ assignmentId: "assignment:last" }));
+  appendCanonicalEvidence(db, "session:last");
+  const retry = finishGuidedAssignment(db, finishInput({ assignmentId: "assignment:last" }));
+  expect(retry.receipt).toEqual(first.receipt);
+  expect(retry.nextAction).toEqual({
+    kind: "complete",
+    command: "",
+    reason: "The guided authoring request is complete."
+  });
+});
+
+test.each([
+  ["rejected_save", "revise", "masthead workbench author save --assignment assignment:one --file <revised-draft.json> --json", "The saved draft has blocking structured findings to resolve."],
+  ["staged_canary", "await_operator", "masthead workbench author review --assignment assignment:one --json", "The canary draft is staged and awaiting operator approval."],
+  ["accepted_or_approved", "finish", "masthead workbench author finish --assignment assignment:one --json", "The accepted assignment is ready for atomic publication."],
+  ["nonfinal_finish", "claim_next", "masthead workbench author start --request request:one --json", "The next guided assignment is ready to start."],
+  ["final_finish", "complete", "", "The guided authoring request is complete."]
+] as const)("returns the exact %s next action", (state, kind, command, reason) => {
+  expect(nextActionForFixtureState(db, state)).toEqual({ kind, command, reason });
+});
 ```
 
 - [ ] **Step 2: Run focused service tests and verify failure**
@@ -1678,7 +2243,7 @@ test.each(["save", "approve", "reject", "finish"])(
 Run:
 
 ```bash
-npx vitest run src/workbench/authoring/__tests__/guidedAuthoringService.test.ts -t "canary|atomic|identity|guard"
+npx vitest run src/workbench/authoring/__tests__/guidedAuthoringService.test.ts src/daemon/db/__tests__/guidedAuthoringRepository.test.ts -t "canary|atomic|identity|guard|revision"
 ```
 
 Expected: FAIL because V4 staging and finish do not exist.
@@ -1687,15 +2252,172 @@ Expected: FAIL because V4 staging and finish do not exist.
 
 `saveGuidedDraft()` appends a draft/review revision and stores accepted canary drafts as `staged_canary`; it changes the request to `awaiting_canary_approval`. `approveGuidedCanary()` requires `reviewedBy`, nonempty notes, matching request and assignment IDs, the exact accepted draft revision, and current evidence revision. Rejection appends an operator review, changes the assignment to `needs_revision`, and returns the request to `open` without publishing. A later revision and approval append new rows rather than overwriting either rejection or draft history.
 
-Every public write service in this task accepts `GuidedAuthoringExpectedIdentity` and the immutable current daemon identity. `saveGuidedDraft()`, `approveGuidedCanary()`, and `rejectGuidedCanary()` call `assertGuidedAuthoringExpectedIdentity()` immediately before their transaction or first repository write; request lookup, validation, and review computation may happen first, but no durable state may change before the guard succeeds. Each operation also calls `assertStableGuidedRequestBinding()` so a safe restart may change only the current nonce and PID while the request's creation nonce remains unchanged audit evidence.
+Use this mutation/status matrix; reject every unlisted transition before any operation-specific write:
 
-- [ ] **Step 4: Implement one-transaction finish**
+| Operation | Legal starting state | Required current state | Result |
+| --- | --- | --- | --- |
+| `save` | `investigating`, `drafting`, `needs_revision` | Complete coverage at the exact assignment evidence revision | Blocking findings append a review and produce `needs_revision`; accepted canaries produce `staged_canary` plus request `awaiting_canary_approval`; accepted non-canaries produce `ready_to_finish`. |
+| `approve` | `staged_canary` | Request awaits approval; decision names the exact accepted draft revision and its current evidence revision | Append approval only; keep `staged_canary` and publish nothing. |
+| `reject` | `staged_canary` | Same exact current draft/evidence binding as approval | Append rejection, set `needs_revision`, clear accepted draft and canary approval fields, and set request `open`. |
+| `finish` | `ready_to_finish` | Accepted draft and complete coverage match current evidence | Publish atomically. |
+| `finish` | `staged_canary` | Exact accepted draft/evidence revision has an approval | Publish atomically. |
+| completed `finish` retry | `completed` | Expected/current identity and stored request binding still pass | Return the immutable stored receipt without revalidating later evidence or writing anything. |
+
+Return these exact next actions from save, decision, review, and finish results:
+
+```ts
+const revise = {
+  kind: "revise",
+  command: `${command} workbench author save --assignment ${assignmentId} --file <revised-draft.json> --json`,
+  reason: "The saved draft has blocking structured findings to resolve."
+};
+const awaitOperator = {
+  kind: "await_operator",
+  command: `${command} workbench author review --assignment ${assignmentId} --json`,
+  reason: "The canary draft is staged and awaiting operator approval."
+};
+const finish = {
+  kind: "finish",
+  command: `${command} workbench author finish --assignment ${assignmentId} --json`,
+  reason: "The accepted assignment is ready for atomic publication."
+};
+const claimNext = {
+  kind: "claim_next",
+  command: `${command} workbench author start --request ${requestId} --json`,
+  reason: "The next guided assignment is ready to start."
+};
+const complete = {
+  kind: "complete",
+  command: "",
+  reason: "The guided authoring request is complete."
+};
+```
+
+Rejected saves and operator rejections return `revise`; accepted canary saves return
+`awaitOperator`; accepted non-canary saves and approvals return `finish`; successful nonfinal finish
+returns `claimNext`; final finish and every completed retry return `complete`. Review derives the same
+single action from persisted state and never invents an alternate command or reason.
+
+Task 6 deliberately refuses to reset `ready_to_finish`, `staged_canary`, or approved work during an
+inspection. Before save, approval, rejection, or finish accepts existing draft state, Task 8 recomputes
+the assignment-wide evidence revision inside its serialized mutation boundary. When it changed,
+call this separate locked-state CAS rather than weakening Task 6's helper:
+
+```ts
+export function invalidateLockedGuidedAssignmentEvidenceInTransaction(
+  db: MastheadDatabase,
+  input: {
+    assignmentId: string;
+    expectedStatus: "staged_canary" | "ready_to_finish";
+    expectedEvidenceRevision: string;
+    nextEvidenceRevision: string;
+  }
+): { assignment: GuidedAuthoringAssignmentDto; request: GuidedAuthoringRequestDto };
+```
+
+Its assignment update compares assignment ID, exact locked status, expected evidence revision, and
+non-null accepted draft in one statement. It sets the fresh evidence revision, status
+`investigating` and `accepted_draft_revision = NULL`, while preserving `current_draft_revision` and
+all draft-review, operator-review, and evidence-access rows. The repository does not rewrite old
+draft `findings_json`; review's exact-current-revision join makes those findings invisible. Commit this
+invalidation and only then throw
+`evidence_revision_changed`. Canary invalidation also clears `canary_approved_at` and
+`canary_approved_by` and returns the request to `open`; invalidating a non-canary
+`ready_to_finish` assignment leaves its active request `active`. Use the same changed-sentinel
+commit-before-throw pattern as Task 6; never roll the invalidation back with the error. An old
+approved operator review locks only its exact draft and evidence revision, so a fresh revision may
+be drafted and reviewed without deleting history.
+
+The repository query that detects an existing approval must join the operator review to its draft
+review and block only when both `draft_revision` and that draft row's `evidence_revision` equal the
+assignment's currently accepted draft and current evidence revision. Historical approvals remain
+audit-only and cannot deadlock the first fresh-revision save or later operator decision.
+
+Except for an already-completed finish retry, every save/approve/reject/finish transaction recomputes
+the assignment-wide evidence revision before applying the status matrix. A changed
+`investigating`/`drafting`/`needs_revision` assignment uses Task 6's ordinary in-transaction CAS; a
+changed `staged_canary`/`ready_to_finish` assignment uses the locked CAS above. Both return the private
+changed sentinel, commit, and throw afterward. `completed` is never revision-reset by later evidence.
+
+After a draft has structured validation findings, `reviewGuidedAssignment()` filters
+`GUIDED_EVIDENCE_QUESTIONS` only when supported persisted fields resolve the corresponding question.
+Until then it continues returning the complete Task 5 list established by Task 6.
+
+Review selects a draft row only with `draft_reviews.evidence_revision = assignments.evidence_revision`.
+If no such row exists, it returns no `draftRevision` or `draft`, empty findings, and the complete
+question list even though `current_draft_revision` still points at preserved history. Add locked-state
+tests for stale `staged_canary`, stale approved `staged_canary`, stale `ready_to_finish`, and immutable
+`completed`: the first three expose their current non-inspect action until an allowed Task 8 mutation
+commits invalidation, after which review returns inspect with stale draft/findings hidden; completed
+keeps its stored receipt/history and terminal action.
+
+Every public write service receives `expectedIdentity` and immutable `currentIdentity` through the
+exact object inputs above. `saveGuidedDraft()`, `approveGuidedCanary()`, `rejectGuidedCanary()`, and
+`finishGuidedAssignment()` are non-composable transaction owners: each first asserts
+`!db.isTransaction` and throws
+`guided_authoring_public_mutation_requires_top_level_transaction` before lookup, validation, identity
+checks, or writes. Do not expose public `*InTransaction` variants; only private/repository helpers are
+composable. This guarantees a changed-revision sentinel commits in the public transaction before its
+error and cannot be captured inside an outer transaction that later rolls it back. After the top-level
+assertion, each service calls `assertStableGuidedRequestBinding()` and
+`assertGuidedAuthoringExpectedIdentity(input.expectedIdentity, input.currentIdentity)` immediately
+before their owned transaction or first repository write; request lookup, validation, and review
+computation may happen first, but no durable state may change before both guards succeed. A safe
+restart may change only the current nonce and PID while the request's creation nonce remains unchanged
+audit evidence.
+
+- [ ] **Step 4: Store structured enrichment provenance and implement one-transaction finish**
+
+Add a shared structured record rather than encoding guided provenance into `provider`, `model`,
+`prompt_version`, activity details, or another string field:
+
+```ts
+export type GuidedEnrichmentProvenance = {
+  enrichmentId: string;
+  requestId: string;
+  assignmentId: string;
+  sessionId: string;
+  draftRevision: number;
+  evidenceRevision: string;
+  policyVersion: "guided-authoring-v1";
+  source: "guided_authoring";
+  appliedAt: string;
+};
+
+export function recordGuidedEnrichmentProvenanceInTransaction(
+  db: MastheadDatabase,
+  input: GuidedEnrichmentProvenance
+): void;
+export function listGuidedEnrichmentProvenance(
+  db: MastheadDatabase,
+  assignmentId: string
+): GuidedEnrichmentProvenance[];
+export function listGuidedEnrichmentProvenanceByEnrichment(
+  db: MastheadDatabase,
+  enrichmentId: string
+): GuidedEnrichmentProvenance[];
+```
+
+Migration `032_guided_enrichment_provenance.sql` creates
+`guided_authoring_enrichment_provenance` as an association/event table, not enrichment ownership.
+Use `PRIMARY KEY (enrichment_id, assignment_id)`, a foreign key from `enrichment_id` to
+`session_enrichments`, and the composite foreign key
+`(assignment_id, request_id, session_id)` to
+`guided_authoring_assignment_sessions(assignment_id, request_id, session_id)`. Keep positive
+`draft_revision`, nonblank revision checks, and constrained policy/source literals. A stable
+enrichment row may therefore be reused by later assignments while each assignment receives its own
+immutable provenance association. Extend the schema registry and migration tests. The enrichment
+repository accepts a `GuidedEnrichmentProvenance` object and inserts one association for each generated
+or reused enrichment ID inside the caller's transaction; the existing provider/model fields remain
+ordinary enrichment metadata, never the authoritative request/assignment provenance. Repository tests
+must round-trip every field, prove rollback with the enrichment rows, and reuse one identical stable
+enrichment ID across two requests/assignments without a uniqueness conflict.
 
 Within one `BEGIN IMMEDIATE` transaction:
 
 ```text
 1. Revalidate request and assignment, then immediately before `BEGIN IMMEDIATE` call `assertStableGuidedRequestBinding()` and `assertGuidedAuthoringExpectedIdentity()` against the immutable current daemon identity. The request's creation nonce is audit-only, while the mutation envelope must contain the current nonce reloaded by the client. Only after both guards succeed may the service verify evidence revision, complete inspection, accepted draft revision/findings, and canary approval inside the transaction.
-2. Apply each session's durable enrichment, with request ID, assignment ID, source, and policy version stamped by the daemon so later recovery can identify the exact authoring provenance.
+2. Apply each session's durable enrichment and write the structured provenance row for every generated enrichment ID with request ID, assignment ID, session ID, accepted draft revision, evidence revision, source, policy version, and applied time stamped by the daemon.
 3. Rebuild and stage each canonical dossier snapshot.
 4. Stage optional artifacts and provenance.
 5. Publish all staged artifacts.
@@ -1713,15 +2435,15 @@ The outer service owns the one `BEGIN IMMEDIATE` and calls only transaction-comp
 Run:
 
 ```bash
-npx vitest run src/workbench/authoring/__tests__/guidedAuthoringService.test.ts src/workbench/authoring/__tests__/agentLedAuthoringAcceptance.test.ts src/workbench/authoring/__tests__/authoringService.test.ts
+npx vitest run src/workbench/authoring/__tests__/guidedAuthoringService.test.ts src/workbench/authoring/__tests__/agentLedAuthoringAcceptance.test.ts src/workbench/authoring/__tests__/authoringService.test.ts src/daemon/db/__tests__/guidedAuthoringRepository.test.ts src/daemon/db/__tests__/enrichmentRepository.test.ts src/daemon/db/__tests__/schema.test.ts
 ```
 
-Expected: PASS with no partial Logbook or Workbench state after injected failures.
+Expected: PASS with no partial enrichment, provenance, Logbook, Workbench, receipt, request, or next-assignment state after any injected failure; approval alone publishes nothing; locked revision invalidation commits before its error; historical approvals do not block a fresh current-revision draft; stale drafts/findings never reappear; and completed retries return the original receipt.
 
 - [ ] **Step 6: Commit staged publication**
 
 ```bash
-git add src/workbench/authoring/guidedAuthoringService.ts src/workbench/authoring/authoringService.ts src/daemon/db/guidedAuthoringRepository.ts src/daemon/db/workbenchPipelineRepository.ts src/workbench/authoring/__tests__/guidedAuthoringService.test.ts src/workbench/authoring/__tests__/agentLedAuthoringAcceptance.test.ts
+git add src/shared/guidedAuthoring.ts src/daemon/db/migrations/032_guided_enrichment_provenance.sql src/daemon/db/schema.ts src/daemon/db/enrichmentRepository.ts src/workbench/authoring/guidedAuthoringService.ts src/workbench/authoring/authoringService.ts src/daemon/db/guidedAuthoringRepository.ts src/daemon/db/workbenchPipelineRepository.ts src/daemon/db/__tests__/schema.test.ts src/daemon/db/__tests__/enrichmentRepository.test.ts src/daemon/db/__tests__/guidedAuthoringRepository.test.ts src/workbench/authoring/__tests__/guidedAuthoringService.test.ts src/workbench/authoring/__tests__/agentLedAuthoringAcceptance.test.ts
 git commit -m "feat: stage and publish guided authoring assignments"
 ```
 
