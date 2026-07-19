@@ -27,7 +27,7 @@
 
 ---
 
-## Preserved historical V3 agent-led acceptance
+# Focused V3 agent-led acceptance
 
 Status: **current fixture-only release acceptance; rendered inspection remains required; production
 human canary remains separately gated below**

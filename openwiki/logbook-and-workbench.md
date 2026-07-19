@@ -69,6 +69,10 @@ a manual exclusion remains sticky.
 
 ## Workbench (guided enriched artifact authoring)
 
+This section defines the accepted V4 target and is pending implementation. The installed runtime
+still exposes selection-scoped V3 compatibility during the cutover; it is not the desired contract
+and must not be used for a new bulk or production enrichment campaign.
+
 One durable `workbench-authoring-v4` request produces enriched dossiers and any useful optional artifacts:
 
 1. **Enriched dossier** — the agent writes current durable enrichment for every selected session;
@@ -141,8 +145,15 @@ Prefer for reuse:
 
 Session tools (`search_sessions`, `get_session`, transcript/excerpts) remain for compile evidence, not the primary memory API. See `docs/reference/mcp-tools.md`.
 
-MCP has no authoring mutations. Worktree bridges allow authoring capabilities,
-status, and evidence reads, but block open, submit, and finish.
+MCP has no authoring mutations. In the current V3 runtime, worktree bridges allow capabilities,
+run status/context/evidence, and advisory-suggestion reads while blocking open, submit, and finish.
+That is compatibility behavior during the cutover, not the desired authoring contract.
+
+The accepted V4 bridge policy is pending implementation: it allows capabilities, guided-request
+status, pending-canary discovery, assignment inspect, and assignment review. It blocks guided-request
+creation, assignment start/claim, draft save, canary decisions, and assignment finish. Legacy V3
+status and receipt reads remain audit-only after cutover; V3 mutations return
+`authoring_contract_retired`.
 
 ## Anti-patterns for agents
 

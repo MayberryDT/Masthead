@@ -14,16 +14,17 @@ not the product category.
 Start with agents: `openwiki/quickstart.md`, `CONTEXT.md`, and
 `docs/adr/0011-artifact-first-logbook.md`.
 
-## Stable Today
+## Current runtime during the V4 cutover
 
 - Canonical local SQLite ownership for Masthead-owned sessions, published
   artifacts + provenance, source/connector state, import jobs, settings, and MCP
   audit rows (schema 24; full-body artifact search arrived in schema 21).
 - Multi-adapter / multi-harness live connect (Sources V2) and conservative
   history adapters where coverage exists.
-- Workbench package path: transcript checks/import, quality, claims, Activity, selection-scoped
-  guided authoring requests, daemon-grouped assignments, current durable enrichment, staged canary
-  review, daemon-rebuilt dossiers, optional-artifact judgment, and atomic publication.
+- Workbench package path: transcript checks/import, quality, claims, Activity, selection-scoped V3
+  authoring, durable enrichment, daemon-rebuilt dossiers, optional-artifact judgment, and atomic
+  publication. This is the installed runtime being replaced, not the desired authoring contract;
+  do not use it for a new bulk or production enrichment campaign during the V4 cutover.
 - Logbook artifact book: `GET /logbook/artifacts` + body/provenance inspector;
   full-body search plus kind · project · date filters; no bulk enrich /
   checkboxes / summary strip.
@@ -34,13 +35,23 @@ Start with agents: `openwiki/quickstart.md`, `CONTEXT.md`, and
   checkout you intend to run — path is hardwired into the desktop entry).
 - Product, surface, endpoint-matrix, doctor, smoke, build, and test gates.
 
+## Accepted V4 target — implementation in progress
+
+ADR 0015 defines durable guided authoring requests, daemon-grouped assignments, complete evidence
+traversal, progressive editorial review, the staged operator-approved canary, instance-bound
+launchers, and assignment-atomic finish. The detailed contract below guides implementation, but the
+current daemon and CLI do not advertise or execute V4 until their later implementation tasks land.
+At cutover, V1–V3 reads remain audit-only and all legacy mutations fail with
+`authoring_contract_retired`.
+
 ## Experimental
 
 - Deeper schema coverage for additional source adapters beyond the initial
   bounded scanners.
 - Transcript import breadth and exclusion policy tuning.
-- Legacy/dev native remote enrichment hooks. Guided authoring uses a durable Workbench request plus a
-  thin instance-bound CLI to the daemon-owned V4 authoring module; no native remote model key is required.
+- Legacy/dev native remote enrichment hooks. The accepted guided-authoring target uses a durable
+  Workbench request plus a thin instance-bound CLI to the daemon-owned V4 module; that target remains
+  pending implementation, and no native remote model key will be required.
 - Longer packaged desktop release-smoke automation.
 
 ## Install
@@ -73,9 +84,12 @@ MASTHEAD_CONNECTOR_MODE=bridge MASTHEAD_UPSTREAM_URL=http://127.0.0.1:17373 npm 
 MASTHEAD_BRIDGE_PORT=17374 npm run dev
 ```
 
-## Artifact Authoring
+## Accepted V4 Artifact Authoring Contract
 
-The user flow is:
+This is the accepted target flow and remains pending until the guided service, API, CLI, launcher,
+Workbench review, and cutover tasks land. The current runtime is described above.
+
+After cutover, the user flow is:
 
 **Select sessions → create a guided request → copy its instance-bound start command → agent follows
 the next action → operator approves the canary → Masthead publishes accepted assignments →
