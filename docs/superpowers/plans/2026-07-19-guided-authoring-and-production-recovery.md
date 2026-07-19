@@ -394,7 +394,102 @@ export type GuidedAuthoringCapabilitiesDto = {
   canarySessions: 3;
   operations: ["start", "inspect", "save", "review", "finish"];
 };
+
+export type GuidedAuthoringRequestDto = {
+  requestId: string;
+  actorId: string;
+  policyVersion: "guided-authoring-v1";
+  status: GuidedAuthoringRequestStatus;
+  baseUrl: string;
+  databaseId: string;
+  buildSha: string;
+  instanceManifest: string;
+  creationInstanceId: string;
+  sessionCount: number;
+  completedSessionCount: number;
+  assignmentCount: number;
+  currentAssignmentId?: string;
+  canaryAssignmentId: string;
+  canaryApprovedAt?: string;
+  canaryApprovedBy?: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+};
+
+export type GuidedAuthoringAssignmentDto = {
+  assignmentId: string;
+  requestId: string;
+  ordinal: number;
+  status: GuidedAuthoringAssignmentStatus;
+  canary: boolean;
+  evidenceRevision: string;
+  sessionIds: string[];
+  opportunityIds: string[];
+  currentDraftRevision: number;
+  acceptedDraftRevision?: number;
+  findings: WorkbenchAuthoringFinding[];
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+};
+
+export type GuidedEvidenceCoverageDto = {
+  sessionId: string;
+  evidenceRevision: string;
+  accessedItems: number;
+  totalItems: number;
+  complete: boolean;
+};
+
+export type GuidedAuthoringOperatorReviewDto = {
+  reviewId: string;
+  draftRevision: number;
+  decision: "approved" | "rejected";
+  notes: string;
+  reviewedBy: string;
+  reviewedAt: string;
+};
+
+export type GuidedAuthoringReviewDto = {
+  requestId: string;
+  assignmentId: string;
+  status: GuidedAuthoringAssignmentStatus;
+  evidenceRevision: string;
+  draftRevision?: number;
+  draft?: GuidedAuthoringBundleV4;
+  findings: WorkbenchAuthoringFinding[];
+  coverage: GuidedEvidenceCoverageDto[];
+  operatorReviews: GuidedAuthoringOperatorReviewDto[];
+  nextAction: GuidedAuthoringNextAction;
+};
+
+export type GuidedPublishedArtifactDto = {
+  draftId?: string;
+  artifactId: string;
+  kind: "session_dossier" | "runbook" | "adr" | "incident_timeline";
+  sessionIds: string[];
+};
+
+export type GuidedAuthoringReceiptDto = {
+  receiptVersion: "guided-authoring-receipt-v1";
+  requestId: string;
+  assignmentId: string;
+  evidenceRevision: string;
+  draftRevision: number;
+  sessionIds: string[];
+  opportunityIds: string[];
+  publishedArtifacts: GuidedPublishedArtifactDto[];
+  baseUrl: string;
+  databaseId: string;
+  buildSha: string;
+  instanceManifest: string;
+  publicationInstanceId: string;
+  completedAt: string;
+};
 ```
+
+Request responses expose counts and the current assignment but not the selected session list; assignment responses expose only their bounded membership. Review responses may embed the latest staged draft because Workbench must render the canary after a renderer restart. Receipts are immutable publication evidence and never contain `nextAction`; the service computes the current next action separately so a safe daemon restart does not rewrite historical receipts.
 
 The schema must reject additional properties, empty rationale/evidence arrays, duplicate artifact draft IDs, and session support paths that do not begin with `/sessionTitle`, `/sessionSummary`, or `/sessionDossier`. An `authored` or `changed_kind` disposition requires `artifactDraftId` and `artifactKind`, which must resolve to exactly one submitted artifact of the same kind; a `merged` disposition requires `mergedIntoOpportunityId`; a `dismissed` disposition forbids artifact linkage. Missing or malformed `opportunityDispositions` is invalid, but an empty array is schema-valid because zero-opportunity assignments are legitimate.
 
