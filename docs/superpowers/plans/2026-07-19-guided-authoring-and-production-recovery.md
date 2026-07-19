@@ -70,6 +70,58 @@
 
 ---
 
+### Task 0: Restore a trustworthy green baseline for V1 recovery
+
+**Files:**
+- Modify: `src/cli/__tests__/authoringCli.test.ts`
+- Modify only if the failing test proves production duplication: `src/daemon/databaseBackup.ts`
+- Modify only if the failing test proves production duplication: `src/daemon/db/sessionArtifactRepository.ts`
+
+**Interfaces:**
+- Consumes: the existing failed-V1 recovery audit, prepare, invalidate, and restore commands.
+- Produces: focused recovery tests that preserve the exact 1,283-dossier population assertion without running the complete population audit roughly twelve times in one 120-second test.
+
+- [ ] **Step 1: Preserve the existing reproducible failure as RED**
+
+Run:
+
+```bash
+npx vitest run src/cli/__tests__/authoringCli.test.ts -t "keeps failed V1 recovery audit and prepare dry"
+```
+
+Expected: FAIL at the 120-second timeout while consuming CPU in repeated `verifyRecoveryDatabase()` and `auditFailedV1Generation()` calls.
+
+- [ ] **Step 2: Split population proof from refusal branches**
+
+Keep one focused test with the exact 1,283-dossier fixture that proves audit and prepare identify the historical generation. Move confirmation, hash, identity, altered-population, invalidation, idempotency, and restore branches into independent tests whose fixtures contain the smallest generation that exercises the same invariant. Each test creates and removes its own temporary database and backup.
+
+- [ ] **Step 3: Remove repeated verification only when the prepared receipt already proves unchanged bytes**
+
+If the focused tests show production code repeats full audit and integrity verification within one exclusive maintenance command, thread the immutable prepared receipt through that command and re-audit only after active or backup bytes change. Keep `PRAGMA integrity_check` at backup creation, promotion, and final restore verification. Do not cache audit results across commands or trust a receipt without verifying its database ID, file SHA-256, byte size, audit hash, and maximum age.
+
+- [ ] **Step 4: Run the complete CLI authoring suite**
+
+Run:
+
+```bash
+npx vitest run src/cli/__tests__/authoringCli.test.ts
+```
+
+Expected: all 46 tests PASS without increasing any timeout.
+
+- [ ] **Step 5: Run the full baseline outside loopback sandboxing**
+
+Run `npm test -- --run` with loopback/process access. Expected: 291 test files and 2,337 tests PASS.
+
+- [ ] **Step 6: Commit the baseline repair**
+
+```bash
+git add src/cli/__tests__/authoringCli.test.ts src/daemon/databaseBackup.ts src/daemon/db/sessionArtifactRepository.ts
+git commit -m "test: bound v1 recovery verification"
+```
+
+---
+
 ### Task 1: Lock the incident and V4 product contract
 
 **Files:**
