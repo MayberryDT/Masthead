@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ImportJob } from "../../app/daemonClient";
 import type { ConnectorActionRequired, HarnessConnectorDto, HarnessConnectorsSnapshotDto } from "../../shared/harnessConnectors";
 import type { SourcesSetupRunInput } from "../../shared/sourcesSetup";
+import sailLogoUrl from "../assets/masthead-logo-sail.png";
 import { AppButton } from "../primitives/AppButton";
 import { StatusBadge } from "../primitives/StatusBadge";
 import { liveLabel, liveTone, presenceLabel, presenceTone } from "./HarnessConnectorRow";
@@ -382,7 +383,11 @@ export function SourcesConnectOnboarding({
         aria-label="Capture local session history"
       >
         <header className="session-detail-header">
-          <div>
+          <div className="sources-onboarding-brand" aria-label="Masthead">
+            <img src={sailLogoUrl} alt="" aria-hidden="true" />
+            <strong>Masthead</strong>
+          </div>
+          <div className="sources-onboarding-heading">
             <p className="mono-label">First-run setup</p>
             <h2>Capture local session history</h2>
           </div>

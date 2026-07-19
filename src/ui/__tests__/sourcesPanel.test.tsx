@@ -326,12 +326,14 @@ describe("SourcesPanel", () => {
   test("styles first-run onboarding header as an aligned toolbar band", () => {
     const css = readFileSync("src/styles/sources.css", "utf8");
     const headerRule = css.match(/\.session-detail-modal\.sources-onboarding-modal-full \.session-detail-header\s*\{(?<body>[\s\S]*?)\}/)?.groups?.body ?? "";
+    const desktopHeaderRule = css.match(/\.masthead-shell\.desktop-chrome \.sources-onboarding-modal-full \.session-detail-header\s*\{(?<body>[\s\S]*?)\}/)?.groups?.body ?? "";
     const actionRule = css.match(/\.sources-onboarding-modal-full \.session-detail-header \.surface-actions\s*\{(?<body>[\s\S]*?)\}/)?.groups?.body ?? "";
 
     expect(headerRule).toContain("display: grid;");
-    expect(headerRule).toContain("grid-template-columns: minmax(0, 1fr) auto;");
-    expect(headerRule).toContain("min-height: 72px;");
-    expect(headerRule).toContain("padding: 14px clamp(18px, 3vw, 32px);");
+    expect(headerRule).toContain("grid-template-columns: 215px minmax(0, 1fr) auto;");
+    expect(desktopHeaderRule).toContain("min-height: calc(72px + env(titlebar-area-height, 32px));");
+    expect(desktopHeaderRule).toContain("padding: calc(14px + env(titlebar-area-height, 32px)) clamp(18px, 3vw, 32px) 14px;");
+    expect(desktopHeaderRule).toContain("-webkit-app-region: drag;");
     expect(headerRule).toContain("border-bottom: 1px solid rgba(194, 221, 241, 0.13);");
     expect(actionRule).toContain("align-items: center;");
     expect(actionRule).toContain("justify-self: end;");
@@ -341,7 +343,7 @@ describe("SourcesPanel", () => {
     const css = readFileSync("src/styles/sources.css", "utf8");
     const desktopRule = css.match(/\.masthead-shell\.desktop-chrome \.sources-onboarding-full-window\s*\{(?<body>[\s\S]*?)\}/)?.groups?.body ?? "";
 
-    expect(desktopRule).toContain("top: env(titlebar-area-height, 32px);");
+    expect(desktopRule).toContain("top: 0;");
   });
 
   test("keeps onboarding source paths clipped and shared action rows spaced", () => {

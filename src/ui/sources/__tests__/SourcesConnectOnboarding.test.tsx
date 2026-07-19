@@ -238,6 +238,8 @@ describe("SourcesConnectOnboarding", () => {
     );
 
     expect(html).toContain("Capture local session history");
+    expect(html).toContain('class="sources-onboarding-brand"');
+    expect(html).toContain("Masthead");
     expect(html).toContain("Looking for local sources");
     expect(html).toContain("Discover");
     expect(html).toContain("Connect");
