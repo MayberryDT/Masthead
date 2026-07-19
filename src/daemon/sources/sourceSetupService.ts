@@ -7,7 +7,7 @@ import type {
   SourcesOnboardingScanDto,
   SourcesSetupDto
 } from "../../shared/sourcesSetup.ts";
-import { getAdapterStatuses, getSourceStatuses, type SourceStatusDto } from "../import/sourceStatusService.ts";
+import { adapterStatusesFromSources, getSourceStatuses, type SourceStatusDto } from "../import/sourceStatusService.ts";
 import { listImportJobPage } from "../db/importJobRepository.ts";
 import { getLatestSourceScanRun } from "../db/sourceSetupRepository.ts";
 import type { MastheadDatabase } from "../db/sqlite.ts";
@@ -27,7 +27,7 @@ export function buildSourcesSetupState(db: MastheadDatabase, options: { now: str
 
   return {
     advanced: {
-      adapters: getAdapterStatuses(db),
+      adapters: adapterStatusesFromSources(sourceStatuses),
       imports: listImportJobPage(db, { limit: 50, offset: 0 }).jobs,
       sources: connectedSourcesWithJobs
     },

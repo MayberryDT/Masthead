@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { migrateDatabase } from "../../db/schema.ts";
+import { indexSessionSearch } from "../../db/searchRepository.ts";
 import {
   recordSessionImportHealth,
   summarizeCurrentSessionImportHealth
@@ -411,6 +412,10 @@ describe("import repair", () => {
       reimportSources: ["source:grok"]
     });
     expect(readSession(db, "session:grok-fragment")).toBeUndefined();
+    expect(db.prepare("SELECT COUNT(*) AS count FROM session_search WHERE session_id = ?").get("session:grok-fragment"))
+      .toEqual({ count: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM session_search_rowids WHERE session_id = ?").get("session:grok-fragment"))
+      .toEqual({ count: 0 });
     expect(readSession(db, "session:hermes-old")).toBeDefined();
     expect(readSession(db, "session:live-codex")).toBeDefined();
     expect(readSession(db, "session:manual")).toBeDefined();
@@ -519,6 +524,19 @@ async function repairDatabase(): Promise<MastheadDatabase> {
   seedSession(db, "session:unrelated", "codex", "unrelated");
   seedSession(db, "session:manual", "hermes", "manual");
   seedSession(db, "session:published", "grok", "published");
+  indexSessionSearch(db, {
+    capsule: "",
+    commands: "",
+    filePaths: "",
+    finalResponse: "",
+    firstPrompt: "",
+    normalizedText: "broken fragment",
+    projectAliases: "",
+    sessionId: "session:grok-fragment",
+    tags: "",
+    title: "Broken fragment",
+    toolNames: ""
+  });
   seedImpact(db, "job:grok", "source:grok", "session:grok-fragment", "created");
   seedImpact(db, "job:hermes", "source:hermes", "session:hermes-old", "updated");
   for (const [sessionId, sourceId] of [["session:grok-fragment", "source:grok"], ["session:hermes-old", "source:hermes"], ["session:manual", "source:hermes"], ["session:published", "source:published"]]) {

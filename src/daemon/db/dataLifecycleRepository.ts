@@ -1,4 +1,5 @@
 import type { MastheadDatabase } from "./sqlite.ts";
+import { removeSessionSearchDocument } from "./searchRepository.ts";
 import {
   reconcileWorkbenchArtifactSatisfactionInTransaction,
   type WorkbenchAutomaticKind
@@ -170,7 +171,7 @@ function getScopedDataSummary(db: MastheadDatabase, scope: Exclude<DeleteMasthea
     raw_events: rawEventCountForScope(db, scope, sourceSessionIds),
     runtimes: 0,
     session_enrichments: countWhereIn(db, "session_enrichments", "session_id", sessionIds),
-    session_search: countWhereIn(db, "session_search", "session_id", sessionIds),
+    session_search: countWhereIn(db, "session_search_rowids", "session_id", sessionIds),
     sessions: sessionIds.length,
     source_policies: 0,
     tool_results: countWhereIn(db, "tool_results", "session_id", sessionIds),
@@ -240,6 +241,7 @@ function deleteAllCanonicalData(db: MastheadDatabase): CanonicalDeleteResult {
   try {
     db.exec(`
       DELETE FROM session_search;
+      DELETE FROM session_search_rowids;
       DELETE FROM session_artifact_search;
       DELETE FROM session_artifact_provenance;
       DELETE FROM session_artifacts;
@@ -312,7 +314,7 @@ function deleteSessionScope(
   db.exec("BEGIN IMMEDIATE;");
   try {
     deleteAuthoredDataForSessions(db, sessionIds);
-    deleteWhereIn(db, "session_search", "session_id", sessionIds);
+    for (const sessionId of sessionIds) removeSessionSearchDocument(db, sessionId);
     deleteWhereIn(db, "raw_events", "raw_event_id", rawEventIds);
     deleteReviewDispositionsForSessions(db, sessionIds);
     deleteMcpAuditRowsForSessions(db, sessionIds);

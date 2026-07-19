@@ -25,6 +25,43 @@ afterEach(async () => {
 });
 
 describe("daemon database schema", () => {
+  test("migration 030 maps existing FTS rows to their stable rowids", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-db-v30-search-rowids-"));
+    tempDirs.push(tempDir);
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+    migrateTestDatabaseThrough(db, 29);
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:existing-search",
+      title: "Existing search row"
+    });
+    db.prepare("INSERT INTO session_search(session_id, title, normalized_text) VALUES (?, ?, ?)").run(
+      "session:existing-search",
+      "Existing search row",
+      "historical term"
+    );
+    const existing = db.prepare("SELECT rowid FROM session_search WHERE session_id = ?").get("session:existing-search") as {
+      rowid: number;
+    };
+
+    migrateDatabase(db);
+
+    expect(
+      db.prepare("SELECT search_rowid AS searchRowid FROM session_search_rowids WHERE session_id = ?").get(
+        "session:existing-search"
+      )
+    ).toEqual({ searchRowid: existing.rowid });
+    expect(
+      db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?").get("idx_workbench_activity_time")
+    ).toEqual({ name: "idx_workbench_activity_time" });
+    expect(db.prepare("PRAGMA foreign_key_list(session_search_rowids)").all()).toEqual([
+      expect.objectContaining({ from: "session_id", on_delete: "CASCADE", table: "sessions", to: "session_id" })
+    ]);
+    db.close();
+  });
+
   test("migration 027 distinguishes historical automatic prechecks from manual exclusions", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-db-"));
     tempDirs.push(tempDir);
@@ -153,7 +190,7 @@ describe("daemon database schema", () => {
     migrateDatabase(db);
     migrateDatabase(db);
 
-    expect(CURRENT_SCHEMA_VERSION).toBe(29);
+    expect(CURRENT_SCHEMA_VERSION).toBe(30);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'virtual') ORDER BY name").all() as Array<{ name: string }>;
     expect(tables.map((row) => row.name)).toEqual(
@@ -185,6 +222,7 @@ describe("daemon database schema", () => {
         "project_summaries",
         "mcp_query_log",
         "session_search",
+        "session_search_rowids",
         "app_settings",
         "source_policies",
         "source_scan_runs",
@@ -247,7 +285,8 @@ describe("daemon database schema", () => {
       { version: 26, name: "026_session_import_health" },
       { version: 27, name: "027_workbench_suppression_provenance" },
       { version: 28, name: "028_session_transcript_fingerprints" },
-      { version: 29, name: "029_import_repair_replacements" }
+      { version: 29, name: "029_import_repair_replacements" },
+      { version: 30, name: "030_session_search_rowids" }
     ]);
     expect(
       (db.prepare("PRAGMA table_info(workbench_artifact_candidate_scans)").all() as Array<{ name: string }>).map(
@@ -274,7 +313,8 @@ describe("daemon database schema", () => {
         "idx_workbench_candidate_scans_session_time",
         "idx_session_transcript_fingerprints_lookup",
         "idx_session_import_health_status",
-        "idx_import_repair_replacements_original"
+        "idx_import_repair_replacements_original",
+        "idx_workbench_activity_time"
       ])
     );
     const importHealthColumns = db.prepare("PRAGMA table_info(session_import_health)").all() as Array<{
@@ -523,7 +563,7 @@ describe("daemon database schema", () => {
       "2026-07-15T00:00:00.000Z"
     );
 
-    expect(CURRENT_SCHEMA_VERSION).toBe(29);
+    expect(CURRENT_SCHEMA_VERSION).toBe(30);
     expect(db.prepare("SELECT version, name FROM schema_migrations ORDER BY version DESC LIMIT 1").get()).toEqual({
       name: "024_artifact_candidate_detector_revision",
       version: 24

@@ -9,6 +9,7 @@ import {
 } from "../dataLifecycleRepository.ts";
 import { applySessionArtifact, publishSessionArtifact } from "../sessionArtifactRepository.ts";
 import { getOrCreateDatabaseIdentity, migrateDatabase } from "../schema.ts";
+import { indexSessionSearch } from "../searchRepository.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../sqlite.ts";
 
 const tempDirs: string[] = [];
@@ -34,6 +35,7 @@ describe("data lifecycle repository", () => {
     expect(count(db, "messages")).toBe(0);
     expect(count(db, "session_enrichments")).toBe(0);
     expect(count(db, "session_search")).toBe(0);
+    expect(count(db, "session_search_rowids")).toBe(0);
     expect(count(db, "session_artifact_search")).toBe(0);
     expect(count(db, "session_artifact_provenance")).toBe(0);
     expect(count(db, "session_artifacts")).toBe(0);
@@ -87,6 +89,8 @@ describe("data lifecycle repository", () => {
     expect(ids(db, "workbench_runs", "run_id")).toEqual(["legacy:authoring:session:retained"]);
     expect(ids(db, "workbench_claims", "claim_id")).toEqual(["claim:session:retained"]);
     expect(ids(db, "workbench_activity", "activity_id")).toEqual(["activity:session:retained"]);
+    expect(ids(db, "session_search", "session_id")).toEqual(["session:retained"]);
+    expect(ids(db, "session_search_rowids", "session_id")).toEqual(["session:retained"]);
     expect(getOrCreateDatabaseIdentity(db)).toBe(databaseId);
     db.close();
   });
@@ -314,11 +318,7 @@ function seedCanonicalSessionGraph(db: MastheadDatabase): void {
       generated_at, content_json, source_refs_json
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run("enrichment:1", "session:1", "session_capsule", "current", "fp", "v1", now, "{}", "[]");
-  db.prepare("INSERT INTO session_search(session_id, title, normalized_text) VALUES (?, ?, ?)").run(
-    "session:1",
-    "Import Logbook",
-    "Build Logbook"
-  );
+  indexSessionSearch(db, searchDocument("session:1", "Import Logbook", "Build Logbook"));
   db.prepare(
     `INSERT INTO mcp_query_log (
       mcp_query_id, tool_name, requested_at, result_count, session_ids_json, status
@@ -455,12 +455,29 @@ function seedScopedAuthoredSession(
     now,
     now
   );
+  indexSessionSearch(db, searchDocument(input.sessionId, `Authored ${input.sessionId}`, input.project));
   return seedAuthoredData(db, {
     claimId: `claim:${input.sessionId}`,
     project: input.project,
     runId: `authoring:${input.sessionId}`,
     sessionId: input.sessionId
   });
+}
+
+function searchDocument(sessionId: string, title: string, normalizedText: string) {
+  return {
+    capsule: "",
+    commands: "",
+    filePaths: "",
+    finalResponse: "",
+    firstPrompt: "",
+    normalizedText,
+    projectAliases: "",
+    sessionId,
+    tags: "",
+    title,
+    toolNames: ""
+  };
 }
 
 function seedSharedAuthoredData(db: MastheadDatabase): { artifactId: string } {

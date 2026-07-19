@@ -9,6 +9,7 @@ import type {
 } from "../../shared/importRepair.ts";
 import type { MastheadDatabase } from "../db/sqlite.ts";
 import { recordImportRepairReplacements } from "../db/sessionImportHealthRepository.ts";
+import { removeSessionSearchDocument } from "../db/searchRepository.ts";
 import { withImmediateTransaction } from "../db/sqlite.ts";
 export type { ImportRepairPreview, ImportRepairReceipt } from "../../shared/importRepair.ts";
 
@@ -148,7 +149,7 @@ export function applyImportRepair(
         quality_decision_source = 'automatic', updated_at = CURRENT_TIMESTAMP WHERE session_id = ?`).run(sessionId);
     }
     for (const sessionId of lockedPreview.pseudoSessionsToRemove) {
-      db.prepare("DELETE FROM session_search WHERE session_id = ?").run(sessionId);
+      removeSessionSearchDocument(db, sessionId);
       db.prepare("DELETE FROM sessions WHERE session_id = ?").run(sessionId);
     }
     if (lockedPreview.cursorSourcesToReset.length > 0) {

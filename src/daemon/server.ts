@@ -442,11 +442,12 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   }
 
   function queueSessionEnrichment(sessionId: string | undefined): void {
+    if (closed) return;
     if (!sessionId) return;
     queuedEnrichmentSessionIds.add(sessionId);
     if (enrichmentQueueScheduled) return;
     enrichmentQueueScheduled = true;
-    queueMicrotask(() => {
+    setImmediate(() => {
       void flushEnrichmentQueue();
     });
   }
@@ -457,6 +458,10 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
   async function flushEnrichmentQueue(): Promise<void> {
     enrichmentQueueScheduled = false;
+    if (closed) {
+      queuedEnrichmentSessionIds.clear();
+      return;
+    }
     const sessionIds = [...queuedEnrichmentSessionIds];
     queuedEnrichmentSessionIds.clear();
     for (let index = 0; index < sessionIds.length; index += 1) {
@@ -483,11 +488,11 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           severity: "warning"
         });
       }
-      if ((index + 1) % 5 === 0) await yieldToEventLoop();
+      await yieldToEventLoop();
     }
     if (queuedEnrichmentSessionIds.size > 0 && !enrichmentQueueScheduled) {
       enrichmentQueueScheduled = true;
-      queueMicrotask(() => {
+      setImmediate(() => {
         void flushEnrichmentQueue();
       });
     }
@@ -712,8 +717,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
                 const sessionId = liveSessionRepositoryForEvent(event).upsertLiveEvent(event);
                 if (sessionId) {
                   rememberCompletedLiveSession(event);
-                  queueSessionSearchIndex(sessionId);
-                  if (!shouldDeferLiveEnrichmentToHookTranscript(event)) queueSessionEnrichment(sessionId);
+                  if (shouldDeferLiveEnrichmentToHookTranscript(event)) queueSessionSearchIndex(sessionId);
+                  else queueSessionEnrichment(sessionId);
                 }
                 appendStoreRecordToRawJournal({
                   recordId: `event:${event.eventId}`,
@@ -3710,6 +3715,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     close: () => {
       if (closePromise) return closePromise;
       closed = true;
+      queuedEnrichmentSessionIds.clear();
+      enrichmentQueueScheduled = false;
       queuedSearchIndexSessionIds.clear();
       searchIndexQueueScheduled = false;
       closePromise = (async () => {
