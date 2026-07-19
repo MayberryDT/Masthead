@@ -1,8 +1,9 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { createServer } from "node:net";
 import { dirname, join, posix, resolve, win32 } from "node:path";
+import { promisify } from "node:util";
 import {
   assertGuidedAuthoringExpectedIdentity,
   canonicalInstancePaths,
@@ -20,6 +21,7 @@ import { renderLiveDevInstanceLauncher } from "../core/liveDevLauncher";
 import { classifyDaemonHealth } from "../shared/protocol";
 
 const DEFAULT_CONNECTOR_PORT = 17373;
+const execFileAsync = promisify(execFile);
 const REQUIRED_CAPABILITIES = [
   "live_projection",
   "canonical_sessions",
@@ -109,6 +111,12 @@ export type StartLiveConnectorOptions = {
   warmConnector?: (baseUrl: string) => Promise<void>;
   verifyAuthoringLauncher?: (launcherPath: string, manifestPath: string, nodePath: string, cliEntry: string) => Promise<void>;
   childTerminationGraceMs?: number;
+  readProcessStartIdentity?: (pid: number) => Promise<string | undefined>;
+};
+
+type SpawnedProcessIdentity = {
+  pid: number;
+  processStartIdentity: string;
 };
 
 export function connectorBaseUrl(port: number): string {
@@ -280,15 +288,18 @@ export async function startLiveConnector(
   child.once("exit", () => {
     ownedChildren.delete(child);
   });
+  const readProcessStartIdentity = options.readProcessStartIdentity ?? readPlatformProcessStartIdentity;
+  let spawnedProcessIdentity: SpawnedProcessIdentity | undefined;
 
   try {
+    spawnedProcessIdentity = await captureSpawnedProcessIdentity(child, readProcessStartIdentity);
     const health = await (options.waitForCollector ?? waitForCompatibleCollector)(port, target.dataDirectory, target.databasePath, cliCommand);
     await (options.verifyAuthoringManifest ?? verifyDaemonOwnedManifest)(target.instanceManifest, health);
     await (options.warmConnector ?? warmProjection)(baseUrl);
     return connectorStartResult(true, baseUrl, "Started local Masthead collector.", health);
   } catch (error) {
     try {
-      await stopSpawnedChild(child, options.childTerminationGraceMs);
+      await stopSpawnedChild(child, spawnedProcessIdentity, readProcessStartIdentity, options.childTerminationGraceMs);
     } catch (cleanupError) {
       throw new Error(`${error instanceof Error ? error.message : String(error)}; spawned child cleanup failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`, { cause: error });
     }
@@ -474,7 +485,27 @@ export function cliEntryForTarget(target: Pick<DaemonLaunchTarget, "entryPath">,
   return paths.join(paths.dirname(paths.dirname(target.entryPath)), "cli", "mastheadctl.js");
 }
 
-async function stopSpawnedChild(child: ChildProcess, graceMs = 5_000): Promise<void> {
+async function captureSpawnedProcessIdentity(
+  child: ChildProcess,
+  readProcessStartIdentity: (pid: number) => Promise<string | undefined>
+): Promise<SpawnedProcessIdentity> {
+  const pid = child.pid;
+  if (!Number.isInteger(pid) || !pid || pid <= 0) {
+    throw new Error("Spawned Masthead collector did not expose a valid PID");
+  }
+  const processStartIdentity = await readProcessStartIdentity(pid);
+  if (!processStartIdentity) {
+    throw new Error(`Could not capture process-start identity for spawned Masthead collector ${pid}`);
+  }
+  return { pid, processStartIdentity };
+}
+
+async function stopSpawnedChild(
+  child: ChildProcess,
+  spawnedIdentity: SpawnedProcessIdentity | undefined,
+  readProcessStartIdentity: (pid: number) => Promise<string | undefined>,
+  graceMs = 5_000
+): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return;
   const waitForExactExit = (timeoutMs: number) => new Promise<boolean>((resolveExit) => {
     const timeout = setTimeout(() => {
@@ -491,9 +522,46 @@ async function stopSpawnedChild(child: ChildProcess, graceMs = 5_000): Promise<v
   if (!child.kill("SIGTERM")) throw new Error(`Could not stop spawned Masthead collector ${child.pid ?? "unknown"}`);
   if (await termExit) return;
   if (child.exitCode !== null || child.signalCode !== null) return;
+  if (!spawnedIdentity || child.pid !== spawnedIdentity.pid) {
+    throw new Error(`Refusing SIGKILL for spawned Masthead collector ${child.pid ?? "unknown"}: captured PID identity is unavailable or changed`);
+  }
+  const currentProcessStartIdentity = await readProcessStartIdentity(spawnedIdentity.pid);
+  if (currentProcessStartIdentity !== spawnedIdentity.processStartIdentity) {
+    throw new Error(`Refusing SIGKILL for spawned Masthead collector ${spawnedIdentity.pid}: process-start identity changed`);
+  }
+  if (child.exitCode !== null || child.signalCode !== null) return;
   const killExit = waitForExactExit(graceMs);
   if (!child.kill("SIGKILL")) throw new Error(`Could not kill spawned Masthead collector ${child.pid ?? "unknown"} after SIGTERM timeout`);
   if (!(await killExit)) throw new Error(`Spawned Masthead collector ${child.pid ?? "unknown"} did not exit after identity-bound SIGKILL`);
+}
+
+async function readPlatformProcessStartIdentity(pid: number): Promise<string | undefined> {
+  if (!Number.isInteger(pid) || pid <= 0) return undefined;
+  try {
+    if (process.platform === "linux") {
+      const processStat = await readFile(`/proc/${pid}/stat`, "utf8");
+      const commandEnd = processStat.lastIndexOf(")");
+      if (commandEnd < 0) return undefined;
+      const fieldsAfterCommand = processStat.slice(commandEnd + 1).trim().split(/\s+/);
+      const kernelStartTicks = fieldsAfterCommand[19];
+      return kernelStartTicks ? `linux:${kernelStartTicks}` : undefined;
+    }
+    if (process.platform === "win32") {
+      const { stdout } = await execFileAsync("powershell.exe", [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().Ticks`
+      ], { encoding: "utf8", windowsHide: true });
+      const ticks = stdout.trim();
+      return ticks ? `win32:${ticks}` : undefined;
+    }
+    const { stdout } = await execFileAsync("ps", ["-p", String(pid), "-o", "lstart="], { encoding: "utf8" });
+    const startedAt = stdout.trim();
+    return startedAt ? `${process.platform}:${startedAt}` : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 async function waitForCompatibleCollector(

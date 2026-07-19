@@ -4,7 +4,7 @@ import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import currentHealth from "../../../fixtures/protocol/current-health.json";
-import type { ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import {
   buildDaemonEnv,
   cliEntryForTarget,
@@ -367,6 +367,62 @@ describe("Electron daemon launcher policy", () => {
     expect(child.exited).toBe(true);
     expect(owned.size).toBe(0);
   });
+
+  test("refuses SIGKILL when the spawned PID now has a different process-start identity", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("offline"); }));
+    const child = fakeChild(true);
+    const owned = new Set<ChildProcess>();
+    const processStartIdentities = ["spawned-at-100", "spawned-at-200"];
+
+    await expect(startLiveConnector(connectorInput("/tmp/masthead/bin/mastheadctl"), ["masthead://app"], owned, {
+      childTerminationGraceMs: 1,
+      prepareAuthoringLauncher: async () => undefined,
+      readProcessStartIdentity: async () => processStartIdentities.shift(),
+      verifyAuthoringLauncher: async () => undefined,
+      spawnChild: (() => child.value) as typeof import("node:child_process").spawn,
+      waitForCollector: async () => { throw new Error("original health failure"); }
+    })).rejects.toThrow("Refusing SIGKILL");
+
+    expect(child.signals).toEqual(["SIGTERM"]);
+    expect(child.exited).toBe(false);
+    expect(owned.size).toBe(1);
+  });
+
+  test("SIGKILLs a real spawned child that ignores SIGTERM when its process-start identity is unchanged", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("offline"); }));
+    let realChild: ChildProcess | undefined;
+    let ready: Promise<void> | undefined;
+    const owned = new Set<ChildProcess>();
+
+    try {
+      await expect(startLiveConnector(connectorInput("/tmp/masthead/bin/mastheadctl"), ["masthead://app"], owned, {
+        childTerminationGraceMs: 20,
+        prepareAuthoringLauncher: async () => undefined,
+        verifyAuthoringLauncher: async () => undefined,
+        spawnChild: (() => {
+          realChild = spawn(process.execPath, [
+            "-e",
+            "process.on('SIGTERM', () => {}); process.send('ready'); setInterval(() => {}, 1_000);"
+          ], { stdio: ["ignore", "ignore", "ignore", "ipc"] });
+          ready = new Promise((resolveReady, rejectReady) => {
+            realChild!.once("error", rejectReady);
+            realChild!.once("exit", (code, signal) => rejectReady(new Error(`fixture exited before ready: ${code ?? signal}`)));
+            realChild!.once("message", () => resolveReady());
+          });
+          return realChild;
+        }) as typeof import("node:child_process").spawn,
+        waitForCollector: async () => {
+          await ready;
+          throw new Error("original health failure");
+        }
+      })).rejects.toThrow("original health failure");
+
+      expect(realChild?.signalCode).toBe("SIGKILL");
+      expect(owned.size).toBe(0);
+    } finally {
+      if (realChild?.exitCode === null && realChild.signalCode === null) realChild.kill("SIGKILL");
+    }
+  });
 });
 
 function fakeChild(ignoreTerm = false): { exited: boolean; signals: string[]; value: ChildProcess } {
@@ -375,7 +431,7 @@ function fakeChild(ignoreTerm = false): { exited: boolean; signals: string[]; va
   Object.defineProperties(emitter, {
     exitCode: { configurable: true, get: () => state.exited ? 0 : null },
     signalCode: { configurable: true, get: () => null },
-    pid: { value: 4242 }
+    pid: { value: process.pid }
   });
   emitter.kill = ((signal?: NodeJS.Signals | number) => {
     state.signals.push(String(signal));

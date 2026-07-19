@@ -1,0 +1,109 @@
+# Task 4 implementation report
+
+## Result
+
+Implemented instance-bound authoring launchers and daemon-owned manifest lifecycle, current V3 health/capability identity, manifest-bound CLI guards, V3 Doctor identity validation, non-Electron primary launcher preparation, bridge non-publication, and filesystem-only production stage/activate receipts. No production data, process, installation, or runtime was touched.
+
+Commit: `13f9a96a feat: bind authoring to daemon instance`
+
+## TDD evidence
+
+RED:
+
+- `src/shared/__tests__/instanceIdentity.test.ts` initially failed because the canonical identity module did not exist.
+- Updated Electron launcher tests initially failed because launchers still resolved through `~/.local/bin/mastheadctl` and embedded daemon URLs.
+- The first escalated focused run exposed six compatibility failures in V3 fixtures and a leaked fetch stub; these were corrected without weakening the new identity validator.
+
+GREEN:
+
+- Exact Task 4 focused suite, escalated for loopback: 13 files, 254/254 tests passed, 63.79s final run.
+- Production lifecycle suite: 129/129 tests passed, including the new stage/activate zero-runtime-side-effect proof and all existing rollback proofs.
+- Bridge/UI/authoring capability fallout: 3 files, 100/100 tests passed.
+- `npm run typecheck`: passed.
+- `git diff --check` and cached diff check: passed.
+
+## Main changes
+
+- Added `src/shared/instanceIdentity.ts` as the single parser/normalizer/comparison module, with exact mismatch codes and nonce-tolerant stable request binding.
+- Moved Electron, installed Electron Dev, and `npm run dev` launchers to `<instanceDir>/bin/mastheadctl`; wrappers export only `MASTHEAD_INSTANCE_MANIFEST`.
+- Added complete primary identity to health and current V3 capabilities, with cross-field protocol validation and bridge identity rewriting that publishes no writable manifest identity.
+- Made daemon health unavailable until the atomic manifest exists, and made graceful close remove only its own nonce after the listener closes but before the database writer lock is released.
+- Made the CLI reload the manifest before every mutation, validate current capabilities, accept a safe nonce-only restart, and return structured identity mismatch errors.
+- Made Doctor compare the selected URL, health, manifest, command, and V3 capabilities, then execute the wrapper without injecting identity behind its back.
+- Added `stageProductionInstallation()` and `activateStagedProductionInstallation()` with immutable receipt validation, staged instance launcher, unchanged current/live state during staging, filesystem-only activation, previous-launcher rollback restoration, and preservation of the previous bundle until later transition success.
+
+## Self-review
+
+- No V4 mutation route or end-to-end V4 mutation proof was added; Tasks 8 and 9 still own those boundaries.
+- `creationInstanceId` remains audit evidence and is deliberately excluded from safe-restart authorization.
+- Offline V1 recovery remains outside daemon capability checks.
+- Production activation does not open SQLite, acquire the application lifecycle lease, run maintenance, probe health, spawn Masthead, or write the live manifest.
+- Existing production rollback semantics remain intact: activation retains the previous bundle, and transition cleanup removes it only after maintenance and candidate startup succeed.
+
+## Lifecycle hardening follow-up
+
+Review exposed lifecycle boundaries that the first commit had not proved strongly enough. The follow-up makes the staged receipt independently rehydratable across processes, persists hashes, modes, rollback snapshots, and all destination paths, and rejects staged-byte tampering, receipt path substitution, active-surface drift, and a changed `current` binding before activation. Activation now installs only the exact buffers it hashes, holds an exact PID/start-identity filesystem guard, restores `current` plus all three active surfaces on every injected failure boundary, and records activation durably. Finalization is a separate public filesystem operation and requires a fresh daemon-owned manifest newer than activation before it removes the rollback bundle, receipt, staged files, and stale production helper artifacts.
+
+Daemon startup now uses an exclusive SQLite manifest-writer lease that is released automatically on process death, survives stale metadata safely, and remains held from publication through listener close, owned-manifest removal, and guard release. Shutdown continues database/writer-lock cleanup if publication failed. Electron cleans up and awaits its exact spawned child after health, manifest, or warmup failure; compatible fast paths re-prepare and verify the exact manifest assignment. Primary health identity is canonical and exact, bridge health exposes no writable instance identity, and the read-only bridge rejects current V3 capabilities.
+
+Doctor now checks manifest schema, timestamp, PID, canonical instance directory, exact manifest and command paths, base URL, database/build identity, and instance nonce. Production `stage`, `activate`, and `finalize` commands are documented in `docs/reference/production-cold-activation.md`.
+
+Fresh follow-up verification:
+
+- Complete Task 4 plus bridge/UI fallout suite: 16 files, 376/376 tests passed, 58.39s.
+- Focused standards-hardening set: 5 files, 190/190 tests passed.
+- Production lifecycle suite within the complete run: 136 tests passed.
+- `npm run typecheck`: passed after the final diff.
+- `git diff --check`: passed after the final diff.
+
+Follow-up commit: `fix: harden instance lifecycle boundaries`.
+
+## Crash-recoverable activation follow-up
+
+The second lifecycle review showed that exception rollback was insufficient: process death could leave `current` and the three active launch surfaces at different revisions. Activation now writes and durably syncs a phase journal before every filesystem mutation. A later activation or finalization holds the shared production lifecycle lease, verifies every current surface is exactly its persisted before-image or attested after-image, restores the complete before-image deterministically after an interrupted phase, and removes the journal before retrying. A completed activation discovered with a leftover journal is verified and treated idempotently.
+
+Stage, activate, finalize, install, start, stop, and transition now use the same crash-released lifecycle lease, with unlocked internal composition to avoid nested leases. Receipts persist the resolved lease, data directory, database, port/base URL, candidate identity, and attested rollback bundle identity. Staging cleans safe unreferenced copies and staged files on pre-receipt failure. Activation re-proves the production process set, health, port, runtime ownership sentinel, and live manifest are absent before its first mutation without opening the application database.
+
+Finalization re-verifies the pinned candidate and active launcher/desktop bytes, then requires live evidence tying the guarded daemon manifest to an unchanged PID/start identity, exact production target, primary writable health, base URL, database/build/instance identity, and canonical launcher paths. Arbitrary manifest JSON and dead PIDs fail closed. Electron now verifies the entire expected wrapper body plus executable mode, reuses shared health classification and exact target identity for compatible-daemon reuse, rejects independent instance path overrides, and escalates an exact owned child from SIGTERM to SIGKILL only after the grace period while retaining the original startup failure if cleanup also fails.
+
+Fresh crash-pass verification:
+
+- Complete Task 4 plus production and bridge/UI suite: 16 files, 383/383 tests passed, 66.68s.
+- Focused production and Electron suite: 161/161 tests passed before the final staging-cleanup regression was added.
+- `npm run typecheck` and `git diff --check`: passed.
+
+Crash-recovery commit: `fix: make production activation crash recoverable`.
+
+## Lifecycle gate and finalization recovery follow-up
+
+The final lifecycle review is now implemented as a durable gate shared by install, stage, activate, finalize, transition, cold activation, start, and stop. The versioned activation journal binds the immutable receipt hash, full before-images, attested after-images, candidate and rollback identities, and every completed transition. Activation retains that journal until finalization has proved the exact live daemon identity and removed every staged or obsolete artifact.
+
+Finalization now rechecks candidate digest and release identity, active bytes and modes, the receipt-bound health URL, guarded daemon ownership, and foreign lifecycle artifacts immediately before cleanup. Every bundle, staged-file, and receipt deletion is journaled independently, so a crash after any delete can resume in a fresh process from the embedded receipt. Activation's default offline proof also contends both the database lease and the packaged runtime ownership probe. Electron derives packaged CLI paths with platform-native Windows or POSIX semantics and installs its child exit listener before either termination signal.
+
+Fresh final verification:
+
+- Complete Task 4 suite with permitted isolated loopback: 16 files, 398/398 tests passed.
+- Focused production lifecycle and Electron launcher suite: 173/173 tests passed.
+- Production activation rehearsal: 10/10 selected tests passed, including a real SIGKILL followed by activation recovery in a fresh Node process and retry after every finalization delete boundary.
+- `npm run typecheck` and `git diff --check`: passed.
+- The restricted-sandbox complete run failed only because loopback binds returned `EPERM`; the identical suite passed unchanged with loopback permission.
+
+Final follow-up commit: `fix: gate production lifecycle on crash recovery`.
+
+## Operational activation rehearsal follow-up
+
+The production activation rehearsal is now a bundle-driven operational gate rather than a filtered test alias. It requires a canonical absolute `--bundle`, verifies the packaged content manifest before allocating state, refuses bundles inside live production paths, constructs an isolated home/install/data/database/manifest/lease plus dynamic loopback port, and runs the supplied bundle through stop proof, stage, real activation SIGKILL, fresh-process recovery, packaged daemon startup, strict default finalization, exact stop, and cleanup. It then runs the synthetic crash/race matrix and uses `process.exitCode` only after cleanup; an unproven daemon stop preserves the temporary state and fails with its path.
+
+Lifecycle recovery now sweeps safe unreceipted stage bundles and all three staged launcher surfaces under the shared lease while preserving current, receipt-bound, and maintenance-journal-bound bundles. Finalization rejects foreign staged files before deleting rollback state. Every finalization deletion boundary—rollback bundle, three stages, receipt, and journal—is covered by real SIGKILL and abrupt-exit children followed by recovery in a new process. A rotated completion marker outside the install root makes the terminal journal/receipt deletion idempotent while the install root remains exactly `current` plus one bundle.
+
+The final live proof imports the candidate's shared strict health classifier before applying receipt-specific identity checks. Staged wrappers render and attest the exact receipt lifecycle lease. Electron captures PID plus process-start identity after spawn, revalidates both immediately before SIGKILL, refuses PID reuse, and has a real SIGTERM-ignoring child proof.
+
+Fresh operational verification:
+
+- Workspace package: `npm run package:electron` passed; generated `out/` artifacts remained ignored.
+- Operational rehearsal against the absolute workspace package passed, including isolated packaged daemon startup and 18/18 crash/race matrix cases.
+- Complete Task 4 regression: 17 files, 420/420 tests passed with isolated loopback permission.
+- Focused lifecycle, Electron, and rehearsal acceptance: 3 files, 195/195 tests passed.
+- `npm run typecheck`, JavaScript syntax checks, and `git diff --check` passed.
+
+Operational follow-up commit: `fix: make activation rehearsal operational`.
