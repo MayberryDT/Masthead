@@ -114,10 +114,10 @@ uses a complete strong group of at most three or diverse dossier-only sessions, 
 creation returns `guided_canary_not_constructible` and persists nothing. Finish atomically publishes
 one accepted assignment and releases the next.
 
-The installed CLI is thin agent-facing transport to the daemon-owned V4 authoring boundary and does
-not open SQLite for normal authoring. V1, V2, and V3 remain audit-only; their status and receipts stay
-readable, while legacy mutations fail with `authoring_contract_retired`. Every mutation verifies the
-daemon URL, database ID, build SHA, and manifest identity through the instance-bound launcher. See
+After cutover, the instance-bound CLI is thin agent-facing transport to the daemon-owned V4 authoring
+boundary and does not open SQLite for normal authoring. V1, V2, and V3 remain audit-only; their status
+and receipts stay readable, while legacy mutations fail with `authoring_contract_retired`. Every V4
+mutation verifies the daemon URL, database ID, build SHA, and manifest identity. See
 [ADR 0015](docs/adr/0015-guided-authoring-campaigns.md),
 [ADR 0012](docs/adr/0012-daemon-owned-artifact-authoring.md), and the
 [daemon API reference](docs/reference/daemon-api.md).
@@ -194,7 +194,7 @@ verify` runs the product and surface contracts, typecheck, Vitest, build,
 endpoint matrix, and smoke suite.
 
 `npm run dogfood:durable-artifacts` and the V3 acceptance worksheet are preserved audit evidence.
-Current V4 release acceptance must prove guided evidence traversal, grounded dossier deltas,
+V4 release acceptance must prove guided evidence traversal, grounded dossier deltas,
 opportunity dispositions, the staged operator-approved canary, instance identity, atomic publication,
 and Logbook/MCP retrieval on an isolated corpus without touching production data.
 

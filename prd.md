@@ -4,7 +4,9 @@
 > session row. Workbench still owns the raw→ready session pipeline. The daemon publishes the original
 > canonical dossier as an immutable snapshot. **ADR 0015** makes authoring a durable guided campaign:
 > the daemon groups bounded assignments, requires complete grounded evidence work, and stages the
-> first assignment for operator review. ADR 0011 and `CONTEXT.md` define the artifact-first
+> first assignment for operator review. This V4 contract is the accepted target and remains pending
+> implementation; the installed V3 compatibility runtime is being replaced and must not be used for
+> a new bulk or production enrichment campaign. ADR 0011 and `CONTEXT.md` define the artifact-first
 > boundary. Sections below
 > that say “Logbook of past sessions” or “show imported sessions in Logbook” are historical scope
 > language—do not reintroduce session-library Logbook UX. Prefer OpenWiki + ADR 0011 for current

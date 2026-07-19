@@ -4,6 +4,10 @@
 
 Accepted.
 
+Implementation status: pending. The installed runtime still exposes selection-scoped
+`workbench-authoring-v3` compatibility during the cutover; acceptance of this decision does not mean
+the guided service, API, CLI, launcher, or canary workflow has shipped.
+
 ## Context
 
 The selection-scoped V3 contract proved that Masthead could preserve the canonical dossier renderer,

@@ -6,6 +6,14 @@ the capture and Workbench pipeline unit; **Logbook rows are published artifacts*
 
 This wiki is the fastest map for both humans and coding agents. Start here, then follow the links that match the area you want to change.
 
+## Authoring runtime boundary
+
+ADR 0015 is the accepted V4 product contract, but its guided service, API, CLI, instance-bound
+launcher, Workbench canary review, and legacy-route retirement are pending implementation. The
+installed runtime still exposes selection-scoped `workbench-authoring-v3` compatibility. Do not use
+that compatibility path for a new bulk or production enrichment campaign. Every V4 description below
+is the accepted target after cutover unless it explicitly says otherwise.
+
 ## What Masthead is
 
 Masthead is not primarily a chat client, live monitoring console, or task manager. The product hierarchy is:
@@ -19,8 +27,8 @@ Masthead is not primarily a chat client, live monitoring console, or task manage
 
 Ownership in one line each:
 
-- **Workbench** owns transcript import, cleanup, selection-scoped agent enrichment, daemon-rebuilt
-  dossier publication, and optional-artifact authoring. **Copy Agent Prompt** creates a durable
+- **Workbench** owns transcript import, cleanup, agent enrichment, daemon-rebuilt dossier publication,
+  and optional-artifact authoring. In the accepted V4 target, **Copy Agent Prompt** creates a durable
   guided authoring request, then copies only its request ID and instance-bound start command.
 - **Logbook** is an **artifact book**: capsule list + body inspector + provenance. No bulk enrich, checkboxes, or session-library chrome.
 - **Sources** owns discovering local harnesses and enabling live connectors — not import jobs or per-session Workbench work. Contract: [sources.md](sources.md) → `docs/reference/sources-v2.md`.
@@ -53,8 +61,8 @@ These are the main existing docs this wiki synthesizes:
 - `prd.md` — product scope; **read with ADR 0011 supersession note** for Logbook unit of search.
 - `docs/adr/0011-artifact-first-logbook.md` — Logbook is an artifact book.
 - `docs/adr/0013-canonical-dossier-and-candidate-authoring.md` — preserved original-rendering and evidence findings; its V2 authoring flow is superseded.
-- `docs/adr/0014-agent-led-enriched-artifact-authoring.md` — preserved selection-scoped V3 implementation history.
-- `docs/adr/0015-guided-authoring-campaigns.md` — current V4 guided-authoring contract.
+- `docs/adr/0014-agent-led-enriched-artifact-authoring.md` — superseded V3 decision and installed compatibility runtime during cutover.
+- `docs/adr/0015-guided-authoring-campaigns.md` — accepted V4 guided-authoring contract, pending implementation.
 - `docs/adr/0009-logbook-only-shows-published-sessions.md` — Workbench pipeline ownership (Logbook unit refined by 0011).
 - `docs/architecture/data-paths.md` — runtime data directory and store ownership.
 - `docs/reference/daemon-api.md` — daemon HTTP API.
@@ -80,8 +88,9 @@ Useful scripts from `package.json`:
 
 `npm run install:electron-dev-launcher` **must be run from the checkout you intend to run**. The desktop entry and systemd unit hardwire that path. After switching branches/worktrees/main, reinstall the launcher or Masthead Dev will keep serving a stale tree.
 
-Dogfood Logbook may be **empty after artifact cutover** until Workbench completes V4 guided enrichment and
-publication — that is expected, not a broken connection.
+Dogfood Logbook may be **empty after artifact cutover**. After V4 implementation, it remains empty
+until Workbench completes guided enrichment and publication; during the cutover, do not treat the
+installed V3 compatibility path as the replacement bulk rebuild.
 
 ## Where to go next
 
@@ -99,8 +108,9 @@ publication — that is expected, not a broken connection.
 - Keep the `src/core`/`src/daemon` boundary clear: core is transformation logic; daemon owns runtime state and persistence.
 - Logbook has **no** bulk enrich UI; bulk/session-library chrome is deleted. Workbench owns compile and publish.
 - An enriched dossier means the original canonical dossier structure rendered after current durable enrichment; agents never author its body.
-- `workbench-authoring-v4` uses durable requests and daemon-grouped assignments. The agent follows one
-  next action at a time; the first accepted assignment remains staged for operator approval.
+- The accepted, pending `workbench-authoring-v4` target uses durable requests and daemon-grouped
+  assignments. The agent follows one next action at a time; the first accepted assignment remains
+  staged for operator approval.
 
 ## Guided authoring vocabulary
 

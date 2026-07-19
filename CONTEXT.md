@@ -5,6 +5,15 @@ evidence-backed engineering knowledge artifacts people and agents can search and
 
 ## Language
 
+**Authoring runtime boundary**:
+ADR 0015 defines the accepted V4 target, which is pending implementation. The installed daemon and
+CLI still expose selection-scoped `workbench-authoring-v3` compatibility during the cutover; they do
+not provide V4 requests, assignments, canary review, or instance-bound launchers and must not be used
+for a new bulk or production enrichment campaign. Unless a definition is explicitly historical, V4
+language below describes the accepted target after cutover. At that cutover, V1, V2, and V3 reads
+remain audit-only and legacy mutations fail with `authoring_contract_retired`.
+_Avoid_: Claim that V4 is already shipped, present V3 as the desired contract
+
 **Workbench**:
 A collaboration surface where the user and their coding agent turn captured sessions into
 validated artifacts ready for Logbook. Workbench owns transcript checks, transcript import, quality
@@ -33,8 +42,8 @@ _Avoid_: Published session, automatic work resolved, Logbook-ready session
 
 **Legacy automatic work resolved**:
 Audit-only V1 state that required a session package plus explicit resolution of every optional kind.
-V1, V2, and V3 remain audit-only. Authoring contract V4 does not target or compute this state: it
-guides evidence-backed enrichment and optional-artifact judgment through bounded assignments.
+At V4 cutover, V1, V2, and V3 remain audit-only. The accepted V4 target does not compute this state:
+it guides evidence-backed enrichment and optional-artifact judgment through bounded assignments.
 _Avoid_: V4 completion criterion, per-session optional-kind checklist, Logbook session row
 
 **Publication transition**:
@@ -184,20 +193,22 @@ surface.
 _Avoid_: Task board, live monitoring dashboard
 
 **Agent work request**:
-Historical name for the disposable V1 handoff. Current authoring uses a durable guided authoring
-request and copies only its opaque request ID and one instance-bound start command.
+Historical name for the disposable V1 handoff. The accepted V4 target uses a durable guided authoring
+request and copies only its opaque request ID and one instance-bound start command; this remains
+pending implementation.
 _Avoid_: Current authoring object, session list, multi-step recipe
 
 **Copy Agent Prompt**:
-Creates one durable guided authoring request for the compile-ready subset of the current selection,
-then copies only its opaque request ID and instance-bound start command. Sessions that still need
-transcript or quality review remain selected for human operations, but do not enter the request;
-Workbench discloses the ready and excluded counts.
+In the accepted V4 target, creates one durable guided authoring request for the compile-ready subset
+of the current selection, then copies only its opaque request ID and instance-bound start command.
+Sessions that still need transcript or quality review remain selected for human operations, but do
+not enter the request; Workbench discloses the ready and excluded counts. Pending implementation.
 _Avoid_: Session list, multi-step recipe, detector verdict
 
 **Disposable handoff**:
-The audit-only V1 and V3 copy shape that embedded selection context in a temporary block. Current
-authoring creates a durable request before copying an instance-bound start command.
+The V1/V3 copy shape that embeds selection context in a temporary block. The installed V3 runtime
+still uses this compatibility shape during cutover. The accepted V4 target replaces it with a durable
+request and instance-bound start command.
 _Avoid_: Current handoff, durable guided authoring request
 
 **Guided authoring request**:
@@ -255,7 +266,7 @@ the dossier presentation.
 _Avoid_: Agent-authored dossier body, stale canonical snapshot, protocol report
 
 **Artifact suggestion**:
-A V3 name for a nonbinding detector hint. Current V4 language is knowledge opportunity; high-signal
+A V3 name for a nonbinding detector hint. Accepted V4 language is knowledge opportunity; high-signal
 opportunities require an evidence-backed disposition, but they neither require nor prohibit an
 artifact kind.
 _Avoid_: Artifact obligation, user-facing verdict, empty artifact slot
@@ -286,19 +297,21 @@ They are never reused by V4.
 _Avoid_: Current authoring contract, session-batch authoring, agent-authored dossier, V1 run reuse
 
 **Authoring contract V3**:
-The retired selection-scoped `workbench-authoring-v3` contract. Its records and receipts remain
-readable for audit, but mutation attempts fail with `authoring_contract_retired`.
-_Avoid_: Current authoring contract, resumable authoring run
+The installed selection-scoped compatibility contract during V4 implementation. It is being replaced
+and must not be used for a new bulk or production enrichment campaign. At V4 cutover, its records and
+receipts remain readable for audit while mutation attempts fail with `authoring_contract_retired`.
+_Avoid_: Desired authoring contract, safe bulk campaign, post-cutover resumable run
 
 **Authoring contract V4**:
-The guided `workbench-authoring-v4` contract. Workbench creates a durable request; the daemon groups
-bounded assignments, requires complete evidence traversal and grounded editorial review, stages the
-first accepted assignment for operator approval, and publishes accepted assignments atomically.
+The accepted, pending `workbench-authoring-v4` target. After implementation, Workbench creates a
+durable request; the daemon groups bounded assignments, requires complete evidence traversal and
+grounded editorial review, stages the first accepted assignment for operator approval, and publishes
+accepted assignments atomically.
 _Avoid_: Disposable handoff, agent-partitioned selection, legacy run mutation
 
 **Authoring run**:
-The audit-history object used by V1, V2, and V3. Current V4 authoring stores durable requests and
-assignments instead.
+The durable attempt object still used by the installed V3 compatibility runtime and by V1/V2 audit
+history. The accepted V4 target stores durable requests and assignments instead.
 _Avoid_: Guided authoring request, current assignment, agent chat
 
 **Artifact bundle**:

@@ -209,6 +209,11 @@ x-motion:
   easing: "cubic-bezier(0.22, 1, 0.36, 1)"
 ---
 
+> **Authoring runtime boundary:** Visual and interaction descriptions for guided V4 requests,
+> assignments, canary review, and instance-bound handoff are the accepted design target and remain
+> pending implementation. The installed V3 compatibility runtime is being replaced and must not be
+> used for a new bulk or production enrichment campaign.
+
 # Masthead Design
 
 This is the master design source for Masthead. The repo intentionally uses the lowercase filename `design.md`; tools or agents that expect Google's uppercase `DESIGN.md` format should be pointed at this file.
