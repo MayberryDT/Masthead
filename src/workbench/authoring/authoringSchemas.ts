@@ -4,6 +4,7 @@ import type {
   WorkbenchAuthoringBundleV2,
   WorkbenchAuthoringBundleV3
 } from "../../shared/workbenchAuthoring.ts";
+import type { GuidedAuthoringBundleV4 } from "../../shared/guidedAuthoring.ts";
 
 const stringField = { type: "string" };
 const stringArray = { items: stringField, type: "array" };
@@ -123,6 +124,37 @@ const claimSupport = {
       path: stringField,
       supportKind: {
         enum: ["problem", "decision", "alternative", "change", "verification", "timeline", "remediation", "root_cause"]
+      }
+    },
+    required: ["path", "evidenceRef", "excerpt", "supportKind"],
+    type: "object"
+  },
+  type: "array"
+};
+
+const guidedClaimSupport = {
+  items: {
+    additionalProperties: false,
+    properties: {
+      evidenceRef: stringField,
+      excerpt: stringField,
+      path: stringField,
+      supportKind: {
+        enum: [
+          "problem",
+          "decision",
+          "alternative",
+          "change",
+          "verification",
+          "timeline",
+          "remediation",
+          "root_cause",
+          "purpose",
+          "outcome",
+          "blocker",
+          "continuation",
+          "reuse"
+        ]
       }
     },
     required: ["path", "evidenceRef", "excerpt", "supportKind"],
@@ -308,6 +340,75 @@ export function getAuthoringBundleV3Schema(): WorkbenchJsonSchema {
   };
 }
 
+export function getGuidedAuthoringBundleV4Schema(): WorkbenchJsonSchema {
+  return {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    additionalProperties: false,
+    properties: {
+      artifacts: {
+        items: {
+          oneOf: automaticKinds.map((kind) => ({
+            additionalProperties: false,
+            properties: {
+              draftId: stringField,
+              kind: { const: kind },
+              output: getWorkbenchAuthoringOutputV2Schema(kind),
+              provenanceSessionIds: stringArray,
+              seedSessionId: stringField
+            },
+            required: ["draftId", "kind", "seedSessionId", "provenanceSessionIds", "output"],
+            type: "object"
+          }))
+        },
+        type: "array"
+      },
+      assignmentId: stringField,
+      bundleVersion: { const: "workbench-authoring-v4" },
+      evidenceRevision: stringField,
+      opportunityDispositions: {
+        items: {
+          additionalProperties: false,
+          properties: {
+            artifactDraftId: stringField,
+            artifactKind: { enum: automaticKinds },
+            disposition: { enum: ["authored", "dismissed", "merged", "changed_kind"] },
+            evidenceRefs: stringArray,
+            mergedIntoOpportunityId: stringField,
+            opportunityId: stringField,
+            rationale: stringField
+          },
+          required: ["opportunityId", "disposition", "rationale", "evidenceRefs"],
+          type: "object"
+        },
+        type: "array"
+      },
+      sessionEnrichments: {
+        items: {
+          additionalProperties: false,
+          properties: {
+            claimSupport: guidedClaimSupport,
+            enrichment: durableSessionEnrichment,
+            sessionId: stringField
+          },
+          required: ["sessionId", "enrichment", "claimSupport"],
+          type: "object"
+        },
+        type: "array"
+      }
+    },
+    required: [
+      "bundleVersion",
+      "assignmentId",
+      "evidenceRevision",
+      "sessionEnrichments",
+      "opportunityDispositions",
+      "artifacts"
+    ],
+    title: "GuidedAuthoringBundleV4",
+    type: "object"
+  };
+}
+
 export function parseAuthoringBundleV2(value: unknown): WorkbenchAuthoringBundleV2 {
   if (!isRecord(value) || value.bundleVersion !== "workbench-authoring-v2") {
     throw new Error("unsupported_authoring_bundle_version");
@@ -336,6 +437,108 @@ export function parseAuthoringBundleV3(value: unknown): WorkbenchAuthoringBundle
     if (!(value[field] as string).trim()) throw new Error(`invalid_authoring_bundle:${field}`);
   }
   return value as WorkbenchAuthoringBundleV3;
+}
+
+export function parseGuidedAuthoringBundleV4(value: unknown): GuidedAuthoringBundleV4 {
+  if (!isRecord(value) || value.bundleVersion !== "workbench-authoring-v4") {
+    throw new Error("unsupported_authoring_bundle_version");
+  }
+  const invalidPath = firstInvalidSchemaPath(value, getGuidedAuthoringBundleV4Schema(), "");
+  if (invalidPath) throw invalidGuidedBundle(invalidPath);
+
+  const bundle = value as unknown as GuidedAuthoringBundleV4;
+  validateGuidedBundleSemantics(bundle);
+  return bundle;
+}
+
+function validateGuidedBundleSemantics(bundle: GuidedAuthoringBundleV4): void {
+  requireNonBlank(bundle.assignmentId, "assignmentId");
+  requireNonBlank(bundle.evidenceRevision, "evidenceRevision");
+  if (bundle.sessionEnrichments.length === 0) throw invalidGuidedBundle("sessionEnrichments");
+
+  const sessionIds = new Set<string>();
+  for (let index = 0; index < bundle.sessionEnrichments.length; index += 1) {
+    const session = bundle.sessionEnrichments[index]!;
+    const path = `sessionEnrichments[${index}]`;
+    requireNonBlank(session.sessionId, `${path}.sessionId`);
+    requireUnique(sessionIds, session.sessionId, `${path}.sessionId`);
+    if (session.claimSupport.length === 0) throw invalidGuidedBundle(`${path}.claimSupport`);
+    for (let supportIndex = 0; supportIndex < session.claimSupport.length; supportIndex += 1) {
+      const support = session.claimSupport[supportIndex]!;
+      const supportPath = `${path}.claimSupport[${supportIndex}]`;
+      requireNonBlank(support.path, `${supportPath}.path`);
+      requireNonBlank(support.evidenceRef, `${supportPath}.evidenceRef`);
+      requireNonBlank(support.excerpt, `${supportPath}.excerpt`);
+      if (!/^\/(?:sessionTitle|sessionSummary|sessionDossier)(?:\/|$)/u.test(support.path)) {
+        throw invalidGuidedBundle(`${supportPath}.path`);
+      }
+    }
+  }
+
+  const artifactsById = new Map<string, GuidedAuthoringBundleV4["artifacts"][number]>();
+  for (let index = 0; index < bundle.artifacts.length; index += 1) {
+    const artifact = bundle.artifacts[index]!;
+    const path = `artifacts[${index}]`;
+    requireNonBlank(artifact.draftId, `${path}.draftId`);
+    if (artifactsById.has(artifact.draftId)) throw invalidGuidedBundle(`${path}.draftId`);
+    artifactsById.set(artifact.draftId, artifact);
+  }
+
+  const opportunityIds = new Set<string>();
+  const linkedDraftIds = new Set<string>();
+  for (let index = 0; index < bundle.opportunityDispositions.length; index += 1) {
+    const disposition = bundle.opportunityDispositions[index]!;
+    const path = `opportunityDispositions[${index}]`;
+    requireNonBlank(disposition.opportunityId, `${path}.opportunityId`);
+    requireUnique(opportunityIds, disposition.opportunityId, `${path}.opportunityId`);
+    requireNonBlank(disposition.rationale, `${path}.rationale`);
+    if (disposition.evidenceRefs.length === 0) throw invalidGuidedBundle(`${path}.evidenceRefs`);
+    for (let evidenceIndex = 0; evidenceIndex < disposition.evidenceRefs.length; evidenceIndex += 1) {
+      requireNonBlank(disposition.evidenceRefs[evidenceIndex]!, `${path}.evidenceRefs[${evidenceIndex}]`);
+    }
+
+    if (disposition.disposition === "authored" || disposition.disposition === "changed_kind") {
+      requireNonBlank(disposition.artifactDraftId, `${path}.artifactDraftId`);
+      if (!disposition.artifactKind || disposition.mergedIntoOpportunityId !== undefined) {
+        throw invalidGuidedBundle(path);
+      }
+      const artifact = artifactsById.get(disposition.artifactDraftId!);
+      if (!artifact || artifact.kind !== disposition.artifactKind || linkedDraftIds.has(disposition.artifactDraftId!)) {
+        throw invalidGuidedBundle(`${path}.artifactDraftId`);
+      }
+      linkedDraftIds.add(disposition.artifactDraftId!);
+      continue;
+    }
+
+    if (disposition.disposition === "merged") {
+      requireNonBlank(disposition.mergedIntoOpportunityId, `${path}.mergedIntoOpportunityId`);
+      if (disposition.artifactDraftId !== undefined || disposition.artifactKind !== undefined) {
+        throw invalidGuidedBundle(path);
+      }
+      continue;
+    }
+
+    if (
+      disposition.artifactDraftId !== undefined ||
+      disposition.artifactKind !== undefined ||
+      disposition.mergedIntoOpportunityId !== undefined
+    ) {
+      throw invalidGuidedBundle(path);
+    }
+  }
+}
+
+function requireNonBlank(value: string | undefined, path: string): void {
+  if (!value?.trim()) throw invalidGuidedBundle(path);
+}
+
+function requireUnique(values: Set<string>, value: string, path: string): void {
+  if (values.has(value)) throw invalidGuidedBundle(path);
+  values.add(value);
+}
+
+function invalidGuidedBundle(path: string): Error {
+  return new Error(`invalid_guided_authoring_bundle:${path}`);
 }
 
 function firstInvalidSchemaPath(value: unknown, definition: unknown, path: string): string | undefined {

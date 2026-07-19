@@ -22,7 +22,12 @@ export type WorkbenchClaimSupport = {
     | "verification"
     | "timeline"
     | "remediation"
-    | "root_cause";
+    | "root_cause"
+    | "purpose"
+    | "outcome"
+    | "blocker"
+    | "continuation"
+    | "reuse";
 };
 
 export type WorkbenchAuthoringContractVersion =
