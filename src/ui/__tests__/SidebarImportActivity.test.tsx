@@ -53,6 +53,7 @@ describe("SidebarImportActivity", () => {
     );
     const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 
+    expect(html).toContain('class="sidebar-import-activity is-health"');
     expect(text).toContain("OpenCode");
     expect(text).toContain("500 recognized · 121 rejected");
     expect(text).toContain("500 canonical · 102 package · 12 repair");

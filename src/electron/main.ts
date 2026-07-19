@@ -178,7 +178,6 @@ async function runSmokeAndQuit(window: BrowserWindow): Promise<void> {
       (async () => {
         await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
         const cards = Array.from(document.querySelectorAll('[data-session-card], .session-card, .observability-card, .session-card-shell'));
-        const windowControls = Array.from(document.querySelectorAll('.masthead-window-control')).map((control) => control.getAttribute('aria-label'));
         const samples = [];
         for (const card of cards.slice(0, 12)) {
           const start = performance.now();
@@ -192,13 +191,13 @@ async function runSmokeAndQuit(window: BrowserWindow): Promise<void> {
           cardCount: cards.length,
           hasDesktopBridge: typeof window.mastheadDesktop?.invoke === 'function',
           hasTypedNotify: typeof window.mastheadDesktop?.notifySessionTransition === 'function',
-          hasCustomChrome: document.querySelector('.masthead-shell.desktop-chrome .masthead-window-bar') !== null,
+          hasRendererTitleBar: document.querySelector('.masthead-shell.desktop-chrome .masthead-window-bar') !== null,
+          hasRendererWindowControls: document.querySelector('.masthead-window-control') !== null,
           hasNodeProcess: typeof window.process !== 'undefined',
           hasRawIpc: typeof window.ipcRenderer !== 'undefined',
           hasRequire: typeof window.require !== 'undefined',
           hoverMedianMs: median,
-          hoverP95Ms: p95,
-          windowControls
+          hoverP95Ms: p95
         };
       })()
     `);

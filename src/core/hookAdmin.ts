@@ -35,6 +35,7 @@ export type HookInstallOptions = {
 
 export type HookVerifyResult = {
   installed: boolean;
+  managedConnectorPresent: boolean;
   missingEvents: HookEventName[];
   mismatchedEvents: HookEventName[];
 };
@@ -83,6 +84,9 @@ export function uninstallMastheadHookConfig(config: CodexHookConfig): Required<C
 
 export function verifyMastheadHookConfig(config: CodexHookConfig, expected?: Partial<HookInstallOptions>): HookVerifyResult {
   const hooks = config.hooks ?? {};
+  const managedConnectorPresent = Object.values(hooks).some((groups) =>
+    (groups ?? []).some((group) => isOfficialGroup(group) && group.hooks.some(isMastheadHook))
+  );
   const missingEvents: HookEventName[] = [];
   const mismatchedEvents: HookEventName[] = [];
 
@@ -104,6 +108,7 @@ export function verifyMastheadHookConfig(config: CodexHookConfig, expected?: Par
 
   return {
     installed: missingEvents.length === 0 && mismatchedEvents.length === 0,
+    managedConnectorPresent,
     missingEvents,
     mismatchedEvents
   };

@@ -4,7 +4,12 @@ import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import type { NormalizedEvent } from "../../../core/types.ts";
 import { createSessionRepository } from "../sessionRepository.ts";
-import { indexCanonicalSessionSearch, indexSessionSearch, searchSessions } from "../searchRepository.ts";
+import {
+  indexCanonicalSessionSearch,
+  indexSessionSearch,
+  removeSessionSearchDocument,
+  searchSessions
+} from "../searchRepository.ts";
 import { migrateDatabase } from "../schema.ts";
 import { openMastheadDatabase } from "../sqlite.ts";
 import { publishSessionToLogbook, seedSession } from "./sessionTestHelpers.ts";
@@ -49,6 +54,69 @@ describe("logbook FTS search", () => {
       sessionId: "session-1",
       title: "Masthead data layer"
     });
+    db.close();
+  });
+
+  test("replaces a session search document at its stable FTS rowid", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-search-"));
+    tempDirs.push(tempDir);
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+    migrateDatabase(db);
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session-stable-rowid",
+      title: "Search replacement"
+    });
+    publishSessionToLogbook(db, "session-stable-rowid");
+
+    indexSessionSearch(db, searchDocument("obsolete-porcupine"));
+    const first = db
+      .prepare(
+        `SELECT session_search_rowids.search_rowid AS mappedRowid, session_search.rowid AS indexedRowid
+         FROM session_search_rowids
+         JOIN session_search ON session_search.rowid = session_search_rowids.search_rowid
+         WHERE session_search_rowids.session_id = ?`
+      )
+      .get("session-stable-rowid") as { indexedRowid: number; mappedRowid: number };
+
+    indexSessionSearch(db, searchDocument("current-narwhal"));
+    const second = db
+      .prepare(
+        `SELECT session_search_rowids.search_rowid AS mappedRowid, session_search.rowid AS indexedRowid
+         FROM session_search_rowids
+         JOIN session_search ON session_search.rowid = session_search_rowids.search_rowid
+         WHERE session_search_rowids.session_id = ?`
+      )
+      .get("session-stable-rowid") as { indexedRowid: number; mappedRowid: number };
+
+    expect(second).toEqual(first);
+    expect(searchSessions(db, { limit: 10, query: "obsolete-porcupine" })).toMatchObject({ sessions: [], total: 0 });
+    expect(searchSessions(db, { limit: 10, query: "current-narwhal" }).sessions).toEqual([
+      expect.objectContaining({ sessionId: "session-stable-rowid" })
+    ]);
+    db.close();
+  });
+
+  test("removes both the FTS document and its stable rowid mapping", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-search-"));
+    tempDirs.push(tempDir);
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+    migrateDatabase(db);
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session-stable-rowid",
+      title: "Search removal"
+    });
+    indexSessionSearch(db, searchDocument("remove-me"));
+
+    removeSessionSearchDocument(db, "session-stable-rowid");
+
+    expect(db.prepare("SELECT COUNT(*) AS count FROM session_search").get()).toEqual({ count: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM session_search_rowids").get()).toEqual({ count: 0 });
     db.close();
   });
 
@@ -105,6 +173,22 @@ describe("logbook FTS search", () => {
     db.close();
   });
 });
+
+function searchDocument(normalizedText: string) {
+  return {
+    capsule: "",
+    commands: "",
+    filePaths: "",
+    finalResponse: "",
+    firstPrompt: "",
+    normalizedText,
+    projectAliases: "Masthead",
+    sessionId: "session-stable-rowid",
+    tags: "",
+    title: "Search replacement",
+    toolNames: ""
+  };
+}
 
 function liveEvent(eventId: string, payload: Record<string, unknown> = {}): NormalizedEvent {
   return {

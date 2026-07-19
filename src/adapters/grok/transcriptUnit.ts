@@ -167,6 +167,24 @@ function recordsFromRow(
           toolName: stringValue(row.name) ?? stringValue(row.tool_name)
         })
       ];
+    case "backend_tool_call": {
+      const kind = isRecord(row.kind) ? row.kind : undefined;
+      const action = kind?.action;
+      return [
+        record(source, lineNumber, "tool_call", raw, observedAt, row, "tool_call", {
+          arguments: toolArguments(action),
+          callId: stringValue(kind?.id),
+          observedAt,
+          sessionId: conversationId,
+          status: stringValue(kind?.status),
+          toolName:
+            stringValue(kind?.tool_type) ??
+            (isRecord(action) ? stringValue(action.type) : undefined) ??
+            stringValue(row.kind) ??
+            "backend_tool"
+        })
+      ];
+    }
     default:
       return [
         diagnosticRecord(

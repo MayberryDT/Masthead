@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { createImportJob, updateImportJob } from "../importJobRepository.ts";
 import { migrateDatabase } from "../schema.ts";
-import { openMastheadDatabase } from "../sqlite.ts";
+import { openMastheadDatabase, type MastheadDatabase } from "../sqlite.ts";
 import { getAdapterStatuses, getSourceStatuses } from "../../import/sourceStatusService.ts";
 import type { SourcePreflightResult } from "../../sources/sourcePreflight.ts";
 
@@ -16,6 +16,31 @@ afterEach(async () => {
 });
 
 describe("source status service", () => {
+  test("loads a large source inventory with a constant number of prepared statements", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-source-status-"));
+    tempDirs.push(tempDir);
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+    migrateDatabase(db);
+    const now = "2026-06-25T12:00:00.000Z";
+    const insert = db.prepare(
+      `INSERT INTO ingest_sources (
+        source_id, adapter, source_kind, source_path, confidence, discovered_at, last_seen_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+    );
+    db.exec("BEGIN");
+    for (let index = 0; index < 5_000; index += 1) {
+      insert.run(`opencode-source-${index}`, "opencode", "jsonl", `/tmp/opencode/source-${index}.jsonl`, "authoritative", now, now);
+    }
+    db.exec("COMMIT");
+    const measured = measurePreparedStatements(db);
+
+    const statuses = getSourceStatuses(measured.db);
+
+    expect(statuses).toHaveLength(5_000);
+    expect(measured.count()).toBeLessThanOrEqual(6);
+    db.close();
+  });
+
   test("source status reports real canonical counts", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-source-status-"));
     tempDirs.push(tempDir);
@@ -292,3 +317,20 @@ describe("source status service", () => {
     db.close();
   });
 });
+
+function measurePreparedStatements(db: MastheadDatabase): { count: () => number; db: MastheadDatabase } {
+  let preparedStatements = 0;
+  const measured = new Proxy(db, {
+    get(target, property) {
+      if (property === "prepare") {
+        return (...args: Parameters<MastheadDatabase["prepare"]>) => {
+          preparedStatements += 1;
+          return target.prepare(...args);
+        };
+      }
+      const value = Reflect.get(target, property, target) as unknown;
+      return typeof value === "function" ? value.bind(target) : value;
+    }
+  });
+  return { count: () => preparedStatements, db: measured };
+}

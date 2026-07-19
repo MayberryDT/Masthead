@@ -102,6 +102,21 @@ describe("deriveLiveStatus", () => {
     });
   });
 
+  test("not_installed when a shared config exists without a Masthead-managed connector", () => {
+    expect(
+      deriveLiveStatus({
+        installed: false,
+        configExists: true,
+        managedConnectorPresent: false,
+        missingEvents: ["SessionStart"],
+        mismatchedEvents: [],
+        error: undefined,
+        activation: undefined,
+        lastLiveEventAt: undefined
+      })
+    ).toEqual({ live: "not_installed" });
+  });
+
   test("repair when installed with mismatched events", () => {
     expect(
       deriveLiveStatus({

@@ -1,5 +1,4 @@
 import { ALL_RUNTIME_KINDS, type AdapterDiagnostic, type DiscoveredSource, type RuntimeKind } from "../../adapters/types.ts";
-import { countDistinctSessionsForSource } from "../db/sessionSourceRepository.ts";
 import { supportedAdapters, type AdapterImplementationState } from "../sources/supportedAdapters.ts";
 import type { SourcePreflightResult } from "../sources/sourcePreflight.ts";
 import type { MastheadDatabase } from "../db/sqlite.ts";
@@ -67,37 +66,51 @@ type CountsRow = {
   queuedRecords: number;
 };
 
-type ImportHealthRow = {
+type ImportCountsRow = {
   failure_count: number;
-  import_kind: string;
-  imported_count: number;
-  queued_count: number;
-  status: string;
-  updated_at: string;
+  imported_records: number;
+  last_sync_at: string;
+  queued_records: number;
+  source_id: string;
+};
+
+type SessionCountsRow = {
+  session_count: number;
+  source_id: string;
+};
+
+type SourcePolicyRow = {
+  decided_at: string;
+  enabled: number;
+  policy_kind: string;
+  source_id: string | null;
 };
 
 export function getSourceStatuses(db: MastheadDatabase, discoveredSources: DiscoveredSource[] = []): SourceStatusDto[] {
   upsertDiscoveredSources(db, discoveredSources);
   const rows = db.prepare("SELECT source_id, adapter, source_kind, source_path, confidence FROM ingest_sources ORDER BY source_id").all() as SourceRow[];
+  const importCountsBySource = loadImportCountsBySource(db);
+  const sessionCountsBySource = loadSessionCountsBySource(db);
+  const policies = loadSourcePolicies(db);
   return rows.filter(isVisibleSourceRow).map((row) => {
-    const counts = importCounts(db, row.source_id);
-    const importedSessions = countDistinctSessionsForSource(db, row.source_id);
+    const counts = importCountsBySource.get(row.source_id) ?? EMPTY_COUNTS;
+    const importedSessions = sessionCountsBySource.get(row.source_id) ?? 0;
     const discoveredSessions = importedSessions;
     const status = {
       confidence: row.confidence,
       discoveredSessions,
-      enrichmentEnabled: policyEnabled(db, row.source_id, "enrichment"),
+      enrichmentEnabled: policyEnabled(policies, row.source_id, "enrichment"),
       failureCount: counts.failureCount ?? 0,
       importedRecords: counts.importedRecords ?? 0,
       importedSessions,
       lastSyncAt: counts.lastSyncAt ?? undefined,
-      mcpEnabled: policyEnabled(db, row.source_id, "mcp_access", true),
+      mcpEnabled: policyEnabled(policies, row.source_id, "mcp_access", true),
       path: row.source_path ?? undefined,
       queuedRecords: counts.queuedRecords ?? 0,
       runtime: row.adapter as RuntimeKind,
       sourceId: row.source_id,
       sourceKind: row.source_kind,
-      transcriptImportEnabled: policyEnabled(db, row.source_id, "transcript_import")
+      transcriptImportEnabled: policyEnabled(policies, row.source_id, "transcript_import")
     } satisfies SourceStatusDto;
     return {
       ...status,
@@ -131,6 +144,13 @@ export type AdapterStatusInput =
 export function getAdapterStatuses(db: MastheadDatabase, input: AdapterStatusInput = []): AdapterStatusDto[] {
   const { sources: discoveredSources, preflights } = normalizeAdapterStatusInput(input);
   const sources = getSourceStatuses(db, discoveredSources);
+  return adapterStatusesFromSources(sources, preflights);
+}
+
+export function adapterStatusesFromSources(
+  sources: SourceStatusDto[],
+  preflights: SourcePreflightResult[] = []
+): AdapterStatusDto[] {
   const byRuntime = new Map<RuntimeKind, SourceStatusDto[]>();
   for (const source of sources) {
     const current = byRuntime.get(source.runtime) ?? [];
@@ -246,55 +266,120 @@ function upsertDiscoveredSources(db: MastheadDatabase, sources: DiscoveredSource
   }
 }
 
-function importCounts(db: MastheadDatabase, sourceId: string): CountsRow {
+const EMPTY_COUNTS: CountsRow = {
+  failureCount: 0,
+  importedRecords: 0,
+  lastSyncAt: null,
+  queuedRecords: 0
+};
+
+function loadImportCountsBySource(db: MastheadDatabase): Map<string, CountsRow> {
   const rows = db
     .prepare(
-      `SELECT import_kind, status, imported_count, queued_count, failure_count, updated_at
-      FROM import_jobs
-      WHERE source_id = ?
-      ORDER BY updated_at DESC, import_job_id DESC`
+      `WITH latest_terminal AS (
+        SELECT
+          source_id,
+          import_kind,
+          imported_count,
+          queued_count,
+          failure_count,
+          ROW_NUMBER() OVER (
+            PARTITION BY source_id, import_kind
+            ORDER BY updated_at DESC, import_job_id DESC
+          ) AS terminal_rank
+        FROM import_jobs
+        WHERE status NOT IN ('queued', 'running', 'cancelling')
+      ),
+      terminal_totals AS (
+        SELECT
+          source_id,
+          SUM(imported_count) AS imported_records,
+          SUM(queued_count) AS queued_records,
+          SUM(failure_count) AS failure_count
+        FROM latest_terminal
+        WHERE terminal_rank = 1
+        GROUP BY source_id
+      ),
+      active_totals AS (
+        SELECT source_id, SUM(queued_count) AS queued_records
+        FROM import_jobs
+        WHERE status IN ('queued', 'running', 'cancelling')
+        GROUP BY source_id
+      ),
+      latest_sync AS (
+        SELECT source_id, MAX(updated_at) AS last_sync_at
+        FROM import_jobs
+        GROUP BY source_id
+      )
+      SELECT
+        latest_sync.source_id,
+        COALESCE(terminal_totals.failure_count, 0) AS failure_count,
+        COALESCE(terminal_totals.imported_records, 0) AS imported_records,
+        latest_sync.last_sync_at,
+        COALESCE(terminal_totals.queued_records, 0) + COALESCE(active_totals.queued_records, 0) AS queued_records
+      FROM latest_sync
+      LEFT JOIN terminal_totals ON terminal_totals.source_id = latest_sync.source_id
+      LEFT JOIN active_totals ON active_totals.source_id = latest_sync.source_id`
     )
-    .all(sourceId) as ImportHealthRow[];
-  const latestTerminalByKind = new Map<string, ImportHealthRow>();
-  let queuedRecords = 0;
-  let lastSyncAt: string | null = null;
+    .all() as ImportCountsRow[];
+  const countsBySource = new Map<string, CountsRow>();
   for (const row of rows) {
-    lastSyncAt = latestDate([lastSyncAt ?? undefined, row.updated_at]) ?? null;
-    if (row.status === "queued" || row.status === "running" || row.status === "cancelling") {
-      queuedRecords += row.queued_count;
-      continue;
-    }
-    if (!latestTerminalByKind.has(row.import_kind)) {
-      latestTerminalByKind.set(row.import_kind, row);
-    }
+    countsBySource.set(row.source_id, {
+      failureCount: row.failure_count,
+      importedRecords: row.imported_records,
+      lastSyncAt: row.last_sync_at,
+      queuedRecords: row.queued_records
+    });
   }
-  let importedRecords = 0;
-  let failureCount = 0;
-  for (const row of latestTerminalByKind.values()) {
-    importedRecords += row.imported_count;
-    queuedRecords += row.queued_count;
-    failureCount += row.failure_count;
-  }
-  return {
-    failureCount,
-    importedRecords,
-    lastSyncAt,
-    queuedRecords
-  };
+  return countsBySource;
 }
 
-function policyEnabled(db: MastheadDatabase, sourceId: string, policyKind: string, defaultValue = false): boolean {
-  const row = db
+function loadSessionCountsBySource(db: MastheadDatabase): Map<string, number> {
+  const rows = db
     .prepare(
-      `SELECT enabled
-      FROM source_policies
-      WHERE policy_kind = ?
-        AND (source_id = ? OR source_id IS NULL)
-      ORDER BY source_id IS NOT NULL DESC, decided_at DESC
-      LIMIT 1`
+      `SELECT source_id, COUNT(DISTINCT session_id) AS session_count
+      FROM session_sources
+      GROUP BY source_id`
     )
-    .get(policyKind, sourceId) as { enabled: number } | undefined;
-  return row ? row.enabled === 1 : defaultValue;
+    .all() as SessionCountsRow[];
+  return new Map(rows.map((row) => [row.source_id, row.session_count]));
+}
+
+type LoadedSourcePolicies = {
+  globals: Map<string, boolean>;
+  sourceSpecific: Map<string, boolean>;
+};
+
+function loadSourcePolicies(db: MastheadDatabase): LoadedSourcePolicies {
+  const rows = db
+    .prepare(
+      `SELECT source_id, policy_kind, enabled, decided_at
+      FROM source_policies
+      WHERE policy_kind IN ('transcript_import', 'enrichment', 'mcp_access')
+      ORDER BY decided_at DESC`
+    )
+    .all() as SourcePolicyRow[];
+  const globals = new Map<string, boolean>();
+  const sourceSpecific = new Map<string, boolean>();
+  for (const row of rows) {
+    if (row.source_id === null) {
+      if (!globals.has(row.policy_kind)) globals.set(row.policy_kind, row.enabled === 1);
+      continue;
+    }
+    const key = sourcePolicyKey(row.source_id, row.policy_kind);
+    if (!sourceSpecific.has(key)) sourceSpecific.set(key, row.enabled === 1);
+  }
+  return { globals, sourceSpecific };
+}
+
+function policyEnabled(policies: LoadedSourcePolicies, sourceId: string, policyKind: string, defaultValue = false): boolean {
+  const sourceSpecific = policies.sourceSpecific.get(sourcePolicyKey(sourceId, policyKind));
+  if (sourceSpecific !== undefined) return sourceSpecific;
+  return policies.globals.get(policyKind) ?? defaultValue;
+}
+
+function sourcePolicyKey(sourceId: string, policyKind: string): string {
+  return `${sourceId}\0${policyKind}`;
 }
 
 function latestDate(values: Array<string | undefined>): string | undefined {

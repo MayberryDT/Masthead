@@ -21,8 +21,10 @@ without promoting detector output into authoring obligations.
 
 ## Decision
 
-1. Users select sessions and copy one disposable agent prompt.
-2. The agent must enrich each selected session before its dossier can publish.
+1. Users select sessions and copy one disposable agent prompt for every compile-ready session in
+   that selection; review-needed sessions stay selected but are disclosed and excluded from the
+   request rather than blocking ready work.
+2. The agent must enrich each session included in the request before its dossier can publish.
 3. The daemon rebuilds the original canonical dossier after enrichment; agents do not replace its presentation.
 4. The agent may create zero or more runbooks, ADRs, or incident timelines from the selected evidence.
 5. Deterministic analysis may offer nonbinding suggestions, including canonical-rendering cues, but cannot require or prohibit an artifact kind.
@@ -30,7 +32,8 @@ without promoting detector output into authoring obligations.
 7. V1 and V2 runs remain audit-only and are never reused by V3.
 
 The selection-scoped protocol is `workbench-authoring-v3`. **Copy Agent Prompt** copies a disposable
-request for the selected sessions. **Artifact suggestion** means a nonbinding detector hint supplied
+request for the compile-ready subset of the selected sessions and truthfully reports any excluded
+review-needed sessions. **Artifact suggestion** means a nonbinding detector hint supplied
 privately to the agent. **Agent-led authoring** means the agent enriches selected sessions and
 chooses useful artifacts. **Enriched dossier** means the original canonical dossier structure
 rendered after current durable enrichment. **Publication** means atomic admission of validated

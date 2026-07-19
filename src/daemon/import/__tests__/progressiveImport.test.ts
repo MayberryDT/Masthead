@@ -2,6 +2,7 @@ import { writeFile, mkdir, mkdtemp, rm, symlink, utimes } from "node:fs/promises
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { AddressInfo } from "node:net";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, test } from "vitest";
 import type { DaemonConfig } from "../../config.ts";
 import { createImportJob, getImportJob, listImportJobs, updateImportJob, type ImportJobDto } from "../../db/importJobRepository.ts";
@@ -27,7 +28,7 @@ type ImportActionResponse = Record<string, unknown> & {
 describe("progressive OpenCode imports", () => {
   test("queues adapter metadata import jobs and persists imported progress", async () => {
     const { daemon, opencodeRoot } = await createTestHarness();
-    await writeJsonl(join(opencodeRoot, "session_index.jsonl"), [
+    await writeOpenCodeDatabase(opencodeRoot, [
       {
         session_id: "metadata-session",
         timestamp: "2026-06-25T12:00:00.000Z",
@@ -59,7 +60,7 @@ describe("progressive OpenCode imports", () => {
 
   test("imports approved transcripts into sessions without duplicating a second import", async () => {
     const { daemon, opencodeRoot } = await createTestHarness();
-    await writeJsonl(join(opencodeRoot, "sessions", "2026", "06", "25", "session.jsonl"), [
+    await writeOpenCodeDatabase(opencodeRoot, [
       {
         type: "session_meta",
         timestamp: "2026-06-25T12:00:00.000Z",
@@ -103,8 +104,7 @@ describe("progressive OpenCode imports", () => {
 
   test("resumes durable transcript work after daemon restart without duplicating the job", async () => {
     const { daemon, opencodeRoot, tempDir } = await createTestHarness();
-    const transcriptPath = join(opencodeRoot, "sessions", "2026", "06", "25", "restart.jsonl");
-    await writeJsonl(transcriptPath, [
+    const transcriptPath = await writeOpenCodeDatabase(opencodeRoot, [
       {
         type: "session_meta",
         timestamp: "2026-06-25T12:00:00.000Z",
@@ -140,7 +140,7 @@ describe("progressive OpenCode imports", () => {
         path: transcriptPath,
         runtime: "opencode",
         sourceId,
-        sourceKind: "jsonl"
+        sourceKind: "sqlite"
       }]
     });
     daemon.database.prepare("UPDATE import_work_units SET status = 'running' WHERE work_unit_id = ?").run(manifest.units[0].workUnitId);
@@ -156,7 +156,7 @@ describe("progressive OpenCode imports", () => {
 
   test("imports transcript token counts onto existing hook sessions", async () => {
     const { daemon, opencodeRoot } = await createTestHarness();
-    await writeJsonl(join(opencodeRoot, "sessions", "2026", "06", "25", "session.jsonl"), [
+    await writeOpenCodeDatabase(opencodeRoot, [
       {
         type: "session_meta",
         timestamp: "2026-06-25T12:00:00.000Z",
@@ -203,8 +203,7 @@ describe("progressive OpenCode imports", () => {
 
   test("does not import hook transcriptPath before transcript import approval", async () => {
     const { daemon, opencodeRoot } = await createTestHarness();
-    const transcriptPath = join(opencodeRoot, "sessions", "2026", "06", "25", "unapproved-token-session.jsonl");
-    await writeJsonl(transcriptPath, [
+    const transcriptPath = await writeOpenCodeDatabase(opencodeRoot, [
       {
         type: "session_meta",
         timestamp: "2026-06-25T12:00:00.000Z",
@@ -241,8 +240,7 @@ describe("progressive OpenCode imports", () => {
 
   test("does not import hook transcriptPath on session open when hook transcript catch-up is disabled", async () => {
     const { daemon, opencodeRoot } = await createTestHarness({ hookTranscriptCatchupEnabled: false });
-    const transcriptPath = join(opencodeRoot, "sessions", "2026", "06", "25", "disabled-catchup-session.jsonl");
-    await writeJsonl(transcriptPath, [
+    const transcriptPath = await writeOpenCodeDatabase(opencodeRoot, [
       {
         type: "session_meta",
         timestamp: "2026-06-25T12:00:00.000Z",
@@ -279,7 +277,7 @@ describe("progressive OpenCode imports", () => {
 
   test("keeps hook ingestion accepted when approved transcriptPath is missing", async () => {
     const { daemon, opencodeRoot } = await createTestHarness();
-    const transcriptPath = join(opencodeRoot, "sessions", "2026", "06", "25", "missing-token-session.jsonl");
+    const transcriptPath = join(opencodeRoot, "opencode.db");
     const baseUrl = await listen(daemon);
 
     await ingestHook(baseUrl, {
@@ -311,8 +309,8 @@ describe("progressive OpenCode imports", () => {
 
   test("does not import hook transcriptPath symlinks that escape the OpenCode sessions tree", async () => {
     const { daemon, opencodeRoot, tempDir } = await createTestHarness();
-    const outsideTranscriptPath = join(tempDir, "outside-transcript.jsonl");
-    await writeJsonl(outsideTranscriptPath, [
+    const outsideTranscriptRoot = join(tempDir, "outside-opencode");
+    const outsideTranscriptPath = await writeOpenCodeDatabase(outsideTranscriptRoot, [
       {
         type: "session_meta",
         timestamp: "2026-06-25T12:00:00.000Z",
@@ -327,8 +325,8 @@ describe("progressive OpenCode imports", () => {
         }
       }
     ]);
-    const transcriptPath = join(opencodeRoot, "sessions", "2026", "06", "25", "escaped-token-session.jsonl");
-    await mkdir(dirname(transcriptPath), { recursive: true });
+    const transcriptPath = join(opencodeRoot, "opencode.db");
+    await mkdir(opencodeRoot, { recursive: true });
     await symlink(outsideTranscriptPath, transcriptPath);
     const baseUrl = await listen(daemon);
 
@@ -347,7 +345,7 @@ describe("progressive OpenCode imports", () => {
 
   test("imports useful transcript rows and serves them through the transcript endpoint", async () => {
     const { daemon, opencodeRoot } = await createTestHarness();
-    await writeJsonl(join(opencodeRoot, "sessions", "2026", "06", "25", "useful-session.jsonl"), [
+    await writeOpenCodeDatabase(opencodeRoot, [
       {
         type: "session_meta",
         timestamp: "2026-06-25T12:00:00.000Z",
@@ -532,7 +530,7 @@ describe("progressive OpenCode imports", () => {
     ).toMatchObject({ scopeReason: "outside_recent_range", status: "skipped", timestampBasis: "semantic" });
   });
 
-  test("imports one canonical Grok conversation from chat history and auxiliary files", async () => {
+  test("imports one canonical Grok conversation while ignoring auxiliary files", async () => {
     const { daemon, tempDir } = await createTestHarness();
     const conversationId = "019f42f6-8ada-7001-afff-c722e75faf45";
     const grokRoot = join(tempDir, ".grok", "sessions");
@@ -546,7 +544,7 @@ describe("progressive OpenCode imports", () => {
     await writeRawJsonl(join(conversationDir, "updates.jsonl"), [{ status: "complete" }]);
     await writeRawJsonl(join(conversationDir, "feedback.jsonl"), [{ score: 1 }]);
     const baseUrl = await listen(daemon);
-    const sourceIds = await approveRuntimeTranscriptSources(baseUrl, daemon, "grok", grokRoot, 3);
+    const sourceIds = await approveRuntimeTranscriptSources(baseUrl, daemon, "grok", grokRoot, 1);
 
     const previewResponse = await fetch(`${baseUrl}/sources/import/preview`, {
       body: JSON.stringify({ runtimes: ["grok"], sourceIds }),
@@ -605,7 +603,7 @@ async function createTestHarness(
 ): Promise<{ daemon: MastheadDaemon; tempDir: string; opencodeRoot: string }> {
   const tempDir = options.tempDir ?? (await mkdtemp(join(tmpdir(), "masthead-progressive-import-")));
   if (!options.tempDir) tempDirs.push(tempDir);
-  const opencodeRoot = join(tempDir, ".opencode");
+  const opencodeRoot = join(tempDir, ".local", "share", "opencode");
   await mkdir(opencodeRoot, { recursive: true });
   const config: DaemonConfig = {
     allowedOrigins: ["http://127.0.0.1:5173"],
@@ -628,6 +626,49 @@ async function closeTrackedDaemon(daemon: MastheadDaemon): Promise<void> {
   const index = daemons.indexOf(daemon);
   if (index >= 0) daemons.splice(index, 1);
   await daemon.close();
+}
+
+async function writeOpenCodeDatabase(root: string, rows: unknown[]): Promise<string> {
+  await mkdir(root, { recursive: true });
+  const path = join(root, "opencode.db");
+  const db = new DatabaseSync(path);
+  db.exec(`CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, title TEXT, time_created INTEGER);
+    CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, data TEXT);
+    CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, time_created INTEGER, data TEXT);`);
+  let sessionId: string | undefined;
+  let index = 0;
+  const sessions = db.prepare("INSERT OR IGNORE INTO session (id, directory, title, time_created) VALUES (?, ?, ?, ?)");
+  const messages = db.prepare("INSERT INTO message (id, session_id, time_created, data) VALUES (?, ?, ?, ?)");
+  const parts = db.prepare("INSERT INTO part (id, message_id, session_id, time_created, data) VALUES (?, ?, ?, ?, ?)");
+  for (const row of rows as Array<Record<string, any>>) {
+    const payload = row.payload && typeof row.payload === "object" ? row.payload : {};
+    const at = Date.parse(row.timestamp ?? "2026-06-25T12:00:00.000Z");
+    if (row.type === "session_meta" || row.session_id || row.sessionId) {
+      const discoveredSessionId = payload.session_id ?? payload.sessionId ?? row.session_id ?? row.sessionId;
+      if (typeof discoveredSessionId !== "string") continue;
+      sessionId = discoveredSessionId;
+      sessions.run(discoveredSessionId, payload.cwd ?? null, payload.title ?? row.title ?? row.project ?? null, at);
+      if (row.type !== "session_meta") continue;
+    }
+    if (!sessionId) continue;
+    const messageId = `message-${++index}`;
+    if (row.type === "response_item" && payload.type === "message") {
+      messages.run(messageId, sessionId, at, JSON.stringify({
+        ...(payload.role === "assistant" ? { modelID: "gpt-5", providerID: "openai" } : {}),
+        role: payload.role
+      }));
+      const text = (payload.content ?? []).map((item: Record<string, unknown>) => item.text).filter(Boolean).join("\n");
+      parts.run(`part-${index}`, messageId, sessionId, at, JSON.stringify({ text, type: "text" }));
+    } else if (row.type === "response_item" && payload.type === "function_call") {
+      messages.run(messageId, sessionId, at, JSON.stringify({ role: "assistant" }));
+      parts.run(`part-${index}`, messageId, sessionId, at, JSON.stringify({ callID: payload.call_id ?? `call-${index}`, state: { input: JSON.parse(payload.arguments ?? "{}"), status: "completed", time: { start: at, end: at }, output: "Tests passed." }, tool: payload.name, type: "tool" }));
+    } else if (row.type === "event_msg" && payload.type === "token_count") {
+      const usage = payload.info?.last_token_usage ?? {};
+      messages.run(messageId, sessionId, at, JSON.stringify({ modelID: "gpt-5", providerID: "openai", role: "assistant", tokens: { input: usage.input_tokens, output: usage.output_tokens } }));
+    }
+  }
+  db.close();
+  return path;
 }
 
 async function writeJsonl(path: string, rows: unknown[]): Promise<void> {
@@ -737,17 +778,17 @@ async function approveTranscriptSource(baseUrl: string, daemon: MastheadDaemon, 
   const now = "2026-06-25T12:00:00.000Z";
   const scan = await fetch(`${baseUrl}/sources/scan`, { headers: { accept: "application/json" }, method: "POST" });
   expect(scan.status).toBe(202);
-  const sessionsRoot = join(opencodeRoot, "sessions");
+  const databasePath = join(opencodeRoot, "opencode.db");
   const row = daemon.database
     .prepare(
       `SELECT source_id AS sourceId
       FROM ingest_sources
       WHERE adapter = 'opencode'
-        AND source_path LIKE ?
+        AND source_path = ?
       ORDER BY length(source_path) ASC, source_id ASC
       LIMIT 1`
     )
-    .get(`${sessionsRoot}%`) as { sourceId: string } | undefined;
+    .get(databasePath) as { sourceId: string } | undefined;
   expect(row).toBeDefined();
   const sourceId = row?.sourceId ?? "";
   setSourcePolicy(daemon.database, {

@@ -52,6 +52,7 @@ describe("Codex hook admin config", () => {
 
     expect(verifyMastheadHookConfig(next, { command, timeout: 2 })).toEqual({
       installed: true,
+      managedConnectorPresent: true,
       missingEvents: [],
       mismatchedEvents: []
     });
@@ -97,6 +98,7 @@ describe("Codex hook admin config", () => {
 
     expect(verifyMastheadHookConfig(partial)).toEqual({
       installed: false,
+      managedConnectorPresent: true,
       missingEvents: ["Stop"],
       mismatchedEvents: []
     });
@@ -109,6 +111,7 @@ describe("Codex hook admin config", () => {
 
     expect(verifyMastheadHookConfig(partial)).toEqual({
       installed: false,
+      managedConnectorPresent: true,
       missingEvents: ["UserPromptSubmit", "PreToolUse"],
       mismatchedEvents: []
     });
@@ -119,6 +122,7 @@ describe("Codex hook admin config", () => {
 
     expect(verifyMastheadHookConfig(installed, { command })).toEqual({
       installed: false,
+      managedConnectorPresent: true,
       missingEvents: [],
       mismatchedEvents: ["SessionStart", "UserPromptSubmit", "PermissionRequest", "PreToolUse", "PostToolUse", "Stop"]
     });

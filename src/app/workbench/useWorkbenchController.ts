@@ -2,7 +2,6 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } f
 import {
   getWorkbenchAuthoringCapabilities,
   getWorkbenchActivity,
-  getWorkbenchImportHealthSummary,
   getWorkbenchNotAddedSessions,
   getWorkbenchNotAddedSummary,
   getWorkbenchSessions,
@@ -17,7 +16,6 @@ import type {
   WorkbenchActivityDto,
   WorkbenchNotAddedSessionDto,
   WorkbenchNotAddedSummaryDto,
-  WorkbenchImportHealthSummaryDto,
   WorkbenchQueueSessionDto,
   WorkbenchSessionsResponse
 } from "../../shared/workbench";
@@ -53,6 +51,8 @@ export type UseWorkbenchControllerResult = {
   actionBusy: boolean;
   actionError?: string;
   activity: WorkbenchActivityDto[];
+  agentPromptExcludedCount: number;
+  agentPromptSessionCount: number;
   canRun: (kind: WorkbenchActionKind) => boolean;
   clearActionFeedback: () => void;
   clearSelection: () => void;
@@ -64,7 +64,6 @@ export type UseWorkbenchControllerResult = {
   notAddedOpen: boolean;
   notAddedSessions: WorkbenchNotAddedSessionDto[];
   notAddedSummary?: WorkbenchNotAddedSummaryDto;
-  importHealthSummary?: WorkbenchImportHealthSummaryDto;
   page: number;
   pageSize: number;
   retry: () => void;
@@ -89,7 +88,6 @@ export function useWorkbenchController({
   const [sessions, setSessions] = useState<WorkbenchQueueSessionDto[]>([]);
   const [activity, setActivity] = useState<WorkbenchActivityDto[]>([]);
   const [notAddedSummary, setNotAddedSummary] = useState<WorkbenchNotAddedSummaryDto>();
-  const [importHealthSummary, setImportHealthSummary] = useState<WorkbenchImportHealthSummaryDto>();
   const [notAddedSessions, setNotAddedSessions] = useState<WorkbenchNotAddedSessionDto[]>([]);
   const [authoringCapabilities, setAuthoringCapabilities] = useState<WorkbenchAuthoringCapabilitiesDto>();
   const [notAddedOpen, setNotAddedOpenState] = useState(false);
@@ -117,7 +115,7 @@ export function useWorkbenchController({
       const capabilitiesPromise = getWorkbenchAuthoringCapabilities(activeProjectionUrl, {
         signal: options.signal
       }).catch(() => undefined);
-      const [response, activityResponse, notAdded, importHealth, capabilities] = await Promise.all([
+      const [response, activityResponse, notAdded, capabilities] = await Promise.all([
         getWorkbenchSessions(activeProjectionUrl, {
           limit: pageSize,
           offset: pageIndex * pageSize,
@@ -125,7 +123,6 @@ export function useWorkbenchController({
         }),
         getWorkbenchActivity(activeProjectionUrl, { limit: 30, signal: options.signal }),
         getWorkbenchNotAddedSummary(activeProjectionUrl, { signal: options.signal }),
-        getWorkbenchImportHealthSummary(activeProjectionUrl, { signal: options.signal }),
         capabilitiesPromise
       ]);
       if (options.signal?.aborted || requestId !== loadRequestId.current) return;
@@ -141,7 +138,6 @@ export function useWorkbenchController({
       setTotal(typeof response.total === "number" ? response.total : response.sessions.length);
       setActivity(activityResponse.activity);
       setNotAddedSummary(notAdded);
-      setImportHealthSummary(importHealth);
       setAuthoringCapabilities(capabilities);
       setSelectedCompileReadySessionIds((current) => {
         const next = new Set(current);
@@ -212,6 +208,12 @@ export function useWorkbenchController({
   );
 
   const deferredSelectedSessionIds = useDeferredValue(selectedSessionIds);
+  const agentPromptSessionIds = useMemo(
+    () => Array.from(selectedSessionIds).filter((sessionId) => selectedCompileReadySessionIds.has(sessionId)),
+    [selectedCompileReadySessionIds, selectedSessionIds]
+  );
+  const agentPromptSessionCount = agentPromptSessionIds.length;
+  const agentPromptExcludedCount = selectedSessionIds.size - agentPromptSessionCount;
   const handoffSessions = useMemo(
     () => sessions.filter((session) => deferredSelectedSessionIds.has(session.sessionId)),
     [deferredSelectedSessionIds, sessions]
@@ -220,15 +222,15 @@ export function useWorkbenchController({
   const handoffText = useMemo(
     () =>
       authoringCapabilities?.bundleVersion === "workbench-authoring-v3" &&
-      isCompileReadySelection(selectedSessionIds, selectedCompileReadySessionIds)
+      agentPromptSessionCount > 0
         ? buildWorkbenchHandoff({
             authoringCommand: authoringCapabilities.command,
             databaseId: authoringCapabilities.databaseId,
-            sessionIds: Array.from(selectedSessionIds),
+            sessionIds: agentPromptSessionIds,
             sessions: handoffSessions
           })
         : "",
-    [authoringCapabilities, handoffSessions, selectedSessionIds]
+    [agentPromptSessionCount, agentPromptSessionIds, authoringCapabilities, handoffSessions]
   );
 
   const canRun = useCallback(
@@ -237,7 +239,7 @@ export function useWorkbenchController({
       if (kind === "enroll_missing") return true;
       if (kind === "copy_agent_prompt") {
         return authoringCapabilities?.bundleVersion === "workbench-authoring-v3" &&
-          isCompileReadySelection(selectedSessionIds, selectedCompileReadySessionIds);
+          agentPromptSessionCount > 0;
       }
       if (selectedSessions.length === 0) return false;
 
@@ -272,7 +274,7 @@ export function useWorkbenchController({
           return false;
       }
     },
-    [actionBusy, authoringCapabilities, isLive, selectedCompileReadySessionIds, selectedSessionIds, selectedSessions]
+    [actionBusy, agentPromptSessionCount, authoringCapabilities, isLive, selectedSessions]
   );
 
   const runAction = useCallback(
@@ -281,7 +283,16 @@ export function useWorkbenchController({
 
       if (kind === "copy_agent_prompt") {
         setActionError(undefined);
-        setLastActionSummary(`Agent prompt copied for ${selectedSessionIds.size} sessions`);
+        const copiedLabel = `Agent prompt copied for ${agentPromptSessionCount} ready session${
+          agentPromptSessionCount === 1 ? "" : "s"
+        }`;
+        setLastActionSummary(
+          agentPromptExcludedCount === 0
+            ? copiedLabel
+            : `${copiedLabel}; ${agentPromptExcludedCount} selected session${
+              agentPromptExcludedCount === 1 ? " needs" : "s need"
+            } review and ${agentPromptExcludedCount === 1 ? "was" : "were"} left out`
+        );
         return;
       }
 
@@ -364,7 +375,16 @@ export function useWorkbenchController({
         setActionBusy(false);
       }
     },
-    [activeProjectionUrl, canRun, load, onLibraryChanged, selectedSessionIds, sessions]
+    [
+      activeProjectionUrl,
+      agentPromptExcludedCount,
+      agentPromptSessionCount,
+      canRun,
+      load,
+      onLibraryChanged,
+      selectedSessionIds,
+      sessions
+    ]
   );
 
   const retry = useCallback(() => {
@@ -441,6 +461,8 @@ export function useWorkbenchController({
     actionBusy,
     actionError,
     activity,
+    agentPromptExcludedCount,
+    agentPromptSessionCount,
     canRun,
     clearActionFeedback,
     clearSelection,
@@ -454,7 +476,6 @@ export function useWorkbenchController({
     notAddedOpen,
     notAddedSessions,
     notAddedSummary,
-    importHealthSummary,
     page,
     pageSize,
     retry,
@@ -473,11 +494,6 @@ export function useWorkbenchController({
 function isCompileReadySession(session: WorkbenchQueueSessionDto): boolean {
   return (session.transcriptStatus === "available" || session.transcriptStatus === "imported") &&
     session.qualityStatus === "passed";
-}
-
-function isCompileReadySelection(selectedSessionIds: Set<string>, compileReadySessionIds: Set<string>): boolean {
-  return selectedSessionIds.size > 0 &&
-    Array.from(selectedSessionIds).every((sessionId) => compileReadySessionIds.has(sessionId));
 }
 
 async function resolveSelectedCompileReadiness(

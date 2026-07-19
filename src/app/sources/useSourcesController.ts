@@ -192,21 +192,14 @@ export function useSourcesController({ activeProjectionUrl, activeSurface, isLiv
   }, [activeProjectionUrl, loadInventory]);
 
   useEffect(() => {
-    if (!isLive) return;
-    void loadInventory().catch((error: unknown) => {
-      console.error("[masthead] Source inventory refresh failed", error);
-    });
-  }, [isLive, loadInventory]);
-
-  useEffect(() => {
-    if (activeSurface !== "sources") return;
+    if (!isLive || activeSurface !== "sources") return;
     if (inventoryLoadInFlightRef.current) return;
     const lastLoadedAt = inventoryLoadedForUrlRef.current === activeProjectionUrl ? inventoryLoadedAtRef.current : undefined;
     if (!shouldRefreshSourceInventory({ activeSurface, lastLoadedAt, now: Date.now() })) return;
     void loadInventory().catch((error: unknown) => {
       setStatus(`Source inventory refresh failed: ${error instanceof Error ? error.message : String(error)}`);
     });
-  }, [activeProjectionUrl, activeSurface, loadInventory]);
+  }, [activeProjectionUrl, activeSurface, isLive, loadInventory]);
 
   const pollActiveImports = useCallback(async () => {
     const activeImportIds = new Set(

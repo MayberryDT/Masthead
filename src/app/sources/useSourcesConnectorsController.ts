@@ -9,12 +9,19 @@ import {
   uninstallHarnessConnector,
   type HarnessConnectorsSnapshotDto
 } from "../daemonClient";
-import { readOnboardingDismissed, writeOnboardingDismissed } from "../onboardingPreference";
+import {
+  readOnboardingDismissed,
+  resolveOnboardingDismissed,
+  writeOnboardingDismissed
+} from "../onboardingPreference";
+import type { ConnectorActionRequired } from "../../shared/harnessConnectors";
 
 export type UseSourcesConnectorsControllerOptions = {
   readOnly?: boolean;
   /** When true (default), load connectors on mount and when the projection URL changes. */
   autoLoad?: boolean;
+  /** Canonical database identity used to keep first-run dismissal profile-specific. */
+  databaseId?: string;
 };
 
 export type UseSourcesConnectorsControllerResult = {
@@ -37,7 +44,7 @@ export type UseSourcesConnectorsControllerResult = {
   discoverHistory: () => Promise<void>;
   enable: (runtime: string) => Promise<boolean>;
   enableAllDetected: () => Promise<void>;
-  test: (runtime: string) => Promise<{ verified: boolean; needsAction: boolean }>;
+  test: (runtime: string) => Promise<{ verified: boolean; needsAction: boolean; actionRequired?: ConnectorActionRequired }>;
   uninstall: (runtime: string) => Promise<void>;
   confirmActivation: (runtime: string) => Promise<void>;
 };
@@ -70,6 +77,11 @@ export function useSourcesConnectorsController(
 ): UseSourcesConnectorsControllerResult {
   const readOnly = options?.readOnly ?? false;
   const autoLoad = options?.autoLoad ?? true;
+  const databaseId = options?.databaseId?.trim() || undefined;
+  const readDismissedForActiveDatabase = useCallback(
+    () => (databaseId ? readOnboardingDismissed(databaseId) : false),
+    [databaseId]
+  );
 
   const [snapshot, setSnapshot] = useState<HarnessConnectorsSnapshotDto>();
   const [busy, setBusy] = useState(false);
@@ -77,9 +89,19 @@ export function useSourcesConnectorsController(
   const [cardActionStatus, setCardActionStatus] = useState<Record<string, string>>({});
   const [actionRuntime, setActionRuntime] = useState<string | undefined>();
   const [selectedRuntime, setSelectedRuntime] = useState<string | undefined>();
-  const [onboardingDismissed, setOnboardingDismissed] = useState(() => readOnboardingDismissed());
+  const [onboardingDismissed, setOnboardingDismissed] = useState(readDismissedForActiveDatabase);
+  const [resolvedOnboardingDatabaseId, setResolvedOnboardingDatabaseId] = useState<string>();
   const [manualOnboardingOpen, setManualOnboardingOpen] = useState(false);
-  const [autoOnboardingEligible, setAutoOnboardingEligible] = useState(() => !readOnboardingDismissed());
+  const [autoOnboardingEligible, setAutoOnboardingEligible] = useState(() => !readDismissedForActiveDatabase());
+
+  useEffect(() => {
+    if (!databaseId) return;
+    const dismissed = resolveOnboardingDismissed(databaseId);
+    setOnboardingDismissed(dismissed);
+    setAutoOnboardingEligible(!dismissed);
+    setManualOnboardingOpen(false);
+    setResolvedOnboardingDatabaseId(databaseId);
+  }, [databaseId]);
 
   const snapshotRef = useRef(snapshot);
   snapshotRef.current = snapshot;
@@ -88,10 +110,10 @@ export function useSourcesConnectorsController(
   const applySnapshot = useCallback((next: HarnessConnectorsSnapshotDto) => {
     setSnapshot(next);
     snapshotRef.current = next;
-    if (!readOnboardingDismissed() && shouldOpenFirstRunOnboarding(next)) {
+    if (!readDismissedForActiveDatabase() && shouldOpenFirstRunOnboarding(next)) {
       setAutoOnboardingEligible(true);
     }
-  }, []);
+  }, [readDismissedForActiveDatabase]);
 
   const load = useCallback(async () => {
     const generation = ++loadGenerationRef.current;
@@ -252,14 +274,22 @@ export function useSourcesConnectorsController(
         const connector = next.connectors.find((row) => row.runtime === runtime);
         const lastTest = connector?.lastTest;
         if (lastTest?.status === "passed") {
-          setCardStatus(setCardActionStatus, runtime, `Test passed — ${lastTest.message}`);
-          return { verified: true, needsAction: connector?.live === "needs_action" };
+          setCardStatus(setCardActionStatus, runtime, "Endpoint test passed.");
+          return {
+            verified: true,
+            needsAction: connector?.live === "needs_action" || connector?.live === "error",
+            actionRequired: connector?.actionRequired ?? (connector?.live === "error" ? "repair" : undefined)
+          };
         } else if (lastTest?.status === "failed") {
           setCardStatus(setCardActionStatus, runtime, `Test failed — ${lastTest.message}`);
         } else {
           setCardStatus(setCardActionStatus, runtime, "Test finished with no result payload.");
         }
-        return { verified: false, needsAction: connector?.live === "needs_action" };
+        return {
+          verified: false,
+          needsAction: connector?.live === "needs_action" || connector?.live === "error",
+          actionRequired: connector?.actionRequired ?? (connector?.live === "error" ? "repair" : undefined)
+        };
       } catch (error) {
         setCardStatus(setCardActionStatus, runtime, `Test failed: ${errorMessage(error)}`);
         return { verified: false, needsAction: false };
@@ -322,26 +352,28 @@ export function useSourcesConnectorsController(
 
   const openOnboarding = useCallback(() => {
     setOnboardingDismissed(false);
-    writeOnboardingDismissed(false);
+    if (databaseId) writeOnboardingDismissed(false, databaseId);
     setManualOnboardingOpen(true);
-  }, []);
+  }, [databaseId]);
 
   const closeOnboarding = useCallback(() => {
     setManualOnboardingOpen(false);
     setOnboardingDismissed(true);
     setAutoOnboardingEligible(false);
-    writeOnboardingDismissed(true);
-  }, []);
+    if (databaseId) writeOnboardingDismissed(true, databaseId);
+  }, [databaseId]);
 
   const skipOnboarding = useCallback(() => {
     setManualOnboardingOpen(false);
     setOnboardingDismissed(true);
     setAutoOnboardingEligible(false);
-    writeOnboardingDismissed(true);
-  }, []);
+    if (databaseId) writeOnboardingDismissed(true, databaseId);
+  }, [databaseId]);
 
   const onboardingOpen =
-    manualOnboardingOpen || (!readOnly && !onboardingDismissed && autoOnboardingEligible);
+    Boolean(databaseId) &&
+    resolvedOnboardingDatabaseId === databaseId &&
+    (manualOnboardingOpen || (!readOnly && !onboardingDismissed && autoOnboardingEligible));
 
   return {
     snapshot,

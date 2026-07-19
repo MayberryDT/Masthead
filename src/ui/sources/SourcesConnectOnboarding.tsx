@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ImportJob } from "../../app/daemonClient";
-import type { HarnessConnectorDto, HarnessConnectorsSnapshotDto } from "../../shared/harnessConnectors";
+import type { ConnectorActionRequired, HarnessConnectorDto, HarnessConnectorsSnapshotDto } from "../../shared/harnessConnectors";
 import type { SourcesSetupRunInput } from "../../shared/sourcesSetup";
+import sailLogoUrl from "../assets/masthead-logo-sail.png";
 import { AppButton } from "../primitives/AppButton";
 import { StatusBadge } from "../primitives/StatusBadge";
 import { liveLabel, liveTone, presenceLabel, presenceTone } from "./HarnessConnectorRow";
+import { isHostActivationAction, pendingActionTestCopy } from "./connectorStatusPresentation";
+
+type ConnectorTestResult = { verified: boolean; needsAction: boolean; actionRequired?: ConnectorActionRequired };
 
 export type SourcesConnectOnboardingProps = {
   open: boolean;
@@ -14,7 +18,7 @@ export type SourcesConnectOnboardingProps = {
   onSkip: () => void;
   onDiscover: () => Promise<void> | void;
   onEnable: (runtime: string) => Promise<void> | void;
-  onTest: (runtime: string) => Promise<boolean | { verified: boolean; needsAction: boolean }> | boolean | { verified: boolean; needsAction: boolean };
+  onTest: (runtime: string) => Promise<boolean | ConnectorTestResult> | boolean | ConnectorTestResult;
   onConfirmActivation?: (runtime: string) => Promise<void> | void;
   imports?: ImportJob[];
   onImportHistory?: (input: SourcesSetupRunInput) => Promise<unknown> | unknown;
@@ -25,6 +29,11 @@ export type SourcesConnectOnboardingProps = {
 type Step = "intro" | "connect" | "history";
 type Stage = "discover" | "connect" | "history" | "ready";
 type HistoryChoice = "everything" | "recent";
+type ConnectionState = {
+  status: "enabling" | "verifying" | "verified" | "verified_needs_action" | "failed";
+  actionRequired?: ConnectorActionRequired;
+  verified?: boolean;
+};
 
 const stepRail: Array<{ id: Stage; label: string; description: string }> = [
   { id: "discover", label: "Discover", description: "Find harnesses and local history." },
@@ -48,7 +57,7 @@ export function SourcesConnectOnboarding({
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [discoverStarted, setDiscoverStarted] = useState(false);
   const [enableRunning, setEnableRunning] = useState(false);
-  const [connectionStates, setConnectionStates] = useState<Record<string, "enabling" | "verifying" | "verified" | "failed">>({});
+  const [connectionStates, setConnectionStates] = useState<Record<string, ConnectionState>>({});
   const [discoverAttempted, setDiscoverAttempted] = useState(false);
   const [historyChoice, setHistoryChoice] = useState<HistoryChoice>("everything");
   const [importRunning, setImportRunning] = useState(false);
@@ -115,20 +124,35 @@ export function SourcesConnectOnboarding({
     let failed = false;
     try {
       for (const target of selectedConnectors) {
-        const alreadyInstalled = connectionStates[target.runtime] === "verified";
+        const alreadyInstalled =
+          connectionStates[target.runtime]?.status === "verified" ||
+          connectionStates[target.runtime]?.status === "verified_needs_action";
         if (!alreadyInstalled) {
-          setConnectionStates((current) => ({ ...current, [target.runtime]: "enabling" }));
+          setConnectionStates((current) => ({ ...current, [target.runtime]: { status: "enabling" } }));
           await onEnable(target.runtime);
         }
-        setConnectionStates((current) => ({ ...current, [target.runtime]: "verifying" }));
+        setConnectionStates((current) => ({ ...current, [target.runtime]: { status: "verifying" } }));
         const verification = await onTest(target.runtime);
         const verified = typeof verification === "boolean" ? verification : verification.verified;
+        const needsAction = typeof verification === "boolean" ? false : verification.needsAction;
+        const actionRequired = typeof verification === "boolean" ? undefined : verification.actionRequired;
         if (!verified) {
           failed = true;
-          setConnectionStates((current) => ({ ...current, [target.runtime]: "failed" }));
+          setConnectionStates((current) => ({ ...current, [target.runtime]: { status: "failed", actionRequired, verified: false } }));
           continue;
         }
-        setConnectionStates((current) => ({ ...current, [target.runtime]: "verified" }));
+        if (needsAction && !isHostActivationAction(actionRequired)) {
+          failed = true;
+          setConnectionStates((current) => ({ ...current, [target.runtime]: { status: "failed", actionRequired, verified: true } }));
+          continue;
+        }
+        setConnectionStates((current) => ({
+          ...current,
+          [target.runtime]: {
+            status: needsAction ? "verified_needs_action" : "verified",
+            actionRequired
+          }
+        }));
       }
     } catch {
       failed = true;
@@ -242,7 +266,7 @@ export function SourcesConnectOnboarding({
                     <span className="surface-status source-card-path">{connector.actionMessage}</span>
                   ) : null}
                   {connectionStates[connector.runtime] ? (
-                    <span className={`surface-status source-connection-verification is-${connectionStates[connector.runtime]}`} role="status">
+                    <span className={`surface-status source-connection-verification is-${connectionStates[connector.runtime]!.status}`} role="status">
                       {connectionStateLabel(connectionStates[connector.runtime])}
                     </span>
                   ) : null}
@@ -285,6 +309,18 @@ export function SourcesConnectOnboarding({
           <p className="surface-status">
             Start the import, then use Masthead immediately. History continues in the background and reports progress in the sidebar.
           </p>
+          {selectedConnectors.some((connector) => connectionStates[connector.runtime]?.status === "verified_needs_action") ? (
+            <div className="surface-status status-warning" role="status">
+              {selectedConnectors
+                .filter((connector) => connectionStates[connector.runtime]?.status === "verified_needs_action")
+                .map((connector) => (
+                  <p key={connector.runtime}>
+                    <strong>{connector.label} still needs activation.</strong>{" "}
+                    {pendingActionTestCopy(connectionStates[connector.runtime]?.actionRequired)}. {connector.actionMessage ?? "Complete the host activation step before expecting live capture."}
+                  </p>
+                ))}
+            </div>
+          ) : null}
           <div className="sources-history-choice-grid" role="radiogroup" aria-label="History range">
             <label className={`adapter-card source-select-card ${historyChoice === "everything" ? "is-selected" : ""}`}>
               <span className="adapter-card-head">
@@ -347,7 +383,11 @@ export function SourcesConnectOnboarding({
         aria-label="Capture local session history"
       >
         <header className="session-detail-header">
-          <div>
+          <div className="sources-onboarding-brand" aria-label="Masthead">
+            <img src={sailLogoUrl} alt="" aria-hidden="true" />
+            <strong>Masthead</strong>
+          </div>
+          <div className="sources-onboarding-heading">
             <p className="mono-label">First-run setup</p>
             <h2>Capture local session history</h2>
           </div>
@@ -381,11 +421,13 @@ export function SourcesConnectOnboarding({
   );
 }
 
-function connectionStateLabel(state: "enabling" | "verifying" | "verified" | "failed"): string {
-  if (state === "enabling") return "Installing connector…";
-  if (state === "verifying") return "Executing connector command…";
-  if (state === "verified") return "Connector command verified";
-  return "Verification failed — repair the connector and try again";
+function connectionStateLabel(state: ConnectionState): string {
+  if (state.status === "enabling") return "Installing connector…";
+  if (state.status === "verifying") return "Testing endpoint…";
+  if (state.status === "verified") return "Endpoint test passed";
+  if (state.status === "verified_needs_action") return pendingActionTestCopy(state.actionRequired);
+  if (state.actionRequired === "repair" && state.verified) return pendingActionTestCopy("repair");
+  return "Endpoint test failed — repair the connector and try again";
 }
 
 function historyCountLabel(connector: HarnessConnectorDto): string {

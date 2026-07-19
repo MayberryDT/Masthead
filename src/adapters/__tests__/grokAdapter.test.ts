@@ -93,6 +93,52 @@ describe("Grok adapter", () => {
       await rm(root, { force: true, recursive: true });
     }
   });
+
+  test("discovers only canonical Grok chat histories and skips recap request JSON", async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), "masthead-grok-discovery-"));
+    const conversationDir = join(homeDir, ".grok", "sessions", "%2Fworkspace", grokSessionId);
+    const recapDir = join(conversationDir, "recap_requests");
+    await mkdir(recapDir, { recursive: true });
+    await writeFile(join(conversationDir, "chat_history.jsonl"), '{"type":"user","content":"Sanitized prompt"}\n');
+    await writeFile(join(recapDir, "request.json"), "{}");
+
+    try {
+      const sources = await grokAdapter.discover({ exclusions: [], homeDir, now: "2026-07-18T00:00:00.000Z" });
+      expect(sources.map((source) => source.path)).toEqual([join(conversationDir, "chat_history.jsonl")]);
+    } finally {
+      await rm(homeDir, { force: true, recursive: true });
+    }
+  });
+
+  test("normalizes the observed Grok backend tool-call row", async () => {
+    const root = await mkdtemp(join(tmpdir(), "masthead-grok-backend-tool-"));
+    const conversationDir = join(root, grokSessionId);
+    const path = join(conversationDir, "chat_history.jsonl");
+    await mkdir(conversationDir);
+    await writeFile(
+      path,
+      '{"type":"backend_tool_call","kind":{"tool_type":"web_search","action":{"type":"search","query":"sanitized query","sources":[]},"id":"ws_fixture_call_1","status":"completed"}}\n'
+    );
+
+    try {
+      const [unit] = await grokAdapter.planTranscriptUnits(grokFixtureSource(path));
+      const parsed = await grokAdapter.parseTranscriptUnit(unit);
+      expect(parsed.completeness).toBe("complete");
+      expect(parsed.records.map((record) => record.normalized.kind)).toEqual(["tool_call"]);
+      expect(parsed.records.map((record) => record.normalized.value)).toEqual([
+        {
+          arguments: { query: "sanitized query", sources: [], type: "search" },
+          callId: "ws_fixture_call_1",
+          observedAt: "1970-01-01T00:00:00.000Z",
+          sessionId: grokSessionId,
+          status: "completed",
+          toolName: "web_search"
+        }
+      ]);
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
 });
 
 function grokFixtureSource(path = join(fixturesDir, "grok", grokSessionId, "chat_history.jsonl")): DiscoveredSource {

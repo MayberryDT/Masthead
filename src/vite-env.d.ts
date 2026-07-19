@@ -16,6 +16,7 @@ type MastheadDesktopNotificationResult =
 
 type MastheadDesktopBridge = {
   invoke: <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
+  platform?: string;
   notifySessionTransition?: (
     input: MastheadDesktopSessionTransitionNotificationInput
   ) => Promise<MastheadDesktopNotificationResult>;

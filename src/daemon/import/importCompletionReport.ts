@@ -127,10 +127,10 @@ export function settleImportSessionClassifications(
     importJobId: string;
   }
 ): void {
-  const holdForRepair = input.anomalies.some((anomaly) => anomaly.severity === "error");
-  if (!holdForRepair && !input.finalizeNoise) return;
+  const hasErrorAnomaly = input.anomalies.some((anomaly) => anomaly.severity === "error");
+  if (!hasErrorAnomaly && !input.finalizeNoise) return;
   for (const sessionId of listImportImpactSessionIds(db, input.importJobId)) {
-    const sessionHoldForRepair = holdForRepair || sessionImportRequiresRepair(db, input.importJobId, sessionId);
+    const sessionHoldForRepair = sessionImportRequiresRepair(db, input.importJobId, sessionId);
     reconcileImportedTranscript(db, sessionId, {
       finalizeNoise: input.finalizeNoise && !sessionHoldForRepair,
       holdForRepair: sessionHoldForRepair

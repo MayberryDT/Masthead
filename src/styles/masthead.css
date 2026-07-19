@@ -2073,40 +2073,8 @@ main {
 .workbench-panel > .workbench-toolbar,
 .workbench-panel > .workbench-error,
 .workbench-panel > .workbench-action-summary,
-.workbench-panel > .workbench-import-repair-panel,
 .workbench-panel > .workbench-not-added-panel {
   flex: 0 0 auto;
-}
-
-.workbench-import-repair-panel {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-sm);
-  border: 1px solid rgba(247, 201, 72, 0.28);
-  border-radius: 5px;
-  background: rgba(247, 201, 72, 0.06);
-  padding: 10px 12px;
-}
-
-.workbench-import-repair-panel p {
-  margin: 0;
-  color: var(--mute);
-  font-size: 11px;
-  line-height: 1.4;
-}
-
-.workbench-import-repair-panel .mono-label {
-  margin-bottom: 3px;
-  color: var(--yellow);
-}
-
-.workbench-import-repair-receipts {
-  display: flex;
-  flex: 0 0 auto;
-  flex-wrap: wrap;
-  gap: 6px;
 }
 
 .workbench-surface {
@@ -2418,6 +2386,15 @@ main {
   font-size: 13px;
   font-variant-numeric: tabular-nums;
   font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.workbench-selection-readiness {
+  color: var(--mute);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
   line-height: 1;
   white-space: nowrap;
 }
@@ -3856,6 +3833,7 @@ body {
 
 .observability-console,
 .masthead-shell {
+  --masthead-sidebar-offset: 215px;
   --space-xs: 8px;
   --space-sm: 12px;
   --space-md: 16px;
@@ -3963,6 +3941,20 @@ body {
   background: var(--sidebar-bg);
 }
 
+.masthead-shell.desktop-chrome .masthead-sidebar {
+  --masthead-sidebar-titlebar-inset: min(env(titlebar-area-height, 0px), env(titlebar-area-x, 0px));
+  padding-top: var(--masthead-sidebar-titlebar-inset);
+}
+
+.masthead-shell.desktop-chrome.desktop-chrome-macos .masthead-sidebar {
+  --masthead-sidebar-titlebar-inset: env(titlebar-area-height, 32px);
+}
+
+.masthead-shell.desktop-chrome .masthead-sidebar .sidebar-shell {
+  height: calc(100vh - var(--masthead-sidebar-titlebar-inset));
+  min-height: calc(100vh - var(--masthead-sidebar-titlebar-inset));
+}
+
 .observability-console .metal-sidebar,
 .masthead-shell .metal-sidebar {
   isolation: isolate;
@@ -3996,19 +3988,15 @@ body {
 }
 
 .masthead-shell.desktop-chrome .masthead-workspace {
-  grid-template-rows: 30px minmax(0, 1fr);
+  grid-template-rows: env(titlebar-area-height, 32px) minmax(0, 1fr);
 }
 
 .masthead-window-bar {
   position: relative;
   z-index: 20;
-  display: flex;
-  align-items: stretch;
-  justify-content: flex-end;
   min-width: 0;
-  height: 30px;
+  height: env(titlebar-area-height, 32px);
   background: linear-gradient(180deg, rgba(5, 23, 36, 0.92), rgba(3, 16, 25, 0.96));
-  -webkit-app-region: drag;
 }
 
 .masthead-window-bar::after {
@@ -4024,71 +4012,13 @@ body {
 }
 
 .masthead-window-drag-region {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.masthead-window-controls {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: stretch;
-  align-self: flex-start;
-  height: calc(100% - 1px);
-  -webkit-app-region: no-drag;
-}
-
-.masthead-window-control {
-  position: relative;
-  display: grid;
-  width: 32px;
-  min-width: 32px;
-  height: 100%;
-  isolation: isolate;
-  place-items: center;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  color: rgba(214, 228, 239, 0.82);
-  cursor: default;
-  padding: 0;
-  transition:
-    color 140ms ease;
-}
-
-.masthead-window-control::after {
-  content: "";
   position: absolute;
-  top: 50%;
-  left: 50%;
-  z-index: -1;
-  width: 20px;
-  height: 20px;
-  background: rgba(87, 193, 255, 0.08);
-  opacity: 0;
-  pointer-events: none;
-  transform: translate(-50%, -50%);
-  transition: opacity 140ms ease;
-}
-
-.masthead-window-control.close {
-  width: 32px;
-  min-width: 32px;
-}
-
-.masthead-window-control:hover {
-  color: var(--ink);
-}
-
-.masthead-window-control:hover::after {
-  opacity: 1;
-}
-
-.masthead-window-control.close:hover {
-  color: #ffd7d7;
-}
-
-.masthead-window-control.close::after {
-  background: rgba(255, 97, 97, 0.14);
+  top: 0;
+  left: max(0px, calc(env(titlebar-area-x, 0px) - var(--masthead-sidebar-offset)));
+  right: max(0px, calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)));
+  width: auto;
+  height: 100%;
+  -webkit-app-region: drag;
 }
 
 .observability-content,
@@ -4163,15 +4093,16 @@ body {
 .sidebar-shell {
   position: relative;
   z-index: 1;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  height: 100vh;
   min-height: 100vh;
+  overflow: hidden;
 }
 
 .sidebar-brand {
-  position: absolute;
+  position: static;
   box-sizing: border-box;
-  left: 0;
-  right: 0;
-  top: 0;
   display: grid;
   grid-template-columns: 42px auto;
   gap: 10px;
@@ -4213,12 +4144,10 @@ body {
 }
 
 .sidebar-nav {
-  position: absolute;
-  left: 16px;
-  right: 16px;
-  top: 100px;
+  position: static;
   display: grid;
   gap: var(--space-lg);
+  margin: 22px 16px 0;
 }
 
 .sidebar-group {
@@ -4238,7 +4167,7 @@ body {
   align-items: center;
   gap: 10px;
   overflow: hidden;
-  border: 0;
+  border: 1px solid rgba(92, 153, 187, 0.18);
   border-radius: 5px;
   background: transparent;
   cursor: pointer;
@@ -4433,11 +4362,20 @@ body {
   color: var(--ash);
 }
 
+.sidebar-import-region {
+  position: static;
+  min-height: 0;
+  margin: 16px 16px 0;
+  overflow: hidden;
+}
+
+.sidebar-import-region .sidebar-import-activity {
+  position: static;
+  max-height: 100%;
+  overflow-y: auto;
+}
+
 .sidebar-import-activity {
-  position: absolute;
-  right: 16px;
-  bottom: 186px;
-  left: 16px;
   border: 1px solid rgba(46, 167, 255, 0.2);
   border-radius: 4px;
   background: #03121c;
@@ -4445,6 +4383,11 @@ body {
   color: #d8eaf6;
   font-family: var(--font-mono);
   box-shadow: inset 0 1px 0 rgba(210, 237, 252, 0.035);
+}
+
+.sidebar-import-activity.is-updating {
+  box-sizing: border-box;
+  height: 100%;
 }
 
 .sidebar-import-heading {
@@ -6421,6 +6364,15 @@ body {
 }
 
 @media (max-width: 760px) {
+  .masthead-shell {
+    --masthead-sidebar-offset: 0px;
+  }
+
+  .masthead-shell.desktop-chrome .masthead-sidebar,
+  .masthead-shell.desktop-chrome.desktop-chrome-macos .masthead-sidebar {
+    --masthead-sidebar-titlebar-inset: 0px;
+  }
+
   .observability-console,
   .masthead-shell {
     grid-template-columns: 1fr;
@@ -6525,12 +6477,6 @@ body {
 
   .summary-strip {
     grid-template-columns: 1fr;
-  }
-}
-
-@media (max-height: 720px) {
-  .sidebar-knowledge-flow {
-    display: none;
   }
 }
 
@@ -7316,21 +7262,29 @@ body {
 
 .observability-console .sidebar-knowledge-flow,
 .masthead-shell .sidebar-knowledge-flow {
-  position: absolute;
-  right: 16px;
-  bottom: 16px;
-  left: 16px;
+  position: relative;
+  margin: 10px 16px 16px;
 }
 
 @media (max-width: 760px) {
-  .sidebar-import-activity {
-    position: static;
+  .sidebar-shell {
+    display: block;
+    height: auto;
+    overflow: visible;
+  }
+
+  .sidebar-import-region {
     margin: 18px 16px 0;
+    overflow: visible;
+  }
+
+  .sidebar-import-region .sidebar-import-activity {
+    max-height: none;
+    overflow-y: visible;
   }
 
   .observability-console .sidebar-knowledge-flow,
   .masthead-shell .sidebar-knowledge-flow {
-    position: static;
     margin: 18px 16px 0;
   }
 }
@@ -7622,8 +7576,6 @@ body {
   }
 }
 
-.observability-console .sidebar-group > div,
-.masthead-shell .sidebar-group > div,
 .observability-console .import-jobs-section,
 .masthead-shell .import-jobs-section {
   position: relative;
@@ -7638,12 +7590,6 @@ body {
   box-shadow:
     inset 0 1px 0 rgba(190, 225, 245, 0.048),
     inset 0 -1px 0 rgba(0, 0, 0, 0.48);
-}
-
-.observability-console .sidebar-group > div,
-.masthead-shell .sidebar-group > div {
-  gap: 6px;
-  padding: 6px;
 }
 
 .observability-console .import-jobs-section::before,

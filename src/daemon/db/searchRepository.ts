@@ -61,9 +61,18 @@ type EnrichmentRow = {
 };
 
 export function indexSessionSearch(db: MastheadDatabase, document: SessionSearchDocument): void {
-  db.prepare("DELETE FROM session_search WHERE session_id = ?").run(document.sessionId);
+  db.prepare(
+    `INSERT INTO session_search_rowids(session_id)
+     VALUES (?)
+     ON CONFLICT(session_id) DO NOTHING`
+  ).run(document.sessionId);
+  const { searchRowid } = db
+    .prepare("SELECT search_rowid AS searchRowid FROM session_search_rowids WHERE session_id = ?")
+    .get(document.sessionId) as { searchRowid: number };
+  db.prepare("DELETE FROM session_search WHERE rowid = ?").run(searchRowid);
   db.prepare(
     `INSERT INTO session_search (
+      rowid,
       session_id,
       title,
       capsule,
@@ -75,8 +84,9 @@ export function indexSessionSearch(db: MastheadDatabase, document: SessionSearch
       file_paths,
       project_aliases,
       tags
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
+    searchRowid,
     document.sessionId,
     document.title,
     document.capsule,
@@ -89,6 +99,18 @@ export function indexSessionSearch(db: MastheadDatabase, document: SessionSearch
     document.projectAliases,
     document.tags
   );
+}
+
+export function removeSessionSearchDocument(db: MastheadDatabase, sessionId: string): void {
+  const mapping = db
+    .prepare("SELECT search_rowid AS searchRowid FROM session_search_rowids WHERE session_id = ?")
+    .get(sessionId) as { searchRowid: number } | undefined;
+  if (mapping) {
+    db.prepare("DELETE FROM session_search WHERE rowid = ?").run(mapping.searchRowid);
+  } else {
+    db.prepare("DELETE FROM session_search WHERE session_id = ?").run(sessionId);
+  }
+  db.prepare("DELETE FROM session_search_rowids WHERE session_id = ?").run(sessionId);
 }
 
 export function indexCanonicalSessionSearch(db: MastheadDatabase, sessionId: string): void {

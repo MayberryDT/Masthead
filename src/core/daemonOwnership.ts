@@ -109,6 +109,25 @@ export async function acquireLegacyDataDirectoryGuard(dataDirectory: string): Pr
   }
 }
 
+/** Mirrors daemon startup ownership without requiring or creating the first-run database. */
+export async function probeExclusiveDatabaseStartupOwnership(
+  databasePath: string,
+  dataDirectory: string
+): Promise<void> {
+  await assertWritableDatabaseLocation(databasePath, dataDirectory);
+  const writerLease = await acquireDatabaseWriterLock(databasePath);
+  let legacyGuard: LegacyDataDirectoryGuard | undefined;
+  try {
+    legacyGuard = await acquireLegacyDataDirectoryGuard(dataDirectory);
+  } finally {
+    try {
+      await legacyGuard?.release();
+    } finally {
+      await writerLease.release();
+    }
+  }
+}
+
 async function canonicalWriterDatabasePath(databasePath: string, seen = new Set<string>()): Promise<string> {
   const canonicalPath = await canonicalPathReadOnly(databasePath, seen);
   await mkdir(dirname(canonicalPath), { recursive: true });

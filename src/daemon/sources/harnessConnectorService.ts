@@ -81,6 +81,7 @@ export async function listHarnessConnectors(
     let derived = deriveLiveStatus({
       installed: live.installed,
       configExists: live.configExists,
+      managedConnectorPresent: live.managedConnectorPresent,
       missingEvents: live.missingEvents,
       mismatchedEvents: live.mismatchedEvents,
       error: live.error,

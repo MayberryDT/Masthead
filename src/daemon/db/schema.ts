@@ -150,6 +150,11 @@ const migrations = [
     version: 29,
     name: "029_import_repair_replacements",
     path: resolve(currentDir, "migrations/029_import_repair_replacements.sql")
+  },
+  {
+    version: 30,
+    name: "030_session_search_rowids",
+    path: resolve(currentDir, "migrations/030_session_search_rowids.sql")
   }
 ];
 
@@ -182,6 +187,7 @@ const criticalTables = [
   "session_enrichments",
   "mcp_query_log",
   "session_search",
+  "session_search_rowids",
   "app_settings",
   "source_policies",
   "source_scan_runs",

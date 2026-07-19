@@ -296,8 +296,10 @@ recur across views, but each surface may use the structure that fits its job:
 - Workbench: dense publish-path table + Activity console rail + metal ops toolbar.
   Human ops cover transcript check/import, quality review, claim/release, publish,
   Not Added inspection, session selection, and agent-led authoring. **Copy Agent Prompt** copies a
-  disposable request for the selected sessions. The agent enriches every selected session and may
-  choose zero or more optional artifacts; detector suggestions are nonbinding.
+  disposable request for the compile-ready subset of the selection. Review-needed sessions remain
+  selected for human operations, are disclosed, and never block ready work. The agent enriches
+  every session in the request and may choose zero or more optional artifacts; detector suggestions
+  are nonbinding.
 - Logbook: dense table plus inspector.
 - Sources: harness connector rows plus enablement detail (Discover → Enable → Activate → Test).
 - Settings: one centered compact steel card with direct controls for everyday preferences and one

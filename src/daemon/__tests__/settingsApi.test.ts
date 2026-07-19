@@ -474,6 +474,87 @@ describe("settings API", () => {
     expect(elapsedMs).toBeLessThan(500);
   });
 
+  test("does not publish a live session search row before durable enrichment finishes", async () => {
+    let markProviderRequested: () => void = () => undefined;
+    let releaseProvider: () => void = () => undefined;
+    const providerRequested = new Promise<void>((resolve) => {
+      markProviderRequested = resolve;
+    });
+    const providerRelease = new Promise<void>((resolve) => {
+      releaseProvider = resolve;
+    });
+    const providerServer = createServer((request, response) => {
+      expect(request.url).toBe("/v1/chat/completions");
+      request.resume();
+      markProviderRequested();
+      void providerRelease.then(() => {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify(
+                    durableProviderOutput({
+                      summary: "Live ingest search waits for durable enrichment.",
+                      title: "Enriched live session"
+                    })
+                  )
+                }
+              }
+            ]
+          })
+        );
+      });
+    });
+    servers.push(providerServer);
+    const providerBaseUrl = await listenHttp(providerServer);
+    const { daemon } = await createTestHarness();
+    const baseUrl = await listen(daemon);
+    await postJson(baseUrl, "/settings/llm-provider", {
+      activeProvider: "ollama",
+      apiKey: "test-compatible-key",
+      baseUrl: `${providerBaseUrl}/v1`,
+      model: "llama-3.1",
+      remoteEnrichmentEnabled: true
+    });
+
+    try {
+      await postJson(baseUrl, "/ingest?runtime=opencode", {
+        event: "session_start",
+        session_id: "live-search-after-enrichment",
+        timestamp: "2026-07-18T14:00:00.000Z",
+        cwd: "/workspace/masthead",
+        project: "Masthead",
+        title: "Raw live session"
+      });
+      await providerRequested;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      const session = daemon.database
+        .prepare("SELECT session_id AS sessionId FROM sessions WHERE source_session_id = ?")
+        .get("live-search-after-enrichment") as { sessionId: string } | undefined;
+      if (!session) throw new Error("live session was not persisted");
+      expect(
+        daemon.database.prepare("SELECT COUNT(*) AS count FROM session_search WHERE session_id = ?").get(session.sessionId) as {
+          count: number;
+        }
+      ).toEqual({ count: 0 });
+
+      releaseProvider();
+      await waitFor(
+        () =>
+          (
+            daemon.database.prepare("SELECT COUNT(*) AS count FROM session_search WHERE session_id = ?").get(session.sessionId) as {
+              count: number;
+            }
+          ).count === 1
+      );
+    } finally {
+      releaseProvider();
+    }
+  });
+
 
   test("lists models from a local OpenAI-compatible provider", async () => {
     const modelServer = createServer((request, response) => {

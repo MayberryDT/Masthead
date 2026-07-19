@@ -90,9 +90,9 @@ describe("Settings surface", () => {
     expect(html).not.toContain("Test hooks");
     expect(html).not.toContain("Uninstall hooks");
     expect(html).not.toContain("Supported harnesses");
-    expect(html).not.toContain("Onboarding");
-    expect(html).not.toContain("Run onboarding again");
-    expect(html).not.toContain("Setup wizard");
+    expect(html).toContain("Onboarding");
+    expect(html).toContain("Run onboarding again");
+    expect(html).toContain("Setup wizard");
     expect(html).toContain("Agent access");
     expect(html).toContain("MCP server");
     expect(html).not.toContain("Refresh MCP");
@@ -173,7 +173,7 @@ describe("Settings surface", () => {
     expect(detail?.textContent).toContain("Data directory");
     expect(detail?.textContent).toContain("Database ID");
     expect(detail?.textContent).toContain("Runtime");
-    expect(host.textContent).not.toContain("Run onboarding again");
+    expect(host.textContent).toContain("Run onboarding again");
 
     await act(async () => {
       root.unmount();

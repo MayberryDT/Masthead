@@ -76,6 +76,16 @@ describe("workbench API", () => {
     expect(summary).toEqual({
       ok: true,
       importJobIds: ["import-current"],
+      repairImports: [{
+        importJobId: "import-current",
+        reasons: [
+          { count: 1, reason: "missing_session_identity" },
+          { count: 1, reason: "schema_drift" }
+        ],
+        repairRequired: 2,
+        runtime: "codex",
+        sourceId: "source:import-health"
+      }],
       reasons: [
         { count: 1, reason: "missing_session_identity" },
         { count: 1, reason: "schema_drift" }
@@ -323,6 +333,75 @@ describe("workbench API", () => {
     expect(readWorkbenchSessionState(daemon.database, "session:published")).toMatchObject({
       publicationStatus: "published"
     });
+  });
+
+  test("POST /workbench/enroll-missing reconciles complete imports and preserves repair holds", async () => {
+    const { baseUrl, daemon } = await startTestDaemon();
+    seedImportHealthUnits(daemon.database, ["unit-complete", "unit-empty", "unit-repair"]);
+    for (const [sessionId, title] of [
+      ["session:complete", "Complete import"],
+      ["session:empty", "Empty complete import"],
+      ["session:repair", "Repair-held import"]
+    ] as const) {
+      seedSession(daemon.database, {
+        lifecycle: "ended",
+        model: "gpt-5",
+        project: "Masthead",
+        sessionId,
+        title
+      });
+    }
+    removeCanonicalEvidence(daemon.database, "session:empty");
+    recordSessionImportHealth(daemon.database, {
+      evidenceRevision: "rev-complete",
+      importJobId: "import-current",
+      sessionId: "session:complete",
+      status: "complete",
+      updatedAt: "2026-07-15T11:00:00.000Z",
+      workUnitId: "unit-complete"
+    });
+    recordSessionImportHealth(daemon.database, {
+      evidenceRevision: "rev-empty",
+      importJobId: "import-current",
+      sessionId: "session:empty",
+      status: "complete",
+      updatedAt: "2026-07-15T11:01:00.000Z",
+      workUnitId: "unit-empty"
+    });
+    recordSessionImportHealth(daemon.database, {
+      evidenceRevision: "rev-repair",
+      importJobId: "import-current",
+      reason: "partial_parse",
+      sessionId: "session:repair",
+      status: "repair_required",
+      updatedAt: "2026-07-15T11:02:00.000Z",
+      workUnitId: "unit-repair"
+    });
+
+    const first = await postJson(baseUrl, "/workbench/enroll-missing", { limit: 100 });
+
+    expect(first).toMatchObject({
+      enrolled: 2,
+      enrolledSessionIds: expect.arrayContaining(["session:complete", "session:empty"]),
+      heldForImportRepair: 1,
+      ok: true
+    });
+    expect(readWorkbenchSessionState(daemon.database, "session:complete")).toMatchObject({
+      publicationStatus: "publish_path",
+      qualityStatus: "passed",
+      transcriptStatus: "imported"
+    });
+    expect(readWorkbenchSessionState(daemon.database, "session:empty")).toMatchObject({
+      nonPublicationReason: "empty",
+      publicationStatus: "not_added_to_logbook",
+      qualityDecisionSource: "automatic",
+      suppressionCategory: "confirmed_noise"
+    });
+    expect(readWorkbenchSessionState(daemon.database, "session:repair")).toBeUndefined();
+
+    const second = await postJson(baseUrl, "/workbench/enroll-missing", { limit: 100 });
+    expect(second).toMatchObject({ enrolled: 0, heldForImportRepair: 1, ok: true });
+    expect(readWorkbenchSessionState(daemon.database, "session:repair")).toBeUndefined();
   });
 
   test("POST claim and release round-trip on queue DTO", async () => {
@@ -674,6 +753,12 @@ function seedImportHealthUnits(db: MastheadDaemon["database"], workUnitIds: stri
   );
   for (const workUnitId of workUnitIds) {
     insert.run(workUnitId, "manifest-current", "import-current", "source:import-health", "codex", "jsonl", "authoritative", "transcript_file", `/tmp/${workUnitId}.jsonl`, "running", "unknown");
+  }
+}
+
+function removeCanonicalEvidence(db: MastheadDaemon["database"], sessionId: string): void {
+  for (const table of ["messages", "tool_results", "tool_calls", "file_effects", "runtime_signals", "checkpoints"]) {
+    db.prepare(`DELETE FROM ${table} WHERE session_id = ?`).run(sessionId);
   }
 }
 

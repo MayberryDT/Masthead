@@ -110,6 +110,75 @@ describe("harnessConnectorService", () => {
     db.close();
   });
 
+  test.each([
+    {
+      runtime: "codex" as const,
+      relativePath: join(".codex", "hooks.json"),
+      config: { hooks: { SessionStart: [{ matcher: "*", hooks: [{ type: "command", command: "foreign-hook" }] }] } }
+    },
+    {
+      runtime: "claude_code" as const,
+      relativePath: join(".claude", "settings.json"),
+      config: { hooks: { SessionStart: [{ matcher: "*", hooks: [{ type: "command", command: "foreign-hook" }] }] } }
+    },
+    {
+      runtime: "cursor" as const,
+      relativePath: join(".cursor", "hooks.json"),
+      config: { hooks: { sessionStart: [{ command: "foreign-hook" }] } }
+    }
+  ])("$runtime foreign-only shared config is not_installed, not repair", async ({ runtime, relativePath, config: hookConfig }) => {
+    const { db, config, tempDir } = await openTestFixture();
+    const configPath = join(tempDir, relativePath);
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, JSON.stringify(hookConfig), "utf8");
+    if (runtime === "codex") {
+      await writeFile(join(tempDir, ".codex", "config.toml"), 'model = "gpt-5"\n', "utf8");
+    }
+
+    const snapshot = await listHarnessConnectors(db, config);
+    expect(snapshot.connectors.find((connector) => connector.runtime === runtime)).toMatchObject({
+      presence: "found",
+      live: "not_installed"
+    });
+
+    db.close();
+  });
+
+  test.each([
+    {
+      runtime: "codex" as const,
+      relativePath: join(".codex", "hooks.json"),
+      config: { hooks: { SessionStart: [{ matcher: "*", hooks: [{ type: "command", command: "/old/masthead-hook.js" }] }] } }
+    },
+    {
+      runtime: "claude_code" as const,
+      relativePath: join(".claude", "settings.json"),
+      config: { hooks: { SessionStart: [{ matcher: "*", hooks: [{ type: "command", command: "/old/masthead-hook.js" }] }] } }
+    },
+    {
+      runtime: "cursor" as const,
+      relativePath: join(".cursor", "hooks.json"),
+      config: { hooks: { sessionStart: [{ command: "/old/masthead-hook.js" }] } }
+    }
+  ])("$runtime partial Masthead-managed config needs repair", async ({ runtime, relativePath, config: hookConfig }) => {
+    const { db, config, tempDir } = await openTestFixture();
+    const configPath = join(tempDir, relativePath);
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, JSON.stringify(hookConfig), "utf8");
+    if (runtime === "codex") {
+      await writeFile(join(tempDir, ".codex", "config.toml"), 'model = "gpt-5"\n', "utf8");
+    }
+
+    const snapshot = await listHarnessConnectors(db, config);
+    expect(snapshot.connectors.find((connector) => connector.runtime === runtime)).toMatchObject({
+      presence: "found",
+      live: "needs_action",
+      actionRequired: "repair"
+    });
+
+    db.close();
+  });
+
   test("codex installed with cleared activation is ready", async () => {
     const { db, config, tempDir } = await openTestFixture();
     await pinCodexHooks(tempDir);

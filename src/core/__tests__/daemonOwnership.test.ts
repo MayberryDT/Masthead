@@ -8,6 +8,7 @@ import {
   acquireDatabaseWriterLock,
   acquireLegacyDataDirectoryGuard,
   assertWritableDatabaseLocation,
+  probeExclusiveDatabaseStartupOwnership,
   type DatabaseWriterLock
 } from "../daemonOwnership.ts";
 
@@ -20,6 +21,16 @@ afterEach(async () => {
 });
 
 describe("database writer lock", () => {
+  test("proves exclusive startup ownership before a first-run database exists", async () => {
+    const dataDirectory = await createTempDir("masthead-first-run-ownership-");
+    const databasePath = join(dataDirectory, "masthead.sqlite");
+
+    await probeExclusiveDatabaseStartupOwnership(databasePath, dataDirectory);
+
+    await expect(accessPath(databasePath)).resolves.toBe(false);
+    await expect(probeExclusiveDatabaseStartupOwnership(databasePath, dataDirectory)).resolves.toBeUndefined();
+  });
+
   test.skipIf(process.platform === "win32")("resolves a dangling database symlink to its absent target", async () => {
     const tempDir = await createTempDir("masthead-dangling-db-lock-");
     const targetPath = join(tempDir, "target.sqlite");

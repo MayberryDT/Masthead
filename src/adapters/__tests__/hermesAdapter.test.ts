@@ -113,6 +113,56 @@ describe("Hermes adapter", () => {
     db.close();
   });
 
+  test("preserves relational Hermes identity and role when SQLite content is a JSON primitive", async () => {
+    const tempDir = await makeTempDir();
+    const sqlitePath = join(tempDir, "state.db");
+    const sqlite = new DatabaseSync(sqlitePath);
+    sqlite.exec("CREATE TABLE messages (session_id TEXT, role TEXT, content TEXT, timestamp REAL);");
+    sqlite
+      .prepare("INSERT INTO messages (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)")
+      .run("hermes-json-string", "user", JSON.stringify("Sanitized prompt"), 1_783_677_600);
+    sqlite.close();
+
+    const [unit] = await hermesAdapter.planTranscriptUnits(sqliteSource(sqlitePath));
+    const parsed = await hermesAdapter.parseTranscriptUnit(unit);
+
+    expect(parsed.completeness).toBe("complete");
+    expect(parsed.sourceSessionIds).toEqual(["hermes-json-string"]);
+    expect(parsed.records.map(normalizedValue)).toEqual([
+      expect.objectContaining({ role: "user", sessionId: "hermes-json-string", text: "Sanitized prompt" })
+    ]);
+  });
+
+  test("keeps malformed SQLite message-array diagnostics on the affected Hermes session", async () => {
+    const tempDir = await makeTempDir();
+    const sqlitePath = join(tempDir, "state.db");
+    const sqlite = new DatabaseSync(sqlitePath);
+    sqlite.exec(
+      "CREATE TABLE sessions (session_id TEXT);" +
+      "CREATE TABLE messages (session_id TEXT, role TEXT, data TEXT, timestamp REAL);"
+    );
+    sqlite.prepare("INSERT INTO sessions VALUES (?)").run("hermes-good");
+    sqlite.prepare("INSERT INTO sessions VALUES (?)").run("hermes-bad");
+    sqlite
+      .prepare("INSERT INTO messages VALUES (?, ?, ?, ?)")
+      .run("hermes-good", "user", JSON.stringify({ content: "Good prompt" }), 1_783_677_600);
+    sqlite
+      .prepare("INSERT INTO messages VALUES (?, ?, ?, ?)")
+      .run("hermes-bad", "user", JSON.stringify({ messages: ["malformed"] }), 1_783_677_601);
+    sqlite.close();
+
+    const units = await hermesAdapter.planTranscriptUnits(sqliteSource(sqlitePath));
+    const parsed = await Promise.all(units.map((unit) => hermesAdapter.parseTranscriptUnit(unit)));
+    const bySession = new Map(parsed.map((unit) => [unit.unit.sourceSessionId, unit]));
+
+    expect(bySession.get("hermes-good")?.completeness).toBe("complete");
+    expect(bySession.get("hermes-good")?.diagnostics).toEqual([]);
+    expect(bySession.get("hermes-bad")?.completeness).toBe("partial");
+    expect(bySession.get("hermes-bad")?.diagnostics).toContainEqual(
+      expect.objectContaining({ code: "hermes_non_object_row" })
+    );
+  });
+
   test("plans recent Hermes activity from session semantics before filename or file mtime", async () => {
     const tempDir = await makeTempDir();
     const path = join(tempDir, "session_20260710_100000_fixture.json");

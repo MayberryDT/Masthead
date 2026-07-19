@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { EventEmitter } from "node:events";
+import { readFileSync } from "node:fs";
 import { PassThrough } from "node:stream";
 import { lstat, mkdir, mkdtemp, open as openFile, readFile, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -32,13 +33,17 @@ import {
 } from "../../../scripts/masthead-production.js";
 
 const cleanup: string[] = [];
+const VALID_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+  "base64"
+);
 
 afterEach(async () => {
   const { rm } = await import("node:fs/promises");
   await Promise.all(cleanup.splice(0).map((path) => rm(path, { force: true, recursive: true })));
 });
 
-async function fixture() {
+async function fixture({ includeIcon = true, iconContents = VALID_PNG } = {}) {
   const root = await mkdtemp(join(tmpdir(), "masthead-production-launcher-"));
   cleanup.push(root);
   const productionRoot = join(root, "production");
@@ -47,6 +52,7 @@ async function fixture() {
   const daemonRoot = join(target, "resources", "daemon");
   await mkdir(join(daemonRoot, "scripts"), { recursive: true });
   await mkdir(join(daemonRoot, "dist", "src", "daemon"), { recursive: true });
+  await mkdir(join(daemonRoot, "dist", "src", "core"), { recursive: true });
   await mkdir(join(target, "resources"), { recursive: true });
   await mkdir(join(homeDir, ".local", "bin"), { recursive: true });
   await mkdir(join(homeDir, ".local", "share", "applications"), { recursive: true });
@@ -59,7 +65,22 @@ async function fixture() {
   await writeFile(join(daemonRoot, "scripts", "resolve-hook-runtime.js"), "resolver");
   await writeFile(join(daemonRoot, "dist", "src", "daemon", "main.js"), "daemon");
   await writeFile(join(daemonRoot, "dist", "src", "daemon", "productionTransitionMaintenance.js"), "maintenance");
+  await writeFile(join(daemonRoot, "dist", "src", "daemon", "databaseBackup.js"), [
+    "export async function withExclusiveDatabaseMaintenance() {",
+    "  throw new Error('maintenance-only ownership probe rejected a missing database');",
+    "}",
+    ""
+  ].join("\n"));
+  await writeFile(join(daemonRoot, "dist", "src", "core", "daemonOwnership.js"), [
+    "export async function probeExclusiveDatabaseStartupOwnership() {",
+    "  return undefined;",
+    "}",
+    ""
+  ].join("\n"));
   await writeFile(join(target, "resources", "app.asar"), "app");
+  if (includeIcon) {
+    await writeFile(join(target, "resources", "masthead-logo-sail.png"), iconContents);
+  }
   await writeFile(join(daemonRoot, "release.json"), JSON.stringify({
     gitSha: "a".repeat(40),
     version: "0.1.0"
@@ -748,6 +769,26 @@ describe("production lifecycle launcher", () => {
     expect(statusReads).toBe(2);
   });
 
+  test("re-verifies transient zombie thread cardinality before failing closed", async () => {
+    const currentUid = typeof process.geteuid === "function" ? process.geteuid() : 1000;
+    let metadataReads = 0;
+    let statusReads = 0;
+    await expect(readOwnedProcessStrict(1488, {
+      currentUid,
+      readCommandLine: async () => { metadataReads += 1; return Buffer.alloc(0); },
+      readEnvironment: async () => { metadataReads += 1; return Buffer.alloc(0); },
+      readExecutable: async () => { metadataReads += 1; return "/usr/bin/unrelated"; },
+      readStatLine: async () => `1488 (gio-launch-desktop) Z ${Array(18).fill("0").join(" ")} stable-start`,
+      readStatus: async () => {
+        statusReads += 1;
+        const threads = statusReads === 1 ? "0" : "1";
+        return `Name:\tgio-launch-desktop\nState:\tZ (zombie)\nUid:\t${currentUid}\t${currentUid}\t${currentUid}\t${currentUid}\nThreads:\t${threads}\n`;
+      }
+    })).resolves.toBeUndefined();
+    expect(metadataReads).toBe(0);
+    expect(statusReads).toBeGreaterThanOrEqual(3);
+  });
+
   test("fails closed if a zombie PID identity changes while its exclusion is verified", async () => {
     const currentUid = typeof process.geteuid === "function" ? process.geteuid() : 1000;
     let statusReads = 0;
@@ -1220,6 +1261,103 @@ describe("production lifecycle launcher", () => {
     expect(wrapper).not.toContain("/current/");
     expect(desktop).toContain(`Exec=${receipt.launcherPath}`);
     expect(desktop).toContain("Name=Masthead");
+    expect(desktop).toContain("StartupWMClass=masthead");
+  });
+
+  test("refreshes the Linux desktop database after atomically installing the production entry", async () => {
+    const { config, homeDir, productionRoot, target } = await fixture();
+    const calls: Array<{ command: string; args: string[] }> = [];
+
+    await installProductionLauncher({
+      bundleDigest: config.bundleDigest,
+      bundlePath: target,
+      homeDir,
+      productionRoot
+    }, {
+      runDesktopDatabaseCommand: (command: string, args: string[]) => {
+        calls.push({ args, command });
+      }
+    });
+
+    expect(calls).toEqual([{
+      args: [join(homeDir, ".local", "share", "applications")],
+      command: "update-desktop-database"
+    }]);
+  });
+
+  test("keeps production launcher installation successful when desktop cache refresh is unavailable", async () => {
+    const { config, homeDir, productionRoot, target } = await fixture();
+
+    await expect(installProductionLauncher({
+      bundleDigest: config.bundleDigest,
+      bundlePath: target,
+      homeDir,
+      productionRoot
+    }, {
+      runDesktopDatabaseCommand: () => {
+        throw new Error("update-desktop-database unavailable");
+      }
+    })).resolves.toMatchObject({ target });
+  });
+
+  test("refuses to install a production desktop entry without its packaged app icon", async () => {
+    const { config, homeDir, productionRoot, target } = await fixture({ includeIcon: false });
+
+    await expect(installProductionLauncher({
+      bundleDigest: config.bundleDigest,
+      bundlePath: target,
+      homeDir,
+      productionRoot
+    })).rejects.toThrow("Production app icon is missing or unreadable");
+  });
+
+  test("refuses a readable production app icon that is not a valid PNG", async () => {
+    const { config, homeDir, productionRoot, target } = await fixture({ iconContents: Buffer.alloc(0) });
+
+    await expect(installProductionLauncher({
+      bundleDigest: config.bundleDigest,
+      bundlePath: target,
+      homeDir,
+      productionRoot
+    })).rejects.toThrow("Production app icon is not a valid PNG");
+  });
+
+  test("refuses an iconless production transition before lifecycle mutation", async () => {
+    const { config, homeDir, productionRoot, target } = await fixture({ includeIcon: false });
+    let lifecycleStarted = false;
+
+    await expect(transitionProduction({
+      bundleDigest: config.bundleDigest,
+      bundlePath: target,
+      homeDir,
+      productionRoot
+    }, {
+      acquireLease: async () => {
+        lifecycleStarted = true;
+        throw new Error("Lifecycle mutation started");
+      }
+    })).rejects.toThrow("Production app icon is missing or unreadable");
+    expect(lifecycleStarted).toBe(false);
+  });
+
+  test("refuses an iconless cold-activation candidate before lifecycle mutation", async () => {
+    const { config, homeDir, productionRoot, target } = await fixture({ includeIcon: false });
+    let lifecycleStarted = false;
+
+    await expect(coldActivateProduction({
+      bundleDigest: config.bundleDigest,
+      bundlePath: target,
+      dataDirectory: config.dataDirectory,
+      databasePath: config.databasePath,
+      homeDir,
+      productionRoot
+    }, {
+      acquireLease: async () => {
+        lifecycleStarted = true;
+        throw new Error("Lifecycle mutation started");
+      }
+    })).rejects.toThrow("Production app icon is missing or unreadable");
+    expect(lifecycleStarted).toBe(false);
   });
 
   test("refuses a bundle outside the production root or a current symlink pointing elsewhere", async () => {
@@ -1293,6 +1431,39 @@ describe("production lifecycle launcher", () => {
     expect(calls).toEqual(["stage", "stop", "maintenance", "swap", "activate-launchers", "start", "complete-maintenance", "release"]);
     const { access } = await import("node:fs/promises");
     await expect(access(staleBundle)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("activates a staged desktop identity before refreshing the Linux desktop database", async () => {
+    const { config, homeDir, productionRoot, target } = await fixture();
+    const launcherPath = join(homeDir, ".local", "bin", "masthead-production");
+    const desktopPath = join(homeDir, ".local", "share", "applications", "ai.animas.masthead.desktop");
+    await writeFile(launcherPath, `MASTHEAD_BUNDLE_DIGEST='${config.bundleDigest}'\n`, { mode: 0o755 });
+    await writeFile(desktopPath, "previous desktop entry\n");
+    const refreshCalls: string[] = [];
+
+    await transitionProduction({
+      bundleDigest: config.bundleDigest,
+      bundlePath: target,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      port: config.port,
+      productionRoot
+    }, {
+      acquireLease: async () => ({ release: async () => undefined }),
+      completeMaintenance: async () => undefined,
+      currentTarget: async () => target,
+      prepareMaintenance: async () => ({ databaseId: "database:test", targetSchemaVersion: 1 }),
+      readMaintenanceJournal: async () => undefined,
+      runDesktopDatabaseCommand: (command: string) => {
+        expect(readFileSync(desktopPath, "utf8")).toContain("StartupWMClass=masthead");
+        refreshCalls.push(command);
+      },
+      start: async () => ({ started: true }),
+      stop: async () => ({ stopped: true })
+    });
+
+    expect(await readFile(desktopPath, "utf8")).toContain("StartupWMClass=masthead");
+    expect(refreshCalls).toEqual(["update-desktop-database"]);
   });
 
   test("requires explicit cold activation for a legacy current target with no attestable release identity", async () => {
@@ -2242,9 +2413,15 @@ describe("production lifecycle launcher", () => {
     });
 
     expect(classifyProductionProcess(electron, config)).toMatchObject({ role: "electron", target });
+    expect(classifyProductionProcess({ ...electron, argv: [electron.argv.join(" ")] }, config))
+      .toMatchObject({ role: "electron", target });
     expect(classifyProductionProcess(daemon, config)).toMatchObject({ role: "daemon", target });
     expect(classifyProductionProcess({ ...electron, argv: [...electron.argv, "--type=renderer"] }, config)).toBeUndefined();
-    expect(classifyProductionProcess({ ...electron, environ: {} }, config)).toBeUndefined();
+    expect(classifyProductionProcess({ ...electron, environ: {} }, config)).toMatchObject({ role: "electron", target });
+    expect(classifyProductionProcess({
+      ...electron,
+      argv: [...electron.argv, "--user-data-dir=/tmp/other-masthead-profile"]
+    }, config)).toBeUndefined();
     expect(classifyProductionProcess({ ...daemon, environ: { ...daemon.environ, MASTHEAD_PORT: "9" } }, config))
       .toMatchObject({ role: "daemon", target });
   });
@@ -2447,6 +2624,36 @@ describe("production lifecycle launcher", () => {
       }),
       executable: join(target, "masthead")
     });
+  });
+
+  test("start reaches Electron when the first-run database does not exist", async () => {
+    const { config, target } = await fixture();
+    const electron = processRecord({
+      argv: [join(target, "masthead"), `--user-data-dir=${config.dataDirectory}`],
+      environ: { MASTHEAD_DATA_DIR: config.dataDirectory, MASTHEAD_DB_PATH: config.databasePath },
+      exe: join(target, "masthead")
+    });
+    const daemon = processRecord({
+      argv: [join(target, "resources", "daemon", "node"), join(target, "resources", "daemon", "dist", "src", "daemon", "main.js")],
+      environ: { MASTHEAD_DATA_DIR: config.dataDirectory, MASTHEAD_DB_PATH: config.databasePath },
+      exe: join(target, "resources", "daemon", "node"), pid: 43, starttime: "daemon"
+    });
+    let scans = 0;
+
+    await expect(startProduction({ ...config, gitSha: "a".repeat(40), version: "0.1.0" }, {
+      acquireLease: async () => ({ release: async () => undefined }),
+      captureSpawned: async () => electron,
+      currentTarget: async () => target,
+      fetchHealth: async () => undefined,
+      portBindable: async () => true,
+      readProcesses: async () => (++scans === 1 ? [] : [electron, daemon]),
+      spawnElectron: async () => 42,
+      waitForHealth: async () => ({
+        buildSha: "a".repeat(40), buildVersion: "0.1.0",
+        data: { dataDirectory: config.dataDirectory, databasePath: config.databasePath },
+        ok: true, product: "masthead", runtime: { port: config.port, writable: true }
+      })
+    })).resolves.toMatchObject({ pid: 42, started: true });
   });
 
   test.each([

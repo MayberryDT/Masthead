@@ -16,6 +16,7 @@ describe("ObservabilityConsoleShell", () => {
     expect(html).toContain('aria-label="Session workspace"');
     expect(html).toContain("masthead-shell");
     expect(html).toContain("masthead-sidebar");
+    expect(html).not.toContain("metal-sidebar");
     expect(html).toContain("masthead-workspace");
     expect(html).toContain("masthead-content");
     expect(html).not.toContain("masthead-right-rail");

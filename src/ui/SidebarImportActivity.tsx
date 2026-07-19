@@ -18,7 +18,7 @@ export function SidebarImportActivity({ imports }: { imports: ImportJob[] }) {
   const progress = selectedTotal > 0 ? Math.min(100, (completed / selectedTotal) * 100) : 0;
 
   return (
-    <aside className="sidebar-import-activity" aria-label="History import activity">
+    <aside className={`sidebar-import-activity ${current ? "is-updating" : "is-health"}`} aria-label="History import activity">
       <div className="sidebar-import-heading">
         <span>{current ? "Updating history" : "Import health"}</span>
         {current ? <span className="sidebar-import-live" aria-hidden="true" /> : null}

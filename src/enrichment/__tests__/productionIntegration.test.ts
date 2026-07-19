@@ -7,6 +7,8 @@ import type { DaemonConfig } from "../../daemon/config.ts";
 import { applySessionArtifact, publishSessionArtifact } from "../../daemon/db/sessionArtifactRepository.ts";
 import { markWorkbenchPublished } from "../../daemon/db/workbenchPipelineRepository.ts";
 import { createMastheadDaemon, type MastheadDaemon } from "../../daemon/server.ts";
+import { buildSessionFacts } from "../sessionFacts.ts";
+import { fingerprintSessionFacts } from "../sessionCompiler.ts";
 
 const tempDirs: string[] = [];
 const daemons: MastheadDaemon[] = [];
@@ -60,7 +62,8 @@ describe("production enrichment integration", () => {
     await postJson(baseUrl, "/ingest", hookPayload("refresh-question", "user_question", { message: "Investigate Board headline refresh." }));
 
     await waitFor(() => {
-      expect(currentCapsuleFingerprint(daemon, "production-enrichment")).toBeTruthy();
+      expect(sourceSessionMessageCount(daemon, "production-enrichment")).toBe(2);
+      expect(currentCapsuleFingerprint(daemon, "production-enrichment")).toBe(currentFactsFingerprint(daemon, "production-enrichment"));
     });
     const before = currentCapsuleFingerprint(daemon, "production-enrichment");
 
@@ -77,7 +80,10 @@ describe("production enrichment integration", () => {
     );
 
     await waitFor(() => {
-      expect(currentCapsuleFingerprint(daemon, "production-enrichment")).not.toBe(before);
+      expect(sourceSessionMessageCount(daemon, "production-enrichment")).toBe(3);
+      const expected = currentFactsFingerprint(daemon, "production-enrichment");
+      expect(expected).not.toBe(before);
+      expect(currentCapsuleFingerprint(daemon, "production-enrichment")).toBe(expected);
     });
   });
 });
@@ -183,6 +189,26 @@ function currentCapsuleFingerprint(daemon: MastheadDaemon, sourceSessionId: stri
     )
     .get(sourceSessionId) as { fingerprint: string } | undefined;
   return row?.fingerprint;
+}
+
+function currentFactsFingerprint(daemon: MastheadDaemon, sourceSessionId: string): string | undefined {
+  const session = daemon.database
+    .prepare("SELECT session_id AS sessionId FROM sessions WHERE source_session_id = ? AND deleted_at IS NULL")
+    .get(sourceSessionId) as { sessionId: string } | undefined;
+  return session ? fingerprintSessionFacts(buildSessionFacts(daemon.database, session.sessionId)) : undefined;
+}
+
+function sourceSessionMessageCount(daemon: MastheadDaemon, sourceSessionId: string): number {
+  const row = daemon.database
+    .prepare(
+      `SELECT COUNT(*) AS count
+      FROM messages
+      JOIN sessions ON sessions.session_id = messages.session_id
+      WHERE sessions.source_session_id = ?
+        AND sessions.deleted_at IS NULL`
+    )
+    .get(sourceSessionId) as { count: number };
+  return row.count;
 }
 
 async function waitFor(assertion: () => void): Promise<void> {

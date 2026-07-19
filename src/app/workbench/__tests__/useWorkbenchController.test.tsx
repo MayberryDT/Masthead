@@ -87,6 +87,15 @@ afterEach(async () => {
 });
 
 describe("useWorkbenchController", () => {
+  test("does not fetch hidden import-repair diagnostics for the human Workbench", async () => {
+    mockWorkbenchResponse([]);
+
+    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
+    await waitFor(() => latest().loading === false);
+
+    expect(getWorkbenchImportHealthSummary).not.toHaveBeenCalled();
+  });
+
   test("preserves selections across pages in one authoritative handoff", async () => {
     vi.mocked(getWorkbenchAuthoringCapabilities).mockResolvedValue(
       authoringCapabilities("database:test", "/home/test/.local/bin/mastheadctl")
@@ -158,8 +167,10 @@ describe("useWorkbenchController", () => {
     await waitFor(() => latest().loading === false);
 
     expect(Array.from(latest().selectedSessionIds)).toEqual(["session:page-1", "session:page-2"]);
-    expect(latest().canRun("copy_agent_prompt")).toBe(false);
-    expect(latest().handoffText).toBe("");
+    expect(latest().agentPromptSessionCount).toBe(1);
+    expect(latest().agentPromptExcludedCount).toBe(1);
+    expect(latest().canRun("copy_agent_prompt")).toBe(true);
+    expect(machineRequest().sessionIds).toEqual(["session:page-2"]);
 
     firstPageReady = true;
     await rerenderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 3 });
@@ -170,7 +181,7 @@ describe("useWorkbenchController", () => {
     expect(machineRequest().sessionIds).toEqual(["session:page-1", "session:page-2"]);
   });
 
-  test("requires V3 capabilities and a compile-ready selection for Copy Agent Prompt", async () => {
+  test("uses the compile-ready subset of a V3 selection for Copy Agent Prompt", async () => {
     mockWorkbenchResponse([
       session("session:ready", "Ready", { nextAction: "enrich", qualityStatus: "passed", transcriptStatus: "imported" }),
       session("session:available", "Available", { qualityStatus: "passed", transcriptStatus: "available" }),
@@ -188,8 +199,10 @@ describe("useWorkbenchController", () => {
       latest().toggleSession("session:ready");
       await Promise.resolve();
     });
-    expect(latest().canRun("copy_agent_prompt")).toBe(false);
-    expect(latest().handoffText).toBe("");
+    expect(latest().agentPromptSessionCount).toBe(1);
+    expect(latest().agentPromptExcludedCount).toBe(1);
+    expect(latest().canRun("copy_agent_prompt")).toBe(true);
+    expect(machineRequest().sessionIds).toEqual(["session:ready"]);
     await act(async () => {
       latest().toggleSession("session:not-ready");
       await Promise.resolve();
@@ -340,7 +353,7 @@ describe("useWorkbenchController", () => {
     expect(latest().canRun("copy_agent_prompt")).toBe(true);
   });
 
-  test("selectAll rejects an off-page mixed-readiness selection from the authoritative handoff", async () => {
+  test("selectAll preserves a mixed selection while handing off only compile-ready sessions", async () => {
     vi.mocked(getWorkbenchAuthoringCapabilities).mockResolvedValue(
       authoringCapabilities("database:test", "/home/test/.local/bin/mastheadctl")
     );
@@ -369,8 +382,10 @@ describe("useWorkbenchController", () => {
     });
 
     expect(Array.from(latest().selectedSessionIds).sort()).toEqual(["session:a", "session:b"]);
-    expect(latest().handoffText).toBe("");
-    expect(latest().canRun("copy_agent_prompt")).toBe(false);
+    expect(latest().agentPromptSessionCount).toBe(1);
+    expect(latest().agentPromptExcludedCount).toBe(1);
+    expect(machineRequest().sessionIds).toEqual(["session:b"]);
+    expect(latest().canRun("copy_agent_prompt")).toBe(true);
   });
 
   test("retries after a failed load", async () => {
@@ -671,19 +686,27 @@ describe("useWorkbenchController", () => {
     });
   });
 
-  test("copy_agent_prompt only sets summary without posting", async () => {
-    mockWorkbenchResponse([session("session:abc", "Copy session")]);
+  test("copy_agent_prompt reports ready and excluded selected sessions without posting", async () => {
+    mockWorkbenchResponse([
+      session("session:ready", "Copy session"),
+      session("session:review", "Review session", { qualityStatus: "unchecked" })
+    ]);
 
     await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
-    await waitFor(() => (latest()?.sessions.length ?? 0) === 1);
-    await select("session:abc");
+    await waitFor(() => (latest()?.sessions.length ?? 0) === 2);
+    await act(async () => {
+      latest().selectPage();
+      await Promise.resolve();
+    });
 
     const loadsBefore = vi.mocked(getWorkbenchSessions).mock.calls.length;
     await act(async () => {
       await latest().runAction("copy_agent_prompt");
     });
 
-    expect(latest().lastActionSummary).toBe("Agent prompt copied for 1 sessions");
+    expect(latest().lastActionSummary).toBe(
+      "Agent prompt copied for 1 ready session; 1 selected session needs review and was left out"
+    );
     expect(postWorkbenchCheckTranscript).not.toHaveBeenCalled();
     expect(getWorkbenchSessions).toHaveBeenCalledTimes(loadsBefore);
   });
@@ -779,6 +802,7 @@ describe("useWorkbenchController", () => {
     vi.mocked(postWorkbenchEnrollMissing).mockResolvedValue({
       ok: true,
       enrolled: 2,
+      heldForImportRepair: 0,
       skippedExisting: 1,
       enrolledSessionIds: ["session:enrolled", "session:other"],
       limit: 500,
@@ -828,6 +852,7 @@ describe("useWorkbenchController", () => {
       resolveEnroll?.({
         ok: true,
         enrolled: 0,
+        heldForImportRepair: 0,
         skippedExisting: 3,
         enrolledSessionIds: [],
         limit: 500,

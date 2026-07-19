@@ -345,15 +345,15 @@ describe("dovetail card system", () => {
     expect(cssRuleBody(mastheadCss, ".masthead-shell .secondary-tier-action::after")).toContain("border-bottom-color: rgba(255, 72, 62, 0.48);");
 
     expect(cssRuleBody(mastheadCss, ".masthead-shell .summary-metric-accent")).toContain("display: none;");
-    const sidebarPositionRule = cssRuleBodyContaining(mastheadCss, ".masthead-shell .sidebar-knowledge-flow", "bottom: 16px;");
+    const sidebarPositionRule = cssRuleBodyContaining(mastheadCss, ".masthead-shell .sidebar-knowledge-flow", "margin: 10px 16px 16px;");
     const sidebarMobileRule = cssRuleBodyContaining(
       mastheadCss,
       "@media (max-width: 760px)",
       ".masthead-shell .sidebar-knowledge-flow"
     );
-    expect(sidebarPositionRule).toContain("position: absolute;");
-    expect(sidebarPositionRule).toContain("bottom: 16px;");
-    expect(sidebarMobileRule).toContain("position: static;");
+    expect(sidebarPositionRule).toContain("position: relative;");
+    expect(sidebarPositionRule).toContain("margin: 10px 16px 16px;");
+    expect(sidebarMobileRule).toContain("margin: 18px 16px 0;");
     expect(mastheadCss).not.toContain(".masthead-shell .import-jobs-section::after");
     expect(mastheadCss).not.toContain(".masthead-shell .session-dossier");
   });

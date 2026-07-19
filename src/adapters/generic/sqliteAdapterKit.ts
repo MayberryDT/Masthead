@@ -8,6 +8,13 @@ export async function withReadonlySqliteCopy<T>(dbPath: string, fn: (db: Databas
   const copyPath = join(tempDir, basename(dbPath));
   try {
     await copyFile(dbPath, copyPath);
+    await Promise.all(["-wal", "-shm"].map(async (suffix) => {
+      try {
+        await copyFile(`${dbPath}${suffix}`, `${copyPath}${suffix}`);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    }));
     const db = new DatabaseSync(copyPath, { readOnly: true });
     try {
       return fn(db);

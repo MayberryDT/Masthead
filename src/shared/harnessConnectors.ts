@@ -50,6 +50,7 @@ export type HarnessConnectorsSnapshotDto = {
 export function deriveLiveStatus(input: {
   installed: boolean;
   configExists: boolean;
+  managedConnectorPresent?: boolean;
   missingEvents: string[];
   mismatchedEvents: string[];
   error?: string;
@@ -61,6 +62,9 @@ export function deriveLiveStatus(input: {
   }
 
   if (!input.installed) {
+    if (input.managedConnectorPresent === false) {
+      return { live: "not_installed" };
+    }
     if (input.missingEvents.includes("enabled") && input.configExists) {
       return {
         live: "needs_action",

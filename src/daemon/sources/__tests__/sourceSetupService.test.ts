@@ -20,6 +20,20 @@ afterEach(async () => {
 });
 
 describe("source setup service", () => {
+  test("derives adapter aggregates from the source inventory already loaded for setup", async () => {
+    const db = await openTestDatabase();
+    seedSource(db, "opencode-history", "opencode");
+    const measured = measurePreparedStatements(db);
+
+    const setup = buildSourcesSetupState(measured.db, { now: "2026-06-27T10:00:00.000Z" });
+
+    expect(setup.advanced.adapters.find((adapter) => adapter.runtime === "opencode")).toMatchObject({
+      sourceLocationCount: 1
+    });
+    expect(measured.count()).toBeLessThanOrEqual(10);
+    db.close();
+  });
+
   test("reports empty before connected sources or scans exist", async () => {
     const db = await openTestDatabase();
 
@@ -184,6 +198,23 @@ function seedSource(db: MastheadDatabase, sourceId: string, runtime: RuntimeKind
       source_id, adapter, source_kind, source_path, confidence, discovered_at, last_seen_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?)`
   ).run(sourceId, runtime, "jsonl", `/tmp/${sourceId}.jsonl`, "authoritative", now, now);
+}
+
+function measurePreparedStatements(db: MastheadDatabase): { count: () => number; db: MastheadDatabase } {
+  let preparedStatements = 0;
+  const measured = new Proxy(db, {
+    get(target, property) {
+      if (property === "prepare") {
+        return (...args: Parameters<MastheadDatabase["prepare"]>) => {
+          preparedStatements += 1;
+          return target.prepare(...args);
+        };
+      }
+      const value = Reflect.get(target, property, target) as unknown;
+      return typeof value === "function" ? value.bind(target) : value;
+    }
+  });
+  return { count: () => preparedStatements, db: measured };
 }
 
 function realisticScanResult(): SourceScanResult {

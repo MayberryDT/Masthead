@@ -815,6 +815,10 @@
     #031019;
 }
 
+.masthead-shell.desktop-chrome .sources-onboarding-full-window {
+  top: 0;
+}
+
 .session-detail-modal.sources-onboarding-modal {
   grid-template-rows: auto minmax(0, 1fr);
   width: min(900px, calc(100vw - 32px));
@@ -837,7 +841,7 @@
 
 .session-detail-modal.sources-onboarding-modal-full .session-detail-header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: 215px minmax(0, 1fr) auto;
   align-items: center;
   gap: 16px;
   min-height: 72px;
@@ -849,7 +853,38 @@
   padding: 14px clamp(18px, 3vw, 32px);
 }
 
-.sources-onboarding-modal-full .session-detail-header > div:first-child {
+.masthead-shell.desktop-chrome .sources-onboarding-modal-full .session-detail-header {
+  min-height: calc(72px + env(titlebar-area-height, 32px));
+  padding: calc(14px + env(titlebar-area-height, 32px)) clamp(18px, 3vw, 32px) 14px;
+  -webkit-app-region: drag;
+}
+
+.masthead-shell.desktop-chrome .sources-onboarding-modal-full .session-detail-header > * {
+  -webkit-app-region: no-drag;
+}
+
+.sources-onboarding-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  color: var(--ink);
+}
+
+.sources-onboarding-brand img {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+  filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.08));
+}
+
+.sources-onboarding-brand strong {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.sources-onboarding-heading {
   display: grid;
   gap: 3px;
   min-width: 0;
@@ -1095,6 +1130,15 @@
 }
 
 @media (max-width: 980px) {
+  .session-detail-modal.sources-onboarding-modal-full .session-detail-header {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 12px;
+  }
+
+  .sources-onboarding-brand strong {
+    display: none;
+  }
+
   .sources-onboarding-modal .sources-onboarding-command-layout {
     grid-template-columns: 1fr;
     align-content: start;
@@ -1127,6 +1171,19 @@
 }
 
 @media (max-width: 620px) {
+  .session-detail-modal.sources-onboarding-modal-full .session-detail-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+  }
+
+  .sources-onboarding-brand {
+    display: none;
+  }
+
+  .sources-onboarding-modal-full .session-detail-header h2 {
+    font-size: 16px;
+  }
+
   .sources-onboarding-step-list {
     gap: 6px;
   }
@@ -2258,6 +2315,10 @@
 
 .sources-connection-open-hint.is-pass {
   color: var(--green, #5bd18a);
+}
+
+.sources-connection-open-hint.is-warn {
+  color: var(--yellow, #ffcf36);
 }
 
 .sources-connection-open-hint.is-fail {

@@ -65,6 +65,31 @@ describe("OperationsPanel", () => {
     expect(html).not.toContain("Run command");
   });
 
+  test("runs onboarding again from Settings", async () => {
+    const onOpenOnboarding = vi.fn();
+
+    await renderPanel(
+      <OperationsPanel onOpenOnboarding={onOpenOnboarding} settingsState={settings} />
+    );
+
+    const runOnboarding = buttonNamed(container, "Run onboarding again");
+    expect(runOnboarding?.disabled).toBe(false);
+
+    await act(async () => {
+      runOnboarding?.click();
+    });
+
+    expect(onOpenOnboarding).toHaveBeenCalledTimes(1);
+  });
+
+  test("disables onboarding when Settings is read-only", async () => {
+    await renderPanel(
+      <OperationsPanel onOpenOnboarding={() => undefined} readOnly settingsState={settings} />
+    );
+
+    expect(buttonNamed(container, "Run onboarding again")?.disabled).toBe(true);
+  });
+
   test("renders explicit delete confirmation state", () => {
     const html = renderToStaticMarkup(
       <OperationsPanel

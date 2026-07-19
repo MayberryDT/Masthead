@@ -11,6 +11,8 @@ type WorkbenchPanelProps = Partial<
     | "actionBusy"
     | "actionError"
     | "activity"
+    | "agentPromptExcludedCount"
+    | "agentPromptSessionCount"
     | "canRun"
     | "clearActionFeedback"
     | "error"
@@ -20,7 +22,6 @@ type WorkbenchPanelProps = Partial<
     | "notAddedOpen"
     | "notAddedSessions"
     | "notAddedSummary"
-    | "importHealthSummary"
     | "page"
     | "pageSize"
     | "runAction"
@@ -36,7 +37,6 @@ type WorkbenchPanelProps = Partial<
   onSelectAll?: () => void;
   onSelectPage?: () => void;
   onToggleSession?: (sessionId: string) => void;
-  onOpenImportReceipt?: (importJobId: string) => void;
 };
 
 const EMPTY_SELECTION = new Set<string>();
@@ -89,6 +89,8 @@ export function WorkbenchPanel({
   actionBusy = false,
   actionError,
   activity = EMPTY_ACTIVITY,
+  agentPromptExcludedCount = 0,
+  agentPromptSessionCount = 0,
   canRun = defaultCanRun,
   clearActionFeedback,
   error,
@@ -98,13 +100,11 @@ export function WorkbenchPanel({
   notAddedOpen = false,
   notAddedSessions = EMPTY_NOT_ADDED,
   notAddedSummary,
-  importHealthSummary,
   onClearSelection,
   onRetry,
   onSelectAll,
   onSelectPage,
   onToggleSession,
-  onOpenImportReceipt,
   page = 0,
   pageSize = 100,
   runAction,
@@ -130,6 +130,17 @@ export function WorkbenchPanel({
       ? sanitizeWorkbenchVisibleText(lastActionSummary)
       : undefined;
   const toastTone = actionError ? "error" : "ok";
+  const copyAgentPromptTitle = selectionCount === 0
+    ? TOOLTIPS.copyAgentPrompt
+    : agentPromptSessionCount === 0
+      ? "No selected sessions are ready for agent enrichment. Review transcript and quality status first."
+      : agentPromptExcludedCount > 0
+        ? `Copy a plain-language request for ${agentPromptSessionCount} ready session${
+          agentPromptSessionCount === 1 ? "" : "s"
+        }. ${agentPromptExcludedCount} selected session${
+          agentPromptExcludedCount === 1 ? " needs" : "s need"
+        } review and will be left out.`
+        : TOOLTIPS.copyAgentPrompt;
 
   const pageSessionIds = sessions.map((session) => session.sessionId);
   const newSessionIds = useNewItemIds(pageSessionIds, page);
@@ -227,7 +238,7 @@ export function WorkbenchPanel({
             variant="primary"
             onClick={() => void run("copy_agent_prompt")}
             disabled={!canRun("copy_agent_prompt")}
-            title={TOOLTIPS.copyAgentPrompt}
+            title={copyAgentPromptTitle}
           >
             Copy Agent Prompt
           </AppButton>
@@ -296,16 +307,16 @@ export function WorkbenchPanel({
             <dt>Package path</dt>
             <dd>{publishPathLabel}</dd>
           </div>
-          <div title="Sessions currently selected for bulk actions">
+          <div title="Sessions currently selected for bulk actions and ready for agent enrichment">
             <dt>Selected</dt>
             <dd>{selectionCount}</dd>
+            {selectionCount > 0 ? (
+              <span className="workbench-selection-readiness">
+                {agentPromptSessionCount} ready
+                {agentPromptExcludedCount > 0 ? ` · ${agentPromptExcludedCount} review` : ""}
+              </span>
+            ) : null}
           </div>
-          {importHealthSummary ? (
-            <div className={importHealthSummary.repairRequired > 0 ? "is-warning" : undefined} title="Import units held outside the package path until their evidence is repaired">
-              <dt>Import repair</dt>
-              <dd>{importHealthSummary.repairRequired}</dd>
-            </div>
-          ) : null}
           {notAddedLabel != null ? (
             <div className={notAddedOpen ? "is-active" : undefined} title={TOOLTIPS.notAdded}>
               <dt>Not Added</dt>
@@ -325,25 +336,6 @@ export function WorkbenchPanel({
           ) : null}
         </dl>
       </div>
-
-      {importHealthSummary && importHealthSummary.repairRequired > 0 ? (
-        <section className="workbench-import-repair-panel" aria-label="Import repair">
-          <div>
-            <p className="mono-label">Import repair — outside the package path</p>
-            <p>
-              {importHealthSummary.repairRequired} import repair issue{importHealthSummary.repairRequired === 1 ? "" : "s"} remain outside the package path.
-              Repair units are not selectable sessions and are not counted as Not Added.
-            </p>
-          </div>
-          <div className="workbench-import-repair-receipts">
-            {importHealthSummary.importJobIds.map((importJobId) => (
-              <AppButton variant="quiet" key={importJobId} onClick={() => onOpenImportReceipt?.(importJobId)} disabled={!onOpenImportReceipt}>
-                Open import receipt
-              </AppButton>
-            ))}
-          </div>
-        </section>
-      ) : null}
 
       {toastMessage ? (
         <div className={`workbench-toast is-${toastTone}`} role="status" aria-live="polite" aria-atomic="true">

@@ -1,6 +1,7 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, test } from "vitest";
 import { migrateDatabase } from "../../db/schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../../db/sqlite.ts";
@@ -34,23 +35,27 @@ describe("source discovery service", () => {
 
   test("counts detected OpenCode candidates before import", async () => {
     const { db, home } = await openSourceDiscoveryTestDatabase("masthead-source-discovery-connected-");
-    const opencodeRoot = join(home, ".opencode");
-    await mkdir(join(opencodeRoot, "sessions", "2026", "06"), { recursive: true });
-    await writeFile(join(opencodeRoot, "sessions", "2026", "06", "one.jsonl"), "{}\n");
-    await writeFile(join(opencodeRoot, "sessions", "2026", "06", "two.jsonl"), "{}\n");
-    await writeFile(join(opencodeRoot, "history.jsonl"), "{}\n");
+    const opencodeRoot = join(home, ".local", "share", "opencode");
+    await mkdir(opencodeRoot, { recursive: true });
+    const opencode = new DatabaseSync(join(opencodeRoot, "opencode.db"));
+    opencode.exec("CREATE TABLE session (id TEXT PRIMARY KEY)");
+    opencode.prepare("INSERT INTO session (id) VALUES (?)").run("one");
+    opencode.prepare("INSERT INTO session (id) VALUES (?)").run("two");
+    opencode.close();
 
     const snapshot = await discoverSourceSnapshot({ codexHomeDir: home, now: "2026-06-25T12:00:00.000Z" });
     const adapters = getAdapterStatuses(db, snapshot);
 
     expect(adapters.find((adapter) => adapter.runtime === "opencode")).toMatchObject({
       diagnostics: [],
-      discoveredCount: 3,
+      discoveredCount: 1,
       implementationState: "active",
       importedCount: 0,
       state: "connected"
     });
-    expect(adapters.find((adapter) => adapter.runtime === "opencode")?.sourceLocations).toHaveLength(3);
+    expect(adapters.find((adapter) => adapter.runtime === "opencode")?.sourceLocations).toEqual([
+      expect.objectContaining({ path: join(opencodeRoot, "opencode.db"), sourceKind: "sqlite" })
+    ]);
     db.close();
   });
 

@@ -1,3 +1,4 @@
+import { ALL_RUNTIME_KINDS, type RuntimeKind } from "../../adapters/types.ts";
 import type {
   SessionImportHealthDiagnosticDto,
   SessionImportHealthStatus,
@@ -6,6 +7,12 @@ import type {
 import type { MastheadDatabase } from "./sqlite.ts";
 
 export type { SessionImportHealthStatus } from "../../shared/workbench.ts";
+
+function requireRuntimeKind(value: string): RuntimeKind {
+  const runtime = ALL_RUNTIME_KINDS.find((candidate) => candidate === value);
+  if (!runtime) throw new TypeError(`Unsupported import repair runtime: ${value}`);
+  return runtime;
+}
 
 export type SessionImportHealthRecord = {
   workUnitId: string;
@@ -134,11 +141,36 @@ export function summarizeCurrentSessionImportHealth(db: MastheadDatabase): {
   repairRequired: number;
   reasons: Array<{ reason: string; count: number }>;
   importJobIds: string[];
+  repairImports: Array<{
+    importJobId: string;
+    sourceId: string;
+    runtime: RuntimeKind;
+    repairRequired: number;
+    reasons: Array<{ reason: string; count: number }>;
+  }>;
 } {
   const rows = db.prepare(
-    `SELECT import_job_id AS importJobId, reason
+    `SELECT health.import_job_id AS importJobId, jobs.source_id AS sourceId,
+      sources.adapter AS runtime, health.reason
     FROM session_import_health health
-    WHERE status = 'repair_required'
+    JOIN import_jobs jobs ON jobs.import_job_id = health.import_job_id
+    JOIN ingest_sources sources ON sources.source_id = jobs.source_id
+    WHERE health.status = 'repair_required'
+      AND (
+        health.session_id IS NULL
+        OR NOT EXISTS (
+          SELECT 1
+          FROM session_import_health newer_health
+          WHERE newer_health.session_id = health.session_id
+            AND (
+              newer_health.updated_at > health.updated_at
+              OR (
+                newer_health.updated_at = health.updated_at
+                AND newer_health.work_unit_id > health.work_unit_id
+              )
+            )
+        )
+      )
       AND NOT EXISTS (
         SELECT 1
         FROM import_repair_replacements replacements
@@ -147,14 +179,37 @@ export function summarizeCurrentSessionImportHealth(db: MastheadDatabase): {
         WHERE replacements.original_import_job_id = health.import_job_id
           AND replacement_jobs.status = 'succeeded'
       )
-    ORDER BY import_job_id, reason, work_unit_id`
-  ).all() as Array<{ importJobId: string; reason: string | null }>;
+    ORDER BY health.import_job_id, health.reason, health.work_unit_id`
+  ).all() as Array<{ importJobId: string; sourceId: string; runtime: string; reason: string | null }>;
   const reasonCounts = new Map<string, number>();
+  const repairImports = new Map<string, {
+    importJobId: string;
+    sourceId: string;
+    runtime: RuntimeKind;
+    repairRequired: number;
+    reasonCounts: Map<string, number>;
+  }>();
   for (const row of rows) {
     if (row.reason) reasonCounts.set(row.reason, (reasonCounts.get(row.reason) ?? 0) + 1);
+    const summary = repairImports.get(row.importJobId) ?? {
+      importJobId: row.importJobId,
+      sourceId: row.sourceId,
+      runtime: requireRuntimeKind(row.runtime),
+      repairRequired: 0,
+      reasonCounts: new Map<string, number>()
+    };
+    summary.repairRequired += 1;
+    if (row.reason) summary.reasonCounts.set(row.reason, (summary.reasonCounts.get(row.reason) ?? 0) + 1);
+    repairImports.set(row.importJobId, summary);
   }
   return {
     importJobIds: [...new Set(rows.map((row) => row.importJobId))],
+    repairImports: [...repairImports.values()].map(({ reasonCounts: importReasonCounts, ...summary }) => ({
+      ...summary,
+      reasons: [...importReasonCounts.entries()]
+        .map(([reason, count]) => ({ count, reason }))
+        .toSorted((left, right) => right.count - left.count || left.reason.localeCompare(right.reason))
+    })),
     reasons: [...reasonCounts.entries()]
       .map(([reason, count]) => ({ count, reason }))
       .toSorted((left, right) => right.count - left.count || left.reason.localeCompare(right.reason)),

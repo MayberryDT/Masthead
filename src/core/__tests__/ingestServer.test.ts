@@ -1247,6 +1247,7 @@ function jobIds(response: Record<string, any>): string[] {
 }
 
 function publishSourceSession(db: DatabaseSync, sourceSessionId: string, artifactTitle: string): void {
+  db.exec("PRAGMA busy_timeout = 3000;");
   const row = db
     .prepare(
       `SELECT session_id AS sessionId, project_label AS project
