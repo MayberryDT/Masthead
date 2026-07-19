@@ -1015,14 +1015,17 @@ git commit -m "fix: bind authoring and harden production activation"
 - Create: `src/workbench/authoring/guidedAuthoringPolicy.ts`
 - Create: `src/workbench/authoring/guidedAuthoringPreflight.ts`
 - Create: `src/workbench/authoring/guidedAuthoringService.ts`
+- Modify: `src/workbench/authoring/evidenceCatalog.ts`
 - Modify: `src/workbench/authoring/advisorySuggestions.ts`
 - Modify: `src/workbench/authoring/artifactCandidates.ts`
 - Create: `src/workbench/authoring/__tests__/guidedAuthoringService.test.ts`
+- Create: `src/workbench/authoring/__tests__/fixtures/guidedAuthoringWalWriter.mjs`
+- Modify: `src/workbench/authoring/__tests__/evidenceCatalog.test.ts`
 - Modify: `src/workbench/authoring/__tests__/advisorySuggestions.test.ts`
 - Modify: `src/workbench/authoring/__tests__/artifactCandidates.test.ts`
 
 **Interfaces:**
-- Consumes: `getArtifactSuggestions`, canonical evidence manifests, V4 repository operations, and request session membership.
+- Consumes: `getArtifactSuggestions`, one-traversal canonical evidence snapshots, V4 repository operations, and request session membership.
 - Produces: `createGuidedRequest()` and `startGuidedAssignment()` with strong-join grouping, dossier-only fallback groups, and a deterministic three-session canary.
 
 - [ ] **Step 1: Write failing assignment-planning tests**
@@ -1148,17 +1151,115 @@ test("rolls back the complete aggregate after an injected persistence failure", 
     .toThrow("injected_guided_request_failure");
   expect(guidedRequestCounts(db)).toEqual(emptyGuidedRequestCounts());
 });
+
+test("derives every assignment revision from one selection evidence snapshot", () => {
+  vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
+  const snapshot = vi.spyOn(evidenceCatalog, "getAuthoringEvidenceSnapshot");
+  const directRevisionRead = vi.spyOn(evidenceCatalog, "authoringEvidenceRevision");
+  const created = createGuidedRequest(db, guidedRequestInput(selectionIds(18)));
+  expect(snapshot).toHaveBeenCalledTimes(1);
+  expect(directRevisionRead).not.toHaveBeenCalled();
+  const captured = snapshot.mock.results[0]!.value as AuthoringEvidenceSnapshot;
+  for (const assignment of getGuidedAssignments(db, created.request.requestId)) {
+    expect(assignment.evidenceRevision).toBe(
+      guidedAuthoringEvidenceRevisionFromInputs(
+        captured.sessions
+          .filter(({ revisionInput }) => assignment.sessionIds.includes(revisionInput.sessionId))
+          .map(({ revisionInput }) => revisionInput)
+      )
+    );
+  }
+});
+
+test("preserves pre-V4 single-session and automatic V2 identities byte for byte", () => {
+  seedDurableArtifactCorpus(db);
+  expect(authoringEvidenceRevision(db, [])).toBe(
+    "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  );
+  expect(authoringEvidenceRevision(db, [oauthFailureFixedAndVerified.id])).toBe(
+    "sha256:d7e792f32fa9cfa0b3bc0f20dcdf7192fe0a68dfce0a5207e3e6adb81a1c9ca4"
+  );
+  expect(authoringEvidenceRevision(db, [oauthFailureFixedAndVerified.id, "", oauthFailureFixedAndVerified.id])).toBe(
+    "sha256:d7e792f32fa9cfa0b3bc0f20dcdf7192fe0a68dfce0a5207e3e6adb81a1c9ca4"
+  );
+  expect(getArtifactSuggestions(db, [oauthFailureFixedAndVerified.id])[0]?.suggestionId).toBe(
+    "artifact-suggestion:3643e87bbcc67d1dae134350e14985c5"
+  );
+  expect(discoverArtifactCandidates(db, [oauthFailureFixedAndVerified.id])[0]?.candidateId).toBe(
+    "artifact-candidate:31c9f759a515ee549ed6ddcbe6b6e26c"
+  );
+  expect(
+    getArtifactSuggestions(db, [repeatedErrorPartOne.id, repeatedErrorPartTwo.id])
+      .find(({ kind }) => kind === "runbook")?.suggestionId
+  ).toBe("artifact-suggestion:86bdf9a27eacf858ba1e60bd147213e9");
+  expect(
+    discoverArtifactCandidates(db, [repeatedErrorPartOne.id, repeatedErrorPartTwo.id])
+      .find(({ kind }) => kind === "runbook")?.candidateId
+  ).toBe("artifact-candidate:7d2240aa5ff15eaa0f34100e994745ac");
+});
+
+test("preserves the legacy multi-session V3 revision and proposed V2 candidate identity", () => {
+  seedDurableArtifactCorpus(db);
+  expect(authoringEvidenceRevision(db, [repeatedErrorPartOne.id, repeatedErrorPartTwo.id])).toBe(
+    "sha256:b5cc607d223255e323b622dfa90b065605a0ffe6cfa84aaa02fc2d8625ea043a"
+  );
+  expect(proposeArtifactCandidate(db, repeatedErrorProposal()).candidateId).toBe(
+    "artifact-candidate:9c9e4b572c4fab19b825ba1b8c9e1432"
+  );
+});
+
+test("holds one WAL write transaction across snapshot, detection, planning, and persistence", async () => {
+  const contender = armCanonicalEvidenceMutationWorker(databasePath, {
+    attemptWhen: "artifact_detector_entered",
+    sessionIds: selectionIds(6)
+  });
+  const realDetector = advisorySuggestions.getArtifactSuggestions;
+  const detector = vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockImplementation((...args) => {
+    contender.releaseFirstAttempt();
+    expect(contender.waitForFirstAttemptSync({ timeoutMs: 2_000 }))
+      .toMatchObject({ code: "SQLITE_BUSY", committed: false });
+    return realDetector(...args);
+  });
+  try {
+    const created = createGuidedRequest(db, guidedRequestInput(selectionIds(6)));
+    expect(await contender.firstAttempt).toMatchObject({ code: "SQLITE_BUSY", committed: false });
+    await expect(contender.retryAfterServiceReturns()).resolves.toMatchObject({ committed: true });
+    expect(() => startGuidedAssignment(db, {
+      command: "/instance/bin/mastheadctl",
+      requestId: created.request.requestId
+    })).toThrow("guided_assignment_evidence_changed");
+  } finally {
+    detector.mockRestore();
+    await contender.stop({ timeoutMs: 2_000 });
+  }
+});
 ```
+
+The WAL test uses a worker with its own `DatabaseSync` connection and a low `busy_timeout`. A
+test-local `vi.spyOn()` detector barrier releases the worker only after `getArtifactSuggestions()` has
+been entered, then synchronously waits on worker-owned `SharedArrayBuffer`/`Atomics` state until that
+first write attempt has returned `SQLITE_BUSY` before allowing the real detector to run. Both waits use
+an explicit two-second timeout, and `finally` restores the spy and terminates the worker even when an
+assertion fails. This proves `createGuidedRequest()` already owns the write reservation throughout
+detector execution without relying on scheduling speed: the first update must fail with `SQLITE_BUSY`,
+the identical update must commit after the service returns, and the persisted pre-update assignment
+revision must then fail the normal stale-evidence guard. Keep the barrier and shared state in the test
+and worker fixture; do not add a production timing hook to make this test possible.
+
+Put the digest assertion in `evidenceCatalog.test.ts` and the suggestion/candidate assertions in their
+existing V2 suites, using a fresh seeded database for each identity case. These literals are migration
+sentinels: fixture or serializer changes must not update them casually, because a changed value means
+historical revision-derived identities have changed.
 
 - [ ] **Step 2: Run the service test and verify failure**
 
 Run:
 
 ```bash
-npx vitest run src/workbench/authoring/__tests__/guidedAuthoringService.test.ts
+npx vitest run src/workbench/authoring/__tests__/evidenceCatalog.test.ts src/workbench/authoring/__tests__/guidedAuthoringService.test.ts
 ```
 
-Expected: FAIL because the policy and service modules do not exist.
+Expected: FAIL because the snapshot, policy, preflight, and service contracts do not exist.
 
 - [ ] **Step 3: Implement deterministic assignment planning**
 
@@ -1268,6 +1369,78 @@ test("exposes every strong-signature member to guided planning while V2 remains 
 
 - [ ] **Step 5: Preflight the complete selection and persist one immutable aggregate**
 
+Refactor `evidenceCatalog.ts` around one canonical selection snapshot. Export this exact contract:
+
+```ts
+export type AuthoringEvidenceRevisionInput = {
+  sessionId: string;
+  sessionDigest: `sha256:${string}`;
+};
+
+export type AuthoringEvidenceSessionSnapshot = {
+  evidence: WorkbenchAuthoringEvidenceManifest["sessions"][number];
+  revisionInput: AuthoringEvidenceRevisionInput;
+  usableCanonicalEvidence: boolean;
+};
+
+export type AuthoringEvidenceSnapshot = {
+  manifest: WorkbenchAuthoringEvidenceManifest;
+  sessions: AuthoringEvidenceSessionSnapshot[];
+};
+
+export function getAuthoringEvidenceSnapshot(
+  db: MastheadDatabase,
+  sessionIds: string[]
+): AuthoringEvidenceSnapshot;
+
+export function guidedAuthoringEvidenceRevisionFromInputs(
+  inputs: AuthoringEvidenceRevisionInput[]
+): string;
+
+export function guidedAuthoringEvidenceRevision(
+  db: MastheadDatabase,
+  sessionIds: string[]
+): string;
+```
+
+`getAuthoringEvidenceSnapshot()` rejects blank or duplicate IDs instead of filtering them, orders its
+`sessions` lexicographically by `sessionId`, and traverses `iterateSessionTranscriptItems()` exactly
+once per selected session. During that traversal it simultaneously builds the existing evidence
+summary, detects at least one non-low-value item with semantic redacted text, updates the unchanged
+legacy whole-selection `authoringEvidenceRevision()` stream, and hashes the same bytes into one
+per-session digest. The guided assignment revision is a V4-only `sha256` over lexicographically ordered
+canonical `{ sessionId, sessionDigest }` records; reject an empty input. Therefore
+`guidedAuthoringEvidenceRevisionFromInputs()` is deterministic, rejects blank or duplicate session IDs
+and digests that are not exactly `sha256:` plus 64 lowercase hexadecimal characters, and needs no
+database handle. `guidedAuthoringEvidenceRevision()` takes a fresh one-traversal snapshot for its
+requested membership and composes only those captured inputs with the same V4 helper.
+
+The per-session byte stream is the existing pre-V4 stream exactly: first
+`` `${JSON.stringify({ sessionId })}\n` ``, then one
+`` `${JSON.stringify(canonicalEvidenceItem)}\n` `` record per canonical item in transcript order.
+`canonicalEvidenceItem` retains the current property insertion order `additions`,
+`argumentsRedacted`, `deletions`, `details`, `exitCode`, `itemId`, `kind`, `label`, `lowValue`,
+`narrativeText`, `observedAt`, `role`, `sourceRef`, `staged`, `status`, `text`, `toolName`. Do not
+introduce a tag, wrapper object, length prefix, alternate delimiter, sorted-object serializer, or
+different undefined-value treatment inside a per-session digest or the legacy whole-selection stream.
+Only the V4 guided-assignment composition hashes the ordered `{ sessionId, sessionDigest }` records.
+
+Keep the legacy normalization boundary too: `getAuthoringEvidenceManifest()` and
+`authoringEvidenceRevision()` continue filtering blank IDs, deduplicating, and sorting before passing
+their normalized membership to the private collector, while the new public snapshot and both guided
+helpers reject blank or duplicate membership. `getAuthoringEvidenceManifest()` returns the collected
+manifest, whose `evidenceRevision` is the exact legacy whole-selection revision, and
+`authoringEvidenceRevision()` returns that same value byte-identically for zero, one, and multiple
+sessions; it must never call either guided helper. Add evidence-catalog tests proving the
+manifest and direct legacy helper agree with fixed zero-, one-, and multi-session goldens, preserve
+legacy blank/duplicate normalization, reversed input is
+stable, and one changed canonical field changes both the legacy and guided revisions. Separately prove
+the DB-backed and input-only guided helpers agree, reject empty/blank/duplicate/malformed input, are
+stable under reversed membership, and can compute assignment revisions from captured inputs after the
+database is closed. Extract one private snapshot collector and canonical record serializer used by
+both `getAuthoringEvidenceSnapshot()` and `authoringEvidenceRevision()`; do not duplicate the
+evidence-field list, replace the legacy whole-selection stream, or let V2/V3 call the guided helpers.
+
 Create a V4-scoped `assertGuidedSelectionCompileReady()` helper in
 `guidedAuthoringPreflight.ts`. It checks every selected session exists, remains on `publish_path`, has
 an available/imported transcript, passed quality, and has usable canonical redacted evidence. Do not
@@ -1287,6 +1460,7 @@ export type GuidedCompileReadySession = {
 export type GuidedSelectionPreflightResult = {
   sessions: GuidedCompileReadySession[];
   manifest: WorkbenchAuthoringEvidenceManifest;
+  revisionInputs: AuthoringEvidenceRevisionInput[];
 };
 
 export function assertGuidedSelectionCompileReady(
@@ -1295,7 +1469,15 @@ export function assertGuidedSelectionCompileReady(
 ): GuidedSelectionPreflightResult;
 ```
 
-Preflight rejects a blank ID first, then the first duplicate ID, then visits sessions in caller order and returns the first missing, non-publish-path, unavailable-transcript, unchecked/failed-quality, or unusable-evidence failure. It reads the canonical evidence manifest once, maps its summaries back into caller order, and returns the dossiers and measured tool-call counts consumed by planning; `createGuidedRequest()` must not repeat those reads or invent a second preflight path.
+Preflight rejects a blank ID first, then the first duplicate ID. It then takes exactly one
+`getAuthoringEvidenceSnapshot()` of the validated selection and evaluates session failures in caller
+order, returning the first missing, non-publish-path, unavailable-transcript,
+unchecked/failed-quality, or unusable-evidence failure. Snapshot collection may read the complete
+validated selection before the caller-order failure is chosen, but it must not change that observable
+failure order. Map snapshot summaries back into caller order and return dossiers, measured tool-call
+counts, the manifest, and revision inputs in caller order. `createGuidedRequest()` must consume that
+one result; it must not call `getAuthoringEvidenceManifest()`, `authoringEvidenceRevision()`, or
+`iterateSessionTranscriptItems()` through a second preflight or per-assignment path.
 
 Export these exact service contracts:
 
@@ -1335,12 +1517,25 @@ export function startGuidedAssignment(
 ): StartGuidedAssignmentResult;
 ```
 
-`createGuidedRequest()` validates and measures the entire selection, calls
-`getArtifactSuggestions()` once, and computes the request ID, complete plan, stable assignment IDs,
-and every assignment-wide `authoringEvidenceRevision` before calling the single Task 3
-`createGuidedAuthoringRequest()` transaction. Map `currentIdentity.instanceId` to immutable
-`creationInstanceId`; Task 9 adds the expected-versus-current mutation guard at the route boundary.
-An abort trigger after opportunity insertion must leave every Task 3 guided table empty.
+After rejecting blank or duplicate request membership, `createGuidedRequest()` opens one outer
+`withImmediateTransaction()` before the first session, dossier, transcript, quality, or detector read.
+Inside that transaction it validates and measures the entire selection, calls
+`getArtifactSuggestions()` once, computes the request ID, complete plan, stable assignment IDs, and
+every assignment-wide evidence revision by filtering the preflight `revisionInputs` and calling
+`guidedAuthoringEvidenceRevisionFromInputs()`, then persists through Task 3's transaction-composable
+`createGuidedAuthoringRequestInTransaction()`. It must not call the public
+`createGuidedAuthoringRequest()` wrapper or open a nested transaction. `BEGIN IMMEDIATE` makes the
+captured selection a coherent SQLite snapshot and prevents concurrent ingestion from changing
+canonical evidence between per-session traversal, detector output, revision derivation, and aggregate
+persistence. Map `currentIdentity.instanceId` to immutable `creationInstanceId`; Task 9 adds the
+expected-versus-current mutation guard at the route boundary. Any preflight, planning, detector, or
+injected repository failure rolls back the outer transaction, and an abort trigger after opportunity
+insertion must leave every Task 3 guided table empty.
+
+The single-read guarantee covers manifest creation, compile-ready evidence checks, tool-call
+measurement, and all assignment revision computation. Advisory opportunity detection remains its one
+explicit detector pass through canonical evidence via `getArtifactSuggestions()`; it is not a hidden
+preflight or revision read, and it must still be invoked exactly once for the complete selection.
 
 Build each `GuidedPlanningSession.toolCallCount` from the canonical evidence manifest's
 `coverage.toolCalls`; no detector-specific count or production-sampling label participates in canary
@@ -1382,7 +1577,7 @@ The successful create response returns exactly one `claim_next` action whose com
 claim behavior at the public mutation boundary. It reads `currentAssignmentId`, bounded membership,
 and opportunity IDs from Task 3 state, filters the persisted request opportunities, and never invokes
 the detector or planner. Before returning current canonical dossier baselines, it requires
-`authoringEvidenceRevision(db, assignment.sessionIds) === assignment.evidenceRevision`; assignment
+`guidedAuthoringEvidenceRevision(db, assignment.sessionIds) === assignment.evidenceRevision`; assignment
 evidence revision is the baseline-drift boundary, and Task 6 owns advancing it after a changed-evidence
 inspection. A detector-output change that does not change canonical assignment evidence must not alter
 the persisted editorial brief.
@@ -1392,17 +1587,19 @@ the persisted editorial brief.
 Run:
 
 ```bash
-npx vitest run src/workbench/authoring/__tests__/guidedAuthoringService.test.ts src/workbench/authoring/__tests__/advisorySuggestions.test.ts src/workbench/authoring/__tests__/artifactCandidates.test.ts
+npx vitest run src/workbench/authoring/__tests__/evidenceCatalog.test.ts src/workbench/authoring/__tests__/guidedAuthoringService.test.ts src/workbench/authoring/__tests__/advisorySuggestions.test.ts src/workbench/authoring/__tests__/artifactCandidates.test.ts
 ```
 
 Expected: PASS with every selection member and normalized opportunity assigned exactly once, stable
 signatures and group keys, unbounded advisory membership, capped historical V2 candidates, legal
-dossier and diverse canaries, atomic aggregate rollback, and persisted-plan-only start behavior.
+dossier and diverse canaries, a single canonical preflight snapshot, database-free assignment revision
+derivation without changing any legacy V2/V3 revision-derived identity, one outer WAL-coherent request
+transaction, atomic aggregate rollback, and persisted-plan-only start behavior.
 
 - [ ] **Step 8: Commit campaign planning**
 
 ```bash
-git add src/workbench/authoring/guidedAuthoringPolicy.ts src/workbench/authoring/guidedAuthoringPreflight.ts src/workbench/authoring/guidedAuthoringService.ts src/workbench/authoring/advisorySuggestions.ts src/workbench/authoring/artifactCandidates.ts src/workbench/authoring/__tests__/guidedAuthoringService.test.ts src/workbench/authoring/__tests__/advisorySuggestions.test.ts src/workbench/authoring/__tests__/artifactCandidates.test.ts
+git add src/workbench/authoring/guidedAuthoringPolicy.ts src/workbench/authoring/guidedAuthoringPreflight.ts src/workbench/authoring/guidedAuthoringService.ts src/workbench/authoring/evidenceCatalog.ts src/workbench/authoring/advisorySuggestions.ts src/workbench/authoring/artifactCandidates.ts src/workbench/authoring/__tests__/guidedAuthoringService.test.ts src/workbench/authoring/__tests__/fixtures/guidedAuthoringWalWriter.mjs src/workbench/authoring/__tests__/evidenceCatalog.test.ts src/workbench/authoring/__tests__/advisorySuggestions.test.ts src/workbench/authoring/__tests__/artifactCandidates.test.ts
 git commit -m "feat: plan guided authoring assignments"
 ```
 
@@ -1465,7 +1662,7 @@ test.each([
 
 test("keeps assignment-wide and session-only evidence revisions distinct", () => {
   const inspected = inspectGuidedAssignment(db, inspectInput({ limit: 1 }));
-  expect(inspected.evidenceRevision).toBe(authoringEvidenceRevision(db, ["session:a", "session:b"]));
+  expect(inspected.evidenceRevision).toBe(guidedAuthoringEvidenceRevision(db, ["session:a", "session:b"]));
   expect(inspected.evidence.evidenceRevision).toBe(authoringEvidenceRevision(db, [inspected.sessionId]));
   expect(inspected.evidenceRevision).not.toBe(inspected.evidence.evidenceRevision);
   expect(inspected.coverage.every(({ evidenceRevision }) =>
@@ -1728,7 +1925,7 @@ The public `inspectGuidedAssignment()` is deliberately non-composable and always
 `guided_inspection_requires_top_level_transaction` if a caller tries to nest it; do not export an
 inspection `*InTransaction` variant. This ensures its revision-reset sentinel always reaches a real
 commit before the public error is thrown. Inside its owned transaction, reload the assignment and
-membership, compute `authoringEvidenceRevision(db, assignment.sessionIds)` before the page read, read
+membership, compute `guidedAuthoringEvidenceRevision(db, assignment.sessionIds)` before the page read, read
 the page, compute the same assignment-wide revision again, record access through only repository
 `*InTransaction` helpers, and compute coverage. Never compare the page's session-only
 `evidence.evidenceRevision` with the assignment-wide revision.
