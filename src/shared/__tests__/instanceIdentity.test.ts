@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -7,6 +7,7 @@ import {
   assertGuidedAuthoringExpectedIdentity,
   assertStableGuidedRequestBinding,
   canonicalInstancePaths,
+  acquireMastheadInstanceManifestGuard,
   removeOwnedMastheadInstanceManifest,
   writeMastheadInstanceManifestAtomic,
   type GuidedAuthoringExpectedIdentity
@@ -87,6 +88,95 @@ describe("Masthead instance identity", () => {
       await expect(removeOwnedMastheadInstanceManifest(path, "instance:old")).resolves.toBe(false);
       expect(JSON.parse(await readFile(path, "utf8"))).toMatchObject({ instanceId: "instance:new" });
       await expect(removeOwnedMastheadInstanceManifest(path, "instance:new")).resolves.toBe(true);
+    } finally {
+      await rm(instanceDir, { force: true, recursive: true });
+    }
+  });
+
+  test("holds an exclusive manifest writer guard through owned cleanup and recovers a stale owner", async () => {
+    const instanceDir = await mkdtemp(join(tmpdir(), "masthead-instance-guard-"));
+    try {
+      const old = await acquireMastheadInstanceManifestGuard({
+        instanceDir,
+        instanceId: "instance:old",
+        pid: 100,
+        startedAt: "2026-07-19T12:00:00.000Z",
+        isProcessAlive: () => true
+      });
+      const manifestPath = join(instanceDir, "masthead-instance.json");
+      await writeMastheadInstanceManifestAtomic(manifestPath, {
+        schemaVersion: 1,
+        instanceId: "instance:old",
+        baseUrl: "http://127.0.0.1:17373",
+        databaseId: "database:test",
+        buildSha: "build:test",
+        pid: 100,
+        instanceDir,
+        updatedAt: "2026-07-19T12:00:00.000Z"
+      });
+      await expect(acquireMastheadInstanceManifestGuard({
+        instanceDir,
+        instanceId: "instance:new",
+        pid: 200,
+        startedAt: "2026-07-19T12:01:00.000Z",
+        isProcessAlive: () => true
+      })).rejects.toThrow("instance_manifest_writer_active");
+      await removeOwnedMastheadInstanceManifest(manifestPath, "instance:old");
+      await old.release();
+      const replacement = await acquireMastheadInstanceManifestGuard({
+        instanceDir,
+        instanceId: "instance:new",
+        pid: 200,
+        startedAt: "2026-07-19T12:01:00.000Z",
+        isProcessAlive: () => false
+      });
+      await replacement.release();
+      const recovered = await acquireMastheadInstanceManifestGuard({
+        instanceDir,
+        instanceId: "instance:recovered",
+        pid: 400,
+        startedAt: "2026-07-19T12:02:00.000Z",
+        isProcessAlive: () => false
+      });
+      await recovered.release();
+    } finally {
+      await rm(instanceDir, { force: true, recursive: true });
+    }
+  });
+
+  test("allows only one contender to recover a stale manifest writer guard", async () => {
+    const instanceDir = await mkdtemp(join(tmpdir(), "masthead-instance-guard-race-"));
+    try {
+      const stale = await acquireMastheadInstanceManifestGuard({
+        instanceDir,
+        instanceId: "instance:stale",
+        pid: 300,
+        startedAt: "2026-07-19T11:00:00.000Z",
+        isProcessAlive: () => false
+      });
+      await stale.release();
+      const contenders = await Promise.allSettled([
+        acquireMastheadInstanceManifestGuard({
+          instanceDir,
+          instanceId: "instance:first",
+          pid: 400,
+          startedAt: "2026-07-19T12:02:00.000Z",
+          isProcessAlive: (pid) => pid !== 300
+        }),
+        acquireMastheadInstanceManifestGuard({
+          instanceDir,
+          instanceId: "instance:second",
+          pid: 500,
+          startedAt: "2026-07-19T12:02:00.000Z",
+          isProcessAlive: (pid) => pid !== 300
+        })
+      ]);
+      const winners = contenders.filter((result) => result.status === "fulfilled");
+      const losers = contenders.filter((result) => result.status === "rejected");
+      expect(winners).toHaveLength(1);
+      expect(losers).toHaveLength(1);
+      expect((losers[0] as PromiseRejectedResult).reason).toHaveProperty("message", expect.stringContaining("instance_manifest_writer_active"));
+      await (winners[0] as PromiseFulfilledResult<Awaited<ReturnType<typeof acquireMastheadInstanceManifestGuard>>>).value.release();
     } finally {
       await rm(instanceDir, { force: true, recursive: true });
     }

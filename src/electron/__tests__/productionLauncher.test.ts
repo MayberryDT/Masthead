@@ -3,9 +3,9 @@ import { once } from "node:events";
 import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import { PassThrough } from "node:stream";
-import { lstat, mkdir, mkdtemp, open as openFile, readFile, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, open as openFile, readFile, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, test } from "vitest";
 import { writePackagedBundleManifest } from "../../../scripts/packaged-bundle-manifest.js";
@@ -20,8 +20,11 @@ import {
   clearExactMaintenanceSentinel,
   installDisabledProductionSurface,
   installProductionLauncher,
+  loadStagedProductionInstallation,
+  finalizeStagedProductionInstallation,
   productionHealthPollPolicy,
   productionMaintenanceTimeoutPolicy,
+  runCli,
   readOwnedProcessStrict,
   readProductionProcesses,
   waitForProductionHealth,
@@ -164,6 +167,22 @@ function legacyIdentity(path: string) {
   return { device: "42", inode: "84", path };
 }
 
+async function publishStartupManifest(receipt: any) {
+  const persisted = await loadStagedProductionInstallation(receipt.receiptPath ?? receipt);
+  if (!persisted.activatedAt) throw new Error("staged receipt is not activated");
+  await mkdir(persisted.instanceDir, { recursive: true });
+  await writeFile(persisted.instanceManifestPath, JSON.stringify({
+    schemaVersion: 1,
+    instanceId: "instance:test",
+    baseUrl: "http://127.0.0.1:17383",
+    databaseId: "database:test",
+    buildSha: persisted.buildSha,
+    pid: 12345,
+    instanceDir: persisted.instanceDir,
+    updatedAt: new Date(Date.parse(persisted.activatedAt) + 1).toISOString()
+  }));
+}
+
 describe("production lifecycle launcher", () => {
   test("stages and activates an instance-bound production installation without runtime or database side effects", async () => {
     const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
@@ -209,6 +228,101 @@ describe("production lifecycle launcher", () => {
     expect(await readFile(activeInstanceLauncherPath, "utf8")).toContain("MASTHEAD_INSTANCE_MANIFEST");
     await expect(lstat(receipt.instanceManifestPath)).rejects.toMatchObject({ code: "ENOENT" });
     expect(await realpath(oldTarget)).toBe(oldTarget);
+  });
+
+  test("rehydrates the staged receipt and rejects staged bytes or path substitution before activation", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const stage = () => stageProductionInstallation({
+      bundleDigest: candidate.bundleDigest,
+      sourceBundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot
+    });
+    const receipt = await stage();
+    const loaded = await loadStagedProductionInstallation(receipt.receiptPath);
+    expect(loaded).toMatchObject({ target: candidate.target, previousCurrentTarget: oldTarget });
+    receipt.target = "/tmp/substituted";
+    await activateStagedProductionInstallation(receipt, { runDesktopDatabaseCommand: () => undefined });
+    expect(await realpath(join(productionRoot, "current"))).toBe(candidate.target);
+
+    await rm(join(productionRoot, "current"));
+    await symlink(oldTarget, join(productionRoot, "current"));
+    const tampered = await stage();
+    await writeFile(tampered.stagedInstanceLauncherPath, "tampered");
+    await expect(activateStagedProductionInstallation(tampered.receiptPath)).rejects.toThrow("Staged production file changed");
+    expect(await realpath(join(productionRoot, "current"))).toBe(oldTarget);
+
+    const substituted = await stage();
+    await chmod(substituted.receiptPath, 0o644);
+    const record = JSON.parse(await readFile(substituted.receiptPath, "utf8"));
+    record.stagedSurface.launcherPath = join(homeDir, "substituted-launcher");
+    await writeFile(substituted.receiptPath, JSON.stringify(record));
+    await expect(activateStagedProductionInstallation(substituted.receiptPath)).rejects.toThrow("path substitution");
+  });
+
+  test.each(["current", "instance-launcher", "lifecycle-launcher", "desktop"])(
+    "rolls every filesystem surface back when activation fails after %s",
+    async (failedStep) => {
+      const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+      const candidate = await secondBundle(productionRoot, oldTarget);
+      const instanceLauncher = join(config.dataDirectory, "bin", "mastheadctl");
+      const lifecycleLauncher = join(homeDir, ".local", "bin", "masthead-production");
+      const desktop = join(homeDir, ".local", "share", "applications", "ai.animas.masthead.desktop");
+      await mkdir(join(config.dataDirectory, "bin"), { recursive: true });
+      await writeFile(instanceLauncher, "old-instance");
+      await writeFile(lifecycleLauncher, "old-lifecycle");
+      await writeFile(desktop, "old-desktop");
+      const receipt = await stageProductionInstallation({
+        bundleDigest: candidate.bundleDigest,
+        sourceBundlePath: candidate.target,
+        dataDirectory: config.dataDirectory,
+        homeDir,
+        productionRoot
+      });
+      await expect(activateStagedProductionInstallation(receipt.receiptPath, {
+        onStep: (step: string) => { if (step === failedStep) throw new Error(`injected ${step}`); },
+        runDesktopDatabaseCommand: () => undefined
+      })).rejects.toThrow(`injected ${failedStep}`);
+      expect(await realpath(join(productionRoot, "current"))).toBe(oldTarget);
+      expect(await readFile(instanceLauncher, "utf8")).toBe("old-instance");
+      expect(await readFile(lifecycleLauncher, "utf8")).toBe("old-lifecycle");
+      expect(await readFile(desktop, "utf8")).toBe("old-desktop");
+    }
+  );
+
+  test("finalizes only a current staged installation and leaves exactly one bundle", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const receipt = await stageProductionInstallation({
+      bundleDigest: candidate.bundleDigest,
+      sourceBundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot
+    });
+    await expect(finalizeStagedProductionInstallation(receipt.receiptPath)).rejects.toThrow("not current");
+    await activateStagedProductionInstallation(receipt.receiptPath, { runDesktopDatabaseCommand: () => undefined });
+    await expect(finalizeStagedProductionInstallation(receipt.receiptPath)).rejects.toThrow("startup manifest");
+    await publishStartupManifest(receipt);
+    await expect(finalizeStagedProductionInstallation(receipt.receiptPath)).resolves.toMatchObject({ finalized: true, receiptRemoved: true });
+    expect((await readdir(productionRoot)).filter((name) => name.startsWith("Masthead-linux-x64-"))).toEqual([candidate.target.split("/").at(-1)]);
+    await expect(lstat(receipt.receiptPath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("exposes stage, activate, and finalize as separate public CLI operations", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const staged = await runCli([
+      "stage", "--bundle", candidate.target, "--bundle-digest", candidate.bundleDigest,
+      "--data-dir", config.dataDirectory, "--production-root", productionRoot
+    ], { HOME: homeDir });
+    expect(staged).toMatchObject({ staged: true, launched: false, databaseOpened: false });
+    const receiptPath = staged.receiptPath as string;
+    await expect(runCli(["activate", "--receipt", receiptPath], { HOME: homeDir })).resolves.toMatchObject({ activated: true });
+    await publishStartupManifest(receiptPath);
+    await expect(runCli(["finalize", "--receipt", receiptPath], { HOME: homeDir })).resolves.toMatchObject({ finalized: true });
   });
 
   test("allows five bounded minutes for activation health without extending for maintenance", () => {
@@ -1508,12 +1622,20 @@ describe("production lifecycle launcher", () => {
         expect(readFileSync(desktopPath, "utf8")).toContain("StartupWMClass=masthead");
         refreshCalls.push(command);
       },
-      start: async () => ({ started: true }),
+      start: async (candidate: any) => {
+        const receiptName = (await readdir(productionRoot)).find((entry) => entry.endsWith(".receipt.json"));
+        if (!receiptName) throw new Error("missing staged receipt");
+        await publishStartupManifest(join(productionRoot, receiptName));
+        return { started: true, target: candidate.target };
+      },
       stop: async () => ({ stopped: true })
     });
 
     expect(await readFile(desktopPath, "utf8")).toContain("StartupWMClass=masthead");
     expect(refreshCalls).toEqual(["update-desktop-database"]);
+    const productionEntries = await readdir(productionRoot);
+    expect(productionEntries.filter((entry) => entry.startsWith("Masthead-linux-x64-"))).toEqual([basename(target)]);
+    expect(productionEntries.some((entry) => entry.endsWith(".staged") || entry.endsWith(".receipt.json"))).toBe(false);
   });
 
   test("requires explicit cold activation for a legacy current target with no attestable release identity", async () => {

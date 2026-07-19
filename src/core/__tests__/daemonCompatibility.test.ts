@@ -87,4 +87,33 @@ describe("daemon compatibility", () => {
       reason: "missing_required_fields"
     });
   });
+
+  test.each([
+    { runtime: { writable: false }, label: "non-writable primary" },
+    { buildSha: "", label: "missing build SHA" },
+    { runtime: { instanceDir: "/tmp/other" }, label: "instance/data directory mismatch" },
+    { runtime: { instanceManifest: "/tmp/other/masthead-instance.json" }, label: "manifest path substitution" },
+    { runtime: { authoringCommand: "/tmp/other/bin/mastheadctl" }, label: "launcher path substitution" },
+    {
+      runtime: {
+        instanceDir: "/tmp/masthead-fixture/../masthead-fixture",
+        instanceManifest: "/tmp/masthead-fixture/../masthead-fixture/masthead-instance.json",
+        authoringCommand: "/tmp/masthead-fixture/../masthead-fixture/bin/mastheadctl"
+      },
+      label: "non-canonical instance paths"
+    }
+  ])("rejects $label", (change) => {
+    expect(classifyDaemonHealth({
+      ...currentHealth,
+      ...(change.buildSha !== undefined ? { buildSha: change.buildSha } : {}),
+      runtime: { ...currentHealth.runtime, ...(change.runtime ?? {}) }
+    })).toMatchObject({ state: "malformed" });
+  });
+
+  test("accepts a read-only bridge only when it carries no writable instance surface", () => {
+    const { instanceDir: _dir, instanceManifest: _manifest, authoringCommand: _command, ...runtime } = currentHealth.runtime;
+    const bridge = { ...currentHealth, runtime: { ...runtime, mode: "read_only_bridge", writable: false } };
+    expect(classifyDaemonHealth(bridge)).toMatchObject({ state: "compatible" });
+    expect(classifyDaemonHealth({ ...bridge, runtime: { ...bridge.runtime, instanceManifest: currentHealth.runtime.instanceManifest } })).toMatchObject({ state: "malformed" });
+  });
 });

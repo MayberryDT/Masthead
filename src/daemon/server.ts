@@ -4,11 +4,13 @@ import { mkdir, readFile, readdir, realpath, rm, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import {
   canonicalInstancePaths,
+  acquireMastheadInstanceManifestGuard,
   identityFromManifest,
   removeOwnedMastheadInstanceManifest,
   writeMastheadInstanceManifestAtomic,
   type GuidedAuthoringExpectedIdentity,
-  type MastheadInstanceManifest
+  type MastheadInstanceManifest,
+  type MastheadInstanceManifestGuard
 } from "../shared/instanceIdentity.ts";
 import type { AdapterMaturity } from "../adapters/capabilities.ts";
 import { adapterRecordFromLiveHook, liveHookSourceForRuntime } from "../adapters/live/hookAdapter.ts";
@@ -391,6 +393,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     const databaseId = getOrCreateDatabaseIdentity(database);
     let instanceManifestPublished = false;
     let instanceManifestPublishPromise: Promise<MastheadInstanceManifest> | undefined;
+    let instanceManifestGuard: MastheadInstanceManifestGuard | undefined;
     const enrichmentProvider = createSettingsBackedEnrichmentProvider(database, config);
     const enrichment = createEnrichmentCoordinator(database, enrichmentProvider, {
       failureBackoffAfterMs: Date.parse(daemonStartedAt)
@@ -1960,10 +1963,22 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   async function publishInstanceManifest(): Promise<MastheadInstanceManifest> {
     if (instanceManifestPublishPromise) return instanceManifestPublishPromise;
     instanceManifestPublishPromise = (async () => {
-      const manifest = instanceIdentity();
-      await writeMastheadInstanceManifestAtomic(instanceManifestPath, manifest);
-      instanceManifestPublished = true;
-      return manifest;
+      instanceManifestGuard = await acquireMastheadInstanceManifestGuard({
+        instanceDir: instancePaths.instanceDir,
+        instanceId: daemonInstanceId,
+        pid: process.pid,
+        startedAt: daemonStartedAt
+      });
+      try {
+        const manifest = instanceIdentity();
+        await writeMastheadInstanceManifestAtomic(instanceManifestPath, manifest);
+        instanceManifestPublished = true;
+        return manifest;
+      } catch (error) {
+        await instanceManifestGuard.release();
+        instanceManifestGuard = undefined;
+        throw error;
+      }
     })();
     return instanceManifestPublishPromise;
   }
@@ -3786,7 +3801,18 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       queuedSearchIndexSessionIds.clear();
       searchIndexQueueScheduled = false;
       closePromise = (async () => {
-        await instanceManifestPublishPromise;
+        let instanceManifestPublicationError: unknown;
+        try {
+          await instanceManifestPublishPromise;
+        } catch (error) {
+          instanceManifestPublicationError = error;
+          recordRuntimeDiagnostic({
+            details: { error, instanceManifestPath },
+            kind: "instance_manifest_publication_failed",
+            message: "Daemon instance manifest publication failed before shutdown.",
+            severity: "warning"
+          });
+        }
         await hydrationPromise;
         if (gitRefreshTimer) clearInterval(gitRefreshTimer);
         await new Promise<void>((resolve) => {
@@ -3800,6 +3826,15 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
             severity: "warning"
           });
         });
+        await instanceManifestGuard?.release().catch((error) => {
+          recordRuntimeDiagnostic({
+            details: { error, guardPath: instanceManifestGuard?.guardPath },
+            kind: "instance_manifest_guard_release_failed",
+            message: "Daemon could not release its instance manifest writer guard.",
+            severity: "warning"
+          });
+        });
+        instanceManifestGuard = undefined;
         let gitRefreshError: unknown;
         try {
           await (gitRefreshPromise ?? activeGitRefreshWorkPromise);
@@ -3826,6 +3861,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
             }
           }
         }
+        if (instanceManifestPublicationError) throw instanceManifestPublicationError;
         if (gitRefreshError) throw gitRefreshError;
         if (deferredQueueError) throw deferredQueueError;
       })();

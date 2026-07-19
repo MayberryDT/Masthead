@@ -98,7 +98,6 @@ export function isAllowedReadOnlyBridgeRequest(method: string | undefined, pathn
   if (method !== "GET") return false;
   if (staticReadOnlyBridgePaths.has(pathname)) return true;
   return (
-    pathname === "/workbench/authoring/capabilities" ||
     /^\/workbench\/authoring\/runs\/[^/]+(?:\/(?:context|evidence))?$/.test(pathname) ||
     /^\/settings\/hooks\/[^/]+$/.test(pathname) ||
     /^\/logbook\/artifacts\/[^/]+$/.test(pathname) ||

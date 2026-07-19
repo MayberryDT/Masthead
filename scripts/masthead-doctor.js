@@ -249,6 +249,32 @@ export function inspectAuthoringCapabilities(value, expectedIdentity) {
   return { command, databaseId, identity: capabilityIdentity, ok: problems.length === 0, operations, problems };
 }
 
+export function inspectInstanceManifestIdentity(manifestValue, healthValue, expectedBaseUrl) {
+  const manifest = isRecord(manifestValue) ? manifestValue : {};
+  const healthRecord = isRecord(healthValue) ? healthValue : {};
+  const runtime = isRecord(healthRecord.runtime) ? healthRecord.runtime : {};
+  const data = isRecord(healthRecord.data) ? healthRecord.data : {};
+  const problems = [];
+  const instanceDir = stringValue(manifest.instanceDir);
+  const instanceManifest = stringValue(runtime.instanceManifest);
+  const expectedCommand = instanceDir
+    ? join(instanceDir, "bin", process.platform === "win32" ? "mastheadctl.cmd" : "mastheadctl")
+    : undefined;
+  if (manifest.schemaVersion !== 1) problems.push("manifest schema version mismatch");
+  if (!stringValue(manifest.updatedAt) || !Number.isFinite(Date.parse(manifest.updatedAt))) problems.push("manifest timestamp is invalid");
+  if (!Number.isSafeInteger(manifest.pid) || manifest.pid < 1 || manifest.pid !== runtime.pid) problems.push("manifest PID mismatch");
+  if (!instanceDir || !isAbsolute(instanceDir) || resolve(instanceDir) !== instanceDir || instanceDir !== data.dataDirectory || instanceDir !== runtime.instanceDir) problems.push("manifest instance directory mismatch");
+  if (!instanceManifest || !instanceDir || resolve(instanceDir, "masthead-instance.json") !== instanceManifest) problems.push("manifest path identity mismatch");
+  if (!expectedCommand || runtime.authoringCommand !== expectedCommand) problems.push("authoring command identity mismatch");
+  if (runtime.baseUrl !== expectedBaseUrl || manifest.baseUrl !== expectedBaseUrl) problems.push("base URL identity mismatch");
+  for (const field of ["databaseId", "buildSha"]) {
+    const healthValueForField = field === "databaseId" ? data.databaseId : healthRecord.buildSha;
+    if (manifest[field] !== healthValueForField) problems.push(`${field} identity mismatch`);
+  }
+  if (!stringValue(manifest.instanceId) || manifest.instanceId !== runtime.daemonInstanceId) problems.push("instance ID mismatch");
+  return { ok: problems.length === 0, problems, expectedCommand, instanceManifest };
+}
+
 export async function resolveAuthoringCommand(command, options = {}) {
   const value = stringValue(command);
   if (!value) return undefined;
@@ -291,6 +317,8 @@ async function checkAuthoring() {
     const manifestPath = stringValue(runtime.instanceManifest);
     if (!manifestPath || !isAbsolute(manifestPath)) throw new Error("Health did not expose an absolute instance manifest path.");
     const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    const manifestInspection = inspectInstanceManifestIdentity(manifest, health, baseUrl);
+    if (!manifestInspection.ok) throw new Error(manifestInspection.problems.join("; "));
     const expectedIdentity = {
       baseUrl: stringValue(runtime.baseUrl),
       buildSha: stringValue(health?.buildSha),
@@ -299,11 +327,6 @@ async function checkAuthoring() {
       instanceManifest: manifestPath,
       instanceId: stringValue(runtime.daemonInstanceId)
     };
-    if (expectedIdentity.baseUrl !== baseUrl) throw new Error("Health base URL does not match the doctor target.");
-    for (const field of ["baseUrl", "databaseId", "buildSha", "instanceId"]) {
-      if (manifest[field] !== expectedIdentity[field]) throw new Error(`Instance manifest ${field} identity mismatch.`);
-    }
-    if (resolve(manifest.instanceDir, "masthead-instance.json") !== manifestPath) throw new Error("Instance manifest path identity mismatch.");
     const capabilities = await getJson("/workbench/authoring/capabilities");
     const inspected = inspectAuthoringCapabilities(capabilities, expectedIdentity);
     const commandPath = await resolveAuthoringCommand(inspected.command, {

@@ -37,7 +37,7 @@ export type MastheadHealthDto = {
   apiVersion: number;
   schemaVersion: number;
   buildVersion: string;
-  buildSha?: string;
+  buildSha: string;
   capabilities: MastheadCapability[];
   runtime: {
     daemonInstanceId: string;
@@ -122,6 +122,7 @@ export function classifyDaemonHealth(
 
   if (
     !runtime ||
+    !stringValue(value.buildSha) ||
     !stringValue(runtime.daemonInstanceId) ||
     !positiveInteger(runtime.pid) ||
     !stringValue(runtime.baseUrl) ||
@@ -139,6 +140,11 @@ export function classifyDaemonHealth(
     return { state: "malformed", reason: "missing_required_fields" };
   }
 
+  if (
+    (runtime.mode === "primary" && runtime.writable !== true) ||
+    (runtime.mode === "read_only_bridge" && runtime.writable !== false)
+  ) return { state: "malformed", reason: "missing_required_fields" };
+
   try {
     const baseUrl = new URL(String(runtime.baseUrl));
     if (
@@ -154,10 +160,27 @@ export function classifyDaemonHealth(
     if (
       runtime.mode === "primary" &&
       (!stringValue(runtime.instanceDir) || !stringValue(runtime.instanceManifest) || !stringValue(runtime.authoringCommand) ||
-        !isAbsolutePath(String(runtime.instanceDir)) ||
-        !isAbsolutePath(String(runtime.instanceManifest)) || !isAbsolutePath(String(runtime.authoringCommand)) ||
+        !isCanonicalAbsoluteProtocolPath(String(runtime.instanceDir)) ||
+        !isCanonicalAbsoluteProtocolPath(String(runtime.instanceManifest)) ||
+        !isCanonicalAbsoluteProtocolPath(String(runtime.authoringCommand)) ||
+        !isCanonicalAbsoluteProtocolPath(String(data.dataDirectory)) ||
+        !isCanonicalAbsoluteProtocolPath(String(data.databasePath)) ||
         !isManifestInsideInstanceDir(String(runtime.instanceManifest), String(runtime.instanceDir)))
     ) {
+      return { state: "malformed", reason: "missing_required_fields" };
+    }
+    if (runtime.mode === "primary") {
+      const instanceDir = canonicalProtocolPath(String(runtime.instanceDir));
+      const dataDirectory = canonicalProtocolPath(String(data.dataDirectory));
+      const expectedManifest = `${instanceDir}/masthead-instance.json`;
+      const windows = /^[A-Za-z]:\//u.test(instanceDir) || instanceDir.startsWith("//");
+      const expectedCommand = `${instanceDir}/bin/${windows ? "mastheadctl.cmd" : "mastheadctl"}`;
+      if (
+        instanceDir !== dataDirectory ||
+        canonicalProtocolPath(String(runtime.instanceManifest)) !== expectedManifest ||
+        canonicalProtocolPath(String(runtime.authoringCommand)) !== expectedCommand
+      ) return { state: "malformed", reason: "missing_required_fields" };
+    } else if (runtime.instanceManifest !== undefined || runtime.authoringCommand !== undefined || runtime.instanceDir !== undefined) {
       return { state: "malformed", reason: "missing_required_fields" };
     }
   } catch {
@@ -199,4 +222,23 @@ function isManifestInsideInstanceDir(manifest: string, instanceDir: string): boo
   const normalizedManifest = manifest.replace(/\\/gu, "/");
   const normalizedDir = instanceDir.replace(/\\/gu, "/").replace(/\/+$/u, "");
   return normalizedManifest === `${normalizedDir}/masthead-instance.json`;
+}
+
+function canonicalProtocolPath(value: string): string {
+  const normalized = value.replace(/\\/gu, "/").replace(/\/+$/u, "");
+  const prefix = normalized.startsWith("//") ? "//" : normalized.startsWith("/") ? "/" : "";
+  const body = prefix ? normalized.slice(prefix.length) : normalized;
+  const segments: string[] = [];
+  for (const segment of body.split("/")) {
+    if (!segment || segment === ".") continue;
+    if (segment === "..") segments.pop();
+    else segments.push(segment);
+  }
+  return `${prefix}${segments.join("/")}`;
+}
+
+function isCanonicalAbsoluteProtocolPath(value: string): boolean {
+  if (!isAbsolutePath(value)) return false;
+  const normalized = value.replace(/\\/gu, "/").replace(/\/+$/u, "");
+  return normalized === canonicalProtocolPath(value);
 }

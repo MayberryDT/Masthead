@@ -145,6 +145,7 @@ export type StagedProductionInstallationReceipt = {
   staged: true;
   launched: false;
   databaseOpened: false;
+  activatedAt?: string;
   stagingNonce: string;
   sourceDigest: string;
   buildSha: string;
@@ -157,6 +158,9 @@ export type StagedProductionInstallationReceipt = {
   activeInstanceLauncherPath: string;
   stagedInstanceLauncherPath: string;
   previousInstanceLauncher: Record<string, unknown>;
+  stagedFiles: Array<{ path: string; sha256: string; mode: number }>;
+  previousLauncher: Record<string, unknown>;
+  previousDesktop: Record<string, unknown>;
   stagedSurface: Record<string, unknown>;
 };
 export function stageProductionInstallation(input: {
@@ -170,7 +174,11 @@ export function stageProductionInstallation(input: {
   productionRoot?: string;
 }): Promise<StagedProductionInstallationReceipt>;
 export function activateStagedProductionInstallation(
-  receipt: StagedProductionInstallationReceipt,
+  receipt: StagedProductionInstallationReceipt | string,
   dependencies?: Record<string, unknown>
+): Promise<Record<string, unknown>>;
+export function loadStagedProductionInstallation(receiptPath: string): Promise<StagedProductionInstallationReceipt>;
+export function finalizeStagedProductionInstallation(
+  receipt: StagedProductionInstallationReceipt | string
 ): Promise<Record<string, unknown>>;
 export function runCli(argv?: string[], environment?: NodeJS.ProcessEnv): Promise<Record<string, unknown>>;

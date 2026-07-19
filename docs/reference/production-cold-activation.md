@@ -4,6 +4,8 @@
 
 Use the normal verified install path whenever the current bundle has a valid release manifest and pinned launcher digest. The cold path requires all of the following before it changes the database or `current` symlink:
 
+The normal install can also be driven as three explicit filesystem phases. `stage --bundle <path>` writes a durable receipt without changing the active surface; after the old daemon is proved stopped, `activate --receipt <path>` switches the attested files with rollback on any failure; after the new daemon has published a fresh matching instance manifest, `finalize --receipt <path>` removes the receipt, staged files, and every obsolete production install artifact. Finalize fails closed before that startup proof exists, so it cannot delete the rollback bundle immediately after activation.
+
 - the candidate bundle and release identity verify completely;
 - the current legacy path is a real, non-symlink, versioned direct child of the production root;
 - production health is absent and the exact production process set is empty;

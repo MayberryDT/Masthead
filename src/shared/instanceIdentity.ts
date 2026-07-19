@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve, win32 } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import type { GuidedAuthoringRequestDto } from "./guidedAuthoring.ts";
 import type { WorkbenchAuthoringCapabilitiesDto } from "./workbenchAuthoring.ts";
 
@@ -24,6 +25,11 @@ export type MastheadInstancePaths = {
   instanceDir: string;
   instanceManifest: string;
   launcherPath: string;
+};
+
+export type MastheadInstanceManifestGuard = {
+  guardPath: string;
+  release: () => Promise<void>;
 };
 
 export type GuidedAuthoringIdentityErrorCode =
@@ -114,6 +120,48 @@ export async function removeOwnedMastheadInstanceManifest(path: string, instance
     if (isErrno(error, "ENOENT")) return false;
     throw error;
   }
+}
+
+export async function acquireMastheadInstanceManifestGuard(input: {
+  instanceDir: string;
+  instanceId: string;
+  pid?: number;
+  startedAt: string;
+  isProcessAlive?: (pid: number) => boolean;
+}): Promise<MastheadInstanceManifestGuard> {
+  const instanceDir = canonicalInstancePaths(input.instanceDir).instanceDir;
+  const guardPath = join(instanceDir, ".masthead-instance-writer.sqlite");
+  const pid = input.pid ?? process.pid;
+  await mkdir(instanceDir, { recursive: true });
+  const database = new DatabaseSync(guardPath);
+  try {
+    database.exec([
+      "PRAGMA busy_timeout = 0;",
+      "CREATE TABLE IF NOT EXISTS manifest_writer_owner (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), instance_id TEXT NOT NULL, pid INTEGER NOT NULL, started_at TEXT NOT NULL);",
+      "BEGIN EXCLUSIVE;"
+    ].join("\n"));
+    database.prepare("INSERT OR REPLACE INTO manifest_writer_owner(singleton, instance_id, pid, started_at) VALUES (1, ?, ?, ?)")
+      .run(input.instanceId, pid, input.startedAt);
+  } catch (error) {
+    database.close();
+    if (error instanceof Error && /database is (?:busy|locked)/iu.test(error.message)) {
+      throw new Error("instance_manifest_writer_active", { cause: error });
+    }
+    throw error;
+  }
+  let released = false;
+  return {
+    guardPath,
+    release: async () => {
+      if (released) return;
+      try {
+        database.exec("ROLLBACK;");
+      } finally {
+        database.close();
+        released = true;
+      }
+    }
+  };
 }
 
 export function identityFromManifest(manifest: MastheadInstanceManifest, instanceManifest: string): GuidedAuthoringExpectedIdentity {

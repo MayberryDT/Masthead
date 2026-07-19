@@ -1,10 +1,16 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { EventEmitter } from "node:events";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { ChildProcess } from "node:child_process";
 import {
   buildDaemonEnv,
   connectorBaseUrl,
   parseCompatibleHealth,
   resolveDaemonLaunchTarget,
-  startLiveConnector
+  startLiveConnector,
+  verifyInstanceLauncher
 } from "../daemonLauncher";
 
 afterEach(() => {
@@ -12,6 +18,19 @@ afterEach(() => {
 });
 
 describe("Electron daemon launcher policy", () => {
+  test("verifies the exact manifest assignment rather than a matching comment", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "masthead-launcher-verify-"));
+    const launcher = join(directory, "mastheadctl");
+    const manifest = join(directory, "masthead-instance.json");
+    try {
+      await writeFile(launcher, `#!/bin/sh\nexec env MASTHEAD_INSTANCE_MANIFEST='${manifest}' '/usr/bin/node' '/app/cli.js' "$@"\n`);
+      await expect(verifyInstanceLauncher(launcher, manifest)).resolves.toBeUndefined();
+      await writeFile(launcher, `# ${manifest}\nexec env MASTHEAD_INSTANCE_MANIFEST='/wrong/manifest.json' '/usr/bin/node' '/app/cli.js' "$@"\n`);
+      await expect(verifyInstanceLauncher(launcher, manifest)).rejects.toThrow("does not bind");
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
   test("builds loopback connector URLs", () => {
     expect(connectorBaseUrl(17373)).toBe("http://127.0.0.1:17373");
   });
@@ -173,6 +192,7 @@ describe("Electron daemon launcher policy", () => {
         prepareAuthoringLauncher: async ({ baseUrl, port }) => {
           events.push(`prepare:${baseUrl}:${port}`);
         },
+        verifyAuthoringLauncher: async () => undefined,
         verifyAuthoringManifest: async () => { events.push("verify-manifest"); }
       }
     );
@@ -181,6 +201,7 @@ describe("Electron daemon launcher policy", () => {
     expect(events).toEqual([
       "fetch:/health",
       "fetch:/workbench/authoring/capabilities",
+      "prepare:http://127.0.0.1:17373:17373",
       "verify-manifest",
       "fetch:/projection"
     ]);
@@ -289,7 +310,60 @@ describe("Electron daemon launcher policy", () => {
     expect(prepare.mock.calls[0]?.[0].port).toBeGreaterThan(17373);
     expect(owned.size).toBe(0);
   });
+
+  test.each(["health-timeout", "manifest-mismatch", "warm-failure"])(
+    "stops and awaits the exact spawned child after %s",
+    async (failure) => {
+      vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("offline"); }));
+      const child = fakeChild();
+      const owned = new Set<ChildProcess>();
+      const health = parseCompatibleHealth(compatibleHealth("/tmp/masthead"))!;
+      const options = {
+        prepareAuthoringLauncher: async () => undefined,
+        verifyAuthoringLauncher: async () => undefined,
+        spawnChild: (() => child.value) as typeof import("node:child_process").spawn,
+        waitForCollector: async () => {
+          if (failure === "health-timeout") throw new Error("health timeout");
+          return health;
+        },
+        verifyAuthoringManifest: async () => {
+          if (failure === "manifest-mismatch") throw new Error("manifest mismatch");
+        },
+        warmConnector: async () => {
+          if (failure === "warm-failure") throw new Error("warm failed");
+        }
+      };
+      await expect(startLiveConnector(
+        connectorInput("/home/test/.local/bin/mastheadctl"),
+        ["masthead://app"],
+        owned,
+        options
+      )).rejects.toThrow();
+      expect(child.signals).toEqual(["SIGTERM"]);
+      expect(child.exited).toBe(true);
+      expect(owned.size).toBe(0);
+    }
+  );
 });
+
+function fakeChild(): { exited: boolean; signals: string[]; value: ChildProcess } {
+  const emitter = new EventEmitter() as ChildProcess;
+  const state = { exited: false, signals: [] as string[], value: emitter };
+  Object.defineProperties(emitter, {
+    exitCode: { configurable: true, get: () => state.exited ? 0 : null },
+    signalCode: { configurable: true, get: () => null },
+    pid: { value: 4242 }
+  });
+  emitter.kill = ((signal?: NodeJS.Signals | number) => {
+    state.signals.push(String(signal));
+    queueMicrotask(() => {
+      state.exited = true;
+      emitter.emit("exit", 0, signal);
+    });
+    return true;
+  }) as ChildProcess["kill"];
+  return state;
+}
 
 function connectorInput(cliCommand: string, env: Record<string, string> = {}) {
   return {

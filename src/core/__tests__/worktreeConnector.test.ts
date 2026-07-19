@@ -156,7 +156,6 @@ describe("Masthead worktree connector planning", () => {
     "/workbench/not-added-summary",
     "/workbench/import-health-summary",
     "/workbench/not-added",
-    "/workbench/authoring/capabilities",
     "/workbench/authoring/runs/authoring%3Arun",
     "/workbench/authoring/runs/authoring%3Arun/evidence",
     "/workbench/authoring/runs/authoring%3Arun/context"
@@ -191,6 +190,7 @@ describe("Masthead worktree connector planning", () => {
     expect(isAllowedReadOnlyBridgeRequest("POST", "/imports")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/imports/job-1/report")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/data/delete")).toBe(false);
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/capabilities")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/runs")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/runs/authoring%3Arun/submit")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/runs/authoring%3Arun/finish")).toBe(false);
@@ -288,6 +288,12 @@ describe("Masthead worktree connector planning", () => {
     });
     expect((health.runtime as Record<string, unknown>).instanceManifest).toBeUndefined();
     expect((health.runtime as Record<string, unknown>).authoringCommand).toBeUndefined();
+
+    const authoringCapabilities = await fetch(`${bridge.baseUrl}/workbench/authoring/capabilities`, {
+      headers: { origin: "http://127.0.0.1:5180" }
+    });
+    expect(authoringCapabilities.status).toBe(405);
+    await expect(authoringCapabilities.json()).resolves.toMatchObject({ ok: false, error: "read-only Masthead worktree bridge" });
 
     const projectionResponse = await fetch(`${bridge.baseUrl}/projection`, {
       headers: { origin: "http://127.0.0.1:5180" }

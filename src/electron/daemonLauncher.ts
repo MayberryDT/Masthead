@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import {
@@ -101,6 +102,10 @@ export type StartLiveConnectorOptions = {
   prepareAuthoringLauncher?: (input: { baseUrl: string; port: number; instanceManifest: string; launcherPath: string }) => Promise<void>;
   verifyAuthoringManifest?: (path: string, health: MastheadHealthSummary) => Promise<void>;
   findAvailablePort?: (startPort: number) => Promise<number>;
+  spawnChild?: typeof spawn;
+  waitForCollector?: typeof waitForCompatibleCollector;
+  warmConnector?: (baseUrl: string) => Promise<void>;
+  verifyAuthoringLauncher?: (launcherPath: string, manifestPath: string) => Promise<void>;
 };
 
 export function connectorBaseUrl(port: number): string {
@@ -228,8 +233,10 @@ export async function startLiveConnector(
   }
   if (initialProbe.state === "compatible") {
     const baseUrl = connectorBaseUrl(target.port);
+    await options.prepareAuthoringLauncher?.({ baseUrl, port: target.port, instanceManifest: target.instanceManifest, launcherPath: target.cliCommand });
+    await (options.verifyAuthoringLauncher ?? verifyInstanceLauncher)(target.cliCommand, target.instanceManifest);
     await (options.verifyAuthoringManifest ?? verifyDaemonOwnedManifest)(target.instanceManifest, initialProbe.health);
-    await warmProjection(baseUrl);
+    await (options.warmConnector ?? warmProjection)(baseUrl);
     return connectorStartResult(false, baseUrl, "Local Masthead collector is already running.", initialProbe.health);
   }
 
@@ -242,6 +249,7 @@ export async function startLiveConnector(
     : target.port;
   const baseUrl = connectorBaseUrl(port);
   await options.prepareAuthoringLauncher?.({ baseUrl, port, instanceManifest: target.instanceManifest, launcherPath: target.cliCommand });
+  await (options.verifyAuthoringLauncher ?? verifyInstanceLauncher)(target.cliCommand, target.instanceManifest);
   const env = buildDaemonEnv({
     allowedOrigins,
     cliCommand,
@@ -255,7 +263,7 @@ export async function startLiveConnector(
     mcpEntry: target.mcpEntry,
     port
   });
-  const child = spawn(target.nodePath, [target.entryPath], {
+  const child = (options.spawnChild ?? spawn)(target.nodePath, [target.entryPath], {
     cwd: target.cwd,
     env: { ...process.env, ...input.env, ...env },
     stdio: "ignore"
@@ -265,10 +273,15 @@ export async function startLiveConnector(
     ownedChildren.delete(child);
   });
 
-  const health = await waitForCompatibleCollector(port, target.dataDirectory, target.databasePath, cliCommand);
-  await (options.verifyAuthoringManifest ?? verifyDaemonOwnedManifest)(target.instanceManifest, health);
-  await warmProjection(baseUrl);
-  return connectorStartResult(true, baseUrl, "Started local Masthead collector.", health);
+  try {
+    const health = await (options.waitForCollector ?? waitForCompatibleCollector)(port, target.dataDirectory, target.databasePath, cliCommand);
+    await (options.verifyAuthoringManifest ?? verifyDaemonOwnedManifest)(target.instanceManifest, health);
+    await (options.warmConnector ?? warmProjection)(baseUrl);
+    return connectorStartResult(true, baseUrl, "Started local Masthead collector.", health);
+  } catch (error) {
+    await stopSpawnedChild(child);
+    throw error;
+  }
 }
 
 export function mcpLaunchConfig(target: DaemonLaunchTarget): McpLaunchConfigResult {
@@ -425,12 +438,40 @@ function numberField(value: unknown): number | undefined {
 }
 
 async function warmProjection(baseUrl: string): Promise<void> {
-  try {
-    const response = await fetch(`${baseUrl}/projection`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(30_000) });
-    await response.arrayBuffer();
-  } catch {
-    // Projection warmup is best-effort; the renderer can still surface live connection errors.
+  const response = await fetch(`${baseUrl}/projection`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(30_000) });
+  if (!response.ok) throw new Error(`Masthead projection warmup failed with HTTP ${response.status}`);
+  await response.arrayBuffer();
+}
+
+export async function verifyInstanceLauncher(launcherPath: string, manifestPath: string): Promise<void> {
+  const body = await readFile(launcherPath, "utf8");
+  const exactBinding = process.platform === "win32"
+    ? `@set "MASTHEAD_INSTANCE_MANIFEST=${manifestPath.replace(/%/gu, "%%")}"`
+    : `exec env MASTHEAD_INSTANCE_MANIFEST='${manifestPath.replace(/'/gu, `'"'"'`)}'`;
+  const hasExactBinding = body.split(/\r?\n/u).some((line) => process.platform === "win32" ? line === exactBinding : line.startsWith(`${exactBinding} `));
+  if (!hasExactBinding || body.includes("MASTHEAD_DAEMON_URL")) {
+    throw new Error(`Masthead instance launcher does not bind ${manifestPath}`);
   }
+}
+
+async function stopSpawnedChild(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  await new Promise<void>((resolveExit, reject) => {
+    const timeout = setTimeout(() => {
+      child.off("exit", onExit);
+      reject(new Error(`Spawned Masthead collector ${child.pid ?? "unknown"} did not exit after SIGTERM`));
+    }, 5_000);
+    const onExit = () => {
+      clearTimeout(timeout);
+      resolveExit();
+    };
+    child.once("exit", onExit);
+    if (!child.kill("SIGTERM")) {
+      clearTimeout(timeout);
+      child.off("exit", onExit);
+      reject(new Error(`Could not stop spawned Masthead collector ${child.pid ?? "unknown"}`));
+    }
+  });
 }
 
 async function waitForCompatibleCollector(
