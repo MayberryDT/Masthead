@@ -107,3 +107,21 @@ Fresh operational verification:
 - `npm run typecheck`, JavaScript syntax checks, and `git diff --check` passed.
 
 Operational follow-up commit: `fix: make activation rehearsal operational`.
+
+## Production lifecycle recovery gap closeout
+
+The remaining production recovery gaps are closed without touching the installed production runtime or its data. Staging now persists a nonce-bound ownership intent before its first filesystem mutation, and every public lifecycle command reconciles that exact intent under the shared lifecycle lease. Recovery removes only paths named and validated by the intent or its bound receipt; malformed ownership evidence fails closed, and unrelated bundles are preserved.
+
+Activation now has an explicit durable commit window: the prospective receipt is journaled before publication, the activated receipt is persisted, and the journal is then promoted to committed. Fresh-process SIGKILL tests cover `current`, instance launcher, lifecycle launcher, desktop entry, receipt publication, and commit publication. Finalization requires the candidate's strict health classifier plus `migrationState: ready`, scans the production, launcher, and desktop staging domains for foreign artifacts before deleting anything, and preserves rollback state whenever readiness or ownership proof fails.
+
+Custom lifecycle lease paths are preserved through install, cold activation, transition recovery, start, and generated wrappers. A real six-child race releases install, stage, activate, finalize, start, and stop simultaneously; exactly one acquires the lease while the other five receive the exact lease refusal, and the winner is stopped before mutation. The operational rehearsal now uses the real default process scan for shutdown and proves the isolated baseline is offline before cleanup.
+
+Fresh closeout verification from review base `baf0b7de347615ce15d1c7ae55b4e3f88e41b99e`:
+
+- Focused production lifecycle and rehearsal suite: 2 files, 186/186 tests passed, exit 0.
+- Complete Task 4 regression: 17 files, 433/433 tests passed with isolated loopback permission, exit 0.
+- `npm run package:electron`: passed, exit 0; the packaged `masthead-production.js` is byte-identical to the source.
+- Operational rehearsal against the absolute fresh package: passed, exit 0, including 23/23 selected crash/race cases and `{ "ok": true, "isolated": true, "matrix": true }`.
+- Typecheck completed inside the successful package build; JavaScript syntax checks and `git diff --check` passed.
+
+Closeout commit: `fix: close production lifecycle recovery gaps`.

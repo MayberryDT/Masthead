@@ -12,6 +12,7 @@ import {
   finalizeStagedProductionInstallation,
   loadStagedProductionInstallation,
   stageProductionInstallation,
+  statusProduction,
   stopProduction
 } from "./masthead-production.js";
 
@@ -77,8 +78,12 @@ export async function runProductionActivationRehearsal(argv = process.argv.slice
       target: baseline,
       version: release.version
     };
-    const stopped = await stopProduction(baselineConfig, { readProcesses: async () => [] });
+    const stopped = await retryTransientProcessScan(() => stopProduction(baselineConfig));
     if (stopped.stopped !== true || stopped.stoppedPids.length !== 0) throw new Error("Isolated stop proof failed before staging.");
+    const baselineStatus = await retryTransientProcessScan(() => statusProduction(baselineConfig));
+    if (baselineStatus.running !== false || baselineStatus.processes.length !== 0 || baselineStatus.healthMatches !== false) {
+      throw new Error("Isolated baseline remained online after the default production stop proof.");
+    }
     receipt = await stageProductionInstallation({
       bundleDigest: verified.manifest.bundleDigest,
       dataDirectory,
@@ -202,7 +207,7 @@ function runCrashRaceMatrix(environment) {
   const result = spawnSync(process.execPath, [
     join(dirname(SCRIPT_PATH), "..", "node_modules", "vitest", "vitest.mjs"),
     "run", "src/electron/__tests__/productionLauncher.test.ts", "-t",
-    "unreceipted stage|real SIGKILL activation|resumes finalization in a fresh process|same crash-safe lifecycle lease|foreign staged artifact"
+    "unreceipted stage|real SIGKILL activation|resumes finalization in a fresh process|same crash-safe lifecycle lease|serializes every public lifecycle command|foreign staged artifact"
   ], { cwd: join(dirname(SCRIPT_PATH), ".."), env: environment, stdio: "inherit" });
   if (result.status !== 0) throw new Error(`Production activation crash/race matrix failed with exit ${result.status ?? "unknown"}.`);
 }

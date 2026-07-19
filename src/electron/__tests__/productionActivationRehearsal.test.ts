@@ -96,4 +96,13 @@ describe("production activation rehearsal CLI", () => {
     expect(removeRoot).toBeGreaterThan(preservedFailure);
     expect(source.slice(cleanupStart, removeRoot)).not.toContain(".catch(() => undefined)");
   });
+
+  test("uses the default production stop scan and proves the isolated baseline is offline", async () => {
+    const source = await readFile(SCRIPT_PATH, "utf8");
+
+    expect(source).not.toContain("readProcesses: async () => []");
+    expect(source).toContain("stopProduction(baselineConfig)");
+    expect(source).toContain("statusProduction(baselineConfig)");
+    expect(source).toContain("baselineStatus.running !== false");
+  });
 });

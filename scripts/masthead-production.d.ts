@@ -5,6 +5,7 @@ export type ProductionConfig = {
   expectedDatabaseId?: string;
   expectedSchemaVersion?: number;
   gitSha?: string;
+  homeDir?: string;
   lifecycleLeasePath?: string;
   port: number;
   productionRoot: string;
@@ -22,6 +23,7 @@ export type ProductionProcessRecord = {
 };
 
 export type ProductionDesktopDependencies = {
+  onLifecycleLeaseAcquired?: () => void | Promise<void>;
   runDesktopDatabaseCommand?: (
     command: string,
     args: string[],
@@ -103,6 +105,7 @@ export function installProductionLauncher(input: {
   dataDirectory?: string;
   databasePath?: string;
   homeDir?: string;
+  lifecycleLeasePath?: string;
   port?: number;
   productionRoot?: string;
 }, dependencies?: ProductionDesktopDependencies): Promise<{ desktopPath: string; gitSha: string; launcherPath: string; target: string; version: string }>;
@@ -121,6 +124,7 @@ export function coldActivateProduction(input: {
   dataDirectory?: string;
   databasePath: string;
   homeDir?: string;
+  lifecycleLeasePath?: string;
   port?: number;
   productionRoot?: string;
 }, dependencies?: Record<string, unknown>): Promise<Record<string, unknown>>;
@@ -136,6 +140,7 @@ export function transitionProduction(input: {
   dataDirectory?: string;
   databasePath?: string;
   homeDir?: string;
+  lifecycleLeasePath?: string;
   port?: number;
   productionRoot?: string;
 }, dependencies?: Record<string, unknown>): Promise<Record<string, unknown>>;
@@ -180,6 +185,7 @@ export function stageProductionInstallation(input: {
   port?: number;
   productionRoot?: string;
   lifecycleLeasePath?: string;
+  onLifecycleLeaseAcquired?: () => void | Promise<void>;
 }): Promise<StagedProductionInstallationReceipt>;
 export function activateStagedProductionInstallation(
   receipt: StagedProductionInstallationReceipt | string,

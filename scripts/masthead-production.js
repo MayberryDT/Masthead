@@ -81,12 +81,12 @@ export async function acquireLifecycleLease(leasePath) {
 
 export async function installProductionLauncher(input, dependencyOverrides = {}) {
   const homeDir = resolve(input.homeDir || homedir());
-  const lease = await acquireLifecycleLease(resolve(input.lifecycleLeasePath || join(homeDir, ".local", "state", "masthead-production", "launcher.lease.sqlite")));
+  const lifecycleLeasePath = resolve(input.lifecycleLeasePath || join(homeDir, ".local", "state", "masthead-production", "launcher.lease.sqlite"));
+  const lease = await acquireLifecycleLease(lifecycleLeasePath);
   try {
+    await dependencyOverrides.onLifecycleLeaseAcquired?.();
     const productionRoot = resolve(input.productionRoot || join(homeDir, ".local", "share", "masthead-production"));
-    const dataDirectory = resolve(input.dataDirectory || join(homeDir, ".config", "masthead-production"));
-    const pending = await readTransitionJournal(resolve(input.databasePath || join(dataDirectory, "masthead.sqlite")));
-    await cleanupSafeStageOrphans(productionRoot, [input.bundlePath, ...bundlePathsFromMaintenanceJournal(pending)], homeDir);
+    await reconcileProductionStageIntent(productionRoot, lifecycleLeasePath);
     await gatePendingProductionLifecycle(productionRoot, "install");
     return await installProductionLauncherUnlocked(input, dependencyOverrides);
   } finally {
@@ -212,7 +212,7 @@ export async function coldActivateProduction(input, dependencyOverrides = {}) {
     dataDirectory,
     databasePath: input.databasePath,
     gitSha: release.gitSha,
-    lifecycleLeasePath: join(homeDir, ".local", "state", "masthead-production", "launcher.lease.sqlite"),
+    lifecycleLeasePath: resolve(input.lifecycleLeasePath || join(homeDir, ".local", "state", "masthead-production", "launcher.lease.sqlite")),
     port: input.port ?? DEFAULT_PORT,
     productionRoot,
     target,
@@ -224,8 +224,7 @@ export async function coldActivateProduction(input, dependencyOverrides = {}) {
     acquireLease: async () => {
       const lease = await acquireLifecycleLease(config.lifecycleLeasePath);
       try {
-        const pending = await readTransitionJournal(config.databasePath);
-        await cleanupSafeStageOrphans(config.productionRoot, [config.target, ...bundlePathsFromMaintenanceJournal(pending)], homeDir);
+        await reconcileProductionStageIntent(config.productionRoot, config.lifecycleLeasePath);
         await gatePendingProductionLifecycle(config.productionRoot, "cold-activate");
         return lease;
       } catch (error) {
@@ -246,6 +245,7 @@ export async function coldActivateProduction(input, dependencyOverrides = {}) {
       dataDirectory: config.dataDirectory,
       databasePath: config.databasePath,
       homeDir,
+      lifecycleLeasePath: config.lifecycleLeasePath,
       port: config.port,
       productionRoot
     }),
@@ -289,7 +289,7 @@ export async function transitionProduction(input, dependencyOverrides = {}) {
     dataDirectory,
     databasePath: input.databasePath || join(dataDirectory, "masthead.sqlite"),
     gitSha: release.gitSha,
-    lifecycleLeasePath: join(homeDir, ".local", "state", "masthead-production", "launcher.lease.sqlite"),
+    lifecycleLeasePath: resolve(input.lifecycleLeasePath || join(homeDir, ".local", "state", "masthead-production", "launcher.lease.sqlite")),
     port: input.port ?? DEFAULT_PORT,
     productionRoot,
     target,
@@ -313,6 +313,7 @@ export async function transitionProduction(input, dependencyOverrides = {}) {
       dataDirectory: config.dataDirectory,
       databasePath: config.databasePath,
       homeDir,
+      lifecycleLeasePath: config.lifecycleLeasePath,
       port: config.port,
       productionRoot
     }),
@@ -333,9 +334,9 @@ export async function transitionProduction(input, dependencyOverrides = {}) {
   let staged;
   let oldTarget;
   try {
+    await reconcileProductionStageIntent(productionRoot, config.lifecycleLeasePath);
     await gatePendingProductionLifecycle(productionRoot, "transition");
     const pending = await dependencies.readMaintenanceJournal();
-    await cleanupSafeStageOrphans(productionRoot, [target, ...bundlePathsFromMaintenanceJournal(pending)], homeDir);
     if (!dependencyOverrides.stageLaunchers) {
       try {
         preparedInstallation = await stageProductionInstallationUnlocked(
@@ -350,7 +351,7 @@ export async function transitionProduction(input, dependencyOverrides = {}) {
           }
         );
       } catch (error) {
-        await cleanupSafeStageOrphans(productionRoot, [target], homeDir).catch(() => undefined);
+        await reconcileProductionStageIntent(productionRoot, config.lifecycleLeasePath).catch(() => undefined);
         throw error;
       }
     }
@@ -494,12 +495,14 @@ export async function stageProductionInstallation(input) {
   const lifecycleLeasePath = resolve(input.lifecycleLeasePath || join(homeDir, ".local", "state", "masthead-production", "launcher.lease.sqlite"));
   const lease = await acquireLifecycleLease(lifecycleLeasePath);
   try {
-    await cleanupSafeStageOrphans(productionRoot, [input.sourceBundlePath || input.bundlePath], homeDir);
+    await input.onLifecycleLeaseAcquired?.();
+    await mkdir(productionRoot, { recursive: true });
+    await reconcileProductionStageIntent(productionRoot, lifecycleLeasePath);
     const pending = await gatePendingProductionLifecycle(productionRoot, "stage");
     if (pending === "completed") throw new Error("A previous staged activation must be finalized before staging another bundle.");
     return await stageProductionInstallationUnlocked(input, { dataDirectory, databasePath, homeDir, lifecycleLeasePath, port, productionRoot });
   } catch (error) {
-    await cleanupSafeStageOrphans(productionRoot, [input.sourceBundlePath || input.bundlePath], homeDir).catch(() => undefined);
+    await reconcileProductionStageIntent(productionRoot, lifecycleLeasePath).catch(() => undefined);
     throw error;
   } finally {
     await lease.release();
@@ -511,12 +514,41 @@ async function stageProductionInstallationUnlocked(input, identity) {
   const sourceBundlePath = await realpath(input.sourceBundlePath || input.bundlePath || "");
   await mkdir(productionRoot, { recursive: true });
   const release = await readRelease(sourceBundlePath);
-  let target;
-  if (dirname(sourceBundlePath) === await realpath(productionRoot) && VERSIONED_TARGET.test(basename(sourceBundlePath))) {
-    target = sourceBundlePath;
-  } else {
-    target = join(productionRoot, `Masthead-linux-x64-${release.version}-${release.gitSha.slice(0, 8)}`);
-    const temporaryTarget = `${target}.${process.pid}.${randomUUID()}.staged`;
+  const canonicalProductionRoot = await realpath(productionRoot);
+  const sourceIsDirectBundle = dirname(sourceBundlePath) === canonicalProductionRoot && VERSIONED_TARGET.test(basename(sourceBundlePath));
+  const stagingNonce = randomUUID();
+  const target = sourceIsDirectBundle
+    ? sourceBundlePath
+    : join(productionRoot, `Masthead-linux-x64-${release.version}-${release.gitSha.slice(0, 8)}-${stagingNonce}`);
+  const temporaryTarget = join(productionRoot, `.masthead-candidate.${stagingNonce}.staged`);
+  const stagedInstanceLauncherPath = join(productionRoot, `.mastheadctl.${stagingNonce}.staged`);
+  const launcherPath = join(homeDir, ".local", "bin", "masthead-production");
+  const desktopPath = join(homeDir, ".local", "share", "applications", "ai.animas.masthead.desktop");
+  const launcherStage = `${launcherPath}.${stagingNonce}.staged`;
+  const desktopStage = `${desktopPath}.${stagingNonce}.staged`;
+  const receiptPath = join(productionRoot, `.masthead-install-${stagingNonce}.receipt.json`);
+  const targetExists = await lstat(target).then(() => true).catch((error) => {
+    if (error && typeof error === "object" && error.code === "ENOENT") return false;
+    throw error;
+  });
+  const stageIntent = {
+    schemaVersion: 1,
+    productionRoot,
+    homeDir,
+    lifecycleLeasePath,
+    stagingNonce,
+    target,
+    ownsCandidate: !sourceIsDirectBundle && !targetExists,
+    temporaryTarget,
+    stagedInstanceLauncherPath,
+    launcherPath,
+    launcherStage,
+    desktopPath,
+    desktopStage,
+    receiptPath
+  };
+  await writeProductionStageIntent(stageIntent);
+  if (!sourceIsDirectBundle && !targetExists) {
     await cp(sourceBundlePath, temporaryTarget, { errorOnExist: true, recursive: true });
     try {
       await rename(temporaryTarget, target);
@@ -535,8 +567,6 @@ async function stageProductionInstallationUnlocked(input, identity) {
   const instanceManifestPath = join(instanceDir, "masthead-instance.json");
   const activeInstanceLauncherPath = join(instanceDir, "bin", process.platform === "win32" ? "mastheadctl.cmd" : "mastheadctl");
   const previousInstanceLauncher = await snapshotFile(activeInstanceLauncherPath);
-  const stagingNonce = randomUUID();
-  const stagedInstanceLauncherPath = join(productionRoot, `.mastheadctl.${stagingNonce}.staged`);
   const instanceLauncher = productionInstanceLauncher({
     cliEntry: runtime.cliEntry,
     instanceManifestPath,
@@ -549,7 +579,8 @@ async function stageProductionInstallationUnlocked(input, identity) {
     ...input,
     bundlePath: target,
     homeDir,
-    productionRoot
+    productionRoot,
+    stagingNonce
   });
   await input.onStageStep?.("surface-stage");
   const rollbackRelease = await readRelease(previousCurrentTarget);
@@ -559,7 +590,6 @@ async function stageProductionInstallationUnlocked(input, identity) {
     nodePath: productionRuntimePaths(previousCurrentTarget).node,
     resourcesPath: join(previousCurrentTarget, "resources")
   });
-  const receiptPath = join(productionRoot, `.masthead-install-${stagingNonce}.receipt.json`);
   const receipt = {
     receiptVersion: "masthead-production-stage-v1",
     staged: true,
@@ -595,6 +625,7 @@ async function stageProductionInstallationUnlocked(input, identity) {
     attestStagedFile(stagedSurface.desktopStage)
   ]);
   await atomicWrite(receiptPath, `${JSON.stringify(stagedReceiptRecord(receipt), null, 2)}\n`, 0o444);
+  await rm(productionStageIntentPath(productionRoot));
   return receipt;
 }
 
@@ -627,7 +658,8 @@ export async function activateStagedProductionInstallation(receiptInput, depende
   const preliminaryReceipt = await loadStagedProductionInstallation(receiptPath);
   const lease = await acquireLifecycleLease(preliminaryReceipt.lifecycleLeasePath);
   try {
-    await cleanupSafeStageOrphans(preliminaryReceipt.productionRoot, [preliminaryReceipt.target], dirname(dirname(dirname(preliminaryReceipt.stagedSurface.launcherPath))));
+    await dependencyOverrides.onLifecycleLeaseAcquired?.();
+    await reconcileProductionStageIntent(preliminaryReceipt.productionRoot, preliminaryReceipt.lifecycleLeasePath);
     if (await gatePendingProductionLifecycle(preliminaryReceipt.productionRoot, "activate", preliminaryReceipt.receiptPath) === "completed") {
       return { activated: true, launched: false, databaseOpened: false, currentPath: preliminaryReceipt.currentPath, target: preliminaryReceipt.target };
     }
@@ -639,6 +671,7 @@ export async function activateStagedProductionInstallation(receiptInput, depende
 
 async function activateStagedProductionInstallationUnlocked(receiptPath, dependencyOverrides) {
   const receipt = await loadStagedProductionInstallation(receiptPath);
+  await reconcileProductionStageIntent(receipt.productionRoot, receipt.lifecycleLeasePath);
   await verifyPinnedBundle(receipt.rollbackBundle.path, receipt.rollbackBundle.bundleDigest);
   const rollbackRelease = await readRelease(receipt.rollbackBundle.path);
   if (rollbackRelease.gitSha !== receipt.rollbackBundle.buildSha || rollbackRelease.version !== receipt.rollbackBundle.version) {
@@ -670,6 +703,7 @@ async function activateStagedProductionInstallationUnlocked(receiptPath, depende
     throw new Error("Staged production lifecycle launcher does not bind the receipt lifecycle lease.");
   }
   const activationJournalPath = productionActivationJournalPath(receipt.productionRoot);
+  let activationCommitted = false;
   try {
     await writeActivationJournal(activationJournalPath, receipt, "before-current");
     await swapCurrentTarget(receipt.productionRoot, receipt.target);
@@ -689,10 +723,16 @@ async function activateStagedProductionInstallationUnlocked(receiptPath, depende
     simulateActivationProcessDeath(dependencyOverrides, "desktop");
     refreshDesktopDatabase(dirname(receipt.stagedSurface.desktopPath), dependencyOverrides.runDesktopDatabaseCommand);
     receipt.activatedAt = new Date().toISOString();
+    await writeActivationJournal(activationJournalPath, receipt, "before-activation-commit");
     await persistStagedReceipt(receipt);
+    await dependencyOverrides.onStep?.("activation-receipt");
+    simulateActivationProcessDeath(dependencyOverrides, "activation-receipt");
     await writeActivationJournal(activationJournalPath, receipt, "activation-committed");
+    activationCommitted = true;
+    await dependencyOverrides.onStep?.("activation-commit");
+    simulateActivationProcessDeath(dependencyOverrides, "activation-commit");
   } catch (error) {
-    if (error?.code === "simulated_activation_process_death") throw error;
+    if (activationCommitted || error?.code === "simulated_activation_process_death") throw error;
     let rollbackError;
     try {
       await swapCurrentTarget(receipt.productionRoot, receipt.previousCurrentTarget);
@@ -775,13 +815,21 @@ async function gatePendingProductionLifecycle(productionRoot, command, expectedR
     receipt = hydrateStagedReceiptRecord(journal.receipt, journal.receiptPath);
   }
   if (journal.schemaVersion === 2) {
-    const receiptHash = createHash("sha256").update(JSON.stringify(stagedReceiptRecord(receipt))).digest("hex");
-    if (receiptHash !== journal.receiptHash) throw new Error("Production lifecycle journal receipt hash mismatch.");
+    const journalReceiptHash = createHash("sha256").update(JSON.stringify(journal.receipt)).digest("hex");
+    const receiptRecord = stagedReceiptRecord(receipt);
+    const receiptHash = createHash("sha256").update(JSON.stringify(receiptRecord)).digest("hex");
+    const commitWindowMatch = journal.phase === "before-activation-commit" && receiptMatchesBeforeActivationCommit(receiptRecord, journal.receipt);
+    if (journalReceiptHash !== journal.receiptHash || receiptHash !== journal.receiptHash && !commitWindowMatch) {
+      throw new Error("Production lifecycle journal receipt hash mismatch.");
+    }
   }
   if (command === "finalize" && (journal.phase.startsWith("finalize-cleanup-") || journal.phase === "finalize-after-stage-cleanup")) {
     return "resume-finalization";
   }
   const result = await recoverInterruptedProductionActivation(receipt);
+  if (result === "completed" && journal.phase !== "activation-committed") {
+    await writeActivationJournal(path, receipt, "activation-committed");
+  }
   if (result === "completed" && ["stage", "install", "cold-activate", "transition"].includes(command)) {
     throw new Error(`Pending activation must be finalized before ${command}.`);
   }
@@ -789,6 +837,13 @@ async function gatePendingProductionLifecycle(productionRoot, command, expectedR
     throw new Error(`Recovered an interrupted activation before ${command}; rerun activation before continuing.`);
   }
   return result;
+}
+
+function receiptMatchesBeforeActivationCommit(receiptRecord, committedReceiptRecord) {
+  if (!committedReceiptRecord || typeof committedReceiptRecord.activatedAt !== "string" || "activatedAt" in receiptRecord) return false;
+  const beforeCommitRecord = { ...committedReceiptRecord };
+  delete beforeCommitRecord.activatedAt;
+  return JSON.stringify(receiptRecord) === JSON.stringify(beforeCommitRecord);
 }
 
 async function recoverInterruptedProductionActivation(receipt) {
@@ -836,6 +891,7 @@ export async function finalizeStagedProductionInstallation(receiptInput, depende
   const preliminaryReceipt = await loadFinalizationReceipt(receiptPath);
   const lease = await acquireLifecycleLease(preliminaryReceipt.lifecycleLeasePath);
   try {
+    await dependencyOverrides.onLifecycleLeaseAcquired?.();
     return await finalizeStagedProductionInstallationUnlocked(receiptPath, dependencyOverrides);
   } finally {
     await lease.release();
@@ -844,6 +900,7 @@ export async function finalizeStagedProductionInstallation(receiptInput, depende
 
 async function finalizeStagedProductionInstallationUnlocked(receiptPath, dependencyOverrides = {}) {
     const preliminaryReceipt = await loadFinalizationReceipt(receiptPath);
+    await reconcileProductionStageIntent(preliminaryReceipt.productionRoot, preliminaryReceipt.lifecycleLeasePath);
     if (preliminaryReceipt.finalizationCommitted === true) {
       await assertCommittedFinalization(preliminaryReceipt);
       return { finalized: true, recovered: true, target: preliminaryReceipt.target, receiptRemoved: true };
@@ -986,17 +1043,22 @@ async function assertFinalizedProductionHygiene(receipt) {
 async function assertNoOtherLifecycleArtifacts(receipt) {
   const currentReceipt = basename(receipt.receiptPath);
   const currentJournal = basename(productionActivationJournalPath(receipt.productionRoot));
-  const ownedStages = new Set([
-    basename(receipt.stagedInstanceLauncherPath),
-    basename(receipt.stagedSurface.launcherStage),
-    basename(receipt.stagedSurface.desktopStage)
-  ]);
   const entries = await readdir(receipt.productionRoot);
   const forbidden = entries.filter((name) =>
-    (name.endsWith(".staged") && !ownedStages.has(name)) ||
+    (name.endsWith(".staged") && resolve(receipt.productionRoot, name) !== resolve(receipt.stagedInstanceLauncherPath)) ||
     (name.endsWith(".receipt.json") && name !== currentReceipt) ||
     (name.endsWith(".journal.json") && name !== currentJournal)
   );
+  for (const [ownedStage, stagedName] of [
+    [receipt.stagedSurface.launcherStage, /^masthead-production\..+\.staged$/u],
+    [receipt.stagedSurface.desktopStage, /^ai\.animas\.masthead\.desktop\..+\.staged$/u]
+  ]) {
+    const stageDirectory = dirname(ownedStage);
+    for (const name of await readdir(stageDirectory)) {
+      const path = resolve(stageDirectory, name);
+      if (stagedName.test(name) && path !== resolve(ownedStage)) forbidden.push(path);
+    }
+  }
   if (forbidden.length > 0) throw new Error(`Finalized production hygiene left stale artifacts: ${forbidden.join(", ")}`);
 }
 
@@ -1045,7 +1107,7 @@ async function persistStagedReceipt(receipt) {
   await atomicWrite(receipt.receiptPath, `${JSON.stringify(stagedReceiptRecord(receipt), null, 2)}\n`, 0o444);
 }
 
-async function assertSuccessfulStagedStartup(receipt) {
+async function assertSuccessfulStagedStartup(receipt, dependencies = {}) {
   const activatedAt = Date.parse(receipt.activatedAt);
   if (!Number.isFinite(activatedAt)) throw new Error("Cannot finalize before staged activation completes.");
   let manifest;
@@ -1063,8 +1125,10 @@ async function assertSuccessfulStagedStartup(receipt) {
     typeof manifest.instanceId !== "string" || !manifest.instanceId ||
     !Number.isFinite(Date.parse(manifest.updatedAt)) || Date.parse(manifest.updatedAt) < activatedAt
   ) throw new Error("Activated production startup manifest does not prove the staged target started successfully.");
-  const [firstProcess, health] = await Promise.all([readProcess(manifest.pid), fetchHealth(receipt.port)]);
-  const secondProcess = await readProcess(manifest.pid);
+  const processReader = dependencies.readProcess ?? readProcess;
+  const healthReader = dependencies.fetchHealth ?? fetchHealth;
+  const [firstProcess, health] = await Promise.all([processReader(manifest.pid), healthReader(receipt.port)]);
+  const secondProcess = await processReader(manifest.pid);
   if (!firstProcess?.starttime || firstProcess.starttime !== secondProcess?.starttime) throw new Error("Activated production daemon PID/start identity is not live.");
   const classified = classifyProductionProcess(firstProcess, {
     dataDirectory: receipt.dataDirectory,
@@ -1075,6 +1139,7 @@ async function assertSuccessfulStagedStartup(receipt) {
   if (classified?.role !== "daemon" || classified.target !== receipt.target) throw new Error("Activated production daemon process does not belong to the staged target.");
   const compatibility = await classifyPackagedDaemonHealth(receipt, health);
   if (compatibility?.state !== "compatible") throw new Error(`Activated production health failed strict protocol classification: ${compatibility?.state || "unavailable"}.`);
+  if (health?.data?.migrationState !== "ready") throw new Error("Activated production health must report migration state ready before finalization.");
   if (
     health?.runtime?.mode !== "primary" || health.runtime.writable !== true ||
     health.runtime.pid !== manifest.pid || health.runtime.daemonInstanceId !== manifest.instanceId ||
@@ -1083,7 +1148,7 @@ async function assertSuccessfulStagedStartup(receipt) {
     health.data?.dataDirectory !== receipt.dataDirectory || health.data?.databasePath !== receipt.databasePath ||
     health.data?.databaseId !== manifest.databaseId || health.buildSha !== receipt.buildSha
   ) throw new Error("Activated production health does not match the staged receipt and daemon manifest.");
-  await assertManifestWriterGuardActive(receipt.instanceDir);
+  await (dependencies.assertManifestWriterGuard ?? assertManifestWriterGuardActive)(receipt.instanceDir);
 }
 
 async function classifyPackagedDaemonHealth(receipt, health) {
@@ -1312,10 +1377,11 @@ export async function startProduction(configInput, dependencyOverrides = {}) {
   const dependencies = { ...defaultDependencies(config), ...dependencyOverrides };
   const lease = await dependencies.acquireLease();
   try {
+    await dependencies.onLifecycleLeaseAcquired?.();
+    await reconcileProductionStageIntent(config.productionRoot, config.lifecycleLeasePath);
     await gatePendingProductionLifecycle(config.productionRoot, "start");
     let interruptedStart;
     const pending = await dependencies.readMaintenanceJournal();
-    await cleanupSafeStageOrphans(config.productionRoot, [config.target, ...bundlePathsFromMaintenanceJournal(pending)]);
     if ((pending?.schemaVersion === 2 || pending?.rollbackMode === "offline_only") && !config.transitionNonce) {
       throw new Error("Production has a pending offline-only cold activation; ordinary start is disabled; rerun install with --cold-activate.");
     }
@@ -1399,9 +1465,10 @@ export async function stopProduction(configInput, dependencyOverrides = {}) {
   const dependencies = { ...defaultDependencies(config), ...dependencyOverrides };
   const lease = await dependencies.acquireLease();
   try {
+    await dependencies.onLifecycleLeaseAcquired?.();
+    await reconcileProductionStageIntent(config.productionRoot, config.lifecycleLeasePath);
     await gatePendingProductionLifecycle(config.productionRoot, "stop");
     const pending = await dependencies.readMaintenanceJournal();
-    await cleanupSafeStageOrphans(config.productionRoot, [config.target, ...bundlePathsFromMaintenanceJournal(pending)]);
     return await stopInsideLifecycleLease(config, dependencies);
   } finally {
     await lease.release();
@@ -1506,7 +1573,7 @@ async function stageProductionLaunchers(input) {
     port: validPort(input.port ?? DEFAULT_PORT), productionRoot, target, version: release.version
   });
   const desktop = productionDesktopEntry(launcherPath, target);
-  const token = `${process.pid}.${Date.now()}`;
+  const token = input.stagingNonce || `${process.pid}.${Date.now()}`;
   const launcherStage = `${launcherPath}.${token}.staged`;
   const desktopStage = `${desktopPath}.${token}.staged`;
   const [previousLauncher, previousDesktop] = await Promise.all([snapshotFile(launcherPath), snapshotFile(desktopPath)]);
@@ -1632,46 +1699,87 @@ async function cleanupProductionInstallArtifacts(productionRoot, target, remove 
   }
 }
 
-function bundlePathsFromMaintenanceJournal(journal) {
-  return [journal?.oldBundle?.target, journal?.newBundle?.target, journal?.legacyTarget?.path]
-    .filter((path) => typeof path === "string" && path);
+function productionStageIntentPath(productionRoot) {
+  return join(productionRoot, ".masthead-install-stage.intent.json");
 }
 
-async function cleanupSafeStageOrphans(productionRoot, protectedPaths = [], homeDir) {
-  const entries = await readdir(productionRoot, { withFileTypes: true });
-  const retained = new Set(protectedPaths.filter((path) => typeof path === "string" && path).map((path) => resolve(path)));
-  for (const entry of entries) {
-    if (!entry.name.endsWith(".receipt.json")) continue;
+async function writeProductionStageIntent(intent) {
+  validateProductionStageIntent(intent, intent.productionRoot, intent.lifecycleLeasePath);
+  await atomicWrite(productionStageIntentPath(intent.productionRoot), `${JSON.stringify(intent, null, 2)}\n`, 0o600);
+}
+
+function validateProductionStageIntent(intent, productionRootInput, lifecycleLeasePathInput) {
+  const productionRoot = resolve(productionRootInput);
+  const lifecycleLeasePath = resolve(lifecycleLeasePathInput);
+  if (
+    intent?.schemaVersion !== 1 || intent.productionRoot !== productionRoot || intent.lifecycleLeasePath !== lifecycleLeasePath ||
+    typeof intent.homeDir !== "string" || resolve(intent.homeDir) !== intent.homeDir ||
+    typeof intent.stagingNonce !== "string" || !/^[0-9a-f-]{36}$/u.test(intent.stagingNonce) ||
+    typeof intent.ownsCandidate !== "boolean"
+  ) throw new Error("Production stage intent is malformed.");
+  const nonce = intent.stagingNonce;
+  const expectedTargetParent = dirname(intent.target || "");
+  const expectedLauncher = join(intent.homeDir, ".local", "bin", "masthead-production");
+  const expectedDesktop = join(intent.homeDir, ".local", "share", "applications", "ai.animas.masthead.desktop");
+  if (
+    expectedTargetParent !== productionRoot || !VERSIONED_TARGET.test(basename(intent.target || "")) ||
+    (intent.ownsCandidate && !basename(intent.target).endsWith(`-${nonce}`)) ||
+    intent.temporaryTarget !== join(productionRoot, `.masthead-candidate.${nonce}.staged`) ||
+    intent.stagedInstanceLauncherPath !== join(productionRoot, `.mastheadctl.${nonce}.staged`) ||
+    intent.receiptPath !== join(productionRoot, `.masthead-install-${nonce}.receipt.json`) ||
+    intent.launcherPath !== expectedLauncher || intent.launcherStage !== `${expectedLauncher}.${nonce}.staged` ||
+    intent.desktopPath !== expectedDesktop || intent.desktopStage !== `${expectedDesktop}.${nonce}.staged`
+  ) throw new Error("Production stage intent is malformed.");
+  return intent;
+}
+
+async function reconcileProductionStageIntent(productionRootInput, lifecycleLeasePath) {
+  const productionRoot = resolve(productionRootInput);
+  const intentPath = productionStageIntentPath(productionRoot);
+  let source;
+  try {
+    source = await readFile(intentPath, "utf8");
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "ENOENT") return "none";
+    throw error;
+  }
+  let intent;
+  try {
+    intent = JSON.parse(source);
+  } catch (error) {
+    throw new Error("Production stage intent is malformed.", { cause: error });
+  }
+  validateProductionStageIntent(intent, productionRoot, lifecycleLeasePath);
+  const receiptExists = await lstat(intent.receiptPath).then(() => true).catch((error) => {
+    if (error && typeof error === "object" && error.code === "ENOENT") return false;
+    throw error;
+  });
+  if (receiptExists) {
+    let receipt;
     try {
-      const receipt = JSON.parse(await readFile(join(productionRoot, entry.name), "utf8"));
-      for (const path of [receipt.target, receipt.previousCurrentTarget, receipt.rollbackBundle?.path, receipt.stagedInstanceLauncherPath, receipt.stagedSurface?.launcherStage, receipt.stagedSurface?.desktopStage]) {
-        if (typeof path === "string") retained.add(resolve(path));
-      }
-    } catch {
-      // Preserve malformed receipts and their unknown dependencies for explicit recovery.
+      receipt = await loadStagedProductionInstallation(intent.receiptPath);
+    } catch (error) {
+      throw new Error("Production stage receipt is malformed; exact stage ownership cannot be reconciled.", { cause: error });
     }
+    if (
+      receipt.productionRoot !== productionRoot || receipt.lifecycleLeasePath !== lifecycleLeasePath ||
+      receipt.stagingNonce !== intent.stagingNonce || receipt.target !== intent.target ||
+      receipt.stagedInstanceLauncherPath !== intent.stagedInstanceLauncherPath ||
+      receipt.stagedSurface.launcherStage !== intent.launcherStage || receipt.stagedSurface.desktopStage !== intent.desktopStage
+    ) throw new Error("Production stage receipt does not match its durable intent.");
+    await rm(intentPath);
+    return "receipt-durable";
   }
-  const current = await realpath(join(productionRoot, "current")).catch(() => undefined);
-  for (const entry of entries) {
-    const path = join(productionRoot, entry.name);
-    const unreferencedStage = entry.name.endsWith(".staged") && !retained.has(resolve(path));
-    const unreferencedBundle = VERSIONED_TARGET.test(entry.name) && path !== current && !retained.has(resolve(path));
-    if (unreferencedStage || unreferencedBundle) await rm(path, { force: true, recursive: true });
+  const currentTarget = await realpath(join(productionRoot, "current")).catch(() => undefined);
+  if (intent.ownsCandidate && currentTarget === intent.target) {
+    throw new Error("Production stage intent candidate is current and cannot be reconciled safely.");
   }
-  if (!homeDir) return;
-  for (const [directory, pattern] of [
-    [join(homeDir, ".local", "bin"), /^masthead-production\..+\.staged$/u],
-    [join(homeDir, ".local", "share", "applications"), /^ai\.animas\.masthead\.desktop\..+\.staged$/u]
-  ]) {
-    const stagedEntries = await readdir(directory, { withFileTypes: true }).catch((error) => {
-      if (error && typeof error === "object" && error.code === "ENOENT") return [];
-      throw error;
-    });
-    for (const entry of stagedEntries) {
-      const path = join(directory, entry.name);
-      if (entry.isFile() && pattern.test(entry.name) && !retained.has(resolve(path))) await rm(path, { force: true });
-    }
+  for (const path of [intent.temporaryTarget, intent.stagedInstanceLauncherPath, intent.launcherStage, intent.desktopStage]) {
+    await rm(path, { force: true, recursive: true });
   }
+  if (intent.ownsCandidate) await rm(intent.target, { force: true, recursive: true });
+  await rm(intentPath);
+  return "recovered";
 }
 
 function defaultDependencies(config) {
@@ -1698,7 +1806,8 @@ function defaultDependencies(config) {
         bundlePath: request.oldBundle.target,
         dataDirectory: config.dataDirectory,
         databasePath: config.databasePath,
-        homeDir: homedir(),
+        homeDir: config.homeDir,
+        lifecycleLeasePath: config.lifecycleLeasePath,
         port: config.port,
         productionRoot: config.productionRoot
       });
@@ -1989,6 +2098,7 @@ async function completeConfig(input) {
   const productionRoot = resolve(input.productionRoot || dirname(target));
   const release = input.gitSha && input.version ? { gitSha: input.gitSha, version: input.version } : await readRelease(target);
   const dataDirectory = resolve(required(input.dataDirectory, "production data directory"));
+  const homeDir = resolve(input.homeDir || homedir());
   return {
     bundleDigest: validateDigest(input.bundleDigest),
     dataDirectory,
@@ -1996,7 +2106,8 @@ async function completeConfig(input) {
     expectedDatabaseId: input.expectedDatabaseId,
     expectedSchemaVersion: input.expectedSchemaVersion,
     gitSha: validateSha(release.gitSha),
-    lifecycleLeasePath: resolve(input.lifecycleLeasePath || join(homedir(), ".local", "state", "masthead-production", "launcher.lease.sqlite")),
+    homeDir,
+    lifecycleLeasePath: resolve(input.lifecycleLeasePath || join(homeDir, ".local", "state", "masthead-production", "launcher.lease.sqlite")),
     port: validPort(input.port ?? DEFAULT_PORT),
     productionRoot,
     target,

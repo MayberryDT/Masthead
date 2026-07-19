@@ -312,6 +312,16 @@ describe("production lifecycle launcher", () => {
       .toContain(`MASTHEAD_LIFECYCLE_LEASE='${lifecycleLeasePath}'`);
     await expect(activateStagedProductionInstallation(receipt.receiptPath, { assertOffline: async () => undefined, runDesktopDatabaseCommand: () => undefined }))
       .resolves.toMatchObject({ activated: true });
+    expect(await readFile(String(receipt.stagedSurface.launcherPath), "utf8"))
+      .toContain(`MASTHEAD_LIFECYCLE_LEASE='${lifecycleLeasePath}'`);
+    await expect(lstat(join(homeDir, ".local", "state", "masthead-production", "launcher.lease.sqlite")))
+      .rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("threads the configured lifecycle lease through interrupted-start launcher recovery", async () => {
+    const source = await readFile(new URL("../../../scripts/masthead-production.js", import.meta.url), "utf8");
+    const recoveryBlock = source.slice(source.indexOf("recoverStartSurface:"), source.indexOf("restoreInterruptedStart:"));
+    expect(recoveryBlock).toContain("lifecycleLeasePath: config.lifecycleLeasePath");
   });
 
   test.each(["current", "instance-launcher", "lifecycle-launcher", "desktop"])(
@@ -370,7 +380,9 @@ describe("production lifecycle launcher", () => {
     expect(await realpath(join(productionRoot, "current"))).toBe(candidate.target);
   });
 
-  test.skipIf(process.platform === "win32")("recovers a real SIGKILL activation in a fresh process", async () => {
+  test.skipIf(process.platform === "win32").each([
+    "current", "instance-launcher", "lifecycle-launcher", "desktop", "activation-receipt", "activation-commit"
+  ])("recovers a real SIGKILL activation after the %s boundary in a fresh process", async (failedStep) => {
     const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
     const candidate = await secondBundle(productionRoot, oldTarget);
     const receipt = await stageProductionInstallation({
@@ -383,10 +395,11 @@ describe("production lifecycle launcher", () => {
     const moduleUrl = new URL("../../../scripts/masthead-production.js", import.meta.url).href;
     const crashSource = [
       `import { activateStagedProductionInstallation } from ${JSON.stringify(moduleUrl)};`,
+      `const failedStep = ${JSON.stringify(failedStep)};`,
       "await activateStagedProductionInstallation(process.argv[1], {",
       "  assertOffline: async () => undefined,",
       "  runDesktopDatabaseCommand: () => undefined,",
-      "  onStep(step) { if (step === 'instance-launcher') process.kill(process.pid, 'SIGKILL'); }",
+      "  onStep(step) { if (step === failedStep) process.kill(process.pid, 'SIGKILL'); }",
       "});"
     ].join("\n");
     const crash = spawn(process.execPath, ["--input-type=module", "-e", crashSource, receipt.receiptPath], { stdio: "ignore" });
@@ -406,6 +419,8 @@ describe("production lifecycle launcher", () => {
     expect(recoverCode).toBe(0);
     expect(JSON.parse(await readFile(recoveryResultPath, "utf8"))).toMatchObject({ activated: true, target: candidate.target });
     expect(await realpath(join(productionRoot, "current"))).toBe(candidate.target);
+    expect(JSON.parse(await readFile(join(productionRoot, ".masthead-install-activation.journal.json"), "utf8")))
+      .toMatchObject({ phase: "activation-committed" });
   });
 
   test("uses the same crash-safe lifecycle lease for stage, activate, and finalize", async () => {
@@ -434,6 +449,139 @@ describe("production lifecycle launcher", () => {
     await expect(finalizeStagedProductionInstallation(receipt.receiptPath)).rejects.toThrow("already running");
     await held.release();
   });
+
+  test.skipIf(process.platform === "win32")(
+    "serializes every public lifecycle command through one exact lease in real child processes",
+    async () => {
+      const { config, homeDir, productionRoot, root, target } = await fixture();
+      const lifecycleLeasePath = join(root, "shared-lifecycle.lease.sqlite");
+      const receipt = await stageProductionInstallation({
+        bundleDigest: config.bundleDigest,
+        dataDirectory: config.dataDirectory,
+        databasePath: config.databasePath,
+        homeDir,
+        lifecycleLeasePath,
+        productionRoot,
+        sourceBundlePath: target
+      });
+      const receiptBeforeRace = await readFile(receipt.receiptPath, "utf8");
+      const productionEntriesBeforeRace = await readdir(productionRoot);
+      const moduleUrl = new URL("../../../scripts/masthead-production.js", import.meta.url).href;
+      const waitForPath = async (path: string) => {
+        for (let attempt = 0; attempt < 500; attempt += 1) {
+          if (await lstat(path).then(() => true).catch(() => false)) return;
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        throw new Error(`Timed out waiting for child-process barrier ${path}.`);
+      };
+
+      const input = {
+        bundleDigest: config.bundleDigest,
+        bundlePath: target,
+        dataDirectory: config.dataDirectory,
+        databasePath: config.databasePath,
+        homeDir,
+        lifecycleLeasePath,
+        port: config.port,
+        productionRoot,
+        sourceBundlePath: target,
+        target
+      };
+      const commands = ["stage", "activate", "finalize", "start", "stop", "install"] as const;
+      const gatePath = join(root, "lifecycle-race.go");
+      const winnerPath = join(root, "lifecycle-race.winner");
+      const winnerReleasePath = join(root, "lifecycle-race.winner-release");
+      const workerSource = [
+        `import { activateStagedProductionInstallation, finalizeStagedProductionInstallation, installProductionLauncher, stageProductionInstallation, startProduction, stopProduction } from ${JSON.stringify(moduleUrl)};`,
+        "import { access, writeFile } from 'node:fs/promises';",
+        "const [command, inputJson, receiptPath, readyPath, gatePath, winnerPath, winnerReleasePath, resultPath] = process.argv.slice(1);",
+        "const input = JSON.parse(inputJson);",
+        "let entered = false;",
+        "await writeFile(readyPath, String(process.pid));",
+        "while (true) {",
+        "  try { await access(gatePath); break; } catch { await new Promise((resolve) => setTimeout(resolve, 5)); }",
+        "}",
+        "const onLifecycleLeaseAcquired = async () => {",
+        "  entered = true;",
+        "  await writeFile(winnerPath, command);",
+        "  while (true) {",
+        "    try { await access(winnerReleasePath); break; } catch { await new Promise((resolve) => setTimeout(resolve, 5)); }",
+        "  }",
+        "  throw new Error('Lifecycle race winner stopped before mutation.');",
+        "};",
+        "try {",
+        "  if (command === 'stage') await stageProductionInstallation({ ...input, onLifecycleLeaseAcquired });",
+        "  else if (command === 'activate') await activateStagedProductionInstallation(receiptPath, { onLifecycleLeaseAcquired });",
+        "  else if (command === 'finalize') await finalizeStagedProductionInstallation(receiptPath, { onLifecycleLeaseAcquired });",
+        "  else if (command === 'start') await startProduction(input, { onLifecycleLeaseAcquired });",
+        "  else if (command === 'stop') await stopProduction(input, { onLifecycleLeaseAcquired });",
+        "  else if (command === 'install') await installProductionLauncher(input, { onLifecycleLeaseAcquired });",
+        "  else throw new Error(`Unknown test command: ${command}`);",
+        "  await writeFile(resultPath, JSON.stringify({ command, entered }));",
+        "} catch (error) {",
+        "  await writeFile(resultPath, JSON.stringify({ command, entered, error: error instanceof Error ? error.message : String(error) }));",
+        "}"
+      ].join("\n");
+      const workers = commands.map((command) => {
+        const readyPath = join(root, `${command}.ready`);
+        const resultPath = join(root, `${command}.result.json`);
+        return {
+          command,
+          process: spawn(process.execPath, [
+            "--input-type=module",
+            "-e",
+            workerSource,
+            command,
+            JSON.stringify(input),
+            receipt.receiptPath,
+            readyPath,
+            gatePath,
+            winnerPath,
+            winnerReleasePath,
+            resultPath
+          ], { stdio: "ignore" }),
+          readyPath,
+          resultPath
+        };
+      });
+      const workerExits = workers.map(({ process: child }) => once(child, "close"));
+
+      try {
+        await Promise.all(workers.map(({ readyPath }) => waitForPath(readyPath)));
+        await writeFile(gatePath, "go");
+        await waitForPath(winnerPath);
+        for (let attempt = 0; attempt < 500; attempt += 1) {
+          const completed = await Promise.all(workers.map(({ resultPath }) => lstat(resultPath).then(() => true).catch(() => false)));
+          if (completed.filter(Boolean).length === commands.length - 1) break;
+          if (attempt === 499) throw new Error("Timed out waiting for five lifecycle lease refusals.");
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        await writeFile(winnerReleasePath, "release");
+        const exits = await Promise.all(workerExits);
+        expect(exits.map(([code]) => code)).toEqual(commands.map(() => 0));
+        const results = await Promise.all(workers.map(async ({ resultPath }) => JSON.parse(await readFile(resultPath, "utf8"))));
+        const winners = results.filter((result) => result.entered === true);
+        const refused = results.filter((result) => result.entered === false);
+        expect(winners).toEqual([{
+          command: await readFile(winnerPath, "utf8"),
+          entered: true,
+          error: "Lifecycle race winner stopped before mutation."
+        }]);
+        expect(refused).toHaveLength(commands.length - 1);
+        expect(refused.every((result) => result.error === `Another Masthead production lifecycle command is already running through ${lifecycleLeasePath}.`))
+          .toBe(true);
+        expect(results.map((result) => result.command).sort()).toEqual([...commands].sort());
+        expect(await realpath(join(productionRoot, "current"))).toBe(target);
+        expect(await readFile(receipt.receiptPath, "utf8")).toBe(receiptBeforeRace);
+        expect(await readdir(productionRoot)).toEqual(productionEntriesBeforeRace);
+        expect(JSON.parse(receiptBeforeRace)).toMatchObject({ lifecycleLeasePath });
+      } finally {
+        await writeFile(gatePath, "go");
+        await writeFile(winnerReleasePath, "release");
+        await Promise.all(workerExits);
+      }
+    }
+  );
 
   test("releases the cold-activation lease when the pending-activation gate refuses entry", async () => {
     const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
@@ -528,6 +676,126 @@ describe("production lifecycle launcher", () => {
     }
   );
 
+  test("creates a missing production root safely before recording stage ownership", async () => {
+    const { config, homeDir, productionRoot, root, target } = await fixture();
+    const sourceBundlePath = join(root, "detached-candidate");
+    const { cp } = await import("node:fs/promises");
+    await cp(target, sourceBundlePath, { recursive: true });
+    await rm(productionRoot, { force: true, recursive: true });
+    await expect(stageProductionInstallation({
+      bundleDigest: config.bundleDigest,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot,
+      sourceBundlePath
+    })).rejects.toThrow();
+    await expect(lstat(productionRoot)).resolves.toMatchObject({});
+    await expect(lstat(sourceBundlePath)).resolves.toMatchObject({});
+    expect(await readdir(productionRoot)).toEqual([]);
+  });
+
+  test.skipIf(process.platform === "win32").each(["stage", "start", "stop"] as const)(
+    "a fresh stage process death is reconciled by %s without deleting unrelated bundles",
+    async (recoveryCommand) => {
+      const { config, homeDir, productionRoot, root, target: oldTarget } = await fixture();
+      const unrelated = join(productionRoot, `Masthead-linux-x64-9.9.9-unrelated-${recoveryCommand}`);
+      await mkdir(unrelated);
+      await writeFile(join(unrelated, "owner.txt"), "unrelated");
+      const sourceBundlePath = join(root, `candidate-source-${recoveryCommand}`);
+      const { cp } = await import("node:fs/promises");
+      await cp(oldTarget, sourceBundlePath, { recursive: true });
+      const sourceManifest = await writePackagedBundleManifest({
+        bundleRoot: sourceBundlePath,
+        executablePath: join(sourceBundlePath, "masthead"),
+        resourcesPath: join(sourceBundlePath, "resources")
+      });
+      const moduleUrl = new URL("../../../scripts/masthead-production.js", import.meta.url).href;
+      const input = { bundleDigest: sourceManifest.bundleDigest, dataDirectory: config.dataDirectory, homeDir, productionRoot, sourceBundlePath };
+      const crashSource = [
+        `import { stageProductionInstallation } from ${JSON.stringify(moduleUrl)};`,
+        `await stageProductionInstallation({ ...${JSON.stringify(input)}, onStageStep(step) { if (step === 'surface-stage') process.kill(process.pid, 'SIGKILL'); } });`
+      ].join("\n");
+      const crash = spawn(process.execPath, ["--input-type=module", "-e", crashSource], { stdio: "ignore" });
+      const [, crashSignal] = await once(crash, "close");
+      expect(crashSignal).toBe("SIGKILL");
+
+      const recoverySource = recoveryCommand === "stage"
+        ? [
+            `import { stageProductionInstallation } from ${JSON.stringify(moduleUrl)};`,
+            `await stageProductionInstallation(${JSON.stringify(input)});`
+          ].join("\n")
+        : [
+            `import { ${recoveryCommand}Production } from ${JSON.stringify(moduleUrl)};`,
+            `const config = ${JSON.stringify({ ...config, gitSha: "a".repeat(40), lifecycleLeasePath: join(homeDir, ".local", "state", "masthead-production", "launcher.lease.sqlite"), version: "0.1.0" })};`,
+            recoveryCommand === "start"
+              ? "await startProduction(config, { transitionGuard: async () => { throw new Error('reconciliation verified'); } }).catch(() => undefined);"
+              : "await stopProduction(config);"
+          ].join("\n");
+      const recovery = spawn(process.execPath, ["--input-type=module", "-e", recoverySource], { stdio: "inherit" });
+      const [recoveryCode] = await once(recovery, "close");
+      expect(recoveryCode).toBe(0);
+      await expect(readFile(join(unrelated, "owner.txt"), "utf8")).resolves.toBe("unrelated");
+      expect((await readdir(productionRoot)).filter((name) => name.endsWith(".intent.json")), recoveryCommand).toEqual([]);
+      expect((await readdir(productionRoot)).filter((name) => name.endsWith(".staged"))).toEqual(
+        recoveryCommand === "stage" ? expect.arrayContaining([expect.stringMatching(/^\.mastheadctl\..+\.staged$/u)]) : []
+      );
+      if (recoveryCommand === "stage") {
+        for (const receiptName of (await readdir(productionRoot)).filter((name) => name.endsWith(".receipt.json"))) {
+          const receipt = JSON.parse(await readFile(join(productionRoot, receiptName), "utf8"));
+          await rm(receipt.receiptPath, { force: true });
+          await rm(receipt.stagedInstanceLauncherPath, { force: true });
+          await rm(receipt.stagedSurface.launcherStage, { force: true });
+          await rm(receipt.stagedSurface.desktopStage, { force: true });
+        }
+      }
+    }
+  );
+
+  test("fails closed on malformed durable stage ownership", async () => {
+    const { config, homeDir, productionRoot, target } = await fixture();
+    const intentPath = join(productionRoot, ".masthead-install-stage.intent.json");
+    await writeFile(intentPath, "{malformed");
+    await expect(stageProductionInstallation({
+      bundleDigest: config.bundleDigest,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot,
+      sourceBundlePath: target
+    })).rejects.toThrow("stage intent is malformed");
+    await expect(readFile(intentPath, "utf8")).resolves.toBe("{malformed");
+  });
+
+  test.skipIf(process.platform === "win32")("fails closed on a malformed receipt named by durable stage ownership", async () => {
+    const { config, homeDir, productionRoot, root, target: oldTarget } = await fixture();
+    const sourceBundlePath = join(root, "malformed-receipt-candidate");
+    const { cp } = await import("node:fs/promises");
+    await cp(oldTarget, sourceBundlePath, { recursive: true });
+    const sourceManifest = await writePackagedBundleManifest({
+      bundleRoot: sourceBundlePath,
+      executablePath: join(sourceBundlePath, "masthead"),
+      resourcesPath: join(sourceBundlePath, "resources")
+    });
+    const moduleUrl = new URL("../../../scripts/masthead-production.js", import.meta.url).href;
+    const input = { bundleDigest: sourceManifest.bundleDigest, dataDirectory: config.dataDirectory, homeDir, productionRoot, sourceBundlePath };
+    const crashSource = [
+      `import { stageProductionInstallation } from ${JSON.stringify(moduleUrl)};`,
+      `await stageProductionInstallation({ ...${JSON.stringify(input)}, onStageStep(step) { if (step === 'surface-stage') process.kill(process.pid, 'SIGKILL'); } });`
+    ].join("\n");
+    const crash = spawn(process.execPath, ["--input-type=module", "-e", crashSource], { stdio: "ignore" });
+    await once(crash, "close");
+    const intentPath = join(productionRoot, ".masthead-install-stage.intent.json");
+    const intent = JSON.parse(await readFile(intentPath, "utf8"));
+    await writeFile(intent.receiptPath, "{malformed");
+    await expect(startProduction({
+      ...config,
+      gitSha: "a".repeat(40),
+      lifecycleLeasePath: join(homeDir, ".local", "state", "masthead-production", "launcher.lease.sqlite"),
+      version: "0.1.0"
+    })).rejects.toThrow("stage receipt is malformed");
+    await expect(lstat(intentPath)).resolves.toMatchObject({});
+    await expect(lstat(intent.stagedSurface?.launcherStage ?? intent.launcherStage)).resolves.toMatchObject({});
+  });
+
   test("finalizes only a current staged installation and leaves exactly one bundle", async () => {
     const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
     const candidate = await secondBundle(productionRoot, oldTarget);
@@ -580,7 +848,7 @@ describe("production lifecycle launcher", () => {
       .rejects.toThrow("stale artifacts");
   });
 
-  test("refuses a foreign staged artifact before deleting the rollback bundle or owned stages", async () => {
+  test.each(["production", "launcher", "desktop"])("refuses a foreign %s staged artifact before deleting the rollback bundle or owned stages", async (domain) => {
     const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
     const candidate = await secondBundle(productionRoot, oldTarget);
     const receipt = await stageProductionInstallation({
@@ -591,7 +859,11 @@ describe("production lifecycle launcher", () => {
       productionRoot
     });
     await activateStagedProductionInstallation(receipt.receiptPath, { assertOffline: async () => undefined, runDesktopDatabaseCommand: () => undefined });
-    const foreignStage = join(productionRoot, ".foreign.staged");
+    const foreignStage = domain === "production"
+      ? join(productionRoot, ".foreign.staged")
+      : domain === "launcher"
+        ? join(dirname(String(receipt.stagedSurface.launcherStage)), "masthead-production.foreign.staged")
+        : join(dirname(String(receipt.stagedSurface.desktopStage)), "ai.animas.masthead.desktop.foreign.staged");
     await writeFile(foreignStage, "foreign");
     const before = new Map<string, number>(await Promise.all(
       ([oldTarget, foreignStage, receipt.stagedInstanceLauncherPath, receipt.stagedSurface.launcherStage, receipt.stagedSurface.desktopStage] as string[])
@@ -618,6 +890,61 @@ describe("production lifecycle launcher", () => {
     manifest.baseUrl = "http://127.0.0.1:1";
     await writeFile(receipt.instanceManifestPath, JSON.stringify(manifest));
     await expect(finalizeStagedProductionInstallation(receipt.receiptPath)).rejects.toThrow("startup manifest does not prove");
+  });
+
+  test("refuses a strictly compatible but migrating daemon before deleting any activation artifact", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const receipt = await stageProductionInstallation({
+      bundleDigest: candidate.bundleDigest,
+      sourceBundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot
+    });
+    await activateStagedProductionInstallation(receipt.receiptPath, { assertOffline: async () => undefined, runDesktopDatabaseCommand: () => undefined });
+    await publishStartupManifest(receipt);
+    const runtimeNode = join(receipt.target, "resources", "daemon", "node");
+    const daemonEntry = join(receipt.target, "resources", "daemon", "dist", "src", "daemon", "main.js");
+    const daemonProcess = processRecord({
+      argv: [runtimeNode, daemonEntry],
+      environ: { MASTHEAD_DATA_DIR: receipt.dataDirectory, MASTHEAD_DB_PATH: receipt.databasePath },
+      exe: runtimeNode,
+      pid: 12345,
+      starttime: "stable-start"
+    });
+    const migratingHealth = {
+      ok: true,
+      product: "masthead",
+      apiVersion: 1,
+      capabilities: [],
+      buildSha: receipt.buildSha,
+      data: {
+        dataDirectory: receipt.dataDirectory,
+        databasePath: receipt.databasePath,
+        databaseId: "database:test",
+        migrationState: "migrating"
+      },
+      runtime: {
+        mode: "primary",
+        writable: true,
+        pid: 12345,
+        daemonInstanceId: "instance:test",
+        host: "127.0.0.1",
+        port: receipt.port,
+        baseUrl: receipt.baseUrl,
+        instanceDir: receipt.instanceDir,
+        instanceManifest: receipt.instanceManifestPath,
+        authoringCommand: receipt.activeInstanceLauncherPath
+      }
+    };
+    const protectedPaths = [oldTarget, receipt.stagedInstanceLauncherPath, receipt.stagedSurface.launcherStage, receipt.stagedSurface.desktopStage] as string[];
+    await expect(finalizeStagedProductionInstallation(receipt.receiptPath, {
+      assertManifestWriterGuard: async () => undefined,
+      fetchHealth: async () => migratingHealth,
+      readProcess: async () => daemonProcess
+    } as any)).rejects.toThrow("migration state ready");
+    for (const path of protectedPaths) await expect(lstat(path)).resolves.toBeDefined();
   });
 
   test.each(FINALIZATION_CRASH_CASES)(
