@@ -22,14 +22,34 @@ const SYSTEMCTL_PATH = "/usr/bin/systemctl";
 const CGROUP_ROOT = "/sys/fs/cgroup";
 const fixtureScopes = new Map();
 const fixtureExternalClaims = new Map();
-const MATRIX_STAGE_STEPS = ["candidate-copy", "instance-stage", "surface-stage", "receipt-publication", "intent-removal"];
+const MATRIX_STAGE_STEPS = [
+  "candidate-temp-created",
+  "candidate-copy-start",
+  "candidate-claim",
+  "candidate-claimed",
+  "candidate-copy",
+  "instance-file-created",
+  "instance-stage",
+  "lifecycle-file-created",
+  "desktop-file-created",
+  "surface-stage",
+  "receipt-publication",
+  "intent-removal"
+];
 const MATRIX_ACTIVATION_STEPS = [
   "current", "instance-launcher", "lifecycle-launcher", "desktop", "activation-pre-commit", "activation-commit", "activation-receipt"
 ];
 const MATRIX_FINALIZATION_STEPS = ["rollback-bundle", "staged-0", "staged-1", "staged-2", "receipt", "journal"];
 const PACKAGE_BOUND_MATRIX_REQUIRED_IDS = [
+  "stage:candidate-temp-created:SIGKILL",
+  "stage:candidate-copy-start:SIGKILL",
+  "stage:candidate-claim:SIGKILL",
+  "stage:candidate-claimed:SIGKILL",
   "stage:candidate-copy:SIGKILL",
+  "stage:instance-file-created:SIGKILL",
   "stage:instance-stage:SIGKILL",
+  "stage:lifecycle-file-created:SIGKILL",
+  "stage:desktop-file-created:SIGKILL",
   "stage:surface-stage:SIGKILL",
   "stage:receipt-publication:SIGKILL",
   "stage:intent-removal:SIGKILL",
@@ -60,7 +80,7 @@ const PACKAGE_BOUND_MATRIX_CASES = [
     id: `finalize:${step}:${termination}`, operation: "finalize", step, termination
   })))
 ];
-const PACKAGE_BOUND_MATRIX_MINIMUM_CASES = 24;
+const PACKAGE_BOUND_MATRIX_MINIMUM_CASES = 31;
 const FIXTURE_PROCESS_MARKER = "MASTHEAD_REHEARSAL_FIXTURE_ROOT";
 const FIXTURE_RUN_TOKEN_MARKER = "MASTHEAD_REHEARSAL_RUN_TOKEN";
 const OPERATIONAL_SUBPROCESS_TIMEOUT_MS = 360_000;
@@ -842,7 +862,7 @@ async function crashAndRecoverActivation(verified, receiptPath, environment) {
   await retryTransientProcessScan(() => runPackagedLifecycleCommand(verified, ["activate", "--receipt", receiptPath], environment));
 }
 
-async function retryTransientProcessScan(operation) {
+export async function retryTransientProcessScan(operation) {
   for (let attempt = 0; attempt < 5; attempt += 1) {
     try {
       return await operation();
@@ -859,6 +879,33 @@ async function runPackagedLifecycleCommand(verified, args, environment) {
 
 async function runInstalledLifecycleCommand(launcherPath, args, environment, supervisorOptions = {}) {
   return runLifecycleSubprocess(launcherPath, [...args, "--json"], environment, supervisorOptions);
+}
+
+export async function runReceiptBoundStopAndStatus(runLifecycleCommand, launcherPath, environment) {
+  let stopped;
+  let status;
+  let stopFailure;
+  let statusFailure;
+  try {
+    stopped = await retryTransientProcessScan(() => runLifecycleCommand(launcherPath, ["stop"], environment));
+  } catch (error) {
+    stopFailure = error;
+  }
+  try {
+    status = await retryTransientProcessScan(() => runLifecycleCommand(launcherPath, ["status"], environment));
+  } catch (error) {
+    statusFailure = error;
+  }
+  if (stopFailure && statusFailure) {
+    throw new AggregateError(
+      [stopFailure, statusFailure],
+      "Receipt-bound stop and status cleanup both failed.",
+      { cause: stopFailure }
+    );
+  }
+  if (stopFailure) throw stopFailure;
+  if (statusFailure) throw statusFailure;
+  return { status, stopped };
 }
 
 async function startInstalledLifecycleWithIdentityCapture(runLifecycleCommand, launcherPath, environment, receipt) {
@@ -920,26 +967,28 @@ function captureProductionCompanionIdentities(receipt) {
     const output = result.stdout.trim();
     const line = output.split(/\r?\n/u).filter(Boolean).at(-1);
     const started = JSON.parse(line || "");
-    const health = await waitForExactReadyHealth(receipt);
-    const manifest = JSON.parse(await readFile(receipt.instanceManifestPath, "utf8"));
-    if (
-      manifest?.schemaVersion !== 1 || manifest.pid !== health.runtime.pid || manifest.instanceId !== health.runtime.daemonInstanceId ||
-      manifest.baseUrl !== receipt.baseUrl || manifest.instanceDir !== receipt.instanceDir || manifest.buildSha !== receipt.buildSha ||
-      !Number.isFinite(Date.parse(manifest.updatedAt))
-    ) throw new Error("Installed packaged start did not publish an exact startup manifest.");
     if (started?.started !== true || !Number.isSafeInteger(started.pid) || started.pid < 1) {
       throw new Error("Installed packaged start did not return an exact trusted Electron start PID.");
     }
-    await claimExternalScope({ startPid: started.pid, daemonPid: health.runtime.pid });
-    const processes = await inspectProcesses();
-    try {
-      return selectProductionCompanionIdentities(started, health, processes);
-    } catch (error) {
-      const daemonCgroup = await readFile(join("/proc", String(health.runtime.pid), "cgroup"), "utf8")
-        .then((value) => value.trim())
-        .catch((cause) => `unreadable:${cause?.code || cause}`);
-      throw new Error(`${error instanceof Error ? error.message : String(error)}; daemonCgroup=${daemonCgroup}`, { cause: error });
-    }
+    return retryTransientProcessScan(async () => {
+      const health = await waitForExactReadyHealth(receipt);
+      const manifest = JSON.parse(await readFile(receipt.instanceManifestPath, "utf8"));
+      if (
+        manifest?.schemaVersion !== 1 || manifest.pid !== health.runtime.pid || manifest.instanceId !== health.runtime.daemonInstanceId ||
+        manifest.baseUrl !== receipt.baseUrl || manifest.instanceDir !== receipt.instanceDir || manifest.buildSha !== receipt.buildSha ||
+        !Number.isFinite(Date.parse(manifest.updatedAt))
+      ) throw new Error("Installed packaged start did not publish an exact startup manifest.");
+      await claimExternalScope({ startPid: started.pid, daemonPid: health.runtime.pid });
+      const processes = await inspectProcesses();
+      try {
+        return selectProductionCompanionIdentities(started, health, processes);
+      } catch (error) {
+        const daemonCgroup = await readFile(join("/proc", String(health.runtime.pid), "cgroup"), "utf8")
+          .then((value) => value.trim())
+          .catch((cause) => `unreadable:${cause?.code || cause}`);
+        throw new Error(`${error instanceof Error ? error.message : String(error)}; daemonCgroup=${daemonCgroup}`, { cause: error });
+      }
+    });
   };
 }
 
@@ -1219,14 +1268,14 @@ async function executeFinalizationCrashCase(definition, fixture) {
     target: receipt.target,
     version: receipt.buildVersion
   });
-  const started = await startInstalledLifecycleWithIdentityCapture(
-    runInstalledLifecycleCommand,
-    receipt.stagedSurface.launcherPath,
-    lifecycleEnvironment,
-    receipt
-  );
-  fixture.allowedLiveIdentities = started.fixtureProcessIdentities;
   await runRehearsalCaseWithCleanup(fixture.root, async () => {
+    const started = await startInstalledLifecycleWithIdentityCapture(
+      runInstalledLifecycleCommand,
+      receipt.stagedSurface.launcherPath,
+      lifecycleEnvironment,
+      receipt
+    );
+    fixture.allowedLiveIdentities = started.fixtureProcessIdentities;
     const hookStep = definition.step === "rollback-bundle" ? `artifact-${basename(receipt.rollbackBundle.path)}` : definition.step;
     await expectMatrixCrash(definition, fixture, {
       operation: "finalize",
@@ -1245,16 +1294,11 @@ async function executeFinalizationCrashCase(definition, fixture) {
     }
   }, async () => {
     try {
-      const stopped = await retryTransientProcessScan(() => runInstalledLifecycleCommand(
+      const { status, stopped } = await runReceiptBoundStopAndStatus(
+        runInstalledLifecycleCommand,
         receipt.stagedSurface.launcherPath,
-        ["stop"],
         lifecycleEnvironment
-      ));
-      const status = await retryTransientProcessScan(() => runInstalledLifecycleCommand(
-        receipt.stagedSurface.launcherPath,
-        ["status"],
-        lifecycleEnvironment
-      ));
+      );
       if (stopped.stopped !== true || status.running !== false || status.processes.length !== 0) {
         throw new Error("Identity-bound matrix stop did not prove an empty supplied-package process set.");
       }

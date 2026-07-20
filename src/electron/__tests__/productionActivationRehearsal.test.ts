@@ -15,9 +15,11 @@ import {
   formatRehearsalFailure,
   runBoundedFixtureSubprocess,
   runRehearsalCaseWithCleanup,
+  runReceiptBoundStopAndStatus,
   runInstalledStartAndFinalizeProof,
   runPackageBoundCrashMatrix,
   runProductionActivationRehearsal,
+  retryTransientProcessScan,
   selectProductionCompanionIdentities,
   signalFixtureProcessIdentity,
   validateRehearsalBundle,
@@ -35,6 +37,10 @@ import {
 const TEST_PATH = fileURLToPath(import.meta.url);
 const PROJECT_ROOT = resolve(dirname(TEST_PATH), "../../..");
 const SCRIPT_PATH = join(PROJECT_ROOT, "scripts", "masthead-production-activation-rehearsal.js");
+const VALID_TEST_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+  "base64"
+);
 const cleanup: string[] = [];
 
 type ClaimedExternalControlGroup = {
@@ -80,7 +86,10 @@ const inspectClaimedFixtureProcessSetForTest = async (
 }).inspectClaimedFixtureProcessSetForTest(input, adapters);
 
 const EXPECTED_PACKAGE_BOUND_CASE_IDS = [
-  "stage:candidate-copy:SIGKILL", "stage:instance-stage:SIGKILL", "stage:surface-stage:SIGKILL",
+  "stage:candidate-temp-created:SIGKILL", "stage:candidate-copy-start:SIGKILL",
+  "stage:candidate-claim:SIGKILL", "stage:candidate-claimed:SIGKILL",
+  "stage:candidate-copy:SIGKILL", "stage:instance-file-created:SIGKILL", "stage:instance-stage:SIGKILL",
+  "stage:lifecycle-file-created:SIGKILL", "stage:desktop-file-created:SIGKILL", "stage:surface-stage:SIGKILL",
   "stage:receipt-publication:SIGKILL", "stage:intent-removal:SIGKILL",
   "activate:current:SIGKILL", "activate:instance-launcher:SIGKILL", "activate:lifecycle-launcher:SIGKILL",
   "activate:desktop:SIGKILL", "activate:activation-pre-commit:SIGKILL", "activate:activation-commit:SIGKILL",
@@ -122,7 +131,7 @@ async function validSuppliedLifecycleBundle(root: string, lifecycleSource: strin
     writeFile(join(bundle, "package.json"), '{"type":"module"}\n'),
     writeFile(join(bundle, process.platform === "win32" ? "masthead.exe" : "masthead"), "test executable\n", { mode: 0o755 }),
     writeFile(join(bundle, "resources", "app.asar"), "test app\n"),
-    writeFile(join(bundle, "resources", "masthead-logo-sail.png"), Buffer.from("test logo")),
+    writeFile(join(bundle, "resources", "masthead-logo-sail.png"), VALID_TEST_PNG),
     writeFile(join(daemonRoot, "release.json"), `${JSON.stringify({ gitSha: "b".repeat(40), version: "test-bundle" })}\n`),
     writeFile(join(scriptsRoot, "masthead-production.js"), lifecycleSource),
     cp(join(PROJECT_ROOT, "scripts", "packaged-bundle-manifest.js"), join(scriptsRoot, "packaged-bundle-manifest.js")),
@@ -720,6 +729,33 @@ describe("production activation rehearsal CLI", () => {
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 350));
   });
 
+  test.skipIf(process.platform !== "linux")("retries transient companion attribution inside the completed start runner", async () => {
+    const root = await temporaryDirectory("masthead-rehearsal-transient-capture-");
+    const source = [
+      "const { spawn } = require('node:child_process');",
+      "const child = spawn(process.execPath, ['-e', 'setTimeout(() => undefined, 300)'], { env: process.env, stdio: 'ignore' });",
+      "child.unref();"
+    ].join("\n");
+    let captureAttempts = 0;
+
+    const result = await runBoundedFixtureSubprocess(process.execPath, ["-e", source], {
+      captureAllowedLiveIdentities: async ({ inspectProcesses }) => retryTransientProcessScan(async () => {
+        const processes = await inspectProcesses();
+        captureAttempts += 1;
+        if (captureAttempts === 1) throw new Error("Production process command line changed during scan.");
+        return processes;
+      }),
+      environment: process.env,
+      fixtureRoot: root,
+      postKillTimeoutMs: 500,
+      timeoutMs: 2_000
+    });
+
+    expect(captureAttempts).toBe(2);
+    expect(result.allowedLiveIdentities).toHaveLength(1);
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 350));
+  });
+
   test("binds every operational child to the bounded fixture subprocess runner", async () => {
     const source = await readFile(SCRIPT_PATH, "utf8");
 
@@ -753,7 +789,7 @@ describe("production activation rehearsal CLI", () => {
     expect(source).not.toContain("fetchHealth: async");
     expect(source).toContain("captureProductionCompanionIdentities");
     expect(source).toContain("startInstalledLifecycleWithIdentityCapture");
-    expect(source).toMatch(/runInstalledLifecycleCommand\(\s+receipt\.stagedSurface\.launcherPath,\s+\["stop"\]/u);
+    expect(source).toMatch(/runReceiptBoundStopAndStatus\(\s+runInstalledLifecycleCommand,\s+receipt\.stagedSurface\.launcherPath/u);
     expect(source).not.toContain("startMatrixLiveProofDaemon");
   });
 
@@ -974,6 +1010,36 @@ describe("production activation rehearsal CLI", () => {
     expect(formatRehearsalFailure(failure)).toContain("identity-bound stop proof failed");
   });
 
+  test("registers receipt-bound finalization cleanup before packaged startup can fail", async () => {
+    const source = await readFile(SCRIPT_PATH, "utf8");
+    const finalizationStart = source.indexOf("async function executeFinalizationCrashCase");
+    const cleanupScope = source.indexOf("await runRehearsalCaseWithCleanup(fixture.root", finalizationStart);
+    const startup = source.indexOf("const started = await startInstalledLifecycleWithIdentityCapture", finalizationStart);
+    const stop = source.indexOf("runReceiptBoundStopAndStatus(\n        runInstalledLifecycleCommand", finalizationStart);
+
+    expect(finalizationStart).toBeGreaterThan(-1);
+    expect(cleanupScope).toBeGreaterThan(finalizationStart);
+    expect(startup).toBeGreaterThan(cleanupScope);
+    expect(stop).toBeGreaterThan(startup);
+  });
+
+  test("attempts receipt-bound status even when the stop command fails", async () => {
+    const calls: string[] = [];
+    const stopFailure = new Error("identity-bound stop failed");
+
+    await expect(runReceiptBoundStopAndStatus(
+      async (_launcher, args) => {
+        calls.push(args[0]);
+        if (args[0] === "stop") throw stopFailure;
+        return { running: false, processes: [] };
+      },
+      "/fixture/launcher",
+      {}
+    )).rejects.toBe(stopFailure);
+
+    expect(calls).toEqual(["stop", "status"]);
+  });
+
   test("stages the actual verified supplied bundle as the package-bound candidate", async () => {
     const source = await readFile(SCRIPT_PATH, "utf8");
 
@@ -984,9 +1050,9 @@ describe("production activation rehearsal CLI", () => {
     expect(source).not.toContain("matrixOwnershipProbeSource");
   });
 
-  test("pins the exact 24 package-bound crash boundaries independently of the generated matrix", async () => {
-    expect(EXPECTED_PACKAGE_BOUND_CASE_IDS).toHaveLength(24);
-    expect(new Set(EXPECTED_PACKAGE_BOUND_CASE_IDS).size).toBe(24);
+  test("pins the exact 31 package-bound crash boundaries independently of the generated matrix", async () => {
+    expect(EXPECTED_PACKAGE_BOUND_CASE_IDS).toHaveLength(31);
+    expect(new Set(EXPECTED_PACKAGE_BOUND_CASE_IDS).size).toBe(31);
     expect(() => assertPackageBoundMatrixCoverage(EXPECTED_PACKAGE_BOUND_CASE_IDS)).not.toThrow();
     const source = await readFile(SCRIPT_PATH, "utf8");
     expect(source).toContain("await import(process.argv[1])");
@@ -999,11 +1065,18 @@ describe("production activation rehearsal CLI", () => {
 
     expect(Object.keys(contract)).toEqual(EXPECTED_PACKAGE_BOUND_CASE_IDS);
     expect(contract).toEqual({
-      "stage:candidate-copy:SIGKILL": { current: "baseline", journalPhase: null, ownedStageCount: 0, present: ["stage-intent", "candidate"], absent: ["instance-stage", "lifecycle-stage", "desktop-stage", "pending-receipt", "receipt"] },
-      "stage:instance-stage:SIGKILL": { current: "baseline", journalPhase: null, ownedStageCount: 3, present: ["stage-intent", "candidate", "instance-stage"], absent: ["lifecycle-stage", "desktop-stage", "pending-receipt", "receipt"] },
-      "stage:surface-stage:SIGKILL": { current: "baseline", journalPhase: null, ownedStageCount: 3, present: ["stage-intent", "candidate", "instance-stage", "lifecycle-stage", "desktop-stage"], absent: ["pending-receipt", "receipt"] },
-      "stage:receipt-publication:SIGKILL": { current: "baseline", journalPhase: null, ownedStageCount: 3, present: ["stage-intent", "candidate", "instance-stage", "lifecycle-stage", "desktop-stage", "pending-receipt", "receipt"], absent: [] },
-      "stage:intent-removal:SIGKILL": { current: "baseline", journalPhase: null, ownedStageCount: null, present: ["candidate", "instance-stage", "lifecycle-stage", "desktop-stage", "pending-receipt", "receipt"], absent: ["stage-intent"] },
+      "stage:candidate-temp-created:SIGKILL": { current: "baseline", journalPhase: null, ownedStageCount: 0, candidateLocation: "unattested-temporary", present: ["stage-intent", "candidate-temp"], absent: ["candidate", "instance-stage", "lifecycle-stage", "desktop-stage", "pending-receipt", "receipt"] },
+      "stage:candidate-copy-start:SIGKILL": { current: "baseline", journalPhase: null, ownedStageCount: 0, candidateLocation: "temporary", present: ["stage-intent", "candidate-temp"], absent: ["candidate", "instance-stage", "lifecycle-stage", "desktop-stage", "pending-receipt", "receipt"] },
+      "stage:candidate-claim:SIGKILL": { current: "baseline", journalPhase: null, ownedStageCount: 0, candidateLocation: "temporary", present: ["stage-intent", "candidate-temp"], absent: ["candidate", "instance-stage", "lifecycle-stage", "desktop-stage", "pending-receipt", "receipt"] },
+      "stage:candidate-claimed:SIGKILL": { current: "baseline", journalPhase: null, ownedStageCount: 0, candidateLocation: "target", present: ["stage-intent", "candidate"], absent: ["candidate-temp", "instance-stage", "lifecycle-stage", "desktop-stage", "pending-receipt", "receipt"] },
+      "stage:candidate-copy:SIGKILL": { current: "baseline", journalPhase: null, ownedStageCount: 0, candidateLocation: "target", present: ["stage-intent", "candidate"], absent: ["candidate-temp", "instance-stage", "lifecycle-stage", "desktop-stage", "pending-receipt", "receipt"] },
+      "stage:instance-file-created:SIGKILL": { current: "baseline", journalPhase: null, ownedStageCount: 3, candidateLocation: "target", present: ["stage-intent", "candidate", "instance-stage"], absent: ["candidate-temp", "lifecycle-stage", "desktop-stage", "pending-receipt", "receipt"] },
+      "stage:instance-stage:SIGKILL": { current: "baseline", journalPhase: null, ownedStageCount: 3, candidateLocation: "target", present: ["stage-intent", "candidate", "instance-stage"], absent: ["candidate-temp", "lifecycle-stage", "desktop-stage", "pending-receipt", "receipt"] },
+      "stage:lifecycle-file-created:SIGKILL": { current: "baseline", journalPhase: null, ownedStageCount: 3, candidateLocation: "target", present: ["stage-intent", "candidate", "instance-stage", "lifecycle-stage"], absent: ["candidate-temp", "desktop-stage", "pending-receipt", "receipt"] },
+      "stage:desktop-file-created:SIGKILL": { current: "baseline", journalPhase: null, ownedStageCount: 3, candidateLocation: "target", present: ["stage-intent", "candidate", "instance-stage", "lifecycle-stage", "desktop-stage"], absent: ["candidate-temp", "pending-receipt", "receipt"] },
+      "stage:surface-stage:SIGKILL": { current: "baseline", journalPhase: null, ownedStageCount: 3, candidateLocation: "target", present: ["stage-intent", "candidate", "instance-stage", "lifecycle-stage", "desktop-stage"], absent: ["candidate-temp", "pending-receipt", "receipt"] },
+      "stage:receipt-publication:SIGKILL": { current: "baseline", journalPhase: null, ownedStageCount: 3, candidateLocation: "target", present: ["stage-intent", "candidate", "instance-stage", "lifecycle-stage", "desktop-stage", "pending-receipt", "receipt"], absent: ["candidate-temp"] },
+      "stage:intent-removal:SIGKILL": { current: "baseline", journalPhase: null, ownedStageCount: null, candidateLocation: null, present: ["candidate", "instance-stage", "lifecycle-stage", "desktop-stage", "pending-receipt", "receipt"], absent: ["stage-intent", "candidate-temp"] },
       "activate:current:SIGKILL": { current: "candidate", journalPhase: "before-current", present: ["candidate", "journal", "receipt-before", "journal-receipt-before", "instance-stage", "lifecycle-stage", "desktop-stage"], absent: ["stage-intent", "pending-receipt", "receipt-after", "journal-receipt-after", "instance-active", "lifecycle-active", "desktop-active"] },
       "activate:instance-launcher:SIGKILL": { current: "candidate", journalPhase: "before-instance-launcher", present: ["candidate", "journal", "receipt-before", "journal-receipt-before", "instance-stage", "lifecycle-stage", "desktop-stage", "instance-active"], absent: ["stage-intent", "pending-receipt", "receipt-after", "journal-receipt-after", "lifecycle-active", "desktop-active"] },
       "activate:lifecycle-launcher:SIGKILL": { current: "candidate", journalPhase: "before-lifecycle-launcher", present: ["candidate", "journal", "receipt-before", "journal-receipt-before", "instance-stage", "lifecycle-stage", "desktop-stage", "instance-active", "lifecycle-active"], absent: ["stage-intent", "pending-receipt", "receipt-after", "journal-receipt-after", "desktop-active"] },
@@ -1141,13 +1214,115 @@ describe("production activation rehearsal CLI", () => {
     )).resolves.toBeUndefined();
   });
 
+  describe("independent active-surface crash-boundary oracle", () => {
+    async function validActiveSurfaceBoundaryFixture(label: string) {
+      const root = await temporaryDirectory(`masthead-active-surface-oracle-${label}-`);
+      const productionRoot = join(root, "production");
+      const candidate = join(productionRoot, "Masthead-linux-x64-matrix-candidate");
+      const homeDir = join(root, "home");
+      const dataDir = join(root, "data");
+      const receiptPath = join(productionRoot, ".masthead-install-active-surface.receipt.json");
+      const stagePaths = [
+        join(productionRoot, ".mastheadctl.active-surface.staged"),
+        join(homeDir, ".local", "bin", "masthead-production.active-surface.staged"),
+        join(homeDir, ".local", "share", "applications", "ai.animas.masthead.desktop.active-surface.staged")
+      ];
+      const activePaths = [
+        join(dataDir, "bin", "mastheadctl"),
+        join(homeDir, ".local", "bin", "masthead-production"),
+        join(homeDir, ".local", "share", "applications", "ai.animas.masthead.desktop")
+      ];
+      const bodies = ["instance launcher\n", "lifecycle launcher\n", "desktop entry\n"];
+      const modes = [0o755, 0o755, 0o644];
+      await Promise.all([
+        mkdir(candidate, { recursive: true }),
+        ...stagePaths.map((path) => mkdir(dirname(path), { recursive: true })),
+        ...activePaths.map((path) => mkdir(dirname(path), { recursive: true }))
+      ]);
+      await symlink(candidate, join(productionRoot, "current"));
+      const stagedFiles = [];
+      for (const [index, path] of stagePaths.entries()) {
+        await Promise.all([
+          writeFile(path, bodies[index], { mode: modes[index] }),
+          writeFile(activePaths[index], bodies[index], { mode: modes[index] })
+        ]);
+        stagedFiles.push({
+          path,
+          sha256: createHash("sha256").update(bodies[index]!).digest("hex"),
+          mode: modes[index]
+        });
+      }
+      const receipt = {
+        receiptPath,
+        target: candidate,
+        activeInstanceLauncherPath: activePaths[0],
+        stagedInstanceLauncherPath: stagePaths[0],
+        stagedFiles,
+        stagedSurface: {
+          launcherPath: activePaths[1],
+          launcherStage: stagePaths[1],
+          desktopPath: activePaths[2],
+          desktopStage: stagePaths[2]
+        },
+        activatedAt: "2026-07-19T00:00:00.000Z"
+      };
+      await Promise.all([
+        writeFile(receiptPath, `${JSON.stringify(receipt)}\n`),
+        writeFile(join(productionRoot, ".masthead-install-activation.journal.json"), `${JSON.stringify({
+          phase: "activation-committed",
+          receipt
+        })}\n`)
+      ]);
+      return { activePaths, bodies, productionRoot, receipt, root };
+    }
+
+    test("rejects a symlinked active surface even when its followed bytes match the staged attestation", async () => {
+      const fixture = await validActiveSurfaceBoundaryFixture("symlink");
+      const target = join(fixture.root, "matching-active-target");
+      await writeFile(target, fixture.bodies[0], { mode: 0o755 });
+      await rm(fixture.activePaths[0]);
+      await symlink(target, fixture.activePaths[0]);
+
+      await expect(assertPackageBoundCrashBoundary(
+        { id: "activate:activation-receipt:SIGKILL" },
+        { baseline: join(fixture.productionRoot, "unused"), productionRoot: fixture.productionRoot },
+        fixture.receipt
+      )).rejects.toThrow("did not establish durable boundary activate:activation-receipt:SIGKILL");
+    });
+
+    test("rejects a hard-linked active surface even when its bytes match the staged attestation", async () => {
+      const fixture = await validActiveSurfaceBoundaryFixture("hardlink");
+      const twin = join(fixture.root, "matching-active-twin");
+      await writeFile(twin, fixture.bodies[1], { mode: 0o755 });
+      await rm(fixture.activePaths[1]);
+      await (await import("node:fs/promises")).link(twin, fixture.activePaths[1]);
+
+      await expect(assertPackageBoundCrashBoundary(
+        { id: "activate:activation-receipt:SIGKILL" },
+        { baseline: join(fixture.productionRoot, "unused"), productionRoot: fixture.productionRoot },
+        fixture.receipt
+      )).rejects.toThrow("did not establish durable boundary activate:activation-receipt:SIGKILL");
+    });
+
+    test("rejects an active surface whose mode differs from the staged attestation", async () => {
+      const fixture = await validActiveSurfaceBoundaryFixture("mode");
+      await chmod(fixture.activePaths[2], 0o600);
+
+      await expect(assertPackageBoundCrashBoundary(
+        { id: "activate:activation-receipt:SIGKILL" },
+        { baseline: join(fixture.productionRoot, "unused"), productionRoot: fixture.productionRoot },
+        fixture.receipt
+      )).rejects.toThrow("did not establish durable boundary activate:activation-receipt:SIGKILL");
+    });
+  });
+
   test("rejects zero, missing, duplicated, and renamed package-bound matrix cases", () => {
-    expect(() => assertPackageBoundMatrixCoverage([])).toThrow("executed 0 of 24 required cases");
+    expect(() => assertPackageBoundMatrixCoverage([])).toThrow("executed 0 of 31 required cases");
     expect(() => assertPackageBoundMatrixCoverage(["stage:candidate-copy:SIGKILL"])).toThrow(
-      "executed 1 of 24 required cases"
+      "executed 1 of 31 required cases"
     );
-    const valid = Array.from({ length: 24 }, (_, index) => `case-${index}`);
-    expect(() => assertPackageBoundMatrixCoverage(valid.slice(0, -1), valid)).toThrow("executed 23 of 24 required cases");
+    const valid = Array.from({ length: 31 }, (_, index) => `case-${index}`);
+    expect(() => assertPackageBoundMatrixCoverage(valid.slice(0, -1), valid)).toThrow("executed 30 of 31 required cases");
     expect(() => assertPackageBoundMatrixCoverage([...valid.slice(0, -1), valid[0]], valid)).toThrow("matrix case set changed");
     expect(() => assertPackageBoundMatrixCoverage([...valid.slice(0, -1), "renamed-case"], valid)).toThrow(
       "matrix case set changed"
@@ -1164,7 +1339,7 @@ describe("production activation rehearsal CLI", () => {
     ].join("\n"));
 
     await expect(runPackageBoundCrashMatrix(verified, process.env)).rejects.toThrow(
-      "stage:candidate-copy:SIGKILL"
+      "stage:candidate-temp-created:SIGKILL"
     );
   });
 
@@ -1173,8 +1348,8 @@ describe("production activation rehearsal CLI", () => {
     const lifecycleSource = await readFile(join(PROJECT_ROOT, "scripts", "masthead-production.js"), "utf8");
     const prematureLifecycle = lifecycleSource
       .replace(
-        "  if (!sourceIsDirectBundle && !targetExists) {",
-        '  await input.onStageStep?.("candidate-copy");\n  if (!sourceIsDirectBundle && !targetExists) {'
+        "  if (!sourceIsDirectBundle) {\n    await input.onStageStep?.(\"candidate-temp-claim\");",
+        '  await input.onStageStep?.("candidate-copy");\n  if (!sourceIsDirectBundle) {\n    await input.onStageStep?.("candidate-temp-claim");'
       )
       .replace(
         '  await input.onStageStep?.("candidate-copy");\n  const manifest =',

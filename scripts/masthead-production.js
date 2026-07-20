@@ -35,6 +35,7 @@ const PRODUCTION_SHUTDOWN_TIMEOUT_MS = 30_000;
 const PRODUCTION_MAINTENANCE_TIMEOUT_MS = 43_200_000;
 const PRODUCTION_MAINTENANCE_EXIT_GRACE_MS = 30_000;
 const VERSIONED_TARGET = /^Masthead-linux-x64-[A-Za-z0-9][A-Za-z0-9._+-]*$/u;
+const MV_PATH = "/usr/bin/mv";
 
 class ProductionStagePathCollision extends Error {
   constructor(path, surface, cause) {
@@ -561,10 +562,6 @@ async function stageProductionInstallationUnlocked(input, identity, dependencyOv
   const launcherStage = `${launcherPath}.${stagingNonce}.staged`;
   const desktopStage = `${desktopPath}.${stagingNonce}.staged`;
   const receiptPath = join(productionRoot, `.masthead-install-${stagingNonce}.receipt.json`);
-  const targetExists = await lstat(target).then(() => true).catch((error) => {
-    if (error && typeof error === "object" && error.code === "ENOENT") return false;
-    throw error;
-  });
   const stageIntent = {
     schemaVersion: 1,
     productionRoot,
@@ -572,7 +569,7 @@ async function stageProductionInstallationUnlocked(input, identity, dependencyOv
     lifecycleLeasePath,
     stagingNonce,
     target,
-    ownsCandidate: !sourceIsDirectBundle && !targetExists,
+    ownsCandidate: false,
     temporaryTarget,
     stagedInstanceLauncherPath,
     launcherPath,
@@ -583,14 +580,30 @@ async function stageProductionInstallationUnlocked(input, identity, dependencyOv
     ownedStages: []
   };
   await writeProductionStageIntent(stageIntent);
-  if (!sourceIsDirectBundle && !targetExists) {
-    await cp(sourceBundlePath, temporaryTarget, { errorOnExist: true, recursive: true });
+  if (!sourceIsDirectBundle) {
+    await input.onStageStep?.("candidate-temp-claim");
     try {
-      await rename(temporaryTarget, target);
+      await mkdir(temporaryTarget, { mode: 0o755 });
     } catch (error) {
-      await rm(temporaryTarget, { force: true, recursive: true });
-      if (!(error && typeof error === "object" && error.code === "EEXIST")) throw error;
+      if (error && typeof error === "object" && error.code === "EEXIST") {
+        throw new ProductionStagePathCollision(temporaryTarget, "candidate copy", error);
+      }
+      throw error;
     }
+    await input.onStageStep?.("candidate-temp-created");
+    const candidateInfo = await lstat(temporaryTarget, { bigint: true });
+    if (!candidateInfo.isDirectory() || candidateInfo.isSymbolicLink()) {
+      throw new Error("Production candidate copy is not an owned directory.");
+    }
+    stageIntent.ownsCandidate = true;
+    stageIntent.candidateOwnership = candidateReservation(stageIntent, candidateInfo);
+    await writeProductionStageIntent(stageIntent);
+    await input.onStageStep?.("candidate-copy-start");
+    await copyBundleIntoOwnedDirectory(sourceBundlePath, temporaryTarget);
+    await verifyPinnedBundle(temporaryTarget, input.bundleDigest);
+    await input.onStageStep?.("candidate-claim");
+    await publishCandidateNoReplace(temporaryTarget, target, dependencyOverrides.publishCandidateNoReplace);
+    await input.onStageStep?.("candidate-claimed");
   }
   await input.onStageStep?.("candidate-copy");
   const manifest = await verifyPinnedBundle(target, input.bundleDigest);
@@ -2045,6 +2058,16 @@ function validateProductionStageIntent(intent, productionRootInput, lifecycleLea
     intent.launcherPath !== expectedLauncher || intent.launcherStage !== `${expectedLauncher}.${nonce}.staged` ||
     intent.desktopPath !== expectedDesktop || intent.desktopStage !== `${expectedDesktop}.${nonce}.staged`
   ) throw new Error("Production stage intent is malformed.");
+  if (
+    intent.ownsCandidate
+      ? intent.candidateOwnership?.schemaVersion !== 1 ||
+        intent.candidateOwnership.path !== intent.target ||
+        intent.candidateOwnership.temporaryPath !== intent.temporaryTarget ||
+        intent.candidateOwnership.quarantinePath !== candidateQuarantinePath(intent) ||
+        typeof intent.candidateOwnership.dev !== "string" || !/^\d+$/u.test(intent.candidateOwnership.dev) ||
+        typeof intent.candidateOwnership.ino !== "string" || !/^\d+$/u.test(intent.candidateOwnership.ino)
+      : intent.candidateOwnership !== undefined
+  ) throw new Error("Production stage intent candidate ownership is malformed.");
   const expectedStagePaths = new Set([intent.stagedInstanceLauncherPath, intent.launcherStage, intent.desktopStage]);
   if (
     !Array.isArray(intent.ownedStages) || intent.ownedStages.length > expectedStagePaths.size ||
@@ -2057,6 +2080,57 @@ function validateProductionStageIntent(intent, productionRootInput, lifecycleLea
     ))
   ) throw new Error("Production stage intent ownership is malformed.");
   return intent;
+}
+
+function candidateReservation(intent, info) {
+  return {
+    schemaVersion: 1,
+    path: intent.target,
+    temporaryPath: intent.temporaryTarget,
+    quarantinePath: candidateQuarantinePath(intent),
+    dev: String(info.dev),
+    ino: String(info.ino)
+  };
+}
+
+function candidateQuarantinePath(intent) {
+  return join(intent.productionRoot, `.${basename(intent.target)}.${intent.stagingNonce}.cleanup`);
+}
+
+function matchesCandidateReservation(info, reservation) {
+  return info.isDirectory() && !info.isSymbolicLink() &&
+    String(info.dev) === reservation.dev && String(info.ino) === reservation.ino;
+}
+
+async function publishCandidateNoReplace(source, target, override) {
+  if (override) return override(source, target);
+  const result = spawnSync(MV_PATH, ["-T", "--no-clobber", "--", source, target], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  if (result.error) throw new Error("Production candidate no-replace publication could not run.", { cause: result.error });
+  const [sourceExists, targetExists] = await Promise.all([
+    lstat(source).then(() => true).catch((error) => {
+      if (error && typeof error === "object" && error.code === "ENOENT") return false;
+      throw error;
+    }),
+    lstat(target).then(() => true).catch((error) => {
+      if (error && typeof error === "object" && error.code === "ENOENT") return false;
+      throw error;
+    })
+  ]);
+  if (sourceExists && targetExists) throw new ProductionStagePathCollision(target, "candidate");
+  if (result.status !== 0) {
+    throw new Error(`Production candidate no-replace publication failed: ${(result.stderr || "").trim() || `exit ${result.status}`}`);
+  }
+  if (sourceExists) throw new Error("Production candidate no-replace publication retained its source without a target collision.");
+  if (!targetExists) throw new Error("Production candidate no-replace publication produced no target.");
+}
+
+async function copyBundleIntoOwnedDirectory(source, target) {
+  for (const entry of await readdir(source)) {
+    await cp(join(source, entry), join(target, entry), { errorOnExist: true, force: false, recursive: true });
+  }
 }
 
 function stageReservation(intent, path, body, mode) {
@@ -2121,6 +2195,61 @@ async function quarantineOwnedStage(intent, path, ownership, options, affectedPa
     throw error;
   });
   return { changed: true, ownershipChanged: replacementExists };
+}
+
+async function quarantineOwnedCandidate(intent, options, affectedParents, preservedPaths) {
+  const ownership = intent.candidateOwnership;
+  const quarantinePath = ownership.quarantinePath;
+  let quarantinedInfo = await lstat(quarantinePath, { bigint: true }).catch((error) => {
+    if (error && typeof error === "object" && error.code === "ENOENT") return undefined;
+    throw error;
+  });
+  if (!quarantinedInfo) {
+    const locations = await Promise.all([ownership.temporaryPath, intent.target].map(async (path) => ({
+      info: await lstat(path, { bigint: true }).catch((error) => {
+        if (error && typeof error === "object" && error.code === "ENOENT") return undefined;
+        throw error;
+      }),
+      path
+    })));
+    const matching = locations.filter(({ info }) => info && matchesCandidateReservation(info, ownership));
+    if (matching.length !== 1) {
+      const existing = locations.filter(({ info }) => info);
+      if (existing.length === 1) {
+        await options.onStageStep?.("reconcile-before-candidate-quarantine");
+        await rename(existing[0].path, quarantinePath);
+        affectedParents.add(dirname(existing[0].path));
+      }
+      return { changed: existing.length > 0, ownershipChanged: true };
+    }
+    const ownedPath = matching[0].path;
+    await options.onStageStep?.("reconcile-before-candidate-quarantine");
+    try {
+      await rename(ownedPath, quarantinePath);
+    } catch (error) {
+      if (error && typeof error === "object" && error.code === "ENOENT") {
+        return { changed: false, ownershipChanged: true };
+      }
+      throw error;
+    }
+    affectedParents.add(dirname(ownedPath));
+    quarantinedInfo = await lstat(quarantinePath, { bigint: true });
+  }
+  if (!matchesCandidateReservation(quarantinedInfo, ownership)) {
+    return { changed: true, ownershipChanged: true };
+  }
+  await rm(quarantinePath, { force: true, recursive: true });
+  affectedParents.add(dirname(intent.target));
+  const unexpectedLocations = [];
+  for (const path of [ownership.temporaryPath, intent.target]) {
+    if (preservedPaths.has(resolve(path))) continue;
+    const exists = await lstat(path).then(() => true).catch((error) => {
+      if (error && typeof error === "object" && error.code === "ENOENT") return false;
+      throw error;
+    });
+    if (exists) unexpectedLocations.push(path);
+  }
+  return { changed: true, ownershipChanged: unexpectedLocations.length > 0 };
 }
 
 async function removeExisting(path, options, affectedParents) {
@@ -2196,7 +2325,6 @@ async function reconcileProductionStageIntent(productionRootInput, lifecycleLeas
   const ownershipByPath = new Map(intent.ownedStages.map((ownership) => [ownership.path, ownership]));
   const affectedParents = new Set();
   const changedOwnershipPaths = [];
-  await removeExisting(intent.temporaryTarget, { force: true, recursive: true }, affectedParents);
   for (const path of [intent.stagedInstanceLauncherPath, intent.launcherStage, intent.desktopStage]) {
     if (preservedPaths.has(resolve(path))) continue;
     const ownership = ownershipByPath.get(path);
@@ -2220,7 +2348,13 @@ async function reconcileProductionStageIntent(productionRootInput, lifecycleLeas
   if (changedOwnershipPaths.length > 0) {
     throw new Error(`Production exact stage ownership changed before cleanup: ${changedOwnershipPaths.join(", ")}`);
   }
-  if (intent.ownsCandidate) await removeExisting(intent.target, { force: true, recursive: true }, affectedParents);
+  if (intent.ownsCandidate) {
+    const candidateResult = await quarantineOwnedCandidate(intent, options, affectedParents, preservedPaths);
+    await syncAffectedStageParents(affectedParents, options.openStageDirectory);
+    if (candidateResult.ownershipChanged) {
+      throw new Error(`Production exact candidate ownership changed before cleanup: ${intent.target}`);
+    }
+  }
   if (stagePending) await removeExisting(stagePendingPath, { force: true }, affectedParents);
   await syncAffectedStageParents(affectedParents, options.openStageDirectory);
   await options.onStageStep?.("reconcile-before-intent-removal");

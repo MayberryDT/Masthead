@@ -25,9 +25,9 @@ export function runProductionActivationRehearsal(
 
 export interface PackageBoundMatrixResult {
   source: "supplied-package";
-  executedCaseCount: number;
-  expectedCaseCount: number;
-  minimumCaseCount: number;
+  executedCaseCount: 31;
+  expectedCaseCount: 31;
+  minimumCaseCount: 31;
   caseIds: string[];
 }
 
@@ -89,6 +89,18 @@ export function runBoundedFixtureSubprocess(
   stdout: string;
   stderr: string;
 }>;
+
+export function retryTransientProcessScan<T>(operation: () => T | Promise<T>): Promise<T>;
+
+export function runReceiptBoundStopAndStatus(
+  runLifecycleCommand: (
+    launcher: string,
+    args: string[],
+    environment: NodeJS.ProcessEnv
+  ) => Promise<Record<string, unknown>>,
+  launcherPath: string,
+  environment: NodeJS.ProcessEnv
+): Promise<{ stopped: Record<string, unknown>; status: Record<string, unknown> }>;
 
 export function assertIdentityBoundSignalingAvailable(): Promise<void>;
 

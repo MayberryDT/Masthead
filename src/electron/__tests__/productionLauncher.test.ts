@@ -744,6 +744,254 @@ describe("production lifecycle launcher", () => {
     expect(entries.filter((entry) => entry.startsWith("Masthead-linux-x64-"))).toEqual([basename(oldTarget)]);
   });
 
+  test("atomically refuses a candidate path allocated after intent publication without changing it", async () => {
+    const { config, homeDir, productionRoot, root, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const sourceBundlePath = join(root, "candidate-claim-source");
+    const { cp } = await import("node:fs/promises");
+    await cp(candidate.target, sourceBundlePath, { recursive: true });
+    await rm(candidate.target, { force: true, recursive: true });
+    let claimedByAnotherRequest = "";
+
+    await expect(stageProductionInstallation({
+      bundleDigest: candidate.bundleDigest,
+      sourceBundlePath,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot,
+      onStageStep: async (step: string) => {
+        if (step !== "candidate-claim") return;
+        const intent = JSON.parse(await readFile(join(productionRoot, ".masthead-install-stage.intent.json"), "utf8"));
+        claimedByAnotherRequest = intent.target;
+        await mkdir(claimedByAnotherRequest);
+        await writeFile(join(claimedByAnotherRequest, "foreign-marker"), "owned-by-another-request");
+      }
+    })).rejects.toThrow("Production candidate stage path already exists");
+
+    await expect(readFile(join(claimedByAnotherRequest, "foreign-marker"), "utf8"))
+      .resolves.toBe("owned-by-another-request");
+    await expect(lstat(join(productionRoot, ".masthead-install-stage.intent.json"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("refuses a temporary candidate collision before copy without changing it", async () => {
+    const { config, homeDir, productionRoot, root, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const sourceBundlePath = join(root, "temporary-candidate-collision-source");
+    const { cp } = await import("node:fs/promises");
+    await cp(candidate.target, sourceBundlePath, { recursive: true });
+    await rm(candidate.target, { force: true, recursive: true });
+    let foreignTemporaryTarget = "";
+
+    await expect(stageProductionInstallation({
+      bundleDigest: candidate.bundleDigest,
+      sourceBundlePath,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot,
+      onStageStep: async (step: string) => {
+        if (step !== "candidate-temp-claim") return;
+        const intent = JSON.parse(await readFile(join(productionRoot, ".masthead-install-stage.intent.json"), "utf8"));
+        foreignTemporaryTarget = intent.temporaryTarget;
+        await mkdir(foreignTemporaryTarget);
+        await writeFile(join(foreignTemporaryTarget, "foreign-marker"), "owned-by-another-request");
+      }
+    })).rejects.toThrow("Production candidate copy stage path already exists");
+
+    await expect(readFile(join(foreignTemporaryTarget, "foreign-marker"), "utf8"))
+      .resolves.toBe("owned-by-another-request");
+    await expect(lstat(join(productionRoot, ".masthead-install-stage.intent.json"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("preserves a temporary candidate replaced before ownership persistence", async () => {
+    const { config, homeDir, productionRoot, root, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const sourceBundlePath = join(root, "temporary-candidate-replacement-source");
+    const displacedCandidate = join(root, "displaced-temporary-candidate");
+    const { cp } = await import("node:fs/promises");
+    await cp(candidate.target, sourceBundlePath, { recursive: true });
+    await rm(candidate.target, { force: true, recursive: true });
+    let intent: any;
+
+    await expect(stageProductionInstallation({
+      bundleDigest: candidate.bundleDigest,
+      sourceBundlePath,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot,
+      onStageStep: async (step: string) => {
+        if (step !== "candidate-temp-created") return;
+        intent = JSON.parse(await readFile(join(productionRoot, ".masthead-install-stage.intent.json"), "utf8"));
+        await rename(intent.temporaryTarget, displacedCandidate);
+        await mkdir(intent.temporaryTarget);
+        await writeFile(join(intent.temporaryTarget, "foreign-marker"), "owned-by-another-request");
+        throw new Error("force pre-ownership recovery");
+      }
+    })).rejects.toThrow("force pre-ownership recovery");
+
+    await expect(readFile(join(intent.temporaryTarget, "foreign-marker"), "utf8"))
+      .resolves.toBe("owned-by-another-request");
+    await expect(lstat(displacedCandidate)).resolves.toMatchObject({});
+    expect(await readdir(displacedCandidate)).toEqual([]);
+    await expect(lstat(join(productionRoot, ".masthead-install-stage.intent.json"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("fails closed when the owned temporary candidate is replaced as copying begins", async () => {
+    const { config, homeDir, productionRoot, root, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const sourceBundlePath = join(root, "temporary-candidate-copy-race-source");
+    const displacedCandidate = join(root, "displaced-owned-temporary-candidate");
+    const { cp } = await import("node:fs/promises");
+    await cp(candidate.target, sourceBundlePath, { recursive: true });
+    await rm(candidate.target, { force: true, recursive: true });
+    let intent: any;
+
+    await expect(stageProductionInstallation({
+      bundleDigest: candidate.bundleDigest,
+      sourceBundlePath,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot,
+      onStageStep: async (step: string) => {
+        if (step !== "candidate-copy-start") return;
+        intent = JSON.parse(await readFile(join(productionRoot, ".masthead-install-stage.intent.json"), "utf8"));
+        await rename(intent.temporaryTarget, displacedCandidate);
+        await mkdir(intent.temporaryTarget);
+        await writeFile(join(intent.temporaryTarget, "foreign-marker"), "owned-by-another-request");
+        await writeFile(join(intent.temporaryTarget, "masthead"), "foreign-binary");
+      }
+    })).rejects.toThrow("exact candidate ownership changed");
+
+    await expect(readFile(join(intent.candidateOwnership.quarantinePath, "foreign-marker"), "utf8"))
+      .resolves.toBe("owned-by-another-request");
+    await expect(lstat(displacedCandidate)).resolves.toMatchObject({});
+    await expect(lstat(join(productionRoot, ".masthead-install-stage.intent.json"))).resolves.toBeDefined();
+  });
+
+  test.skipIf(process.platform === "win32")("retries with a new nonce after a crash leaves an unattested temporary candidate", async () => {
+    const { config, homeDir, productionRoot, root, target: oldTarget } = await fixture();
+    const sourceBundlePath = join(root, "unattested-temporary-candidate-source");
+    const { cp } = await import("node:fs/promises");
+    await cp(oldTarget, sourceBundlePath, { recursive: true });
+    const sourceManifest = await writePackagedBundleManifest({
+      bundleRoot: sourceBundlePath,
+      executablePath: join(sourceBundlePath, "masthead"),
+      resourcesPath: join(sourceBundlePath, "resources")
+    });
+    const input = {
+      bundleDigest: sourceManifest.bundleDigest,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot,
+      sourceBundlePath
+    };
+    const moduleUrl = new URL("../../../scripts/masthead-production.js", import.meta.url).href;
+    const crashSource = [
+      `import { stageProductionInstallation } from ${JSON.stringify(moduleUrl)};`,
+      `await stageProductionInstallation({ ...${JSON.stringify(input)}, onStageStep(step) { if (step === 'candidate-temp-created') process.kill(process.pid, 'SIGKILL'); } });`
+    ].join("\n");
+    const crash = spawn(process.execPath, ["--input-type=module", "-e", crashSource], { stdio: "ignore" });
+    const [crashCode, crashSignal] = await once(crash, "close");
+    expect(crashCode).toBeNull();
+    expect(crashSignal).toBe("SIGKILL");
+
+    const crashedIntent = JSON.parse(await readFile(join(productionRoot, ".masthead-install-stage.intent.json"), "utf8"));
+    expect(crashedIntent.ownsCandidate).toBe(false);
+    expect(crashedIntent.candidateOwnership).toBeUndefined();
+    const ambiguousInfo = await lstat(crashedIntent.temporaryTarget, { bigint: true });
+
+    const receipt = await stageProductionInstallation(input);
+    const preservedInfo = await lstat(crashedIntent.temporaryTarget, { bigint: true });
+    expect({ dev: String(preservedInfo.dev), ino: String(preservedInfo.ino) })
+      .toEqual({ dev: String(ambiguousInfo.dev), ino: String(ambiguousInfo.ino) });
+    expect(receipt.stagingNonce).not.toBe(crashedIntent.stagingNonce);
+    await expect(lstat(join(productionRoot, ".masthead-install-stage.intent.json"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("fails closed and preserves a candidate replacement raced into cleanup", async () => {
+    const { config, homeDir, productionRoot, root, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const sourceBundlePath = join(root, "candidate-cleanup-source");
+    const displacedOwnedCandidate = join(root, "displaced-owned-candidate");
+    const { cp } = await import("node:fs/promises");
+    await cp(candidate.target, sourceBundlePath, { recursive: true });
+    await rm(candidate.target, { force: true, recursive: true });
+    let intent: any;
+
+    await expect(stageProductionInstallation({
+      bundleDigest: candidate.bundleDigest,
+      sourceBundlePath,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot,
+      onStageStep: async (step: string) => {
+        if (step === "candidate-copy") {
+          intent = JSON.parse(await readFile(join(productionRoot, ".masthead-install-stage.intent.json"), "utf8"));
+          throw new Error("force candidate cleanup");
+        }
+        if (step === "reconcile-before-candidate-quarantine") {
+          await rename(intent.target, displacedOwnedCandidate);
+          await mkdir(intent.target);
+          await writeFile(join(intent.target, "foreign-marker"), "owned-by-another-request");
+        }
+      }
+    })).rejects.toThrow("exact candidate ownership changed");
+
+    await expect(readFile(join(intent.candidateOwnership.quarantinePath, "foreign-marker"), "utf8"))
+      .resolves.toBe("owned-by-another-request");
+    await expect(readFile(join(displacedOwnedCandidate, "masthead"), "utf8")).resolves.toBe("candidate-binary");
+    await expect(lstat(intent.target)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(lstat(join(productionRoot, ".masthead-install-stage.intent.json"))).resolves.toBeDefined();
+  });
+
+  test.skipIf(process.platform === "win32").each([
+    ["candidate-claim", "temporaryTarget"],
+    ["candidate-claimed", "target"]
+  ] as const)("recovers a SIGKILL at the durable %s boundary", async (crashStep, ownedPathKey) => {
+    const { config, homeDir, productionRoot, root, target: oldTarget } = await fixture();
+    const sourceBundlePath = join(root, "candidate-claimed-crash-source");
+    const { cp } = await import("node:fs/promises");
+    await cp(oldTarget, sourceBundlePath, { recursive: true });
+    const sourceManifest = await writePackagedBundleManifest({
+      bundleRoot: sourceBundlePath,
+      executablePath: join(sourceBundlePath, "masthead"),
+      resourcesPath: join(sourceBundlePath, "resources")
+    });
+    const input = {
+      bundleDigest: sourceManifest.bundleDigest,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot,
+      sourceBundlePath
+    };
+    const moduleUrl = new URL("../../../scripts/masthead-production.js", import.meta.url).href;
+    const crashSource = [
+      `import { stageProductionInstallation } from ${JSON.stringify(moduleUrl)};`,
+      `const crashStep = ${JSON.stringify(crashStep)};`,
+      `await stageProductionInstallation({ ...${JSON.stringify(input)}, onStageStep(step) { if (step === crashStep) process.kill(process.pid, 'SIGKILL'); } });`
+    ].join("\n");
+    const crash = spawn(process.execPath, ["--input-type=module", "-e", crashSource], { stdio: "ignore" });
+    const [crashCode, crashSignal] = await once(crash, "close");
+    expect(crashCode).toBeNull();
+    expect(crashSignal).toBe("SIGKILL");
+
+    const crashedIntent = JSON.parse(await readFile(join(productionRoot, ".masthead-install-stage.intent.json"), "utf8"));
+    const ownedCandidateInfo = await lstat(crashedIntent[ownedPathKey], { bigint: true });
+    expect(crashedIntent).toMatchObject({
+      ownsCandidate: true,
+      candidateOwnership: {
+        path: crashedIntent.target,
+        temporaryPath: crashedIntent.temporaryTarget
+      }
+    });
+    expect(String(ownedCandidateInfo.dev)).toBe(crashedIntent.candidateOwnership.dev);
+    expect(String(ownedCandidateInfo.ino)).toBe(crashedIntent.candidateOwnership.ino);
+
+    const receipt = await stageProductionInstallation(input);
+    const versionedTargets = (await readdir(productionRoot)).filter((name) => VERSIONED_TARGET_FOR_TEST.test(name)).sort();
+    expect(versionedTargets).toEqual([basename(oldTarget), basename(receipt.target)].sort());
+    await expect(lstat(crashedIntent[ownedPathKey])).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   test("fsyncs every exclusive stage parent before publishing pending receipt state", async () => {
     const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
     const candidate = await secondBundle(productionRoot, oldTarget);

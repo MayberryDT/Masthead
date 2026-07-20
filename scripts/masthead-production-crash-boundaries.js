@@ -8,30 +8,77 @@ const STAGE_ARTIFACTS = ["instance-stage", "lifecycle-stage", "desktop-stage"];
 // This is deliberately literal. A generated contract could silently rename or replace
 // a required crash boundary at the same time as the generated execution matrix.
 const CRASH_BOUNDARIES = {
+  "stage:candidate-temp-created:SIGKILL": stageBoundary(
+    0,
+    ["stage-intent", "candidate-temp"],
+    ["candidate", "instance-stage", "lifecycle-stage", "desktop-stage", "pending-receipt", "receipt"],
+    "unattested-temporary"
+  ),
+  "stage:candidate-copy-start:SIGKILL": stageBoundary(
+    0,
+    ["stage-intent", "candidate-temp"],
+    ["candidate", "instance-stage", "lifecycle-stage", "desktop-stage", "pending-receipt", "receipt"],
+    "temporary"
+  ),
+  "stage:candidate-claim:SIGKILL": stageBoundary(
+    0,
+    ["stage-intent", "candidate-temp"],
+    ["candidate", "instance-stage", "lifecycle-stage", "desktop-stage", "pending-receipt", "receipt"],
+    "temporary"
+  ),
+  "stage:candidate-claimed:SIGKILL": stageBoundary(
+    0,
+    ["stage-intent", "candidate"],
+    ["candidate-temp", "instance-stage", "lifecycle-stage", "desktop-stage", "pending-receipt", "receipt"],
+    "target"
+  ),
   "stage:candidate-copy:SIGKILL": stageBoundary(
     0,
     ["stage-intent", "candidate"],
-    ["instance-stage", "lifecycle-stage", "desktop-stage", "pending-receipt", "receipt"]
+    ["candidate-temp", "instance-stage", "lifecycle-stage", "desktop-stage", "pending-receipt", "receipt"],
+    "target"
+  ),
+  "stage:instance-file-created:SIGKILL": stageBoundary(
+    3,
+    ["stage-intent", "candidate", "instance-stage"],
+    ["candidate-temp", "lifecycle-stage", "desktop-stage", "pending-receipt", "receipt"],
+    "target"
   ),
   "stage:instance-stage:SIGKILL": stageBoundary(
     3,
     ["stage-intent", "candidate", "instance-stage"],
-    ["lifecycle-stage", "desktop-stage", "pending-receipt", "receipt"]
+    ["candidate-temp", "lifecycle-stage", "desktop-stage", "pending-receipt", "receipt"],
+    "target"
+  ),
+  "stage:lifecycle-file-created:SIGKILL": stageBoundary(
+    3,
+    ["stage-intent", "candidate", "instance-stage", "lifecycle-stage"],
+    ["candidate-temp", "desktop-stage", "pending-receipt", "receipt"],
+    "target"
+  ),
+  "stage:desktop-file-created:SIGKILL": stageBoundary(
+    3,
+    ["stage-intent", "candidate", ...STAGE_ARTIFACTS],
+    ["candidate-temp", "pending-receipt", "receipt"],
+    "target"
   ),
   "stage:surface-stage:SIGKILL": stageBoundary(
     3,
     ["stage-intent", "candidate", ...STAGE_ARTIFACTS],
-    ["pending-receipt", "receipt"]
+    ["candidate-temp", "pending-receipt", "receipt"],
+    "target"
   ),
   "stage:receipt-publication:SIGKILL": stageBoundary(
     3,
     ["stage-intent", "candidate", ...STAGE_ARTIFACTS, "pending-receipt", "receipt"],
-    []
+    ["candidate-temp"],
+    "target"
   ),
   "stage:intent-removal:SIGKILL": stageBoundary(
     null,
     ["candidate", ...STAGE_ARTIFACTS, "pending-receipt", "receipt"],
-    ["stage-intent"]
+    ["stage-intent", "candidate-temp"],
+    null
   ),
   "activate:current:SIGKILL": activationBoundary(
     "before-current",
@@ -82,8 +129,8 @@ const CRASH_BOUNDARIES = {
   "finalize:journal:exit": finalizationBoundary(null, ["candidate", "completion-marker", ...ACTIVE_ARTIFACTS], ["rollback-bundle", ...STAGE_ARTIFACTS, "receipt", "journal"])
 };
 
-function stageBoundary(ownedStageCount, present, absent) {
-  return { current: "baseline", journalPhase: null, ownedStageCount, present, absent };
+function stageBoundary(ownedStageCount, present, absent, candidateLocation) {
+  return { current: "baseline", journalPhase: null, ownedStageCount, candidateLocation, present, absent };
 }
 
 function activationBoundary(journalPhase, present, absent) {
@@ -116,7 +163,7 @@ export async function assertPackageBoundCrashBoundary(definition, fixture, recei
     } else if (state.journal?.phase !== expectedJournalPhase) {
       throw new Error(`journal phase was ${state.journal?.phase ?? "absent"}; expected ${expectedJournalPhase}`);
     }
-    if (Object.hasOwn(expected, "ownedStageCount")) assertStageOwnershipContract(expected, state);
+    if (Object.hasOwn(expected, "ownedStageCount")) await assertStageOwnershipContract(expected, state);
     for (const artifact of expected.present) await assertArtifact(artifact, true, state);
     for (const artifact of expected.absent) await assertArtifact(artifact, false, state);
   } catch (cause) {
@@ -189,7 +236,7 @@ async function assertArtifact(name, shouldExist, state) {
   if (shouldExist && name.endsWith("-active")) await assertActiveArtifactMatchesStage(name, state);
 }
 
-function assertStageOwnershipContract(expected, state) {
+async function assertStageOwnershipContract(expected, state) {
   if (expected.ownedStageCount === null) {
     if (state.intent !== undefined) throw new Error("stage intent remained after its removal boundary");
     return;
@@ -207,6 +254,32 @@ function assertStageOwnershipContract(expected, state) {
       !Number.isInteger(reservation.mode) || reservation.mode < 0 || reservation.mode > 0o777
     ))
   ) throw new Error("stage intent reservations did not exactly match their declared paths, hashes, and modes");
+  await assertCandidateOwnershipContract(expected, state);
+}
+
+async function assertCandidateOwnershipContract(expected, state) {
+  if (expected.candidateLocation === "unattested-temporary") {
+    if (state.intent?.ownsCandidate !== false || state.intent?.candidateOwnership !== undefined) {
+      throw new Error("unattested temporary candidate unexpectedly had durable ownership authority");
+    }
+    return;
+  }
+  if (expected.candidateLocation === null) return;
+  const ownership = state.intent?.candidateOwnership;
+  const expectedPath = expected.candidateLocation === "temporary" ? state.intent?.temporaryTarget : state.intent?.target;
+  if (
+    state.intent?.ownsCandidate !== true || ownership?.schemaVersion !== 1 ||
+    ownership.path !== state.intent?.target || ownership.temporaryPath !== state.intent?.temporaryTarget ||
+    ownership.quarantinePath !== join(
+      state.intent.productionRoot,
+      `.${basename(state.intent.target)}.${state.intent.stagingNonce}.cleanup`
+    ) || ownership.dev === undefined || ownership.ino === undefined
+  ) throw new Error("candidate ownership authority was incomplete");
+  const info = await lstat(expectedPath, { bigint: true });
+  if (
+    !info || !info.isDirectory() || info.isSymbolicLink() ||
+    String(info.dev) !== ownership.dev || String(info.ino) !== ownership.ino
+  ) throw new Error(`candidate ${expected.candidateLocation} inode did not match durable ownership authority`);
 }
 
 async function assertStagedArtifactMatchesAuthority(name, state) {
@@ -237,6 +310,7 @@ function artifactPath(name, state) {
   if (name === "receipt") return state.receiptPath;
   if (name === "journal") return state.journalPath;
   if (name === "candidate") return state.target;
+  if (name === "candidate-temp") return state.intent?.temporaryTarget;
   if (name === "rollback-bundle") return state.receipt?.rollbackBundle?.path;
   if (name === "completion-marker") return state.markerPath;
   if (name in state.stagePaths) return state.stagePaths[name];
@@ -246,9 +320,16 @@ function artifactPath(name, state) {
 
 async function assertActiveArtifactMatchesStage(name, state) {
   const stageName = name === "instance-active" ? "instance-stage" : name === "lifecycle-active" ? "lifecycle-stage" : "desktop-stage";
-  const active = await readFile(state.activePaths[name]);
+  const activePath = state.activePaths[name];
   const attestation = state.receipt?.stagedFiles?.find(({ path }) => path === state.stagePaths[stageName]);
-  if (!attestation || createHash("sha256").update(active).digest("hex") !== attestation.sha256) {
+  if (!attestation) throw new Error(`${name} had no ${stageName} attestation`);
+  const info = await lstat(activePath, { bigint: true });
+  if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1n) {
+    throw new Error(`${name} was not a regular single-link file`);
+  }
+  const bodyHash = createHash("sha256").update(await readFile(activePath)).digest("hex");
+  const mode = Number(info.mode & 0o777n);
+  if (bodyHash !== attestation.sha256 || mode !== attestation.mode) {
     throw new Error(`${name} did not match ${stageName} attestation`);
   }
 }
