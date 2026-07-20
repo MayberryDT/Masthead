@@ -25,6 +25,26 @@ afterEach(async () => {
 });
 
 describe("daemon database schema", () => {
+  test("migration 032 adds guided enrichment provenance to a schema-31 database", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-db-v32-guided-provenance-"));
+    tempDirs.push(tempDir);
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+    migrateTestDatabaseThrough(db, 31);
+
+    migrateDatabase(db);
+
+    expect(db.prepare("SELECT version, name FROM schema_migrations ORDER BY version DESC LIMIT 1").get()).toEqual({
+      name: "032_guided_enrichment_provenance",
+      version: 32
+    });
+    expect(
+      db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+        .get("guided_authoring_enrichment_provenance")
+    ).toEqual({ name: "guided_authoring_enrichment_provenance" });
+    expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    db.close();
+  });
+
   test("migration 030 maps existing FTS rows to their stable rowids", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-db-v30-search-rowids-"));
     tempDirs.push(tempDir);
@@ -190,7 +210,7 @@ describe("daemon database schema", () => {
     migrateDatabase(db);
     migrateDatabase(db);
 
-    expect(CURRENT_SCHEMA_VERSION).toBe(31);
+    expect(CURRENT_SCHEMA_VERSION).toBe(32);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'virtual') ORDER BY name").all() as Array<{ name: string }>;
     expect(tables.map((row) => row.name)).toEqual(
@@ -261,7 +281,8 @@ describe("daemon database schema", () => {
         "guided_authoring_assignment_opportunities",
         "guided_authoring_evidence_access",
         "guided_authoring_draft_reviews",
-        "guided_authoring_operator_reviews"
+        "guided_authoring_operator_reviews",
+        "guided_authoring_enrichment_provenance"
       ])
     );
     const applied = db.prepare("SELECT version, name FROM schema_migrations").all();
@@ -296,7 +317,8 @@ describe("daemon database schema", () => {
       { version: 28, name: "028_session_transcript_fingerprints" },
       { version: 29, name: "029_import_repair_replacements" },
       { version: 30, name: "030_session_search_rowids" },
-      { version: 31, name: "031_guided_authoring" }
+      { version: 31, name: "031_guided_authoring" },
+      { version: 32, name: "032_guided_enrichment_provenance" }
     ]);
     expect(
       (db.prepare("PRAGMA table_info(workbench_artifact_candidate_scans)").all() as Array<{ name: string }>).map(
@@ -574,7 +596,7 @@ describe("daemon database schema", () => {
       "2026-07-15T00:00:00.000Z"
     );
 
-    expect(CURRENT_SCHEMA_VERSION).toBe(31);
+    expect(CURRENT_SCHEMA_VERSION).toBe(32);
     expect(db.prepare("SELECT version, name FROM schema_migrations ORDER BY version DESC LIMIT 1").get()).toEqual({
       name: "024_artifact_candidate_detector_revision",
       version: 24

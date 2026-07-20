@@ -1,4 +1,5 @@
 import type { SessionEnrichmentRecord } from "../../enrichment/types.ts";
+import type { GuidedEnrichmentProvenance } from "../../shared/guidedAuthoring.ts";
 import { stableRecordId } from "../identity.ts";
 import type { MastheadDatabase } from "./sqlite.ts";
 
@@ -16,6 +17,18 @@ type SessionEnrichmentRow = {
   sourceRefsJson: string;
   failureCode: string | null;
   failureMessage: string | null;
+};
+
+type GuidedEnrichmentProvenanceRow = {
+  enrichmentId: string;
+  requestId: string;
+  assignmentId: string;
+  sessionId: string;
+  draftRevision: number;
+  evidenceRevision: string;
+  policyVersion: GuidedEnrichmentProvenance["policyVersion"];
+  source: GuidedEnrichmentProvenance["source"];
+  appliedAt: string;
 };
 
 export function upsertSessionEnrichment(db: MastheadDatabase, record: Omit<SessionEnrichmentRecord, "enrichmentId">): string {
@@ -188,6 +201,81 @@ export function markStaleCurrentSessionEnrichments(
     options.exceptContentFingerprint ?? null,
     options.exceptContentFingerprint ?? null
   );
+}
+
+export function recordGuidedEnrichmentProvenanceInTransaction(
+  db: MastheadDatabase,
+  input: GuidedEnrichmentProvenance
+): void {
+  const inserted = db.prepare(
+    `INSERT INTO guided_authoring_enrichment_provenance (
+      enrichment_id,
+      request_id,
+      assignment_id,
+      session_id,
+      draft_revision,
+      evidence_revision,
+      policy_version,
+      source,
+      applied_at
+    )
+    SELECT enrichment_id, ?, ?, session_id, ?, ?, ?, ?, ?
+    FROM session_enrichments
+    WHERE enrichment_id = ? AND session_id = ?`
+  ).run(
+    input.requestId,
+    input.assignmentId,
+    input.draftRevision,
+    input.evidenceRevision,
+    input.policyVersion,
+    input.source,
+    input.appliedAt,
+    input.enrichmentId,
+    input.sessionId
+  );
+  if (inserted.changes !== 1) throw new Error("guided_enrichment_session_mismatch");
+}
+
+export function listGuidedEnrichmentProvenance(
+  db: MastheadDatabase,
+  assignmentId: string
+): GuidedEnrichmentProvenance[] {
+  const rows = db.prepare(
+    `${guidedEnrichmentProvenanceSelect}
+     WHERE assignment_id = ?
+     ORDER BY session_id, enrichment_id`
+  ).all(assignmentId) as GuidedEnrichmentProvenanceRow[];
+  return rows.map(guidedEnrichmentProvenanceRowToRecord);
+}
+
+export function listGuidedEnrichmentProvenanceByEnrichment(
+  db: MastheadDatabase,
+  enrichmentId: string
+): GuidedEnrichmentProvenance[] {
+  const rows = db.prepare(
+    `${guidedEnrichmentProvenanceSelect}
+     WHERE enrichment_id = ?
+     ORDER BY assignment_id`
+  ).all(enrichmentId) as GuidedEnrichmentProvenanceRow[];
+  return rows.map(guidedEnrichmentProvenanceRowToRecord);
+}
+
+const guidedEnrichmentProvenanceSelect = `SELECT
+  enrichment_id AS enrichmentId,
+  request_id AS requestId,
+  assignment_id AS assignmentId,
+  session_id AS sessionId,
+  draft_revision AS draftRevision,
+  evidence_revision AS evidenceRevision,
+  policy_version AS policyVersion,
+  source,
+  applied_at AS appliedAt
+FROM guided_authoring_enrichment_provenance`;
+
+function guidedEnrichmentProvenanceRowToRecord(
+  row: GuidedEnrichmentProvenanceRow
+): GuidedEnrichmentProvenance {
+  return { ...row };
 }
 
 function rowToRecord(row: SessionEnrichmentRow): SessionEnrichmentRecord {

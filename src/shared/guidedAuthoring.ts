@@ -59,6 +59,18 @@ export type GuidedSessionEnrichmentDraft = {
   claimSupport: WorkbenchClaimSupport[];
 };
 
+export type GuidedEnrichmentProvenance = {
+  enrichmentId: string;
+  requestId: string;
+  assignmentId: string;
+  sessionId: string;
+  draftRevision: number;
+  evidenceRevision: string;
+  policyVersion: "guided-authoring-v1";
+  source: "guided_authoring";
+  appliedAt: string;
+};
+
 export type GuidedAuthoringBundleV4 = {
   bundleVersion: "workbench-authoring-v4";
   assignmentId: string;

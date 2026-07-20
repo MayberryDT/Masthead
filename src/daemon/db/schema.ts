@@ -160,6 +160,11 @@ const migrations = [
     version: 31,
     name: "031_guided_authoring",
     path: resolve(currentDir, "migrations/031_guided_authoring.sql")
+  },
+  {
+    version: 32,
+    name: "032_guided_enrichment_provenance",
+    path: resolve(currentDir, "migrations/032_guided_enrichment_provenance.sql")
   }
 ];
 
@@ -231,7 +236,8 @@ const criticalTables = [
   "guided_authoring_assignment_opportunities",
   "guided_authoring_evidence_access",
   "guided_authoring_draft_reviews",
-  "guided_authoring_operator_reviews"
+  "guided_authoring_operator_reviews",
+  "guided_authoring_enrichment_provenance"
 ];
 
 export function migrateDatabase(db: MastheadDatabase): void {
