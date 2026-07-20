@@ -187,3 +187,27 @@ Fresh final verification:
 - Fresh rebuilt-package rehearsal: passed real isolated activation, exact start/health/manifest/process capture, finalization, stop/offline proof, and all ordered 24/24 supplied-package crash cases.
 - `npm run typecheck`, JavaScript syntax checks, isolated Python helper compilation, and `git diff --check`: passed.
 - Successful rehearsal cleanup left no `app-masthead-*` scope or disposable package-rehearsal root. Installed production runtime, data, processes, and installation were not touched.
+
+## Recovery review follow-up
+
+The independent package-bound contract now covers 27 ordered fresh-process cases. Its eight staging cases include `instance-file-created`, `lifecycle-file-created`, and `desktop-file-created`, which terminate after exclusive creation and exact ownership checks but before the file fsync, so recovery is exercised at every production hook rather than only after each surface becomes durable.
+
+Finalization fixture cleanup is registered before packaged startup begins. A health, manifest, cgroup-claim, or companion-inspection failure therefore still enters receipt-bound stop and status proof; stop and status are both attempted, their failures are retained, and the original body failure remains the primary cause. Transient process-scan attribution is retried inside the completed start's capture callback, so the successful fresh-start result is not discarded and converted into an incompatible `alreadyRunning` retry.
+
+Focused review verification passed without running the rebuilt-package 27-case matrix; that final operational gate remains for release closeout. Installed production runtime, data, processes, and installation were not touched.
+
+## Final reviewed package-bound closeout
+
+The final recovery contract contains 31 ordered supplied-package cases. Staging now covers the unattested temporary-directory crash, durable empty-candidate ownership, completed temporary copy, atomic no-replace publication, post-copy verification, all three pre-fsync surface creations, every durable surface checkpoint, receipt publication, and intent removal. Candidate cleanup and successful staging both re-attest the exact reserved device/inode; a byte-identical foreign replacement remains preserved and blocks staging retry or activation, including receipt-exists recovery.
+
+The operational supervisor no longer retries a whole `start` after a possibly successful launch. It retries bounded attribution inside the completed runner, attempts receipt-bound status even when stop fails, preserves both cleanup errors, and gives each package worker a bounded 60 seconds for repeated bundle, health, process, and containment proof.
+
+Fresh final verification from package source `27eefafa6ce7b811f0cf441980815e2354fd4990`:
+
+- Combined production launcher and rehearsal suites: 271/271 passed.
+- TypeScript, Node syntax, and diff checks: passed.
+- Electron package build: passed with bundled release SHA `27eefafa6ce7b811f0cf441980815e2354fd4990`.
+- Rebuilt supplied-package operational rehearsal: passed all 31/31 exact ordered cases with `source: "supplied-package"`, real isolated start/health/manifest/process proof, finalization, stop, offline proof, and complete cleanup.
+- Final independent review: no Critical, Important, or Minor findings.
+
+Installed production runtime, data, processes, and installation were not touched.
