@@ -2332,6 +2332,7 @@ async function reconcileProductionStageIntent(productionRootInput, lifecycleLeas
       receipt.stagedInstanceLauncherPath !== intent.stagedInstanceLauncherPath ||
       receipt.stagedSurface.launcherStage !== intent.launcherStage || receipt.stagedSurface.desktopStage !== intent.desktopStage
     ) throw new Error("Production stage receipt does not match its durable intent.");
+    await assertReservedCandidateOwnership(intent, intent.target, "before durable receipt recovery");
     await rm(intentPath);
     await syncStageDirectory(productionRoot, options.openStageDirectory);
     return "receipt-durable";

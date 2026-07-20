@@ -926,6 +926,44 @@ describe("production lifecycle launcher", () => {
     await expect(lstat(join(productionRoot, ".masthead-install-stage.intent.json"))).resolves.toBeDefined();
   });
 
+  test("blocks receipt retry and activation after a byte-identical candidate replacement at receipt publication", async () => {
+    const { config, homeDir, productionRoot, root, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const sourceBundlePath = join(root, "receipt-candidate-same-content-race-source");
+    const displacedCandidate = join(root, "displaced-same-content-receipt-candidate");
+    const { cp } = await import("node:fs/promises");
+    await cp(candidate.target, sourceBundlePath, { recursive: true });
+    await rm(candidate.target, { force: true, recursive: true });
+    const input = {
+      bundleDigest: candidate.bundleDigest,
+      sourceBundlePath,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot
+    };
+    let intent: any;
+
+    await expect(stageProductionInstallation({
+      ...input,
+      onStageStep: async (step: string) => {
+        if (step !== "receipt-publication") return;
+        intent = JSON.parse(await readFile(join(productionRoot, ".masthead-install-stage.intent.json"), "utf8"));
+        await rename(intent.target, displacedCandidate);
+        await cp(displacedCandidate, intent.target, { recursive: true });
+      }
+    })).rejects.toThrow("exact candidate ownership changed");
+
+    await expect(stageProductionInstallation(input)).rejects.toThrow("exact candidate ownership changed");
+    await expect(activateStagedProductionInstallation(intent.receiptPath, {
+      assertOffline: async () => undefined,
+      runDesktopDatabaseCommand: () => undefined
+    })).rejects.toThrow("exact candidate ownership changed");
+    await expect(readFile(join(displacedCandidate, "masthead"), "utf8")).resolves.toBe("candidate-binary");
+    await expect(readFile(join(intent.target, "masthead"), "utf8")).resolves.toBe("candidate-binary");
+    await expect(lstat(join(productionRoot, ".masthead-install-stage.intent.json"))).resolves.toBeDefined();
+    await expect(lstat(intent.receiptPath)).resolves.toBeDefined();
+  });
+
   test.skipIf(process.platform === "win32")("retries with a new nonce after a crash leaves an unattested temporary candidate", async () => {
     const { config, homeDir, productionRoot, root, target: oldTarget } = await fixture();
     const sourceBundlePath = join(root, "unattested-temporary-candidate-source");
