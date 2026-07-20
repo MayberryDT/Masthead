@@ -475,7 +475,7 @@ function validateGuidedBundleSemantics(bundle: GuidedAuthoringBundleV4): void {
     }
   }
 
-  const artifactsById = new Map<string, GuidedAuthoringBundleV4["artifacts"][number]>();
+  const artifactIds = new Set<string>();
   for (let index = 0; index < bundle.artifacts.length; index += 1) {
     const artifact = bundle.artifacts[index]!;
     const path = `artifacts[${index}]`;
@@ -488,12 +488,10 @@ function validateGuidedBundleSemantics(bundle: GuidedAuthoringBundleV4): void {
       requireNonBlank(provenanceSessionId, provenancePath);
       requireUnique(provenanceSessionIds, provenanceSessionId, provenancePath);
     }
-    if (artifactsById.has(artifact.draftId)) throw invalidGuidedBundle(`${path}.draftId`);
-    artifactsById.set(artifact.draftId, artifact);
+    requireUnique(artifactIds, artifact.draftId, `${path}.draftId`);
   }
 
   const opportunityIds = new Set<string>();
-  const linkedDraftIds = new Set<string>();
   for (let index = 0; index < bundle.opportunityDispositions.length; index += 1) {
     const disposition = bundle.opportunityDispositions[index]!;
     const path = `opportunityDispositions[${index}]`;
@@ -510,11 +508,6 @@ function validateGuidedBundleSemantics(bundle: GuidedAuthoringBundleV4): void {
       if (!disposition.artifactKind || disposition.mergedIntoOpportunityId !== undefined) {
         throw invalidGuidedBundle(path);
       }
-      const artifact = artifactsById.get(disposition.artifactDraftId!);
-      if (!artifact || artifact.kind !== disposition.artifactKind || linkedDraftIds.has(disposition.artifactDraftId!)) {
-        throw invalidGuidedBundle(`${path}.artifactDraftId`);
-      }
-      linkedDraftIds.add(disposition.artifactDraftId!);
       continue;
     }
 

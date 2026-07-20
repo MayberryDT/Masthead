@@ -170,19 +170,37 @@ describe("guided authoring V4 schema", () => {
     expect(() => parseGuidedAuthoringBundleV4(bundle)).toThrow("invalid_guided_authoring_bundle");
   });
 
-  test("rejects artifact linkage to a missing draft", () => {
+  test("defers artifact linkage to a missing draft to structured quality review", () => {
     const bundle = validGuidedBundle();
     bundle.opportunityDispositions = [authoredDisposition({ artifactDraftId: "draft:missing" })];
 
-    expect(() => parseGuidedAuthoringBundleV4(bundle)).toThrow("invalid_guided_authoring_bundle");
+    expect(parseGuidedAuthoringBundleV4(bundle)).toEqual(bundle);
   });
 
-  test("rejects artifact linkage whose declared kind differs from the draft", () => {
+  test("defers a linked draft kind mismatch to structured quality review", () => {
     const bundle = validGuidedBundle();
     bundle.artifacts = [validAdrDraft()];
     bundle.opportunityDispositions = [authoredDisposition({ artifactKind: "runbook" })];
 
-    expect(() => parseGuidedAuthoringBundleV4(bundle)).toThrow("invalid_guided_authoring_bundle");
+    expect(parseGuidedAuthoringBundleV4(bundle)).toEqual(bundle);
+  });
+
+  test("defers reuse of one draft by multiple dispositions to structured quality review", () => {
+    const bundle = validGuidedBundle();
+    bundle.artifacts = [validAdrDraft()];
+    bundle.opportunityDispositions = [
+      authoredDisposition(),
+      authoredDisposition({ opportunityId: "opportunity:adr:two" })
+    ];
+
+    expect(parseGuidedAuthoringBundleV4(bundle)).toEqual(bundle);
+  });
+
+  test("defers an unlinked submitted draft to structured quality review", () => {
+    const bundle = validGuidedBundle();
+    bundle.artifacts = [validAdrDraft()];
+
+    expect(parseGuidedAuthoringBundleV4(bundle)).toEqual(bundle);
   });
 
   test.each([

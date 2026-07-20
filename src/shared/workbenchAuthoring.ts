@@ -257,6 +257,8 @@ export type WorkbenchAuthoringFinding = {
   severity: "error" | "warning";
   path?: string;
   sessionId?: string;
+  artifactDraftId?: string;
+  opportunityId?: string;
   artifactKind?: "session_enrichment" | WorkbenchAuthoredArtifactKind;
 };
 
