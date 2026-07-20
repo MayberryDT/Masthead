@@ -1,6 +1,7 @@
 import type { DurableSessionEnrichment } from "./sessionEnrichment.ts";
 import type {
   WorkbenchArtifactDraft,
+  WorkbenchAuthoringEvidencePage,
   WorkbenchAuthoringFinding,
   WorkbenchClaimSupport
 } from "./workbenchAuthoring.ts";
@@ -147,8 +148,20 @@ export type GuidedAuthoringReviewDto = {
   draftRevision?: number;
   draft?: GuidedAuthoringBundleV4;
   findings: WorkbenchAuthoringFinding[];
+  editorialQuestions: string[];
   coverage: GuidedEvidenceCoverageDto[];
   operatorReviews: GuidedAuthoringOperatorReviewDto[];
+  nextAction: GuidedAuthoringNextAction;
+};
+
+export type GuidedInspectionDto = {
+  assignmentId: string;
+  evidenceRevision: string;
+  sessionId: string;
+  evidence: WorkbenchAuthoringEvidencePage;
+  progressRecorded: boolean;
+  editorialQuestions: string[];
+  coverage: GuidedEvidenceCoverageDto[];
   nextAction: GuidedAuthoringNextAction;
 };
 

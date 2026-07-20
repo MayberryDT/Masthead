@@ -314,16 +314,23 @@ export function recordGuidedEvidenceAccessInTransaction(
     throw new Error("invalid_guided_evidence_access");
   }
   const membership = db.prepare(
-    `SELECT rs.state, a.status
+    `SELECT rs.state, a.status, a.evidence_revision AS evidenceRevision
      FROM guided_authoring_assignment_sessions AS membership
      JOIN guided_authoring_request_sessions AS rs
        ON rs.request_id = membership.request_id AND rs.session_id = membership.session_id
      JOIN guided_authoring_assignments AS a ON a.assignment_id = membership.assignment_id
      WHERE membership.assignment_id = ? AND membership.request_id = ? AND membership.session_id = ?`
-  ).get(input.assignmentId, input.requestId, input.sessionId) as { state: string; status: string } | undefined;
+  ).get(input.assignmentId, input.requestId, input.sessionId) as {
+    evidenceRevision: string;
+    state: string;
+    status: string;
+  } | undefined;
   if (!membership) throw new Error("guided_evidence_session_not_assigned");
   if (membership.state !== "assigned" || membership.status === "completed") {
     throw new Error("guided_assignment_not_active");
+  }
+  if (membership.evidenceRevision !== input.evidenceRevision) {
+    throw new Error("guided_evidence_revision_mismatch");
   }
   const insert = db.prepare(
     `INSERT OR IGNORE INTO guided_authoring_evidence_access
@@ -334,6 +341,54 @@ export function recordGuidedEvidenceAccessInTransaction(
   for (const evidenceRef of new Set(input.evidenceRefs)) {
     insert.run(input.assignmentId, input.requestId, input.sessionId, input.evidenceRevision, evidenceRef, now);
   }
+}
+
+export function advanceGuidedAssignmentEvidenceRevision(
+  db: MastheadDatabase,
+  input: {
+    assignmentId: string;
+    expectedEvidenceRevision: string;
+    nextEvidenceRevision: string;
+  }
+): GuidedAuthoringAssignmentDto {
+  return withImmediateTransaction(db, () => advanceGuidedAssignmentEvidenceRevisionInTransaction(db, input));
+}
+
+export function advanceGuidedAssignmentEvidenceRevisionInTransaction(
+  db: MastheadDatabase,
+  input: {
+    assignmentId: string;
+    expectedEvidenceRevision: string;
+    nextEvidenceRevision: string;
+  }
+): GuidedAuthoringAssignmentDto {
+  requireNonblank(
+    [input.assignmentId, input.expectedEvidenceRevision, input.nextEvidenceRevision],
+    "invalid_guided_evidence_revision_advance"
+  );
+  const assignment = getAssignmentRow(db, input.assignmentId);
+  if (!assignment) throw new Error("guided_assignment_not_found");
+  if (["staged_canary", "ready_to_finish", "completed"].includes(assignment.status)) {
+    throw new Error("guided_assignment_evidence_locked");
+  }
+  if (assignment.evidenceRevision !== input.expectedEvidenceRevision) {
+    throw new Error("guided_evidence_revision_conflict");
+  }
+  const now = new Date().toISOString();
+  const changed = db.prepare(
+    `UPDATE guided_authoring_assignments
+     SET evidence_revision = ?, status = 'investigating', accepted_draft_revision = NULL, updated_at = ?
+     WHERE assignment_id = ? AND evidence_revision = ?
+       AND status IN ('investigating', 'drafting', 'needs_revision')`
+  ).run(input.nextEvidenceRevision, now, input.assignmentId, input.expectedEvidenceRevision);
+  if (changed.changes !== 1) {
+    const current = getAssignmentRow(db, input.assignmentId);
+    if (current && ["staged_canary", "ready_to_finish", "completed"].includes(current.status)) {
+      throw new Error("guided_assignment_evidence_locked");
+    }
+    throw new Error("guided_evidence_revision_conflict");
+  }
+  return requireGuidedAssignment(db, input.assignmentId);
 }
 
 export function listGuidedEvidenceAccess(
@@ -640,8 +695,8 @@ function mapAssignment(db: MastheadDatabase, row: AssignmentRow): GuidedAuthorin
   const draft = row.currentDraftRevision > 0
     ? db.prepare(
       `SELECT findings_json AS findingsJson FROM guided_authoring_draft_reviews
-       WHERE assignment_id = ? AND revision = ?`
-    ).get(row.assignmentId, row.currentDraftRevision) as { findingsJson: string } | undefined
+       WHERE assignment_id = ? AND revision = ? AND evidence_revision = ?`
+    ).get(row.assignmentId, row.currentDraftRevision, row.evidenceRevision) as { findingsJson: string } | undefined
     : undefined;
   return {
     assignmentId: row.assignmentId,

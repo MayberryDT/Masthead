@@ -5,7 +5,12 @@ import { once } from "node:events";
 import { Worker } from "node:worker_threads";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { WorkbenchArtifactSuggestionDto } from "../../../shared/workbenchAuthoring.ts";
-import { getGuidedAssignments, listGuidedOpportunities } from "../../../daemon/db/guidedAuthoringRepository.ts";
+import {
+  getGuidedAssignment,
+  getGuidedAssignments,
+  listGuidedEvidenceAccess,
+  listGuidedOpportunities
+} from "../../../daemon/db/guidedAuthoringRepository.ts";
 import { migrateDatabase } from "../../../daemon/db/schema.ts";
 import { markSessionCompileReady, seedSession } from "../../../daemon/db/__tests__/sessionTestHelpers.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../../../daemon/db/sqlite.ts";
@@ -13,13 +18,19 @@ import * as advisorySuggestions from "../advisorySuggestions.ts";
 import * as evidenceCatalog from "../evidenceCatalog.ts";
 import type { AuthoringEvidenceSnapshot } from "../evidenceCatalog.ts";
 import {
+  GUIDED_EVIDENCE_QUESTIONS,
   GUIDED_TOOL_HEAVY_CALL_THRESHOLD,
   classifyPlanningSession,
   planGuidedAssignments,
   type GuidedPlanningSession
 } from "../guidedAuthoringPolicy.ts";
 import { assertGuidedSelectionCompileReady } from "../guidedAuthoringPreflight.ts";
-import { createGuidedRequest, startGuidedAssignment } from "../guidedAuthoringService.ts";
+import {
+  createGuidedRequest,
+  inspectGuidedAssignment,
+  reviewGuidedAssignment,
+  startGuidedAssignment
+} from "../guidedAuthoringService.ts";
 
 const tempDirs: string[] = [];
 
@@ -332,6 +343,361 @@ describe("guided authoring service", () => {
     })).toThrow("guided_assignment_evidence_changed");
     db.close();
   });
+
+  test("requires complete canonical evidence coverage before save", async () => {
+    const db = await serviceDb(2);
+    vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
+    const created = createGuidedRequest(db, requestInput(selectionIds(2)));
+    const assignmentId = created.request.currentAssignmentId!;
+
+    const first = inspectGuidedAssignment(db, { assignmentId, command: "masthead", limit: 1 });
+    const sampled = inspectGuidedAssignment(db, {
+      assignmentId,
+      command: "masthead",
+      limit: 1,
+      order: "desc"
+    });
+    const review = reviewGuidedAssignment(db, { assignmentId, command: "masthead" });
+
+    expect(first.progressRecorded).toBe(true);
+    expect(first.evidenceRevision).not.toBe(first.evidence.evidenceRevision);
+    expect(first.coverage.every(({ evidenceRevision }) => evidenceRevision === first.evidenceRevision)).toBe(true);
+    expect(listGuidedEvidenceAccess(db, assignmentId).every(({ evidenceRevision }) => (
+      evidenceRevision === first.evidenceRevision && evidenceRevision !== first.evidence.evidenceRevision
+    ))).toBe(true);
+    expect(sampled.progressRecorded).toBe(false);
+    expect(review.coverage[0]).toMatchObject({ accessedItems: 1, complete: false, totalItems: 4 });
+    expect(review.nextAction.kind).toBe("inspect");
+    expect(review.editorialQuestions).toEqual(GUIDED_EVIDENCE_QUESTIONS);
+
+    let current = review;
+    for (let index = 0; index < 10 && current.nextAction.kind === "inspect"; index += 1) {
+      inspectGuidedAssignment(db, { assignmentId, command: "masthead", limit: 2 });
+      current = reviewGuidedAssignment(db, { assignmentId, command: "masthead" });
+    }
+    expect(current.coverage.every(({ complete }) => complete)).toBe(true);
+    expect(current.nextAction).toEqual({
+      command: `masthead workbench author save --assignment ${assignmentId} --file <draft.json> --json`,
+      kind: "save",
+      reason: "Every assignment session has complete canonical evidence coverage."
+    });
+    db.close();
+  });
+
+  test("keeps supplementary reads out of coverage and returns the earliest canonical hole", async () => {
+    const db = await serviceDb(1);
+    vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
+    const created = createGuidedRequest(db, requestInput(selectionIds(1)));
+    const assignmentId = created.request.currentAssignmentId!;
+
+    const assignmentBefore = getGuidedAssignment(db, assignmentId);
+    for (const supplementary of [{ query: "OAuth" }, { kind: "tools" as const }, { order: "desc" as const }]) {
+      const inspected = inspectGuidedAssignment(db, { assignmentId, command: "masthead", ...supplementary });
+      expect(inspected.progressRecorded).toBe(false);
+    }
+    expect(listGuidedEvidenceAccess(db, assignmentId)).toEqual([]);
+    expect(getGuidedAssignment(db, assignmentId)).toEqual(assignmentBefore);
+
+    inspectGuidedAssignment(db, { assignmentId, command: "masthead", cursor: "2", limit: 1 });
+    expect(reviewGuidedAssignment(db, { assignmentId, command: "masthead" }).nextAction).toEqual({
+      command: `masthead workbench author inspect --assignment ${assignmentId} --session session:0 --cursor 0 --json`,
+      kind: "inspect",
+      reason: "Session session:0 still has unread canonical evidence."
+    });
+    db.close();
+  });
+
+  test("accepts leading-zero decimal cursors and keeps repeated explicit reads idempotent", async () => {
+    const db = await serviceDb(1);
+    vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
+    const created = createGuidedRequest(db, requestInput(selectionIds(1)));
+    const assignmentId = created.request.currentAssignmentId!;
+    const input = { assignmentId, command: "masthead", cursor: "01", limit: 1 };
+
+    const first = inspectGuidedAssignment(db, input);
+    const access = listGuidedEvidenceAccess(db, assignmentId);
+    const repeated = inspectGuidedAssignment(db, input);
+
+    expect(first.evidence.items).toHaveLength(1);
+    expect(repeated.coverage).toEqual(first.coverage);
+    expect(listGuidedEvidenceAccess(db, assignmentId)).toEqual(access);
+    db.close();
+  });
+
+  test("derives holes from observedAt and itemId order rather than access count", async () => {
+    const db = await serviceDb(1);
+    db.prepare("DELETE FROM tool_results WHERE session_id = ?").run("session:0");
+    db.prepare("DELETE FROM tool_calls WHERE session_id = ?").run("session:0");
+    db.prepare("DELETE FROM file_effects WHERE session_id = ?").run("session:0");
+    db.prepare("DELETE FROM messages WHERE session_id = ?").run("session:0");
+    const insert = db.prepare(
+      `INSERT INTO messages
+       (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence)
+       VALUES (?, 'session:0', 'user', ?, ?, ?, '{}', 'authoritative')`
+    );
+    insert.run("item:z", "Earlier z", "hash:z", "2026-07-19T10:00:00.000Z");
+    insert.run("item:b", "Later b", "hash:b", "2026-07-19T10:01:00.000Z");
+    insert.run("item:a", "Later a", "hash:a", "2026-07-19T10:01:00.000Z");
+    vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
+    const created = createGuidedRequest(db, requestInput(selectionIds(1)));
+    const assignmentId = created.request.currentAssignmentId!;
+
+    const skipped = inspectGuidedAssignment(db, { assignmentId, command: "masthead", cursor: "1", limit: 1 });
+    expect(skipped.evidence.items[0]?.itemId).toBe("message:item:a");
+    expect(skipped.nextAction.command).toContain("--cursor 0");
+    const first = inspectGuidedAssignment(db, { assignmentId, command: "masthead", cursor: "0", limit: 1 });
+    expect(first.evidence.items[0]?.itemId).toBe("message:item:z");
+    expect(first.nextAction.command).toContain("--cursor 2");
+    db.close();
+  });
+
+  test("chooses incomplete sessions in persisted assignment order", async () => {
+    const db = await serviceDb(2);
+    vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
+    const created = createGuidedRequest(db, requestInput(["session:1", "session:0"]));
+    const assignmentId = created.request.currentAssignmentId!;
+
+    inspectGuidedAssignment(db, {
+      assignmentId,
+      command: "masthead",
+      limit: 100,
+      sessionId: "session:1"
+    });
+    expect(reviewGuidedAssignment(db, { assignmentId, command: "masthead" }).nextAction.command)
+      .toContain("--session session:0 --cursor 0");
+    db.close();
+  });
+
+  test.each(["", " ", "NaN", "-1", "1.5", "+1", "1e2", "0x10", "1junk", "9007199254740992", "4", "999"])(
+    "rejects invalid inspection cursor %j before recording progress",
+    async (cursor) => {
+      const db = await serviceDb(1);
+      vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
+      const created = createGuidedRequest(db, requestInput(selectionIds(1)));
+      const assignmentId = created.request.currentAssignmentId!;
+      expect(() => inspectGuidedAssignment(db, { assignmentId, command: "masthead", cursor }))
+        .toThrow("guided_inspection_cursor_invalid");
+      expect(() => inspectGuidedAssignment(db, { assignmentId, command: "masthead", cursor, query: "OAuth" }))
+        .toThrow("guided_inspection_cursor_invalid");
+      expect(listGuidedEvidenceAccess(db, assignmentId)).toEqual([]);
+      db.close();
+    }
+  );
+
+  test("commits assignment-wide evidence revision reset before throwing", async () => {
+    const fixture = await serviceDbWithPath(2);
+    vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
+    const created = createGuidedRequest(fixture.db, requestInput(selectionIds(2)));
+    const assignmentId = created.request.currentAssignmentId!;
+    const previousRevision = getGuidedAssignment(fixture.db, assignmentId)!.evidenceRevision;
+    inspectGuidedAssignment(fixture.db, { assignmentId, command: "masthead", limit: 1 });
+    fixture.db.prepare("UPDATE messages SET text_redacted = ? WHERE session_id = ?")
+      .run("Changed canonical evidence", "session:1");
+
+    expect(() => inspectGuidedAssignment(fixture.db, {
+      assignmentId,
+      command: "masthead",
+      query: "Changed"
+    })).toThrow("evidence_revision_changed");
+
+    const second = await openMastheadDatabase(fixture.databasePath);
+    const advanced = getGuidedAssignment(second, assignmentId)!;
+    expect(advanced.evidenceRevision).not.toBe(previousRevision);
+    expect(reviewGuidedAssignment(second, { assignmentId, command: "masthead" }).coverage)
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ accessedItems: 0, complete: false, evidenceRevision: advanced.evidenceRevision })
+      ]));
+    expect(listGuidedEvidenceAccess(second, assignmentId, previousRevision)).toHaveLength(1);
+    second.close();
+    fixture.db.close();
+  });
+
+  test("defensively resets when evidence changes after the page read", async () => {
+    const db = await serviceDb(2);
+    vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
+    const created = createGuidedRequest(db, requestInput(selectionIds(2)));
+    const assignmentId = created.request.currentAssignmentId!;
+    const previousRevision = getGuidedAssignment(db, assignmentId)!.evidenceRevision;
+    const originalPage = evidenceCatalog.getAuthoringEvidencePage;
+    vi.spyOn(evidenceCatalog, "getAuthoringEvidencePage").mockImplementation((database, query) => {
+      const page = originalPage(database, query);
+      database.prepare("UPDATE messages SET text_redacted = ? WHERE session_id = ?")
+        .run("Changed after page selection", "session:1");
+      return page;
+    });
+
+    expect(() => inspectGuidedAssignment(db, { assignmentId, command: "masthead", limit: 1 }))
+      .toThrow("evidence_revision_changed");
+    expect(getGuidedAssignment(db, assignmentId)!.evidenceRevision).not.toBe(previousRevision);
+    expect(listGuidedEvidenceAccess(db, assignmentId)).toEqual([]);
+    db.close();
+  });
+
+  test("keeps review read-only", async () => {
+    const db = await serviceDb(1);
+    vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
+    const created = createGuidedRequest(db, requestInput(selectionIds(1)));
+    const assignmentId = created.request.currentAssignmentId!;
+    const assignmentBefore = getGuidedAssignment(db, assignmentId);
+    const changesBefore = totalChanges(db);
+
+    reviewGuidedAssignment(db, { assignmentId, command: "masthead" });
+
+    expect(totalChanges(db)).toBe(changesBefore);
+    expect(getGuidedAssignment(db, assignmentId)).toEqual(assignmentBefore);
+    expect(listGuidedEvidenceAccess(db, assignmentId)).toEqual([]);
+    db.close();
+  });
+
+  test("hides stale draft findings after revision reset while preserving history", async () => {
+    const db = await serviceDb(1);
+    vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
+    const created = createGuidedRequest(db, requestInput(selectionIds(1)));
+    const assignmentId = created.request.currentAssignmentId!;
+    const assignment = getGuidedAssignment(db, assignmentId)!;
+    const draft = {
+      artifacts: [],
+      assignmentId,
+      bundleVersion: "workbench-authoring-v4",
+      evidenceRevision: assignment.evidenceRevision,
+      opportunityDispositions: [],
+      sessionEnrichments: []
+    };
+    db.prepare(
+      `INSERT INTO guided_authoring_draft_reviews
+       (assignment_id, revision, evidence_revision, draft_json, findings_json, accepted, created_at)
+       VALUES (?, 1, ?, ?, ?, 0, ?)`
+    ).run(
+      assignmentId,
+      assignment.evidenceRevision,
+      JSON.stringify(draft),
+      JSON.stringify([{ code: "revise", message: "Revise it", severity: "error" }]),
+      "2026-07-19T12:00:00.000Z"
+    );
+    db.prepare(
+      "UPDATE guided_authoring_assignments SET status = 'needs_revision', current_draft_revision = 1 WHERE assignment_id = ?"
+    ).run(assignmentId);
+    db.prepare("UPDATE messages SET text_redacted = ? WHERE session_id = ?").run("New evidence", "session:0");
+
+    expect(() => inspectGuidedAssignment(db, { assignmentId, command: "masthead" }))
+      .toThrow("evidence_revision_changed");
+    const reviewed = reviewGuidedAssignment(db, { assignmentId, command: "masthead" });
+    expect(reviewed).toMatchObject({
+      editorialQuestions: GUIDED_EVIDENCE_QUESTIONS,
+      findings: [],
+      nextAction: { kind: "inspect" }
+    });
+    expect(reviewed).not.toHaveProperty("draft");
+    expect(reviewed).not.toHaveProperty("draftRevision");
+    expect(getGuidedAssignment(db, assignmentId)).toMatchObject({ currentDraftRevision: 1, findings: [] });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM guided_authoring_draft_reviews WHERE assignment_id = ?")
+      .get(assignmentId)).toEqual({ count: 1 });
+    db.close();
+  });
+
+  test("serializes two WAL inspectors before page selection", async () => {
+    const fixture = await serviceDbWithPath(1);
+    vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
+    const created = createGuidedRequest(fixture.db, requestInput(selectionIds(1)));
+    const assignmentId = created.request.currentAssignmentId!;
+    const state = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * 3));
+    const workerUrl = new URL("./fixtures/guidedInspectionWalWorker.mjs", import.meta.url);
+    const workerA = new Worker(workerUrl, {
+      workerData: {
+        assignmentId,
+        databasePath: fixture.databasePath,
+        pauseAfterSelection: true,
+        releaseIndex: 1,
+        shared: state.buffer
+      }
+    });
+    const workers = [workerA];
+    try {
+      await waitForWorkerMessage(workerA, "page_selected", 2_000);
+      const workerB = new Worker(workerUrl, {
+        workerData: {
+          assignmentId,
+          databasePath: fixture.databasePath,
+          pauseAfterSelection: false,
+          releaseIndex: 2,
+          shared: state.buffer
+        }
+      });
+      workers.push(workerB);
+      await waitForWorkerMessage(workerB, "transaction_attempted", 2_000);
+      await expect(waitForWorkerMessage(workerB, "page_selected", 100)).rejects.toThrow("bounded_timeout");
+
+      const committedA = waitForWorkerMessage(workerA, "committed", 2_000);
+      const selectedB = waitForWorkerMessage(workerB, "page_selected", 2_000);
+      const committedB = waitForWorkerMessage(workerB, "committed", 2_000);
+      Atomics.store(state, 1, 1);
+      Atomics.notify(state, 1);
+      const [first, secondSelected, second] = await Promise.all([committedA, selectedB, committedB]);
+
+      expect(first.kind).toBe("committed");
+      expect(secondSelected.kind).toBe("page_selected");
+      expect(first.result.evidence.items[0]?.itemId).not.toBe(second.result.evidence.items[0]?.itemId);
+      expect(second.result.coverage[0]?.accessedItems).toBe(2);
+    } finally {
+      await Promise.all(workers.map((worker) => worker.terminate()));
+      fixture.db.close();
+    }
+  });
+
+  test("refuses nested inspection and locked evidence revision resets", async () => {
+    const db = await serviceDb(1);
+    vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
+    const created = createGuidedRequest(db, requestInput(selectionIds(1)));
+    const assignmentId = created.request.currentAssignmentId!;
+
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      expect(() => inspectGuidedAssignment(db, { assignmentId, command: "masthead" }))
+        .toThrow("guided_inspection_requires_top_level_transaction");
+    } finally {
+      db.exec("ROLLBACK");
+    }
+
+    for (const [status, nextKind] of [["staged_canary", "await_operator"], ["ready_to_finish", "finish"]] as const) {
+      db.prepare("UPDATE guided_authoring_assignments SET status = ? WHERE assignment_id = ?").run(status, assignmentId);
+      db.prepare("UPDATE messages SET text_redacted = text_redacted || ? WHERE session_id = ?")
+        .run(` ${status}`, "session:0");
+      expect(() => inspectGuidedAssignment(db, { assignmentId, command: "masthead" }))
+        .toThrow("guided_assignment_evidence_locked");
+      expect(reviewGuidedAssignment(db, { assignmentId, command: "masthead" }).nextAction.kind).toBe(nextKind);
+    }
+    db.prepare("UPDATE guided_authoring_assignments SET status = 'completed' WHERE assignment_id = ?").run(assignmentId);
+    const completedReview = reviewGuidedAssignment(db, { assignmentId, command: "masthead" });
+    db.prepare("UPDATE messages SET text_redacted = text_redacted || ' completed' WHERE session_id = ?").run("session:0");
+    expect(() => inspectGuidedAssignment(db, { assignmentId, command: "masthead" }))
+      .toThrow("guided_assignment_evidence_locked");
+    expect(reviewGuidedAssignment(db, { assignmentId, command: "masthead" })).toEqual(completedReview);
+    db.close();
+  });
+
+  test.each([
+    ["staged_canary", "await_operator"],
+    ["ready_to_finish", "finish"]
+  ] as const)("keeps coherent historical coverage for stale locked %s review", async (status, nextKind) => {
+    const db = await serviceDb(1);
+    vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
+    const created = createGuidedRequest(db, requestInput(selectionIds(1)));
+    const assignmentId = created.request.currentAssignmentId!;
+    inspectGuidedAssignment(db, { assignmentId, command: "masthead", limit: 100 });
+    db.prepare("UPDATE guided_authoring_assignments SET status = ? WHERE assignment_id = ?").run(status, assignmentId);
+    const historical = reviewGuidedAssignment(db, { assignmentId, command: "masthead" });
+    db.prepare(
+      `INSERT INTO messages
+       (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence)
+       VALUES (?, ?, 'user', ?, ?, ?, '{}', 'authoritative')`
+    ).run("message:later", "session:0", "Later evidence", "hash:later", "2026-07-19T13:00:00.000Z");
+
+    const stale = reviewGuidedAssignment(db, { assignmentId, command: "masthead" });
+    expect(stale.coverage).toEqual(historical.coverage);
+    expect(stale.coverage[0]).toMatchObject({ accessedItems: 4, complete: true, totalItems: 4 });
+    expect(stale.nextAction.kind).toBe(nextKind);
+    db.close();
+  });
 });
 
 function selection(count: number): GuidedPlanningSession[] {
@@ -412,4 +778,29 @@ function guidedCounts(db: MastheadDatabase): number[] {
 
 function totalChanges(db: MastheadDatabase): number {
   return Number((db.prepare("SELECT total_changes() AS count").get() as { count: number }).count);
+}
+
+function waitForWorkerMessage(
+  worker: Worker,
+  kind: string,
+  timeoutMs: number
+): Promise<Record<string, any>> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      worker.off("message", onMessage);
+      reject(new Error("bounded_timeout"));
+    }, timeoutMs);
+    const onMessage = (message: Record<string, any>) => {
+      if (message.kind === "failed") {
+        clearTimeout(timeout);
+        worker.off("message", onMessage);
+        reject(new Error(message.message));
+      } else if (message.kind === kind) {
+        clearTimeout(timeout);
+        worker.off("message", onMessage);
+        resolve(message);
+      }
+    };
+    worker.on("message", onMessage);
+  });
 }

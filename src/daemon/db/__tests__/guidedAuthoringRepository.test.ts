@@ -8,6 +8,8 @@ import { seedSession as seedCanonicalSession } from "./sessionTestHelpers.ts";
 import {
   completeGuidedAssignment,
   completeGuidedAssignmentInTransaction,
+  advanceGuidedAssignmentEvidenceRevision,
+  advanceGuidedAssignmentEvidenceRevisionInTransaction,
   createGuidedAuthoringRequest,
   createGuidedAuthoringRequestInTransaction,
   getGuidedAssignment,
@@ -85,7 +87,7 @@ describe("guided authoring repository", () => {
     }
   });
 
-  test("records evidence refs idempotently and preserves revisions", async () => {
+  test("records current-revision evidence refs idempotently", async () => {
     const db = await createdDb();
     const access = {
       assignmentId: "assignment:one:0",
@@ -97,10 +99,94 @@ describe("guided authoring repository", () => {
 
     recordGuidedEvidenceAccess(db, access);
     recordGuidedEvidenceAccess(db, access);
-    recordGuidedEvidenceAccess(db, { ...access, evidenceRevision: "evidence:one:0:revised" });
+    expect(() => recordGuidedEvidenceAccess(db, { ...access, evidenceRevision: "evidence:one:0:revised" }))
+      .toThrow("guided_evidence_revision_mismatch");
 
-    expect(listGuidedEvidenceAccess(db, access.assignmentId)).toHaveLength(2);
+    expect(listGuidedEvidenceAccess(db, access.assignmentId)).toHaveLength(1);
     expect(listGuidedEvidenceAccess(db, access.assignmentId, access.evidenceRevision)).toHaveLength(1);
+  });
+
+  test("advances evidence revision by compare-and-swap and preserves audit rows", async () => {
+    const db = await createdDb();
+    for (const [revision, accepted] of [[1, 1], [2, 0]] as const) {
+      db.prepare(
+        `INSERT INTO guided_authoring_draft_reviews
+         (assignment_id, revision, evidence_revision, draft_json, findings_json, accepted, created_at)
+         VALUES (?, ?, ?, ?, '[]', ?, ?)`
+      ).run(
+        "assignment:one:0",
+        revision,
+        "evidence:one:0",
+        JSON.stringify(draft(revision)),
+        accepted,
+        `2026-07-19T12:0${revision}:00.000Z`
+      );
+    }
+    db.prepare(
+      `UPDATE guided_authoring_assignments
+       SET status = 'needs_revision', current_draft_revision = 2, accepted_draft_revision = 1
+       WHERE assignment_id = ?`
+    ).run("assignment:one:0");
+    recordGuidedEvidenceAccess(db, {
+      assignmentId: "assignment:one:0",
+      evidenceRefs: ["message:a:1"],
+      evidenceRevision: "evidence:one:0",
+      requestId: "request:one",
+      sessionId: "session:0"
+    });
+
+    const advanced = advanceGuidedAssignmentEvidenceRevision(db, {
+      assignmentId: "assignment:one:0",
+      expectedEvidenceRevision: "evidence:one:0",
+      nextEvidenceRevision: "evidence:one:0:revised"
+    });
+
+    expect(advanced).toMatchObject({
+      currentDraftRevision: 2,
+      evidenceRevision: "evidence:one:0:revised",
+      status: "investigating"
+    });
+    expect(advanced).not.toHaveProperty("acceptedDraftRevision");
+    expect(listGuidedEvidenceAccess(db, "assignment:one:0", "evidence:one:0")).toHaveLength(1);
+    expect(listGuidedDraftReviews(db, "assignment:one:0")).toHaveLength(2);
+    expect(() => advanceGuidedAssignmentEvidenceRevision(db, {
+      assignmentId: "assignment:one:0",
+      expectedEvidenceRevision: "evidence:one:0",
+      nextEvidenceRevision: "evidence:one:0:newer"
+    })).toThrow("guided_evidence_revision_conflict");
+  });
+
+  test.each(["staged_canary", "ready_to_finish", "completed"] as const)(
+    "locks evidence revision advancement in %s",
+    async (status) => {
+      const db = await createdDb();
+      db.prepare("UPDATE guided_authoring_assignments SET status = ? WHERE assignment_id = ?")
+        .run(status, "assignment:one:0");
+      const before = getGuidedAssignment(db, "assignment:one:0");
+
+      expect(() => advanceGuidedAssignmentEvidenceRevision(db, {
+        assignmentId: "assignment:one:0",
+        expectedEvidenceRevision: "evidence:one:0",
+        nextEvidenceRevision: "evidence:one:0:revised"
+      })).toThrow("guided_assignment_evidence_locked");
+      expect(getGuidedAssignment(db, "assignment:one:0")).toEqual(before);
+    }
+  );
+
+  test("composes evidence revision advancement under an outer rollback", async () => {
+    const db = await createdDb();
+    const before = getGuidedAssignment(db, "assignment:one:0");
+
+    expect(() => withImmediateTransaction(db, () => {
+      advanceGuidedAssignmentEvidenceRevisionInTransaction(db, {
+        assignmentId: "assignment:one:0",
+        expectedEvidenceRevision: "evidence:one:0",
+        nextEvidenceRevision: "evidence:one:0:revised"
+      });
+      throw new Error("injected_after_revision_advance");
+    })).toThrow("injected_after_revision_advance");
+
+    expect(getGuidedAssignment(db, "assignment:one:0")).toEqual(before);
   });
 
   test("rejects evidence for a session outside the assignment", async () => {
