@@ -1,14 +1,24 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import * as transcriptRepository from "../../../daemon/db/sessionTranscriptRepository.ts";
 import { seedSession } from "../../../daemon/db/__tests__/sessionTestHelpers.ts";
 import { migrateDatabase } from "../../../daemon/db/schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../../../daemon/db/sqlite.ts";
 import {
+  oauthFailureFixedAndVerified,
+  repeatedErrorPartOne,
+  repeatedErrorPartTwo,
+  seedDurableArtifactCorpus
+} from "../__fixtures__/durableArtifactCorpus.ts";
+import {
   authoringEvidenceRevision,
+  getAuthoringEvidenceSnapshot,
   getAuthoringEvidenceManifest,
-  getAuthoringEvidencePage
+  getAuthoringEvidencePage,
+  guidedAuthoringEvidenceRevision,
+  guidedAuthoringEvidenceRevisionFromInputs
 } from "../evidenceCatalog.ts";
 
 const tempDirs: string[] = [];
@@ -19,6 +29,166 @@ afterEach(async () => {
 });
 
 describe("authoring evidence catalog", () => {
+  test("preserves durable-corpus pre-V4 evidence revisions byte for byte", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+
+    expect(authoringEvidenceRevision(db, [oauthFailureFixedAndVerified.id])).toBe(
+      "sha256:d7e792f32fa9cfa0b3bc0f20dcdf7192fe0a68dfce0a5207e3e6adb81a1c9ca4"
+    );
+    expect(authoringEvidenceRevision(db, [
+      repeatedErrorPartOne.id,
+      repeatedErrorPartTwo.id
+    ])).toBe("sha256:b5cc607d223255e323b622dfa90b065605a0ffe6cfa84aaa02fc2d8625ea043a");
+    db.close();
+  });
+
+  test("preserves exact legacy zero, single, and multi-session revisions", async () => {
+    const db = await testDb();
+    seedOneMessageSession(db, "session:a");
+    seedMixedSession(db, "session:b");
+
+    const cases = [
+      { ids: [], revision: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" },
+      { ids: ["session:a"], revision: "sha256:db1a5457c71783a4b5c33438b305b98911c0875d8ad14d7e617d972f655ebd80" },
+      { ids: ["session:b", "session:a"], revision: "sha256:fe69f4e6cdba0ff68d0e0db58514cb15e404e814907435df22d0cd91c722ed29" }
+    ];
+    for (const { ids, revision } of cases) {
+      expect(authoringEvidenceRevision(db, ids)).toBe(revision);
+      expect(getAuthoringEvidenceManifest(db, ids).evidenceRevision).toBe(revision);
+    }
+    expect(authoringEvidenceRevision(db, ["session:a", "", "session:a"])).toBe(cases[1]!.revision);
+    expect(authoringEvidenceRevision(db, ["session:a", "session:b"])).toBe(cases[2]!.revision);
+    expect(getAuthoringEvidenceManifest(db, ["session:a", "", "session:a"]).sessions.map(({ sessionId }) => sessionId))
+      .toEqual(["session:a"]);
+    db.close();
+  });
+
+  test("keeps legacy manifest and revision paths independent of V4 guided composition", () => {
+    expect(getAuthoringEvidenceManifest.toString()).not.toContain("guidedAuthoringEvidenceRevision");
+    expect(authoringEvidenceRevision.toString()).not.toContain("guidedAuthoringEvidenceRevision");
+  });
+
+  test("takes one strict snapshot traversal per lexicographically ordered session", async () => {
+    const db = await testDb();
+    seedOneMessageSession(db, "session:b");
+    seedOneMessageSession(db, "session:a");
+    const traversal = vi.spyOn(transcriptRepository, "iterateSessionTranscriptItems");
+
+    const snapshot = getAuthoringEvidenceSnapshot(db, ["session:b", "session:a"]);
+
+    expect(snapshot.sessions.map(({ revisionInput }) => revisionInput.sessionId)).toEqual(["session:a", "session:b"]);
+    expect(snapshot.manifest.sessions.map(({ sessionId }) => sessionId)).toEqual(["session:a", "session:b"]);
+    expect(traversal).toHaveBeenCalledTimes(2);
+    expect(traversal.mock.calls.map(([, query]) => query)).toEqual([
+      { order: "asc", sessionId: "session:a" },
+      { order: "asc", sessionId: "session:b" }
+    ]);
+    traversal.mockClear();
+    expect(guidedAuthoringEvidenceRevision(db, ["session:b", "session:a"])).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(traversal).toHaveBeenCalledTimes(2);
+    expect(traversal.mock.calls.map(([, query]) => query)).toEqual([
+      { order: "asc", sessionId: "session:a" },
+      { order: "asc", sessionId: "session:b" }
+    ]);
+    traversal.mockRestore();
+    db.close();
+  });
+
+  test.each([
+    { ids: [""], message: "blank" },
+    { ids: ["   "], message: "blank" },
+    { ids: ["session:a", "session:a"], message: "duplicate" }
+  ])("rejects strict snapshot membership: $message", async ({ ids, message }) => {
+    const db = await testDb();
+    expect(() => getAuthoringEvidenceSnapshot(db, ids)).toThrow(message);
+    expect(() => guidedAuthoringEvidenceRevision(db, ids)).toThrow(message);
+    db.close();
+  });
+
+  test("composes stable guided revisions from captured inputs after the database closes", async () => {
+    const db = await testDb();
+    seedOneMessageSession(db, "session:b");
+    seedMixedSession(db, "session:a");
+    const snapshot = getAuthoringEvidenceSnapshot(db, ["session:b", "session:a"]);
+    const inputs = snapshot.sessions.map(({ revisionInput }) => revisionInput);
+    expect(inputs).toEqual([
+      { sessionId: "session:a", sessionDigest: authoringEvidenceRevision(db, ["session:a"]) },
+      { sessionId: "session:b", sessionDigest: authoringEvidenceRevision(db, ["session:b"]) }
+    ]);
+    const dbBacked = guidedAuthoringEvidenceRevision(db, ["session:b", "session:a"]);
+    db.close();
+
+    expect(guidedAuthoringEvidenceRevisionFromInputs(inputs)).toBe(dbBacked);
+    expect(guidedAuthoringEvidenceRevisionFromInputs([...inputs].reverse())).toBe(dbBacked);
+  });
+
+  test.each([
+    { inputs: [], message: "empty" },
+    { inputs: [{ sessionId: "", sessionDigest: `sha256:${"a".repeat(64)}` }], message: "blank" },
+    { inputs: [{ sessionId: "   ", sessionDigest: `sha256:${"a".repeat(64)}` }], message: "blank" },
+    {
+      inputs: [
+        { sessionId: "session:a", sessionDigest: `sha256:${"a".repeat(64)}` },
+        { sessionId: "session:a", sessionDigest: `sha256:${"b".repeat(64)}` }
+      ],
+      message: "duplicate"
+    },
+    { inputs: [{ sessionId: "session:a", sessionDigest: "sha256:ABC" }], message: "digest" },
+    { inputs: [{ sessionId: "session:a", sessionDigest: "a".repeat(64) }], message: "digest" }
+  ])("rejects invalid guided revision input: $message", ({ inputs, message }) => {
+    expect(() => guidedAuthoringEvidenceRevisionFromInputs(inputs as never)).toThrow(message);
+  });
+
+  test("changes both legacy and guided revisions when one canonical field changes", async () => {
+    const db = await testDb();
+    seedMixedSession(db, "session:changed-field");
+    const legacyBefore = authoringEvidenceRevision(db, ["session:changed-field"]);
+    const guidedBefore = guidedAuthoringEvidenceRevision(db, ["session:changed-field"]);
+
+    db.prepare("UPDATE runtime_signals SET details_json = ? WHERE session_id = ?").run(
+      JSON.stringify({ phase: "finish", receipt: "changed" }),
+      "session:changed-field"
+    );
+
+    expect(authoringEvidenceRevision(db, ["session:changed-field"])).not.toBe(legacyBefore);
+    expect(guidedAuthoringEvidenceRevision(db, ["session:changed-field"])).not.toBe(guidedBefore);
+    db.close();
+  });
+
+  test("marks only semantic non-low-value evidence as usable", async () => {
+    const db = await testDb();
+    seedOneMessageSession(db, "session:usable");
+    seedOneMessageSession(db, "session:low-value");
+    seedOneMessageSession(db, "session:redaction-wrapper-only");
+    db.prepare("UPDATE messages SET text_redacted = ? WHERE session_id = ?").run(
+      "<skill>Internal authoring instructions only.</skill>",
+      "session:low-value"
+    );
+    db.prepare(
+      "UPDATE runtimes SET runtime_kind = 'codex' WHERE runtime_id = (SELECT runtime_id FROM sessions WHERE session_id = ?)"
+    ).run("session:low-value");
+    db.prepare("UPDATE messages SET text_redacted = ? WHERE session_id = ?").run(
+      "Authorization: Bearer [SECRET:bearer_token]",
+      "session:redaction-wrapper-only"
+    );
+
+    const snapshot = getAuthoringEvidenceSnapshot(db, [
+      "session:low-value",
+      "session:redaction-wrapper-only",
+      "session:usable"
+    ]);
+    expect(snapshot.sessions.map(({ revisionInput, usableCanonicalEvidence }) => ({
+      sessionId: revisionInput.sessionId,
+      usableCanonicalEvidence
+    }))).toEqual([
+      { sessionId: "session:low-value", usableCanonicalEvidence: false },
+      { sessionId: "session:redaction-wrapper-only", usableCanonicalEvidence: false },
+      { sessionId: "session:usable", usableCanonicalEvidence: true }
+    ]);
+    db.close();
+  });
+
   test("pages every redacted item and can retrieve the final outcome first", async () => {
     const db = await testDb();
     seedLongSession(db, "session:long", 500);

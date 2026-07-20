@@ -1735,6 +1735,65 @@ describe("artifact candidate discovery", () => {
     db.close();
   });
 
+  test("exposes every strong-signature member to guided planning while V2 remains capped", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+    const selected = [
+      repeatedErrorPartOne.id,
+      repeatedErrorPartTwo.id,
+      ...seedAdditionalStrongSignatureSessions(db, 11)
+    ];
+    const normalized = [...selected].sort();
+
+    const suggestion = getArtifactSuggestions(db, selected).find(
+      ({ signatureKey }) => signatureKey === "error:ssh:codex-command-not-found"
+    )!;
+    expect(suggestion.provenanceSessionIds).toEqual(normalized);
+    expect(suggestion.provenanceSessionIds).toHaveLength(13);
+    expect(
+      getArtifactSuggestions(db, [...selected].reverse()).find(
+        ({ signatureKey }) => signatureKey === "error:ssh:codex-command-not-found"
+      )?.suggestionId
+    ).toBe(suggestion.suggestionId);
+
+    const persisted = discoverArtifactCandidates(db, selected).find(
+      ({ signatureKey }) => signatureKey === "error:ssh:codex-command-not-found"
+    )!;
+    expect(persisted.provenanceSessionIds).toEqual(normalized.slice(0, 12));
+    expect(ARTIFACT_CANDIDATE_DETECTOR_REVISION).toBe(4);
+    db.close();
+  });
+
+  test("preserves automatic and proposed V2 candidate identities byte for byte", async () => {
+    const automaticDb = await testDb();
+    seedDurableArtifactCorpus(automaticDb);
+    expect(discoverArtifactCandidates(automaticDb, [oauthFailureFixedAndVerified.id])[0]?.candidateId).toBe(
+      "artifact-candidate:31c9f759a515ee549ed6ddcbe6b6e26c"
+    );
+    expect(
+      discoverArtifactCandidates(automaticDb, [repeatedErrorPartOne.id, repeatedErrorPartTwo.id])
+        .find(({ kind }) => kind === "runbook")?.candidateId
+    ).toBe("artifact-candidate:7d2240aa5ff15eaa0f34100e994745ac");
+    automaticDb.close();
+
+    const proposalDb = await testDb();
+    seedDurableArtifactCorpus(proposalDb);
+    expect(proposeArtifactCandidate(proposalDb, {
+      kind: "runbook",
+      provenanceSessionIds: [repeatedErrorPartOne.id, repeatedErrorPartTwo.id],
+      seedSessionId: repeatedErrorPartOne.id,
+      signalEvidenceRefs: [
+        "tool_result:repeated-error:1:failure",
+        "file:repeated-error:1:change",
+        "checkpoint:repeated-error:1:verified",
+        "tool_result:repeated-error:2:failure"
+      ],
+      signalSummary: "A verified chain is joined by the exact signature trigger from both sessions.",
+      signatureKey: "error:ssh:codex-command-not-found"
+    }).candidateId).toBe("artifact-candidate:9c9e4b572c4fab19b825ba1b8c9e1432");
+    proposalDb.close();
+  });
+
   test("does not refill a capped signature group from dirty unrescanned stored members", async () => {
     const db = await testDb();
     seedDurableArtifactCorpus(db);
