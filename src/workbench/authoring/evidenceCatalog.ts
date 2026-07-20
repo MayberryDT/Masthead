@@ -11,6 +11,7 @@ import {
   type SessionTranscriptKindFilter
 } from "../../daemon/db/sessionTranscriptRepository.ts";
 import type { MastheadDatabase } from "../../daemon/db/sqlite.ts";
+import type { WorkbenchValidationEvidence } from "../types.ts";
 
 const transcriptKinds: SessionTranscriptKind[] = [
   "message",
@@ -97,6 +98,34 @@ export function getAuthoringEvidencePage(
     sessionId: query.sessionId,
     total: result.total
   };
+}
+
+export function getAuthoringValidationEvidenceByRef(
+  db: MastheadDatabase,
+  sessionIds: string[]
+): Map<string, WorkbenchValidationEvidence> {
+  const evidence = new Map<string, WorkbenchValidationEvidence>();
+  for (const sessionId of sessionIds) {
+    for (const item of iterateSessionTranscriptItems(db, { order: "asc", sessionId })) {
+      evidence.set(item.itemId, {
+        exitCode: item.exitCode,
+        kind: item.kind,
+        label: item.label,
+        lowValue: item.lowValue ?? false,
+        observedAt: item.observedAt,
+        role: item.role,
+        sessionId,
+        status: item.status,
+        text: item.kind === "file_effect"
+          ? `${item.label} ${item.text}`
+          : item.kind === "message"
+            ? (item.narrativeText ?? item.text)
+            : item.text,
+        toolName: item.toolName
+      });
+    }
+  }
+  return evidence;
 }
 
 export function authoringEvidenceRevision(db: MastheadDatabase, sessionIds: string[]): string {

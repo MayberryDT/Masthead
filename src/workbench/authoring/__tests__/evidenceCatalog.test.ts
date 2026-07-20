@@ -14,6 +14,7 @@ import {
 } from "../__fixtures__/durableArtifactCorpus.ts";
 import {
   authoringEvidenceRevision,
+  getAuthoringValidationEvidenceByRef,
   getAuthoringEvidenceSnapshot,
   getAuthoringEvidenceManifest,
   getAuthoringEvidencePage,
@@ -431,6 +432,76 @@ describe("authoring evidence catalog", () => {
         sessionId: "session:complete-canonical-fields"
       }).items.map((item) => item.kind)
     ).toEqual(["tool_call"]);
+    db.close();
+  });
+
+  test("projects canonical evidence into the legacy validation shape for every evidence kind", async () => {
+    const db = await testDb();
+    seedMixedSession(db, "session:validation");
+
+    const evidence = getAuthoringValidationEvidenceByRef(db, ["session:validation"]);
+
+    expect([...evidence.entries()]).toEqual([
+      ["message:session:validation:user", {
+        exitCode: undefined,
+        kind: "message",
+        label: "user",
+        lowValue: false,
+        observedAt: "2026-07-10T13:00:00.000Z",
+        role: "user",
+        sessionId: "session:validation",
+        status: undefined,
+        text: "Implement the evidence catalog.",
+        toolName: undefined
+      }],
+      ["message:session:validation:assistant", {
+        exitCode: undefined,
+        kind: "message",
+        label: "assistant",
+        lowValue: false,
+        observedAt: "2026-07-10T13:01:00.000Z",
+        role: "assistant",
+        sessionId: "session:validation",
+        status: undefined,
+        text: "Implementation complete.",
+        toolName: undefined
+      }],
+      ["tool_call:session:validation:tool", expect.objectContaining({
+        kind: "tool_call",
+        label: "shell",
+        lowValue: true,
+        sessionId: "session:validation",
+        toolName: "shell"
+      })],
+      ["tool_result:session:validation:result", expect.objectContaining({
+        exitCode: 0,
+        kind: "tool_result",
+        lowValue: false,
+        sessionId: "session:validation",
+        status: "succeeded",
+        text: "Tests passed."
+      })],
+      ["file:session:validation:file", expect.objectContaining({
+        kind: "file_effect",
+        label: "modified",
+        lowValue: false,
+        sessionId: "session:validation",
+        text: expect.stringMatching(/^modified .*src\/example\.ts/)
+      })],
+      ["checkpoint:session:validation:checkpoint", expect.objectContaining({
+        kind: "checkpoint",
+        label: "verification",
+        lowValue: false,
+        sessionId: "session:validation",
+        text: "Focused tests passed."
+      })],
+      ["signal:session:validation:signal", expect.objectContaining({
+        kind: "runtime_signal",
+        label: "completed",
+        lowValue: false,
+        sessionId: "session:validation"
+      })]
+    ]);
     db.close();
   });
 

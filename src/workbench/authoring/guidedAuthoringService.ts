@@ -4,6 +4,7 @@ import {
   createGuidedAuthoringRequestInTransaction,
   advanceGuidedAssignmentEvidenceRevisionInTransaction,
   getGuidedAssignment,
+  getGuidedAssignments,
   getGuidedAuthoringRequest,
   listGuidedDraftReviews,
   listGuidedEvidenceAccess,
@@ -17,6 +18,7 @@ import { type MastheadDatabase, withImmediateTransaction } from "../../daemon/db
 import {
   GUIDED_AUTHORING_POLICY_VERSION,
   type GuidedAuthoringAssignmentDto,
+  type GuidedAuthoringBundleV4,
   type GuidedAuthoringExpectedIdentity,
   type GuidedAuthoringReviewDto,
   type GuidedEvidenceCoverageDto,
@@ -36,6 +38,11 @@ import {
   planGuidedAssignments
 } from "./guidedAuthoringPolicy.ts";
 import { assertGuidedSelectionCompileReady } from "./guidedAuthoringPreflight.ts";
+import type {
+  GuidedAcceptedDraftForQuality,
+  GuidedAuthoringValidationInput,
+  GuidedQualityOpportunity
+} from "./guidedAuthoringQuality.ts";
 
 export type CreateGuidedRequestInput = {
   actorId: string;
@@ -167,6 +174,78 @@ export function startGuidedAssignment(
       kind: "inspect",
       reason: "Every session still has unread canonical evidence."
     }
+  };
+}
+
+export function buildGuidedAuthoringValidationInput(
+  db: MastheadDatabase,
+  input: {
+    trustedAssignmentId: string;
+    loadedAssignment: GuidedAuthoringAssignmentDto;
+    bundle: GuidedAuthoringBundleV4;
+  }
+): GuidedAuthoringValidationInput {
+  const assignment = input.loadedAssignment;
+  if (input.trustedAssignmentId !== assignment.assignmentId) {
+    throw new Error("guided_assignment_identity_invariant");
+  }
+
+  const canonicalDossiersBySession = new Map<string, SessionDossierDto>();
+  for (const sessionId of assignment.sessionIds) {
+    const dossier = getSessionDossier(db, sessionId);
+    if (!dossier) throw new Error(`session_not_found:${sessionId}`);
+    canonicalDossiersBySession.set(sessionId, dossier);
+  }
+
+  const persistedOpportunities = new Map(
+    listGuidedOpportunities(db, assignment.requestId).map((opportunity) => [opportunity.opportunityId, opportunity])
+  );
+  const opportunities: GuidedQualityOpportunity[] = assignment.opportunityIds.map((opportunityId) => {
+    const opportunity = persistedOpportunities.get(opportunityId);
+    if (!opportunity) throw new Error(`guided_opportunity_invariant:${opportunityId}`);
+    return {
+      evidenceRefs: opportunity.evidenceRefs,
+      opportunityId: opportunity.opportunityId,
+      provenanceSessionIds: opportunity.provenanceSessionIds,
+      signalStrength: opportunity.signalStrength,
+      suggestedKind: opportunity.suggestedKind,
+      summary: opportunity.summary
+    };
+  });
+
+  const requestAcceptedDrafts: GuidedAcceptedDraftForQuality[] = [];
+  for (const otherAssignment of getGuidedAssignments(db, assignment.requestId)) {
+    if (
+      otherAssignment.assignmentId === assignment.assignmentId ||
+      otherAssignment.acceptedDraftRevision === undefined
+    ) continue;
+    const acceptedReview = listGuidedDraftReviews(db, otherAssignment.assignmentId)
+      .find(({ revision }) => revision === otherAssignment.acceptedDraftRevision);
+    if (!acceptedReview || !acceptedReview.accepted) {
+      throw new Error(`guided_accepted_draft_revision_invariant:${otherAssignment.assignmentId}`);
+    }
+    requestAcceptedDrafts.push({
+      assignmentId: otherAssignment.assignmentId,
+      draft: acceptedReview.draft,
+      draftRevision: acceptedReview.revision,
+      evidenceRevision: acceptedReview.evidenceRevision
+    });
+  }
+
+  return {
+    assignment: {
+      assignmentId: assignment.assignmentId,
+      evidenceRevision: assignment.evidenceRevision,
+      opportunityIds: assignment.opportunityIds,
+      requestId: assignment.requestId,
+      sessionIds: assignment.sessionIds
+    },
+    bundle: input.bundle,
+    canonicalDossiersBySession,
+    coverage: guidedCoverageState(db, assignment, assignment.evidenceRevision).coverage,
+    evidenceByRef: evidenceCatalog.getAuthoringValidationEvidenceByRef(db, assignment.sessionIds),
+    opportunities,
+    requestAcceptedDrafts
   };
 }
 

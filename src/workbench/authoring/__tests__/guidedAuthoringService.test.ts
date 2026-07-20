@@ -5,6 +5,7 @@ import { once } from "node:events";
 import { Worker } from "node:worker_threads";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { WorkbenchArtifactSuggestionDto } from "../../../shared/workbenchAuthoring.ts";
+import type { GuidedAuthoringAssignmentDto, GuidedAuthoringBundleV4 } from "../../../shared/guidedAuthoring.ts";
 import {
   getGuidedAssignment,
   getGuidedAssignments,
@@ -26,6 +27,7 @@ import {
 } from "../guidedAuthoringPolicy.ts";
 import { assertGuidedSelectionCompileReady } from "../guidedAuthoringPreflight.ts";
 import {
+  buildGuidedAuthoringValidationInput,
   createGuidedRequest,
   inspectGuidedAssignment,
   reviewGuidedAssignment,
@@ -328,6 +330,116 @@ describe("guided authoring service", () => {
       command: `masthead workbench author inspect --assignment ${started.assignment.assignmentId} --json`,
       reason: "Every session still has unread canonical evidence."
     });
+    db.close();
+  });
+
+  test("builds validation input from the trusted persisted assignment while preserving bundle mismatches", async () => {
+    const db = await serviceDb(16);
+    const firstOpportunity = suggestion(["session:0"], "adr", "first-persisted", ["message:session:0:seed-user"]);
+    const secondOpportunity = suggestion(["session:1"], "runbook", "second-persisted", ["message:session:1:seed-user"]);
+    const created = createGuidedRequest(db, requestInput(selectionIds(16), [secondOpportunity, firstOpportunity]));
+    const assignment = getGuidedAssignment(db, created.request.currentAssignmentId!)!;
+    const bundle = bundleFor(assignment, {
+      assignmentId: "assignment:submitted-wrong",
+      evidenceRevision: "sha256:submitted-wrong"
+    });
+
+    const input = buildGuidedAuthoringValidationInput(db, {
+      bundle,
+      loadedAssignment: assignment,
+      trustedAssignmentId: assignment.assignmentId
+    });
+
+    expect(input.bundle).toBe(bundle);
+    expect(input.assignment).toEqual({
+      assignmentId: assignment.assignmentId,
+      evidenceRevision: assignment.evidenceRevision,
+      opportunityIds: assignment.opportunityIds,
+      requestId: assignment.requestId,
+      sessionIds: assignment.sessionIds
+    });
+    expect([...input.canonicalDossiersBySession.keys()]).toEqual(assignment.sessionIds);
+    expect(new Set([...input.evidenceByRef.values()].map(({ sessionId }) => sessionId)))
+      .toEqual(new Set(assignment.sessionIds));
+    expect(input.coverage).toEqual(assignment.sessionIds.map((sessionId) => ({
+      accessedItems: 0,
+      complete: false,
+      evidenceRevision: assignment.evidenceRevision,
+      sessionId,
+      totalItems: 4
+    })));
+    const opportunitiesById = new Map(listGuidedOpportunities(db, assignment.requestId)
+      .map((opportunity) => [opportunity.opportunityId, opportunity]));
+    expect(input.opportunities).toEqual(assignment.opportunityIds.map((opportunityId) => {
+      const opportunity = opportunitiesById.get(opportunityId)!;
+      return {
+        evidenceRefs: opportunity.evidenceRefs,
+        opportunityId,
+        provenanceSessionIds: opportunity.provenanceSessionIds,
+        signalStrength: opportunity.signalStrength,
+        suggestedKind: opportunity.suggestedKind,
+        summary: opportunity.summary
+      };
+    }));
+    db.close();
+  });
+
+  test("selects only each other assignment's exact accepted draft revision", async () => {
+    const db = await serviceDb(16);
+    vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
+    const created = createGuidedRequest(db, requestInput(selectionIds(16)));
+    const [current, acceptedOther, rejectedOther] = getGuidedAssignments(db, created.request.requestId);
+    insertDraftReview(db, current!, 1, true);
+    insertDraftReview(db, acceptedOther!, 1, true);
+    insertDraftReview(db, acceptedOther!, 2, false);
+    insertDraftReview(db, rejectedOther!, 1, false);
+    const loadedAssignment = getGuidedAssignment(db, current!.assignmentId)!;
+
+    const input = buildGuidedAuthoringValidationInput(db, {
+      bundle: bundleFor(loadedAssignment),
+      loadedAssignment,
+      trustedAssignmentId: loadedAssignment.assignmentId
+    });
+
+    expect(input.requestAcceptedDrafts).toEqual([{
+      assignmentId: acceptedOther!.assignmentId,
+      draft: bundleFor(acceptedOther!, { evidenceRevision: "revision:1" }),
+      draftRevision: 1,
+      evidenceRevision: "revision:1"
+    }]);
+    db.close();
+  });
+
+  test("rejects an accepted draft pointer that targets a rejected review row", async () => {
+    const db = await serviceDb(16);
+    vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
+    const created = createGuidedRequest(db, requestInput(selectionIds(16)));
+    const [current, rejectedOther] = getGuidedAssignments(db, created.request.requestId);
+    insertDraftReview(db, rejectedOther!, 1, false);
+    db.prepare(
+      "UPDATE guided_authoring_assignments SET accepted_draft_revision = 1 WHERE assignment_id = ?"
+    ).run(rejectedOther!.assignmentId);
+    const loadedAssignment = getGuidedAssignment(db, current!.assignmentId)!;
+
+    expect(() => buildGuidedAuthoringValidationInput(db, {
+      bundle: bundleFor(loadedAssignment),
+      loadedAssignment,
+      trustedAssignmentId: loadedAssignment.assignmentId
+    })).toThrow(`guided_accepted_draft_revision_invariant:${rejectedOther!.assignmentId}`);
+    db.close();
+  });
+
+  test("rejects a loaded assignment that does not match the trusted route identity", async () => {
+    const db = await serviceDb(1);
+    vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
+    const created = createGuidedRequest(db, requestInput(selectionIds(1)));
+    const assignment = getGuidedAssignment(db, created.request.currentAssignmentId!)!;
+
+    expect(() => buildGuidedAuthoringValidationInput(db, {
+      bundle: bundleFor(assignment),
+      loadedAssignment: assignment,
+      trustedAssignmentId: "assignment:different"
+    })).toThrow("guided_assignment_identity_invariant");
     db.close();
   });
 
@@ -723,6 +835,47 @@ function suggestion(
     suggestionId: `suggestion:${suffix}`,
     summary: `Reusable ${suffix} knowledge.`
   };
+}
+
+function bundleFor(
+  assignment: GuidedAuthoringAssignmentDto,
+  overrides: Partial<GuidedAuthoringBundleV4> = {}
+): GuidedAuthoringBundleV4 {
+  return {
+    artifacts: [],
+    assignmentId: assignment.assignmentId,
+    bundleVersion: "workbench-authoring-v4",
+    evidenceRevision: assignment.evidenceRevision,
+    opportunityDispositions: [],
+    sessionEnrichments: [],
+    ...overrides
+  };
+}
+
+function insertDraftReview(
+  db: MastheadDatabase,
+  assignment: GuidedAuthoringAssignmentDto,
+  revision: number,
+  accepted: boolean
+): void {
+  const evidenceRevision = `revision:${revision}`;
+  db.prepare(
+    `INSERT INTO guided_authoring_draft_reviews
+     (assignment_id, revision, evidence_revision, draft_json, findings_json, accepted, created_at)
+     VALUES (?, ?, ?, ?, '[]', ?, ?)`
+  ).run(
+    assignment.assignmentId,
+    revision,
+    evidenceRevision,
+    JSON.stringify(bundleFor(assignment, { evidenceRevision })),
+    accepted ? 1 : 0,
+    `2026-07-19T12:00:0${revision}.000Z`
+  );
+  db.prepare(
+    `UPDATE guided_authoring_assignments
+     SET current_draft_revision = ?, accepted_draft_revision = CASE WHEN ? = 1 THEN ? ELSE accepted_draft_revision END
+     WHERE assignment_id = ?`
+  ).run(revision, accepted ? 1 : 0, revision, assignment.assignmentId);
 }
 
 function counts(values: string[]): Record<string, number> {
