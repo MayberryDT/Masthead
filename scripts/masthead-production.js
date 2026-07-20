@@ -599,13 +599,18 @@ async function stageProductionInstallationUnlocked(input, identity, dependencyOv
     stageIntent.candidateOwnership = candidateReservation(stageIntent, candidateInfo);
     await writeProductionStageIntent(stageIntent);
     await input.onStageStep?.("candidate-copy-start");
+    await assertReservedCandidateOwnership(stageIntent, temporaryTarget, "before copy");
     await copyBundleIntoOwnedDirectory(sourceBundlePath, temporaryTarget);
     await verifyPinnedBundle(temporaryTarget, input.bundleDigest);
+    await assertReservedCandidateOwnership(stageIntent, temporaryTarget, "before publication");
     await input.onStageStep?.("candidate-claim");
     await publishCandidateNoReplace(temporaryTarget, target, dependencyOverrides.publishCandidateNoReplace);
+    await assertReservedCandidateOwnership(stageIntent, target, "after publication");
     await input.onStageStep?.("candidate-claimed");
+    await assertReservedCandidateOwnership(stageIntent, target, "after the candidate-claimed boundary");
   }
   await input.onStageStep?.("candidate-copy");
+  await assertReservedCandidateOwnership(stageIntent, target, "after the candidate-copy boundary");
   const manifest = await verifyPinnedBundle(target, input.bundleDigest);
   const runtime = productionRuntimePaths(target);
   await assertRequiredProductionRuntimeResources(runtime);
@@ -709,8 +714,10 @@ async function stageProductionInstallationUnlocked(input, identity, dependencyOv
     receiptHash,
     stagingNonce
   }, null, 2)}\n`, 0o600);
+  await assertReservedCandidateOwnership(stageIntent, target, "before receipt publication");
   await atomicWrite(receiptPath, `${JSON.stringify(receiptRecord, null, 2)}\n`, 0o444);
   await input.onStageStep?.("receipt-publication");
+  await assertReservedCandidateOwnership(stageIntent, target, "before intent removal");
   await rm(productionStageIntentPath(productionRoot));
   await input.onStageStep?.("intent-removal");
   await rm(productionStagePendingPath(productionRoot));
@@ -2100,6 +2107,18 @@ function candidateQuarantinePath(intent) {
 function matchesCandidateReservation(info, reservation) {
   return info.isDirectory() && !info.isSymbolicLink() &&
     String(info.dev) === reservation.dev && String(info.ino) === reservation.ino;
+}
+
+async function assertReservedCandidateOwnership(intent, path, boundary) {
+  if (!intent.ownsCandidate) return;
+  const ownership = intent.candidateOwnership;
+  const info = await lstat(path, { bigint: true }).catch((error) => {
+    if (error && typeof error === "object" && error.code === "ENOENT") return undefined;
+    throw error;
+  });
+  if (!ownership || !info || !matchesCandidateReservation(info, ownership)) {
+    throw new Error(`Production exact candidate ownership changed ${boundary}: ${path}`);
+  }
 }
 
 async function publishCandidateNoReplace(source, target, override) {

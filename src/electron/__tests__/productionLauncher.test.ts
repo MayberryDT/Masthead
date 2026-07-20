@@ -867,6 +867,65 @@ describe("production lifecycle launcher", () => {
     await expect(lstat(join(productionRoot, ".masthead-install-stage.intent.json"))).resolves.toBeDefined();
   });
 
+  test("rejects a byte-identical empty candidate inode replacement before copy", async () => {
+    const { config, homeDir, productionRoot, root, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const sourceBundlePath = join(root, "temporary-candidate-same-content-copy-race-source");
+    const displacedCandidate = join(root, "displaced-same-content-temporary-candidate");
+    const { cp } = await import("node:fs/promises");
+    await cp(candidate.target, sourceBundlePath, { recursive: true });
+    await rm(candidate.target, { force: true, recursive: true });
+    let intent: any;
+
+    await expect(stageProductionInstallation({
+      bundleDigest: candidate.bundleDigest,
+      sourceBundlePath,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot,
+      onStageStep: async (step: string) => {
+        if (step !== "candidate-copy-start") return;
+        intent = JSON.parse(await readFile(join(productionRoot, ".masthead-install-stage.intent.json"), "utf8"));
+        await rename(intent.temporaryTarget, displacedCandidate);
+        await mkdir(intent.temporaryTarget);
+      }
+    })).rejects.toThrow("exact candidate ownership changed");
+
+    await expect(readdir(displacedCandidate)).resolves.toEqual([]);
+    await expect(readdir(intent.candidateOwnership.quarantinePath)).resolves.toEqual([]);
+    await expect(lstat(join(productionRoot, ".masthead-install-stage.intent.json"))).resolves.toBeDefined();
+  });
+
+  test("rejects a byte-identical candidate inode replacement immediately after publication", async () => {
+    const { config, homeDir, productionRoot, root, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const sourceBundlePath = join(root, "published-candidate-same-content-race-source");
+    const displacedCandidate = join(root, "displaced-same-content-published-candidate");
+    const { cp } = await import("node:fs/promises");
+    await cp(candidate.target, sourceBundlePath, { recursive: true });
+    await rm(candidate.target, { force: true, recursive: true });
+    let intent: any;
+
+    await expect(stageProductionInstallation({
+      bundleDigest: candidate.bundleDigest,
+      sourceBundlePath,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot,
+      onStageStep: async (step: string) => {
+        if (step !== "candidate-claimed") return;
+        intent = JSON.parse(await readFile(join(productionRoot, ".masthead-install-stage.intent.json"), "utf8"));
+        await rename(intent.target, displacedCandidate);
+        await cp(displacedCandidate, intent.target, { recursive: true });
+      }
+    })).rejects.toThrow("exact candidate ownership changed");
+
+    await expect(readFile(join(displacedCandidate, "masthead"), "utf8")).resolves.toBe("candidate-binary");
+    await expect(readFile(join(intent.candidateOwnership.quarantinePath, "masthead"), "utf8"))
+      .resolves.toBe("candidate-binary");
+    await expect(lstat(join(productionRoot, ".masthead-install-stage.intent.json"))).resolves.toBeDefined();
+  });
+
   test.skipIf(process.platform === "win32")("retries with a new nonce after a crash leaves an unattested temporary candidate", async () => {
     const { config, homeDir, productionRoot, root, target: oldTarget } = await fixture();
     const sourceBundlePath = join(root, "unattested-temporary-candidate-source");

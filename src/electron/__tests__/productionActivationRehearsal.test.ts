@@ -252,7 +252,7 @@ describe("production activation rehearsal CLI", () => {
     const source = await readFile(SCRIPT_PATH, "utf8");
     const runnerStart = source.indexOf("export async function runProductionActivationRehearsal");
     const cleanupStart = source.indexOf("} finally {", runnerStart);
-    const stopAttempt = source.indexOf("runInstalledLifecycleCommand(installedLauncher, [\"stop\"]", cleanupStart);
+    const stopAttempt = source.indexOf("runReceiptBoundStopAndStatus(", cleanupStart);
     const removeRoot = source.indexOf("await cleanupDisposableRehearsalRoot(rehearsalRoot", cleanupStart);
     const preservedFailure = source.indexOf("combineRehearsalAndCleanupFailures(rehearsalRoot", cleanupStart);
 
@@ -779,6 +779,13 @@ describe("production activation rehearsal CLI", () => {
     expect(source).toContain("Claimed external scope process identity is unreadable");
   });
 
+  test("gives each matrix worker a bounded minute for repeated package and live proofs", async () => {
+    const source = await readFile(SCRIPT_PATH, "utf8");
+
+    expect(source).toContain("const MATRIX_SUBPROCESS_TIMEOUT_MS = 60_000;");
+    expect(source).toContain("timeoutMs: MATRIX_SUBPROCESS_TIMEOUT_MS");
+  });
+
   test("uses packaged default offline and exact live proofs in the crash matrix", async () => {
     const source = await readFile(SCRIPT_PATH, "utf8");
 
@@ -793,10 +800,7 @@ describe("production activation rehearsal CLI", () => {
     expect(source).not.toContain("startMatrixLiveProofDaemon");
   });
 
-  test("carries exact identities from installed start into operational finalize", async () => {
-    const identities = [
-      { pid: 202, starttime: "daemon-start" }
-    ];
+  test("does not rerun an installed start after a transient post-spawn runner failure", async () => {
     const receipt = {
       receiptPath: "/fixture/receipt.json",
       baseUrl: "http://127.0.0.1:12345",
@@ -808,15 +812,37 @@ describe("production activation rehearsal CLI", () => {
       buildSha: "a".repeat(40)
     };
     const calls: Array<{ args: string[]; options: Record<string, unknown> }> = [];
-    let startAttempts = 0;
+    const runnerFailure = new Error("Production process command line changed during scan after daemon launch.");
     const runLifecycleCommand = async (_launcher: string, args: string[], _environment: NodeJS.ProcessEnv, options = {}) => {
       calls.push({ args, options });
-      if (args[0] === "start") {
-        startAttempts += 1;
-        if (startAttempts === 1) throw new Error("Production process command line changed during scan.");
-        return { started: true, fixtureProcessIdentities: identities };
-      }
-      return { finalized: true };
+      throw runnerFailure;
+    };
+
+    await expect(runInstalledStartAndFinalizeProof("/fixture/launcher", receipt, {}, { runLifecycleCommand }))
+      .rejects.toBe(runnerFailure);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ args: ["start"], options: { captureAllowedLiveIdentities: expect.any(Function) } });
+  });
+
+  test("carries exact identities from one installed start into operational finalize", async () => {
+    const identities = [{ pid: 202, starttime: "daemon-start" }];
+    const receipt = {
+      receiptPath: "/fixture/receipt.json",
+      baseUrl: "http://127.0.0.1:12345",
+      instanceDir: "/fixture/instance",
+      instanceManifestPath: "/fixture/instance/masthead-instance.json",
+      activeInstanceLauncherPath: "/fixture/instance/mastheadctl",
+      dataDirectory: "/fixture/data",
+      databasePath: "/fixture/data/masthead.sqlite",
+      buildSha: "a".repeat(40)
+    };
+    const calls: Array<{ args: string[]; options: Record<string, unknown> }> = [];
+    const runLifecycleCommand = async (_launcher: string, args: string[], _environment: NodeJS.ProcessEnv, options = {}) => {
+      calls.push({ args, options });
+      return args[0] === "start"
+        ? { started: true, fixtureProcessIdentities: identities }
+        : { finalized: true };
     };
 
     await expect(runInstalledStartAndFinalizeProof("/fixture/launcher", receipt, {}, {
@@ -840,10 +866,9 @@ describe("production activation rehearsal CLI", () => {
       runLifecycleCommand
     })).resolves.toMatchObject({ fixtureProcessIdentities: identities });
 
-    expect(calls).toHaveLength(3);
+    expect(calls).toHaveLength(2);
     expect(calls[0]).toMatchObject({ args: ["start"], options: { captureAllowedLiveIdentities: expect.any(Function) } });
-    expect(calls[1]).toMatchObject({ args: ["start"], options: { captureAllowedLiveIdentities: expect.any(Function) } });
-    expect(calls[2]).toEqual({
+    expect(calls[1]).toEqual({
       args: ["finalize", "--receipt", receipt.receiptPath],
       options: { allowedLiveIdentities: identities }
     });
@@ -1023,6 +1048,19 @@ describe("production activation rehearsal CLI", () => {
     expect(stop).toBeGreaterThan(startup);
   });
 
+  test("uses receipt-bound stop and status recovery in top-level operational cleanup", async () => {
+    const source = await readFile(SCRIPT_PATH, "utf8");
+    const rehearsalStart = source.indexOf("export async function runProductionActivationRehearsal");
+    const cleanupStart = source.indexOf("  } finally {", rehearsalStart);
+    const rehearsalEnd = source.indexOf("\n}\n\nasync function crashAndRecoverActivation", cleanupStart);
+    const cleanupSource = source.slice(cleanupStart, rehearsalEnd);
+
+    expect(rehearsalStart).toBeGreaterThan(-1);
+    expect(cleanupStart).toBeGreaterThan(rehearsalStart);
+    expect(rehearsalEnd).toBeGreaterThan(cleanupStart);
+    expect(cleanupSource).toContain("runReceiptBoundStopAndStatus(");
+  });
+
   test("attempts receipt-bound status even when the stop command fails", async () => {
     const calls: string[] = [];
     const stopFailure = new Error("identity-bound stop failed");
@@ -1038,6 +1076,30 @@ describe("production activation rehearsal CLI", () => {
     )).rejects.toBe(stopFailure);
 
     expect(calls).toEqual(["stop", "status"]);
+  });
+
+  test("retains both receipt-bound cleanup failures after attempting stop and status", async () => {
+    const calls: string[] = [];
+    const stopFailure = new Error("identity-bound stop failed");
+    const statusFailure = new Error("identity-bound status failed");
+    let failure: unknown;
+
+    try {
+      await runReceiptBoundStopAndStatus(
+        async (_launcher, args) => {
+          calls.push(args[0]);
+          throw args[0] === "stop" ? stopFailure : statusFailure;
+        },
+        "/fixture/launcher",
+        {}
+      );
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(calls).toEqual(["stop", "status"]);
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect(failure).toMatchObject({ errors: [stopFailure, statusFailure], cause: stopFailure });
   });
 
   test("stages the actual verified supplied bundle as the package-bound candidate", async () => {

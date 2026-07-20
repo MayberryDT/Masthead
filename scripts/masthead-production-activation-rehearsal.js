@@ -84,7 +84,7 @@ const PACKAGE_BOUND_MATRIX_MINIMUM_CASES = 31;
 const FIXTURE_PROCESS_MARKER = "MASTHEAD_REHEARSAL_FIXTURE_ROOT";
 const FIXTURE_RUN_TOKEN_MARKER = "MASTHEAD_REHEARSAL_RUN_TOKEN";
 const OPERATIONAL_SUBPROCESS_TIMEOUT_MS = 360_000;
-const MATRIX_SUBPROCESS_TIMEOUT_MS = 30_000;
+const MATRIX_SUBPROCESS_TIMEOUT_MS = 60_000;
 const POST_KILL_TIMEOUT_MS = 5_000;
 const NATURAL_EXIT_GRACE_MS = 150;
 const DEFAULT_SUBPROCESS_OUTPUT_LIMIT_BYTES = 4 * 1024 * 1024;
@@ -822,8 +822,11 @@ export async function runProductionActivationRehearsal(argv = process.argv.slice
     if (rehearsalRoot) {
       try {
         if (installedLauncher && lifecycleEnvironment) {
-          const stopped = await runInstalledLifecycleCommand(installedLauncher, ["stop"], lifecycleEnvironment);
-          const status = await runInstalledLifecycleCommand(installedLauncher, ["status"], lifecycleEnvironment);
+          const { status, stopped } = await runReceiptBoundStopAndStatus(
+            runInstalledLifecycleCommand,
+            installedLauncher,
+            lifecycleEnvironment
+          );
           if (stopped.stopped !== true || status.running !== false || status.processes.length !== 0) {
             throw new Error("identity-bound stop did not prove an empty process set");
           }
@@ -909,9 +912,9 @@ export async function runReceiptBoundStopAndStatus(runLifecycleCommand, launcher
 }
 
 async function startInstalledLifecycleWithIdentityCapture(runLifecycleCommand, launcherPath, environment, receipt) {
-  return retryTransientProcessScan(() => runLifecycleCommand(launcherPath, ["start"], environment, {
+  return runLifecycleCommand(launcherPath, ["start"], environment, {
     captureAllowedLiveIdentities: captureProductionCompanionIdentities(receipt)
-  }));
+  });
 }
 
 export async function runInstalledStartAndFinalizeProof(installedLauncher, receipt, environment, adapters = {}) {
