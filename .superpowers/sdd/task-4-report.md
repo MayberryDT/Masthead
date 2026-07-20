@@ -145,6 +145,20 @@ Fresh security-closeout verification from review base `57556c48c4cede141e90ca7df
 
 Security-closeout commit: `fix: harden lifecycle terminal boundaries`.
 
+## Durable package-bound recovery certification closeout
+
+The final recovery gate now proves durable state at every required crash boundary instead of crediting callback emission. A literal, independent 24-case contract checks the current target, exact journal phase, artifact presence or absence, receipt authority, and the exact zero/three/removed stage-intent reservation states. Staging reserves all three nonce-bound paths before creating the first file, creates each file exclusively, syncs file bodies and parent directories, and recovers through request-specific quarantine only when regular-file, single-link, SHA-256, and mode authority all match. Mismatches remain preserved with their durable intent.
+
+Every rehearsal subprocess is output-bounded and runs in a transient user cgroup. The supervisor snapshots the user cgroup tree before fixture work, scans every complete launch-cgroup subtree, and audits every newly created external unit. Only Electron's exact `app-masthead-<started-pid>.scope` is accepted as an expected migration; any other sibling unit stops certification and is preserved without signaling. Cleanup signals only launch-scope processes through a pidfd opened before the expected `/proc` start-time check, so no package-controlled health PID can enroll or kill unrelated processes and there is no numeric-PID fallback. Process-set uncertainty, output overflow, body failures, and cleanup failures preserve the exact fixture root and retain all causes, while the receipt-bound stop/status proof is still attempted for known daemons. Finalization also retries only unavailable or strictly malformed startup health for a bounded five seconds; incompatible protocol identities still fail immediately.
+
+Fresh final verification:
+
+- Rebuilt supplied package operational rehearsal: passed with real package start, exact live health/manifest/process identity, finalize, stop, offline proof, and all independently required 24/24 fresh-process crash cases. The result reported `source: "supplied-package"` and the exact ordered case IDs.
+- Complete Task 4 regression: 17 files, 488/488 tests passed with isolated loopback and transient-cgroup permission.
+- `npm run package:electron`: passed; packaged `masthead-production.js` is byte-identical to the workspace source.
+- `npm run typecheck`, JavaScript syntax checks, isolated Python helper compilation, and `git diff --check`: passed.
+- Installed production runtime, production data, production processes, and the production installation were not touched.
+
 ## Package-bound recovery certification and exclusive stage files
 
 The three nonce-bound staging files are now created with exclusive filesystem opens. A preallocated file or symbolic link at the instance-launcher, lifecycle-launcher, or desktop staging path fails closed, remains unchanged, and is excluded from recovery cleanup; the remaining paths owned by the failed staging request are still reconciled.
@@ -159,3 +173,17 @@ Fresh verification from review base `6f270659`:
 - `npm run package:electron`: passed; the bundled production lifecycle source is byte-identical to the workspace source.
 - Operational rehearsal against the absolute rebuilt package: passed, exit 0, with `source: "supplied-package"` and all 24/24 independently required cases executed.
 - Installed production runtime, data, processes, and installation were not touched.
+
+## Final package-bound containment closeout
+
+The package rehearsal now distinguishes fixture ownership from unrelated desktop activity. Every subprocess runs inside a unique transient scope and reports its raw wait status through a parent-secret HMAC attestation, so an ordinary exit 137 cannot impersonate SIGKILL. Persistent Electron and daemon processes are admitted only after attested start output, exact health and manifest agreement, an exact `app-masthead-<start-pid>.scope` under the current user subtree, stable PID/start-time and cgroup reads, and the daemon's inherited per-run random token. Electron may scrub its own environment, but while it remains live its exact cgroup identity must match and the token-bearing daemon must be its direct child. Claimed external processes are observable but never supervisor-signaled; only processes still in supervisor-owned scopes can receive an identity-bound pidfd signal.
+
+The former whole-user cgroup baseline was removed because normal Codex processes entering the existing Codex scope were falsely attributed to Masthead. Inspection is now bounded to registered rehearsal scopes plus exact claimed Masthead scopes, reconciled scope registrations are retired between commands, and allowed captured helpers may exit naturally without blocking later commands. Every claim, scan, output collection, health wait, and cleanup proof retains an independent hard deadline and count limit. Failed proofs preserve their isolated roots, while known candidate daemons still receive receipt-bound stop/status cleanup.
+
+Fresh final verification:
+
+- Complete Task 4 regression: 17 files, 497/497 tests passed with loopback and transient user-scope access.
+- `npm run package:electron`: passed; packaged `masthead-production.js` is byte-identical to the workspace source.
+- Fresh rebuilt-package rehearsal: passed real isolated activation, exact start/health/manifest/process capture, finalization, stop/offline proof, and all ordered 24/24 supplied-package crash cases.
+- `npm run typecheck`, JavaScript syntax checks, isolated Python helper compilation, and `git diff --check`: passed.
+- Successful rehearsal cleanup left no `app-masthead-*` scope or disposable package-rehearsal root. Installed production runtime, data, processes, and installation were not touched.

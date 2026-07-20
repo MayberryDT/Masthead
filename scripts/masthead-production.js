@@ -495,7 +495,7 @@ export async function transitionProduction(input, dependencyOverrides = {}) {
   }
 }
 
-export async function stageProductionInstallation(input) {
+export async function stageProductionInstallation(input, dependencyOverrides = {}) {
   const homeDir = resolve(input.homeDir || homedir());
   const productionRoot = resolve(input.productionRoot || join(homeDir, ".local", "share", "masthead-production"));
   const dataDirectory = resolve(input.dataDirectory || join(homeDir, ".config", "masthead-production"));
@@ -506,7 +506,10 @@ export async function stageProductionInstallation(input) {
   try {
     await input.onLifecycleLeaseAcquired?.();
     await mkdir(productionRoot, { recursive: true });
-    await reconcileProductionStageIntent(productionRoot, lifecycleLeasePath);
+    await reconcileProductionStageIntent(productionRoot, lifecycleLeasePath, {
+      onStageStep: input.onStageStep,
+      openStageDirectory: dependencyOverrides.openStageDirectory
+    });
     const pending = await gatePendingProductionLifecycle(productionRoot, "stage");
     if (pending === "completed") throw new Error("A previous staged activation must be finalized before staging another bundle.");
     const durableReceipt = await findPendingStagedProductionReceipt(productionRoot);
@@ -515,17 +518,32 @@ export async function stageProductionInstallation(input) {
       await rm(productionStagePendingPath(productionRoot));
       return durableReceipt;
     }
-    return await stageProductionInstallationUnlocked(input, { dataDirectory, databasePath, homeDir, lifecycleLeasePath, port, productionRoot });
+    return await stageProductionInstallationUnlocked(
+      input,
+      { dataDirectory, databasePath, homeDir, lifecycleLeasePath, port, productionRoot },
+      dependencyOverrides
+    );
   } catch (error) {
     const preservePaths = error instanceof ProductionStagePathCollision ? [error.path] : [];
-    await reconcileProductionStageIntent(productionRoot, lifecycleLeasePath, { preservePaths }).catch(() => undefined);
+    try {
+      await reconcileProductionStageIntent(productionRoot, lifecycleLeasePath, {
+        onStageStep: input.onStageStep,
+        openStageDirectory: dependencyOverrides.openStageDirectory,
+        preservePaths
+      });
+    } catch (reconciliationError) {
+      throw new Error(
+        `${error instanceof Error ? error.message : String(error)}; cleanup failed closed: ${reconciliationError instanceof Error ? reconciliationError.message : String(reconciliationError)}`,
+        { cause: new AggregateError([error, reconciliationError], "Production stage failed and exact cleanup ownership could not be proven.") }
+      );
+    }
     throw error;
   } finally {
     await lease.release();
   }
 }
 
-async function stageProductionInstallationUnlocked(input, identity) {
+async function stageProductionInstallationUnlocked(input, identity, dependencyOverrides = {}) {
   const { dataDirectory, databasePath, homeDir, lifecycleLeasePath, port, productionRoot } = identity;
   const sourceBundlePath = await realpath(input.sourceBundlePath || input.bundlePath || "");
   await mkdir(productionRoot, { recursive: true });
@@ -561,7 +579,8 @@ async function stageProductionInstallationUnlocked(input, identity) {
     launcherStage,
     desktopPath,
     desktopStage,
-    receiptPath
+    receiptPath,
+    ownedStages: []
   };
   await writeProductionStageIntent(stageIntent);
   if (!sourceIsDirectBundle && !targetExists) {
@@ -588,14 +607,33 @@ async function stageProductionInstallationUnlocked(input, identity) {
     instanceManifestPath,
     node: runtime.node
   });
-  await writeExclusiveStageFile(stagedInstanceLauncherPath, instanceLauncher, 0o755, "instance");
-  await input.onStageStep?.("instance-stage");
-  const stagedSurface = await stageProductionLaunchers({
+  const preparedSurface = await prepareProductionLaunchers({
     ...input,
     bundlePath: target,
     homeDir,
     productionRoot,
     stagingNonce
+  });
+  stageIntent.ownedStages = [
+    stageReservation(stageIntent, stagedInstanceLauncherPath, instanceLauncher, 0o755),
+    stageReservation(stageIntent, preparedSurface.launcherStage, preparedSurface.wrapper, 0o755),
+    stageReservation(stageIntent, preparedSurface.desktopStage, preparedSurface.desktop, 0o644)
+  ];
+  await writeProductionStageIntent(stageIntent);
+  await writeExclusiveStageFile(
+    stagedInstanceLauncherPath,
+    instanceLauncher,
+    0o755,
+    "instance",
+    {
+      onFileCreated: () => input.onStageStep?.("instance-file-created"),
+      openStageDirectory: dependencyOverrides.openStageDirectory
+    }
+  );
+  await input.onStageStep?.("instance-stage");
+  const stagedSurface = await writePreparedProductionLaunchers(preparedSurface, {
+    openStageDirectory: dependencyOverrides.openStageDirectory,
+    onStageStep: input.onStageStep
   });
   await input.onStageStep?.("surface-stage");
   const rollbackRelease = await readRelease(previousCurrentTarget);
@@ -1280,7 +1318,11 @@ async function assertSuccessfulStagedStartup(receipt, dependencies = {}) {
   ) throw new Error("Activated production startup manifest does not prove the staged target started successfully.");
   const processReader = dependencies.readProcess ?? readProcess;
   const healthReader = dependencies.fetchHealth ?? fetchHealth;
-  const [firstProcess, health] = await Promise.all([processReader(manifest.pid), readAvailableStagedHealth(healthReader, receipt.port)]);
+  const [firstProcess, healthProof] = await Promise.all([
+    processReader(manifest.pid),
+    readClassifiedStagedHealth(healthReader, receipt)
+  ]);
+  const { health, compatibility } = healthProof;
   const secondProcess = await processReader(manifest.pid);
   if (!firstProcess?.starttime || firstProcess.starttime !== secondProcess?.starttime) throw new Error("Activated production daemon PID/start identity is not live.");
   const classified = classifyProductionProcess(firstProcess, {
@@ -1290,7 +1332,6 @@ async function assertSuccessfulStagedStartup(receipt, dependencies = {}) {
     target: receipt.target
   });
   if (classified?.role !== "daemon" || classified.target !== receipt.target) throw new Error("Activated production daemon process does not belong to the staged target.");
-  const compatibility = await classifyPackagedDaemonHealth(receipt, health);
   if (compatibility?.state !== "compatible") {
     throw new Error(`Activated production health failed strict protocol classification: ${compatibility?.state || "unavailable"}${compatibility?.reason ? ` (${compatibility.reason})` : ""}.`);
   }
@@ -1306,13 +1347,18 @@ async function assertSuccessfulStagedStartup(receipt, dependencies = {}) {
   await (dependencies.assertManifestWriterGuard ?? assertManifestWriterGuardActive)(receipt.instanceDir);
 }
 
-async function readAvailableStagedHealth(healthReader, port) {
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    const health = await healthReader(port);
-    if (health !== undefined) return health;
-    if (attempt < 4) await delay(50);
+async function readClassifiedStagedHealth(healthReader, receipt) {
+  let health;
+  let compatibility;
+  const attempts = 100;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    health = await healthReader(receipt.port);
+    compatibility = health === undefined ? undefined : await classifyPackagedDaemonHealth(receipt, health);
+    if (compatibility?.state === "compatible") return { health, compatibility };
+    if (health !== undefined && compatibility?.state !== "malformed") return { health, compatibility };
+    if (attempt < attempts - 1) await delay(50);
   }
-  return undefined;
+  return { health, compatibility };
 }
 
 async function classifyPackagedDaemonHealth(receipt, health) {
@@ -1733,7 +1779,7 @@ async function swapCurrentTarget(productionRoot, target) {
   }
 }
 
-async function stageProductionLaunchers(input) {
+async function prepareProductionLaunchers(input) {
   const homeDir = resolve(input.homeDir || homedir());
   const target = await realpath(input.bundlePath);
   const productionRoot = resolve(input.productionRoot);
@@ -1755,9 +1801,36 @@ async function stageProductionLaunchers(input) {
   const launcherStage = `${launcherPath}.${token}.staged`;
   const desktopStage = `${desktopPath}.${token}.staged`;
   const [previousLauncher, previousDesktop] = await Promise.all([snapshotFile(launcherPath), snapshotFile(desktopPath)]);
-  await writeExclusiveStageFile(launcherStage, wrapper, 0o755, "lifecycle");
-  await writeExclusiveStageFile(desktopStage, desktop, 0o644, "desktop");
-  return { desktopPath, desktopStage, launcherPath, launcherStage, previousDesktop, previousLauncher };
+  return { desktop, desktopPath, desktopStage, launcherPath, launcherStage, previousDesktop, previousLauncher, wrapper };
+}
+
+async function writePreparedProductionLaunchers(prepared, input) {
+  await writeExclusiveStageFile(
+    prepared.launcherStage,
+    prepared.wrapper,
+    0o755,
+    "lifecycle",
+    {
+      onFileCreated: () => input.onStageStep?.("lifecycle-file-created"),
+      openStageDirectory: input.openStageDirectory,
+    }
+  );
+  await writeExclusiveStageFile(
+    prepared.desktopStage,
+    prepared.desktop,
+    0o644,
+    "desktop",
+    {
+      onFileCreated: () => input.onStageStep?.("desktop-file-created"),
+      openStageDirectory: input.openStageDirectory,
+    }
+  );
+  const { desktop, wrapper, ...staged } = prepared;
+  return staged;
+}
+
+async function stageProductionLaunchers(input) {
+  return writePreparedProductionLaunchers(await prepareProductionLaunchers(input), input);
 }
 
 function pinnedDigestFromLauncherSnapshot(snapshot) {
@@ -1972,7 +2045,98 @@ function validateProductionStageIntent(intent, productionRootInput, lifecycleLea
     intent.launcherPath !== expectedLauncher || intent.launcherStage !== `${expectedLauncher}.${nonce}.staged` ||
     intent.desktopPath !== expectedDesktop || intent.desktopStage !== `${expectedDesktop}.${nonce}.staged`
   ) throw new Error("Production stage intent is malformed.");
+  const expectedStagePaths = new Set([intent.stagedInstanceLauncherPath, intent.launcherStage, intent.desktopStage]);
+  if (
+    !Array.isArray(intent.ownedStages) || intent.ownedStages.length > expectedStagePaths.size ||
+    new Set(intent.ownedStages.map((ownership) => ownership?.path)).size !== intent.ownedStages.length ||
+    intent.ownedStages.some((ownership) => (
+      ownership?.schemaVersion !== 1 || !expectedStagePaths.has(ownership.path) ||
+      ownership.quarantinePath !== stageQuarantinePath(intent, ownership.path) ||
+      typeof ownership.sha256 !== "string" || !/^[0-9a-f]{64}$/u.test(ownership.sha256) ||
+      !Number.isInteger(ownership.mode) || ownership.mode < 0 || ownership.mode > 0o777
+    ))
+  ) throw new Error("Production stage intent ownership is malformed.");
   return intent;
+}
+
+function stageReservation(intent, path, body, mode) {
+  return {
+    schemaVersion: 1,
+    path,
+    quarantinePath: stageQuarantinePath(intent, path),
+    sha256: createHash("sha256").update(body).digest("hex"),
+    mode
+  };
+}
+
+async function matchesStageReservation(path, info, reservation) {
+  if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1n || Number(info.mode & 0o777n) !== reservation.mode) return false;
+  const body = await readFile(path);
+  return createHash("sha256").update(body).digest("hex") === reservation.sha256;
+}
+
+function stageSurfaceForPath(intent, path) {
+  if (path === intent.stagedInstanceLauncherPath) return "instance";
+  if (path === intent.launcherStage) return "lifecycle";
+  if (path === intent.desktopStage) return "desktop";
+  throw new Error(`Production stage cleanup path is outside its durable intent: ${path}`);
+}
+
+function stageQuarantinePath(intent, path) {
+  return join(dirname(path), `.${basename(path)}.${intent.stagingNonce}.cleanup`);
+}
+
+async function quarantineOwnedStage(intent, path, ownership, options, affectedParents) {
+  const surface = stageSurfaceForPath(intent, path);
+  const quarantinePath = ownership.quarantinePath;
+  let quarantinedInfo = await lstat(quarantinePath, { bigint: true }).catch((error) => {
+    if (error && typeof error === "object" && error.code === "ENOENT") return undefined;
+    throw error;
+  });
+  if (!quarantinedInfo) {
+    const sourceExists = await lstat(path).then(() => true).catch((error) => {
+      if (error && typeof error === "object" && error.code === "ENOENT") return false;
+      throw error;
+    });
+    if (!sourceExists) return { changed: false, ownershipChanged: false };
+    await options.onStageStep?.(`reconcile-before-${surface}-quarantine`);
+    try {
+      await rename(path, quarantinePath);
+    } catch (error) {
+      if (error && typeof error === "object" && error.code === "ENOENT") {
+        return { changed: false, ownershipChanged: true };
+      }
+      throw error;
+    }
+    affectedParents.add(dirname(path));
+    quarantinedInfo = await lstat(quarantinePath, { bigint: true });
+  }
+  if (!(await matchesStageReservation(quarantinePath, quarantinedInfo, ownership))) {
+    return { changed: true, ownershipChanged: true };
+  }
+  await rm(quarantinePath, { force: true });
+  affectedParents.add(dirname(path));
+  const replacementExists = await lstat(path).then(() => true).catch((error) => {
+    if (error && typeof error === "object" && error.code === "ENOENT") return false;
+    throw error;
+  });
+  return { changed: true, ownershipChanged: replacementExists };
+}
+
+async function removeExisting(path, options, affectedParents) {
+  const exists = await lstat(path).then(() => true).catch((error) => {
+    if (error && typeof error === "object" && error.code === "ENOENT") return false;
+    throw error;
+  });
+  if (!exists) return false;
+  await rm(path, options);
+  affectedParents.add(dirname(path));
+  return true;
+}
+
+async function syncAffectedStageParents(parents, openStageDirectory) {
+  for (const path of [...parents].sort()) await syncStageDirectory(path, openStageDirectory);
+  parents.clear();
 }
 
 async function reconcileProductionStageIntent(productionRootInput, lifecycleLeasePath, options = {}) {
@@ -2021,6 +2185,7 @@ async function reconcileProductionStageIntent(productionRootInput, lifecycleLeas
       receipt.stagedSurface.launcherStage !== intent.launcherStage || receipt.stagedSurface.desktopStage !== intent.desktopStage
     ) throw new Error("Production stage receipt does not match its durable intent.");
     await rm(intentPath);
+    await syncStageDirectory(productionRoot, options.openStageDirectory);
     return "receipt-durable";
   }
   const currentTarget = await realpath(join(productionRoot, "current")).catch(() => undefined);
@@ -2028,13 +2193,40 @@ async function reconcileProductionStageIntent(productionRootInput, lifecycleLeas
     throw new Error("Production stage intent candidate is current and cannot be reconciled safely.");
   }
   const preservedPaths = new Set((options.preservePaths || []).map((path) => resolve(path)));
-  for (const path of [intent.temporaryTarget, intent.stagedInstanceLauncherPath, intent.launcherStage, intent.desktopStage]) {
+  const ownershipByPath = new Map(intent.ownedStages.map((ownership) => [ownership.path, ownership]));
+  const affectedParents = new Set();
+  const changedOwnershipPaths = [];
+  await removeExisting(intent.temporaryTarget, { force: true, recursive: true }, affectedParents);
+  for (const path of [intent.stagedInstanceLauncherPath, intent.launcherStage, intent.desktopStage]) {
     if (preservedPaths.has(resolve(path))) continue;
-    await rm(path, { force: true, recursive: true });
+    const ownership = ownershipByPath.get(path);
+    const exists = await lstat(path).then(() => true).catch((error) => {
+      if (error && typeof error === "object" && error.code === "ENOENT") return undefined;
+      throw error;
+    });
+    const quarantineExists = await lstat(stageQuarantinePath(intent, path)).then(() => true).catch((error) => {
+      if (error && typeof error === "object" && error.code === "ENOENT") return false;
+      throw error;
+    });
+    if (!exists && !quarantineExists) continue;
+    if (!ownership) {
+      changedOwnershipPaths.push(path);
+      continue;
+    }
+    const result = await quarantineOwnedStage(intent, path, ownership, options, affectedParents);
+    if (result.ownershipChanged) changedOwnershipPaths.push(path);
   }
-  if (intent.ownsCandidate) await rm(intent.target, { force: true, recursive: true });
-  if (stagePending) await rm(stagePendingPath);
+  await syncAffectedStageParents(affectedParents, options.openStageDirectory);
+  if (changedOwnershipPaths.length > 0) {
+    throw new Error(`Production exact stage ownership changed before cleanup: ${changedOwnershipPaths.join(", ")}`);
+  }
+  if (intent.ownsCandidate) await removeExisting(intent.target, { force: true, recursive: true }, affectedParents);
+  if (stagePending) await removeExisting(stagePendingPath, { force: true }, affectedParents);
+  await syncAffectedStageParents(affectedParents, options.openStageDirectory);
+  await options.onStageStep?.("reconcile-before-intent-removal");
   await rm(intentPath);
+  await syncStageDirectory(productionRoot, options.openStageDirectory);
+  await options.onStageStep?.("reconcile-after-intent-removal");
   return "recovered";
 }
 
@@ -3476,7 +3668,16 @@ async function atomicWrite(path, body, mode) {
   }
 }
 
-async function writeExclusiveStageFile(path, body, mode, surface) {
+async function syncStageDirectory(path, openStageDirectory) {
+  const directory = await (openStageDirectory ? openStageDirectory(path) : open(path, "r"));
+  try {
+    await directory.sync();
+  } finally {
+    await directory.close();
+  }
+}
+
+async function writeExclusiveStageFile(path, body, mode, surface, options = {}) {
   let handle;
   try {
     handle = await open(path, "wx", mode);
@@ -3486,12 +3687,27 @@ async function writeExclusiveStageFile(path, body, mode, surface) {
     }
     throw error;
   }
+  const expected = { mode, sha256: createHash("sha256").update(body).digest("hex") };
   try {
     await handle.writeFile(body, typeof body === "string" ? "utf8" : undefined);
     await handle.chmod(mode);
+    const info = await handle.stat({ bigint: true });
+    if (!info.isFile() || info.nlink !== 1n || Number(info.mode & 0o777n) !== mode) {
+      throw new Error(`Production ${surface} stage is not an exclusively owned regular file: ${path}`);
+    }
+    await options.onFileCreated?.();
     await handle.sync();
+    const durableInfo = await handle.stat({ bigint: true });
+    if (!durableInfo.isFile() || durableInfo.nlink !== 1n || Number(durableInfo.mode & 0o777n) !== mode) {
+      throw new Error(`Production ${surface} stage exact ownership changed before its bytes became durable: ${path}`);
+    }
   } finally {
     await handle.close();
+  }
+  await syncStageDirectory(dirname(path), options.openStageDirectory);
+  const linkedInfo = await lstat(path, { bigint: true });
+  if (!(await matchesStageReservation(path, linkedInfo, expected))) {
+    throw new Error(`Production ${surface} stage exact ownership changed before it became durable: ${path}`);
   }
 }
 

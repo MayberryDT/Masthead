@@ -744,6 +744,134 @@ describe("production lifecycle launcher", () => {
     expect(entries.filter((entry) => entry.startsWith("Masthead-linux-x64-"))).toEqual([basename(oldTarget)]);
   });
 
+  test("fsyncs every exclusive stage parent before publishing pending receipt state", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const syncedParents: string[] = [];
+    const expectedParents = [
+      productionRoot,
+      join(homeDir, ".local", "bin"),
+      join(homeDir, ".local", "share", "applications")
+    ];
+
+    await (stageProductionInstallation as any)({
+      bundleDigest: candidate.bundleDigest,
+      sourceBundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot,
+      onStageStep: (step: string) => {
+        if (step === "instance-stage") expect(syncedParents).toEqual(expectedParents.slice(0, 1));
+        if (step === "surface-stage") expect(syncedParents).toEqual(expectedParents);
+        if (step === "receipt-publication") expect(syncedParents).toEqual(expectedParents);
+      }
+    }, {
+      openStageDirectory: async (path: string) => ({
+        close: async () => undefined,
+        sync: async () => { syncedParents.push(path); }
+      })
+    });
+
+    expect(syncedParents).toEqual(expectedParents);
+  });
+
+  test("fails closed without deleting a replaced earlier stage when a later stage collides", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    let intent: any;
+
+    await expect(stageProductionInstallation({
+      bundleDigest: candidate.bundleDigest,
+      sourceBundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot,
+      onStageStep: async (step: string) => {
+        if (step === "instance-stage") {
+          intent = JSON.parse(await readFile(join(productionRoot, ".masthead-install-stage.intent.json"), "utf8"));
+          await writeFile(intent.desktopStage, "preallocated-desktop-stage");
+        }
+        if (step === "reconcile-before-instance-quarantine") {
+          await rm(intent.stagedInstanceLauncherPath);
+          await writeFile(intent.stagedInstanceLauncherPath, "replacement-owned-by-another-request");
+        }
+      }
+    })).rejects.toThrow("exact stage ownership changed");
+
+    const instanceReservation = intent.ownedStages.find((stage: any) => stage.path === intent.stagedInstanceLauncherPath);
+    await expect(readFile(instanceReservation.quarantinePath, "utf8"))
+      .resolves.toBe("replacement-owned-by-another-request");
+    await expect(lstat(intent.stagedInstanceLauncherPath)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(intent.desktopStage, "utf8")).resolves.toBe("preallocated-desktop-stage");
+    await expect(lstat(intent.launcherStage)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(lstat(join(productionRoot, ".masthead-install-stage.intent.json"))).resolves.toBeDefined();
+  });
+
+  test.skipIf(process.platform === "win32")("recovers a SIGKILL after ownership is durable but before staged bytes are fsynced", async () => {
+    const { config, homeDir, productionRoot, root, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const moduleUrl = new URL("../../../scripts/masthead-production.js", import.meta.url).href;
+    const input = {
+      bundleDigest: candidate.bundleDigest,
+      sourceBundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot
+    };
+    const crashSource = [
+      `import { stageProductionInstallation } from ${JSON.stringify(moduleUrl)};`,
+      `const input = ${JSON.stringify(input)};`,
+      "await stageProductionInstallation({ ...input, onStageStep(step) { if (step === 'instance-file-created') process.kill(process.pid, 'SIGKILL'); } });"
+    ].join("\n");
+    const crash = spawn(process.execPath, ["--input-type=module", "-e", crashSource], { stdio: "ignore" });
+    const [exitCode, signal] = await once(crash, "exit");
+    expect(exitCode).toBeNull();
+    expect(signal).toBe("SIGKILL");
+
+    const receipt = await stageProductionInstallation(input);
+    expect(receipt.staged).toBe(true);
+    expect((await readdir(productionRoot)).filter((name) => name.endsWith(".receipt.json"))).toHaveLength(1);
+    await expect(lstat(join(productionRoot, ".masthead-install-stage.intent.json"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("fsyncs every recovery parent before durably removing its stage intent", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const recoverySyncs: string[] = [];
+    let recovering = false;
+    let syncsBeforeIntentRemoval: string[] = [];
+    let syncsAfterIntentRemoval: string[] = [];
+
+    await expect((stageProductionInstallation as any)({
+      bundleDigest: candidate.bundleDigest,
+      sourceBundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot,
+      onStageStep: (step: string) => {
+        if (step === "surface-stage") {
+          recovering = true;
+          recoverySyncs.length = 0;
+          throw new Error("force recovery");
+        }
+        if (step === "reconcile-before-intent-removal") syncsBeforeIntentRemoval = [...recoverySyncs];
+        if (step === "reconcile-after-intent-removal") syncsAfterIntentRemoval = [...recoverySyncs];
+      }
+    }, {
+      openStageDirectory: async (path: string) => ({
+        close: async () => undefined,
+        sync: async () => { if (recovering) recoverySyncs.push(path); }
+      })
+    })).rejects.toThrow("force recovery");
+
+    expect(new Set(syncsBeforeIntentRemoval)).toEqual(new Set([
+      productionRoot,
+      join(homeDir, ".local", "bin"),
+      join(homeDir, ".local", "share", "applications")
+    ]));
+    expect(syncsAfterIntentRemoval).toEqual([...syncsBeforeIntentRemoval, productionRoot]);
+  });
+
   test.each([
     ["instance", "file"], ["instance", "symlink"],
     ["lifecycle", "file"], ["lifecycle", "symlink"],
@@ -1359,6 +1487,61 @@ describe("production lifecycle launcher", () => {
       readProcess: async () => daemonProcess
     } as any)).rejects.toThrow("migration state ready");
     for (const path of protectedPaths) await expect(lstat(path)).resolves.toBeDefined();
+  });
+
+  test("retries a transient malformed startup health response before finalization", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const receipt = await stageProductionInstallation({
+      bundleDigest: candidate.bundleDigest,
+      sourceBundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot
+    });
+    await activateStagedProductionInstallation(receipt.receiptPath, { assertOffline: async () => undefined, runDesktopDatabaseCommand: () => undefined });
+    await publishStartupManifest(receipt);
+    const runtimeNode = join(receipt.target, "resources", "daemon", "node");
+    const daemonEntry = join(receipt.target, "resources", "daemon", "dist", "src", "daemon", "main.js");
+    const daemonProcess = processRecord({
+      argv: [runtimeNode, daemonEntry],
+      environ: { MASTHEAD_DATA_DIR: receipt.dataDirectory, MASTHEAD_DB_PATH: receipt.databasePath },
+      exe: runtimeNode,
+      pid: 12345,
+      starttime: "stable-start"
+    });
+    const readyHealth = {
+      ok: true,
+      product: "masthead",
+      apiVersion: 1,
+      capabilities: [],
+      buildSha: receipt.buildSha,
+      data: {
+        dataDirectory: receipt.dataDirectory,
+        databasePath: receipt.databasePath,
+        databaseId: "database:test",
+        migrationState: "ready"
+      },
+      runtime: {
+        mode: "primary",
+        writable: true,
+        pid: 12345,
+        daemonInstanceId: "instance:test",
+        host: "127.0.0.1",
+        port: receipt.port,
+        baseUrl: receipt.baseUrl,
+        instanceDir: receipt.instanceDir,
+        instanceManifest: receipt.instanceManifestPath,
+        authoringCommand: receipt.activeInstanceLauncherPath
+      }
+    };
+    let requests = 0;
+    await expect(finalizeStagedProductionInstallation(receipt.receiptPath, {
+      assertManifestWriterGuard: async () => undefined,
+      fetchHealth: async () => (++requests === 1 ? "starting" : readyHealth),
+      readProcess: async () => daemonProcess
+    } as any)).resolves.toMatchObject({ finalized: true });
+    expect(requests).toBe(3);
   });
 
   test.each(FINALIZATION_CRASH_CASES)(
