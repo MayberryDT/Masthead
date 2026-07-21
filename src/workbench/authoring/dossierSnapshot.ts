@@ -3,6 +3,7 @@ import type {
   PublishedSessionDossierV1,
   SessionDossierDto
 } from "../../shared/sessionDossier.ts";
+import { materializeDurableDossierPresentation } from "../../shared/sessionDossierMaterialization.ts";
 
 export function buildPublishedDossierSnapshot(
   dossier: SessionDossierDto,
@@ -23,7 +24,7 @@ export function buildPublishedEnrichedDossierSnapshot(
   if (dossier.enrichment.status !== "current" || !dossier.durableEnrichment) {
     throw new Error("session_dossier_requires_current_enrichment");
   }
-  return buildPublishedDossierSnapshot(dossier, capturedAt);
+  return buildPublishedDossierSnapshot(materializeDurableDossierPresentation(dossier), capturedAt);
 }
 
 export function dossierSnapshotFingerprint(snapshot: PublishedSessionDossierV1): string {

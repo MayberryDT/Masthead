@@ -22,7 +22,7 @@ import { discoverArtifactCandidates } from "../artifactCandidates.ts";
 import {
   buildDurableArtifactFixtureBundleV3,
   corpusSessionIds,
-  seedDurableArtifactCorpus
+  seedDurableArtifactCorpusWithPerformedActions
 } from "../__fixtures__/durableArtifactCorpus.ts";
 
 const tempDirs: string[] = [];
@@ -35,7 +35,7 @@ afterEach(async () => {
 describe("Gate B durable optional artifact slice", () => {
   test("publishes one grounded reusable artifact of every optional kind from the labeled corpus", async () => {
     const db = await testDb();
-    seedDurableArtifactCorpus(db);
+    seedDurableArtifactCorpusWithPerformedActions(db);
     const candidates = discoverArtifactCandidates(db, corpusSessionIds());
 
     expect(countKinds(candidates)).toEqual({ runbook: 3, adr: 2, incident_timeline: 2 });

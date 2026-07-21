@@ -5,9 +5,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { HistoryPanel } from "../../../ui/HistoryPanel";
 import { useLogbookController } from "../useLogbookController";
-import { getLogbookArtifact, getSessionTranscript, listProjects, searchLogbook, type LogbookArtifactDetail, type LogbookSession } from "../../daemonClient";
+import { getDataRevisions, getLogbookArtifact, getSessionTranscript, listProjects, searchLogbook, type LogbookArtifactDetail, type LogbookSession } from "../../daemonClient";
 
 const daemonClientMocks = vi.hoisted(() => ({
+  getDataRevisions: vi.fn().mockResolvedValue({ logbook: 0, workbench: 0 }),
   getLogbookArtifact: vi.fn(),
   getSessionTranscript: vi.fn(),
   listProjects: vi.fn(),
@@ -31,9 +32,31 @@ afterEach(async () => {
   container = undefined;
   latestController = undefined;
   vi.clearAllMocks();
+  vi.mocked(getDataRevisions).mockResolvedValue({ logbook: 0, workbench: 0 });
 });
 
 describe("useLogbookController artifact detail", () => {
+  test("evicts an empty page cache when the daemon Logbook revision advances", async () => {
+    vi.mocked(searchLogbook)
+      .mockResolvedValueOnce({ nextCursor: undefined, sessions: [], total: 0 })
+      .mockResolvedValueOnce({ nextCursor: undefined, sessions: [session("artifact:new", "Published externally")], total: 1 });
+    vi.mocked(getDataRevisions).mockResolvedValue({ logbook: 0, workbench: 0 });
+    await renderHarness();
+    await flushAsync();
+    expect(latestController?.loadState).toMatchObject({ state: "ready", total: 0 });
+
+    vi.mocked(getDataRevisions).mockResolvedValue({ logbook: 1, workbench: 0 });
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      await Promise.resolve();
+    });
+    await flushAsync();
+    await flushAsync();
+
+    expect(latestController?.loadState).toMatchObject({ state: "ready", total: 1 });
+    expect(searchLogbook).toHaveBeenCalledTimes(2);
+  });
+
   test("loads canonical dossier transcript evidence from its single provenance session through pagination", async () => {
     mockLogbookSearch([session("artifact-canonical", "Canonical dossier")], 1);
     vi.mocked(getLogbookArtifact).mockResolvedValueOnce(canonicalArtifactDetail("artifact-canonical", "canonical-session-1"));

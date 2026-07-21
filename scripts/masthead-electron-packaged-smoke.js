@@ -115,6 +115,7 @@ async function runPackagedSmoke(binary, release) {
 
     const cliVerification = verifyPackagedAuthoringCli(
       baseUrl,
+      dataDir,
       homeDir,
       child,
       commandChildren,
@@ -174,7 +175,7 @@ async function runPackagedSmoke(binary, release) {
   if (cleanupError) throw cleanupError;
 }
 
-async function verifyPackagedAuthoringCli(baseUrl, homeDir, child, commandChildren, signal) {
+async function verifyPackagedAuthoringCli(baseUrl, dataDir, homeDir, child, commandChildren, signal) {
   let capabilities;
   for (let attempt = 0; attempt < 120; attempt += 1) {
     if (signal.aborted) throw new Error("Packaged CLI verification was cancelled.");
@@ -190,9 +191,9 @@ async function verifyPackagedAuthoringCli(baseUrl, homeDir, child, commandChildr
   if (!capabilities?.command || !isAbsolute(capabilities.command)) {
     throw new Error(`Packaged daemon did not report an absolute authoring CLI command: ${JSON.stringify(capabilities)}`);
   }
-  const commandRelativeToHome = relative(homeDir, capabilities.command);
-  if (commandRelativeToHome.startsWith("..") || isAbsolute(commandRelativeToHome)) {
-    throw new Error(`Packaged authoring CLI was installed outside the smoke HOME: ${capabilities.command}`);
+  const commandRelativeToDataDirectory = relative(dataDir, capabilities.command);
+  if (commandRelativeToDataDirectory.startsWith("..") || isAbsolute(commandRelativeToDataDirectory)) {
+    throw new Error(`Packaged authoring CLI was installed outside the smoke data directory: ${capabilities.command}`);
   }
   await access(capabilities.command, process.platform === "win32" ? constants.R_OK : constants.X_OK);
 

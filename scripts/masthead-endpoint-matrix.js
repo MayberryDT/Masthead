@@ -35,6 +35,7 @@ export const READ_ONLY_ENDPOINTS = [
   { method: "GET", path: "/imports", label: "import jobs" },
   { method: "GET", path: "/imports/import-1", label: "import detail", allowNotFound: true },
   { method: "GET", path: "/data/summary", label: "data summary" },
+  { method: "GET", path: "/data/revisions", label: "data revisions" },
   { method: "GET", path: "/knowledge-flow/summary", label: "sidebar knowledge flow summary" },
   { method: "GET", path: "/usage/summary?window=today", label: "usage summary" },
   { method: "GET", path: "/mcp/status", label: "mcp status" },
@@ -49,6 +50,25 @@ export const READ_ONLY_ENDPOINTS = [
   { method: "GET", path: "/workbench/not-added-summary", label: "workbench not added summary" },
   { method: "GET", path: "/workbench/not-added?includeDetails=true&limit=10", label: "workbench not added explicit details" },
   { method: "GET", path: "/workbench/authoring/capabilities", label: "authoring capabilities" },
+  {
+    method: "GET",
+    path: "/workbench/authoring/requests/request%3Aone",
+    label: "guided authoring request status",
+    allowNotFound: true
+  },
+  { method: "GET", path: "/workbench/authoring/canaries/pending", label: "pending guided authoring canaries" },
+  {
+    method: "GET",
+    path: "/workbench/authoring/assignments/assignment%3Aone/review",
+    label: "guided authoring assignment review",
+    allowNotFound: true
+  },
+  {
+    method: "GET",
+    path: "/workbench/authoring/assignments/assignment%3Aone/scaffold",
+    label: "guided authoring assignment scaffold",
+    allowNotFound: true
+  },
   { method: "GET", path: "/workbench/authoring/runs/run-1", label: "authoring run status", allowNotFound: true },
   {
     method: "GET",
@@ -69,8 +89,7 @@ export const READ_ONLY_ENDPOINTS = [
 export const READ_ONLY_POST_ENDPOINTS = [
   { method: "POST", path: "/mcp/launch-config/validate", label: "mcp launch validation", body: { launchConfig: { command: process.execPath, args: ["server.js"], env: {} } } },
   { method: "POST", path: "/mcp/test-connection", label: "mcp connection test", body: { launchConfig: { command: process.execPath, args: ["server.js"], env: {} } } },
-  { method: "POST", path: "/settings/llm-provider/models", label: "llm provider model discovery", body: { activeProvider: "ollama", baseUrl: "http://127.0.0.1:11434/v1" } },
-  { method: "POST", path: "/workbench/authoring/suggestions", label: "authoring suggestions", body: { sessionIds: ["session-1"] }, allowNotFound: true }
+  { method: "POST", path: "/settings/llm-provider/models", label: "llm provider model discovery", body: { activeProvider: "ollama", baseUrl: "http://127.0.0.1:11434/v1" } }
 ];
 
 export const BLOCKED_MUTATION_ENDPOINTS = [
@@ -88,6 +107,13 @@ export const BLOCKED_MUTATION_ENDPOINTS = [
   { method: "POST", path: "/settings/hooks/codex/uninstall", label: "uninstall hooks" },
   { method: "POST", path: "/settings/hooks/codex/test", label: "test hooks" },
   { method: "POST", path: "/review-dispositions", label: "write review disposition" },
+  { method: "GET", path: "/workbench/authoring/assignments/assignment%3Aone/inspect", label: "record guided authoring inspection" },
+  { method: "POST", path: "/workbench/authoring/suggestions", label: "compute authoring suggestions" },
+  { method: "POST", path: "/workbench/authoring/requests", label: "create guided authoring request" },
+  { method: "POST", path: "/workbench/authoring/requests/request%3Aone/start", label: "start guided authoring request" },
+  { method: "POST", path: "/workbench/authoring/assignments/assignment%3Aone/draft", label: "save guided authoring draft" },
+  { method: "POST", path: "/workbench/authoring/requests/request%3Aone/canary-decision", label: "record guided authoring canary decision" },
+  { method: "POST", path: "/workbench/authoring/assignments/assignment%3Aone/finish", label: "finish guided authoring assignment" },
   { method: "POST", path: "/workbench/authoring/runs", label: "open authoring run" },
   { method: "POST", path: "/workbench/authoring/runs/run-1/submit", label: "submit authoring bundle" },
   { method: "POST", path: "/workbench/authoring/runs/run-1/finish", label: "finish authoring run" },

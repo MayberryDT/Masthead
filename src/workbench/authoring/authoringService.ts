@@ -16,6 +16,10 @@ import type {
 } from "../../shared/workbenchAuthoring.ts";
 import type { PublishedSessionDossierV1, SessionDossierDto } from "../../shared/sessionDossier.ts";
 import type { DurableSessionEnrichment } from "../../shared/sessionEnrichment.ts";
+import type {
+  GuidedArtifactDraft,
+  GuidedPublishedArtifactDto
+} from "../../shared/guidedAuthoring.ts";
 import type { EvidenceKind, EvidenceRef } from "../../core/types.ts";
 import { hasSemanticRedactedText } from "../../core/redaction.ts";
 import type { SessionArtifactRecord } from "../../daemon/db/sessionArtifactRepository.ts";
@@ -42,6 +46,7 @@ import type { SessionCapsule } from "../../enrichment/types.ts";
 import { iterateSessionTranscriptItems, type SessionTranscriptKindFilter } from "../../daemon/db/sessionTranscriptRepository.ts";
 import { getOrCreateDatabaseIdentity } from "../../daemon/db/schema.ts";
 import { type MastheadDatabase, withImmediateTransaction } from "../../daemon/db/sqlite.ts";
+import { withDataRevisionOperation } from "../../daemon/db/dataRevisionRepository.ts";
 import {
   createWorkbenchAuthoringRunInTransaction,
   completeWorkbenchAuthoringRun,
@@ -89,6 +94,10 @@ import {
 } from "./dossierSnapshot.ts";
 
 const AUTHORING_LEASE_MS = 60 * 60_000;
+
+function withAuthoringMutation<T>(db: MastheadDatabase, callback: () => T): T {
+  return withDataRevisionOperation(db, () => withImmediateTransaction(db, callback));
+}
 
 export type OpenAuthoringRunResult = {
   ok: true;
@@ -192,11 +201,157 @@ export type AgentLedFinishMutationBoundary =
   | "activities_recorded"
   | "receipt_persisted";
 
+export type AppliedGuidedSessionEnrichment = {
+  enrichmentIds: string[];
+  sessionId: string;
+};
+
+export type StagedGuidedOptionalArtifact = {
+  artifact: SessionArtifactRecord;
+  draftId: string;
+  kind: GuidedArtifactDraft["kind"];
+};
+
+export type PublishedGuidedAuthoringArtifacts = {
+  publishedArtifacts: GuidedPublishedArtifactDto[];
+};
+
+/**
+ * Applies one guided session enrichment inside the caller's transaction and
+ * returns every stable enrichment row used by the canonical projections.
+ */
+export function applyGuidedSessionEnrichmentInTransaction(
+  db: MastheadDatabase,
+  input: {
+    actorId: string;
+    enrichment: DurableSessionEnrichment;
+    sessionId: string;
+  }
+): AppliedGuidedSessionEnrichment {
+  return {
+    enrichmentIds: applyDurableSessionEnrichmentInTransaction(
+      db,
+      input.sessionId,
+      input.enrichment,
+      input.actorId,
+      "guided_authoring"
+    ),
+    sessionId: input.sessionId
+  };
+}
+
+/**
+ * Establishes the final Workbench reuse fields and stages canonical dossier
+ * snapshots for one persisted assignment. The caller owns the transaction.
+ */
+export function stageGuidedCanonicalDossiersInTransaction(
+  db: MastheadDatabase,
+  input: {
+    assignmentId: string;
+    actorId: string;
+    evidenceRevision: string;
+    sessionIds: string[];
+  }
+): SessionArtifactRecord[] {
+  assertPersistedGuidedAssignmentMembership(db, input.assignmentId, input.actorId, input.sessionIds);
+  const actor = { id: input.actorId, kind: "agent" } as const;
+  for (const sessionId of input.sessionIds) {
+    markWorkbenchArtifactAppliedInTransaction(db, { actor, artifactKind: "session_dossier", sessionId });
+    // Publication changes canonical reuse fields. Establish those fields before
+    // snapshotting; the final reset helper enforces the complete package gate.
+    markWorkbenchPublishedInTransaction(db, {
+      actor,
+      publishedVia: "guided_authoring_dossier_staging",
+      sessionId
+    });
+  }
+  return input.sessionIds.map((sessionId) =>
+    applyCanonicalDossierSnapshotInTransaction(db, sessionId, input.actorId, {
+      contract: "workbench-authoring-v4",
+      evidenceRevision: input.evidenceRevision
+    })
+  );
+}
+
+/** Stages validated optional artifacts and their Workbench satisfaction state. */
+export function stageGuidedOptionalArtifactsInTransaction(
+  db: MastheadDatabase,
+  input: {
+    actorId: string;
+    artifacts: GuidedArtifactDraft[];
+    assignmentId: string;
+    sessionIds: string[];
+  }
+): StagedGuidedOptionalArtifact[] {
+  assertPersistedGuidedAssignmentMembership(db, input.assignmentId, input.actorId, input.sessionIds);
+  assertGuidedArtifactMembership(input.artifacts, input.sessionIds);
+  const actor = { id: input.actorId, kind: "agent" } as const;
+  return input.artifacts.map((draft) => {
+    const artifact = applyGuidedArtifactInTransaction(db, input.actorId, draft);
+    markWorkbenchArtifactAppliedInTransaction(db, { actor, artifactKind: draft.kind, sessionId: draft.seedSessionId });
+    markWorkbenchArtifactPublishedInTransaction(db, {
+      actor,
+      artifactId: artifact.artifactId,
+      artifactKind: draft.kind,
+      sessionId: draft.seedSessionId
+    });
+    markContributionSatisfactionForProvenanceInTransaction(db, {
+      actor,
+      artifactKind: draft.kind,
+      provenanceSessionIds: draft.provenanceSessionIds,
+      publishedArtifactId: artifact.artifactId,
+      seedSessionId: draft.seedSessionId
+    });
+    return { artifact, draftId: draft.draftId, kind: draft.kind };
+  });
+}
+
+/** Publishes and indexes artifacts already staged by the caller's transaction. */
+export function publishStagedGuidedArtifactsInTransaction(
+  db: MastheadDatabase,
+  input: {
+    dossierArtifacts: SessionArtifactRecord[];
+    optionalArtifacts: StagedGuidedOptionalArtifact[];
+    verifyPublished?: (artifactId: string) => boolean;
+  }
+): PublishedGuidedAuthoringArtifacts {
+  const publishedDossiers = input.dossierArtifacts.map((artifact) =>
+    requirePublishedAuthoringArtifact(db, artifact.artifactId)
+  );
+  const publishedOptional = input.optionalArtifacts.map(({ artifact }) =>
+    requirePublishedAuthoringArtifact(db, artifact.artifactId)
+  );
+  const published = [...publishedDossiers, ...publishedOptional];
+  for (const artifact of published) {
+    indexSessionArtifactSearch(db, artifact.artifactId);
+    assertPublishedArtifactVisible(db, artifact.artifactId, artifact.provenanceSessionIds);
+    if (input.verifyPublished && !input.verifyPublished(artifact.artifactId)) {
+      throw new Error(`authoring_finish_visibility_failed:${artifact.artifactId}`);
+    }
+  }
+
+  return {
+    publishedArtifacts: [
+      ...publishedDossiers.map((artifact): GuidedPublishedArtifactDto => ({
+        artifactId: artifact.artifactId,
+        kind: "session_dossier",
+        sessionIds: [...artifact.provenanceSessionIds]
+      })),
+      ...publishedOptional.map((artifact, index): GuidedPublishedArtifactDto => ({
+        artifactId: artifact.artifactId,
+        draftId: input.optionalArtifacts[index]!.draftId,
+        kind: input.optionalArtifacts[index]!.kind,
+        sessionIds: [...artifact.provenanceSessionIds]
+      }))
+    ]
+  };
+}
+
 export function openAgentLedAuthoringRun(
   db: MastheadDatabase,
   input: { actorId: string; databaseId: string; sessionIds: string[] }
 ): OpenAgentLedAuthoringRunResult {
-  return withImmediateTransaction(db, () => {
+  return withAuthoringMutation(db, () => {
     const sessionIds = normalizeSessionIds(input.sessionIds);
     if (sessionIds.length < 1 || sessionIds.length > 12) throw new Error("authoring_session_count_invalid");
     for (const sessionId of sessionIds) assertSessionExists(db, sessionId);
@@ -268,7 +423,7 @@ export function openAuthoringRun(
   db: MastheadDatabase,
   input: { actorId: string; databaseId: string; sessionIds: string[] }
 ): OpenAuthoringRunResult {
-  return withImmediateTransaction(db, () => {
+  return withAuthoringMutation(db, () => {
     const sessionIds = normalizeSessionIds(input.sessionIds);
     if (sessionIds.length === 0) throw new Error("authoring_run_requires_sessions");
     for (const sessionId of sessionIds) assertSessionExists(db, sessionId);
@@ -353,7 +508,7 @@ export function openCandidateAuthoringRun(
   db: MastheadDatabase,
   input: { actorId: string; candidateId: string; databaseId: string }
 ): OpenCandidateAuthoringRunResult {
-  return withImmediateTransaction(db, () => {
+  return withAuthoringMutation(db, () => {
     const databaseId = getOrCreateDatabaseIdentity(db);
     if (input.databaseId !== databaseId) throw new Error("database_identity_mismatch");
     const candidate = getWorkbenchArtifactCandidate(db, input.candidateId);
@@ -473,7 +628,7 @@ export function submitAuthoringBundle(
   db: MastheadDatabase,
   input: { bundle: WorkbenchAuthoringBundle | WorkbenchAuthoringBundleV2 | WorkbenchAuthoringBundleV3; runId: string }
 ): SubmitAuthoringBundleResult {
-  return withImmediateTransaction(db, () => {
+  return withAuthoringMutation(db, () => {
     const existing = requireAuthoringRun(db, input.runId);
     if (existing.contractVersion !== "workbench-authoring-v3") throw new Error("authoring_contract_audit_only");
     if (existing.status === "completed") throw new Error(`authoring_run_completed:${input.runId}`);
@@ -556,7 +711,7 @@ export function finishAuthoringRun(
     onMutationBoundary?: (boundary: CandidateFinishMutationBoundary | AgentLedFinishMutationBoundary) => void;
   }
 ): WorkbenchAuthoringReceipt {
-  return withImmediateTransaction(db, () => {
+  return withAuthoringMutation(db, () => {
     const existing = requireAuthoringRun(db, input.runId);
     if (existing.contractVersion !== "workbench-authoring-v3") throw new Error("authoring_contract_audit_only");
     if (existing.receipt) return existing.receipt;
@@ -604,21 +759,34 @@ export function canonicalDossierCapsule(snapshot: PublishedSessionDossierV1): {
   summary: string;
   title: string;
 } {
+  const durable = snapshot.durableEnrichment;
+  const durableVerification = durable?.sessionDossier.verification;
+  const capturedVerification = durableVerification && (
+    durableVerification.status === "passed" ||
+    durableVerification.status === "failed" ||
+    durableVerification.status === "mixed"
+  );
   return {
     confidence:
-      snapshot.durableEnrichment?.sessionSummary.confidence ??
+      durable?.sessionSummary.confidence ??
       ({ authoritative: "high", inferred: "medium", heuristic: "low" } as const)[
         snapshot.identity.sourceConfidence
       ],
-    highlight: snapshot.attention[0]?.title ?? snapshot.verification.summary,
+    highlight:
+      (capturedVerification ? durableVerification.summary : undefined) ??
+      durable?.sessionDossier.outcome ??
+      durable?.sessionDossier.keyWork[0] ??
+      durable?.sessionDossier.decisions[0] ??
+      snapshot.attention[0]?.title ??
+      snapshot.verification.summary,
     project: snapshot.identity.project,
     summary:
-      snapshot.durableEnrichment?.sessionSummary.text ??
+      durable?.sessionSummary.text ??
       snapshot.narrative.finalAssistantMessage ??
       snapshot.narrative.outcome ??
       snapshot.narrative.objective ??
       snapshot.identity.title,
-    title: snapshot.identity.title
+    title: durable?.sessionTitle.text ?? snapshot.identity.title
   };
 }
 
@@ -1441,18 +1609,32 @@ function applyAuthoringArtifactInTransaction(
 function applyCanonicalDossierSnapshotInTransaction(
   db: MastheadDatabase,
   sessionId: string,
-  actorId: string
+  actorId: string,
+  options: {
+    contract: "workbench-authoring-v3" | "workbench-authoring-v4";
+    evidenceRevision?: string;
+  } = { contract: "workbench-authoring-v3" }
 ): SessionArtifactRecord {
   const canonical = getSessionDossier(db, sessionId);
   if (!canonical) throw new Error(`canonical_dossier_missing:${sessionId}`);
   const snapshot = buildPublishedEnrichedDossierSnapshot(canonical);
   const capsule = canonicalDossierCapsule(snapshot);
+  const snapshotFingerprint = dossierSnapshotFingerprint(snapshot);
+  const contentFingerprint = options.contract === "workbench-authoring-v4"
+    ? fingerprintWorkbenchOutput({
+        contract: options.contract,
+        evidenceRevision: options.evidenceRevision,
+        snapshotFingerprint
+      })
+    : snapshotFingerprint;
   return applySessionArtifactInTransaction(db, {
     artifactKind: "session_dossier",
     confidence: capsule.confidence,
     content: snapshot,
-    contentFingerprint: dossierSnapshotFingerprint(snapshot),
-    createdBy: `workbench_authoring_v3:${actorId}`,
+    contentFingerprint,
+    createdBy: options.contract === "workbench-authoring-v4"
+      ? `guided_authoring:${actorId}`
+      : `workbench_authoring_v3:${actorId}`,
     evidenceRefs: dossierEvidenceRefs(snapshot),
     highlight: capsule.highlight,
     projectLabel: capsule.project,
@@ -1463,8 +1645,8 @@ function applyCanonicalDossierSnapshotInTransaction(
     title: capsule.title,
     validation: {
       canonicalSnapshot: true,
-      contract: "workbench-authoring-v3",
-      evidenceRevision: authoringEvidenceRevision(db, [sessionId]),
+      contract: options.contract,
+      evidenceRevision: options.evidenceRevision ?? authoringEvidenceRevision(db, [sessionId]),
       ok: true
     }
   });
@@ -1474,8 +1656,9 @@ function applyDurableSessionEnrichmentInTransaction(
   db: MastheadDatabase,
   sessionId: string,
   enrichment: DurableSessionEnrichment,
-  actorId: string
-): void {
+  actorId: string,
+  provider: "guided_authoring" | "workbench_authoring_v3" = "workbench_authoring_v3"
+): string[] {
   const canonicalEnrichment = canonicalizeDurableEnrichmentEvidence(db, sessionId, enrichment);
   const generatedAt = canonicalEnrichment.generatedAt ?? new Date().toISOString();
   const contentFingerprint = fingerprintWorkbenchOutput(canonicalEnrichment);
@@ -1511,6 +1694,7 @@ function applyDurableSessionEnrichmentInTransaction(
     },
     session_capsule: capsule
   } as const;
+  const enrichmentIds: string[] = [];
   for (const enrichmentKind of ["session_capsule", "live_summary", "search_projection"] as const) {
     markStaleCurrentSessionEnrichments(db, {
       enrichmentKind,
@@ -1518,24 +1702,25 @@ function applyDurableSessionEnrichmentInTransaction(
       promptVersion: SESSION_CAPSULE_PROMPT_VERSION,
       sessionId
     });
-    upsertSessionEnrichment(db, {
+    enrichmentIds.push(upsertSessionEnrichment(db, {
       content: contents[enrichmentKind],
       contentFingerprint,
       enrichmentKind,
       generatedAt,
       model: enrichment.model ?? "external_agent",
       promptVersion: SESSION_CAPSULE_PROMPT_VERSION,
-      provider: "workbench_authoring_v3",
+      provider,
       sessionId,
       sourceRefs,
       status: "current"
-    });
+    }));
   }
   indexCanonicalSessionSearch(db, sessionId);
   markWorkbenchSessionEnrichmentSatisfiedInTransaction(db, {
     actor: { id: actorId, kind: "agent" },
     sessionId
   });
+  return enrichmentIds;
 }
 
 function canonicalizeDurableEnrichmentEvidence(
@@ -1599,6 +1784,72 @@ function applyAgentLedArtifactInTransaction(
     title: stringFromOutput(input.output.title),
     validation: { contract: "workbench-authoring-v3", ok: true, schemaVersion: `${input.kind}-v2` }
   });
+}
+
+function applyGuidedArtifactInTransaction(
+  db: MastheadDatabase,
+  actorId: string,
+  draft: GuidedArtifactDraft
+): SessionArtifactRecord {
+  return applySessionArtifactInTransaction(db, {
+    artifactKind: draft.kind,
+    confidence: confidenceFromOutput(draft.output),
+    content: draft.output,
+    contentFingerprint: fingerprintWorkbenchOutput({
+      artifactKind: draft.kind,
+      output: draft.output,
+      provenanceSessionIds: [...new Set(draft.provenanceSessionIds)].sort(),
+      seedSessionId: draft.seedSessionId,
+      signatureKey: normalizeSessionArtifactSignatureKey(draft.output.signatureKey)
+    }),
+    createdBy: `guided_authoring:${actorId}`,
+    evidenceRefs: stringArrayFromOutput(draft.output.evidenceRefs),
+    joinRationale: stringFromOutput(draft.output.joinRationale),
+    projectLabel: projectLabelForSession(db, draft.seedSessionId),
+    provenanceSessionIds: draft.provenanceSessionIds,
+    schemaVersion: `${draft.kind}-v2`,
+    sessionId: draft.seedSessionId,
+    signatureKey: normalizeSessionArtifactSignatureKey(draft.output.signatureKey),
+    title: stringFromOutput(draft.output.title),
+    validation: { contract: "workbench-authoring-v4", ok: true, schemaVersion: `${draft.kind}-v2` }
+  });
+}
+
+function assertPersistedGuidedAssignmentMembership(
+  db: MastheadDatabase,
+  assignmentId: string,
+  actorId: string,
+  sessionIds: string[]
+): void {
+  const persisted = db.prepare(
+    `SELECT membership.session_id AS sessionId, requests.actor_id AS actorId
+     FROM guided_authoring_assignment_sessions AS membership
+     JOIN guided_authoring_requests AS requests ON requests.request_id = membership.request_id
+     WHERE membership.assignment_id = ?
+     ORDER BY membership.ordinal`
+  ).all(assignmentId) as Array<{ actorId: string; sessionId: string }>;
+  if (persisted.length === 0) throw new Error("guided_assignment_not_found");
+  if (persisted.some((row) => row.actorId !== actorId)) {
+    throw new Error("guided_authoring_actor_mismatch");
+  }
+  if (!sameOrderedStrings(persisted.map(({ sessionId }) => sessionId), sessionIds)) {
+    throw new Error("guided_assignment_session_membership_mismatch");
+  }
+}
+
+function assertGuidedArtifactMembership(artifacts: GuidedArtifactDraft[], sessionIds: string[]): void {
+  const membership = new Set(sessionIds);
+  for (const artifact of artifacts) {
+    if (!membership.has(artifact.seedSessionId) || artifact.provenanceSessionIds.some((id) => !membership.has(id))) {
+      throw new Error("guided_artifact_provenance_membership_mismatch");
+    }
+  }
+}
+
+function requirePublishedAuthoringArtifact(db: MastheadDatabase, artifactId: string): SessionArtifactRecord {
+  const published = publishSessionArtifactInTransaction(db, artifactId);
+  if (!published) throw new Error(`authoring_finish_artifact_missing:${artifactId}`);
+  return published;
 }
 
 function applyCandidateAuthoringArtifactInTransaction(

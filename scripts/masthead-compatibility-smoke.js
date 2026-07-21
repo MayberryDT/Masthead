@@ -55,8 +55,9 @@ try {
 
   const upstreamCountBeforeBlocked = upstreamRequests.length;
   for (const entry of BLOCKED_MUTATION_ENDPOINTS) {
+    const requestBody = entry.method === "GET" ? undefined : JSON.stringify({ blocked: true });
     const response = await fetch(`${bridge.baseUrl}${entry.path}`, {
-      body: JSON.stringify({ blocked: true }),
+      body: requestBody,
       headers: { accept: "application/json", "content-type": "application/json", origin: "http://127.0.0.1:5173" },
       method: entry.method
     });

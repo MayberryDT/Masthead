@@ -2,7 +2,12 @@
 
 ## Status
 
-Accepted.
+Superseded by ADR 0015.
+
+This ADR is preserved as implementation history for `workbench-authoring-v3`. ADR 0015 defines the
+accepted V4 target, pending implementation. The installed runtime still implements V3 compatibility during the
+cutover, but V3 is no longer the desired contract and must not be used for a new bulk or production
+enrichment campaign.
 
 ## Context
 

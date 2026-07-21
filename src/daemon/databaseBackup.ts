@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { access, lstat, readdir, realpath, rename, rm, stat } from "node:fs/promises";
+import { access, lstat, readdir, readFile, realpath, rename, rm, stat } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { backup, DatabaseSync } from "node:sqlite";
 import {
@@ -61,6 +61,18 @@ export type ExclusiveDatabaseMaintenance = {
   [exclusiveMaintenanceBrand]: true;
 };
 
+/** Runtime proof that a recovery caller holds this module's unforgeable ownership brand. */
+export function assertExclusiveDatabaseMaintenance(
+  databasePath: string,
+  ownership: ExclusiveDatabaseMaintenance,
+  errorCode = "database_maintenance_exclusive_ownership_required"
+): void {
+  if (
+    !ownership || ownership.databasePath !== resolve(databasePath) ||
+    ownership[exclusiveMaintenanceBrand] !== true
+  ) throw new Error(errorCode);
+}
+
 /** Mirrors daemon startup ownership: location, per-database lease, then legacy data-directory guard. */
 export async function withExclusiveDatabaseMaintenance<T>(
   databasePath: string,
@@ -69,10 +81,15 @@ export async function withExclusiveDatabaseMaintenance<T>(
   await access(databasePath);
   const dataDirectory = dirname(resolve(databasePath));
   await assertWritableDatabaseLocation(databasePath, dataDirectory);
+  await assertNoDaemonRuntimeManifest(dataDirectory);
   const writerLease = await acquireDatabaseWriterLock(databasePath);
   let legacyGuard: Awaited<ReturnType<typeof acquireLegacyDataDirectoryGuard>> | undefined;
   try {
     legacyGuard = await acquireLegacyDataDirectoryGuard(dataDirectory);
+    // Repeat the runtime proof after both daemon-equivalent guards are held.
+    // A malformed or stale manifest is still ownership ambiguity, so
+    // maintenance never reclaims or ignores it automatically.
+    await assertNoDaemonRuntimeManifest(dataDirectory);
     return await callback({
       databasePath: resolve(databasePath),
       [exclusiveMaintenanceBrand]: true
@@ -83,6 +100,48 @@ export async function withExclusiveDatabaseMaintenance<T>(
     } finally {
       await writerLease.release();
     }
+  }
+}
+
+async function assertNoDaemonRuntimeManifest(dataDirectory: string): Promise<void> {
+  const manifestPath = join(dataDirectory, "runtime", "daemon.json");
+  let contents: string;
+  try {
+    const info = await lstat(manifestPath);
+    if (!info.isFile() || info.isSymbolicLink()) {
+      throw new Error(`database_maintenance_daemon_manifest_invalid:${manifestPath}`);
+    }
+    contents = await readFile(manifestPath, "utf8");
+  } catch (error) {
+    if (isErrno(error, "ENOENT")) return;
+    throw error;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(contents);
+  } catch {
+    throw new Error(`database_maintenance_daemon_manifest_invalid:${manifestPath}`);
+  }
+  const pid = parsed && typeof parsed === "object" && "pid" in parsed
+    ? maintenanceManifestPid((parsed as { pid?: unknown }).pid)
+    : undefined;
+  if (!pid) throw new Error(`database_maintenance_daemon_manifest_invalid:${manifestPath}`);
+  if (maintenanceManifestProcessIsAlive(pid)) {
+    throw new Error(`database_maintenance_live_daemon_manifest:${manifestPath}:pid:${pid}`);
+  }
+  throw new Error(`database_maintenance_stale_daemon_manifest:${manifestPath}:pid:${pid}`);
+}
+
+function maintenanceManifestPid(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : undefined;
+}
+
+function maintenanceManifestProcessIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return isErrno(error, "EPERM");
   }
 }
 
@@ -102,9 +161,7 @@ export async function createSingleConsistentBackupInsideExclusiveMaintenance(
   ownership: ExclusiveDatabaseMaintenance,
   options: DatabaseBackupOptions = {}
 ): Promise<ConsistentDatabaseBackupReceipt> {
-  if (ownership.databasePath !== resolve(databasePath) || ownership[exclusiveMaintenanceBrand] !== true) {
-    throw new Error("database_backup_exclusive_ownership_required");
-  }
+  assertExclusiveDatabaseMaintenance(databasePath, ownership, "database_backup_exclusive_ownership_required");
   const directory = dirname(resolve(databasePath));
   const databaseName = basename(databasePath);
   const finalPrefix = `${databaseName}.backup-`;

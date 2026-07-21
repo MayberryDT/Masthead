@@ -209,6 +209,11 @@ x-motion:
   easing: "cubic-bezier(0.22, 1, 0.36, 1)"
 ---
 
+> **Authoring runtime boundary:** Visual and interaction descriptions for guided V4 requests,
+> assignments, canary review, and instance-bound handoff are the accepted design target and remain
+> pending implementation. The installed V3 compatibility runtime is being replaced and must not be
+> used for a new bulk or production enrichment campaign.
+
 # Masthead Design
 
 This is the master design source for Masthead. The repo intentionally uses the lowercase filename `design.md`; tools or agents that expect Google's uppercase `DESIGN.md` format should be pointed at this file.
@@ -295,11 +300,12 @@ recur across views, but each surface may use the structure that fits its job:
 - Now: live cards.
 - Workbench: dense publish-path table + Activity console rail + metal ops toolbar.
   Human ops cover transcript check/import, quality review, claim/release, publish,
-  Not Added inspection, session selection, and agent-led authoring. **Copy Agent Prompt** copies a
-  disposable request for the compile-ready subset of the selection. Review-needed sessions remain
-  selected for human operations, are disclosed, and never block ready work. The agent enriches
-  every session in the request and may choose zero or more optional artifacts; detector suggestions
-  are nonbinding.
+  Not Added inspection, session selection, guided authoring request creation, and staged canary
+  review. **Copy Agent Prompt** first persists the compile-ready selection and campaign policy, then
+  copies only the opaque request ID and one instance-bound start command. Review-needed sessions
+  remain selected for human operations, are disclosed, and never enter the request. The Activity
+  rail shows the current assignment, next action, editorial findings, and operator approval without
+  becoming a command cookbook.
 - Logbook: dense table plus inspector.
 - Sources: harness connector rows plus enablement detail (Discover → Enable → Activate → Test).
 - Settings: one centered compact steel card with direct controls for everyday preferences and one
@@ -380,11 +386,30 @@ published, confidence, and which sessions provenance it. Body detail and multi-s
 belong in the inspector, not free-floating table paragraphs.
 
 `session_dossier` has one visual and semantic contract: the original canonical dossier structure.
-Under `workbench-authoring-v3`, the agent writes current durable enrichment for each selected
-session, then the daemon rebuilds that canonical presentation. The agent may also author zero or
-more claim-supported runbooks, ADRs, or incident timelines. Publication is atomic admission of the
-validated enriched dossiers and optional artifacts into Logbook; nothing enters Logbook until
-enrichment is current.
+Under `workbench-authoring-v4`, the agent traverses complete canonical evidence and writes grounded
+durable enrichment for each assignment session, then the daemon rebuilds that canonical
+presentation. The agent may also author zero or more claim-supported runbooks, ADRs, or incident
+timelines. The first accepted assignment is a three-session canary capped at three sessions and
+remains staged for operator approval. Publication atomically admits one accepted assignment into
+Logbook; nothing enters Logbook until its enrichment and editorial review are accepted.
+
+### Guided authoring vocabulary
+
+Guided authoring request = the durable Workbench selection and campaign policy.
+
+Assignment = one daemon-grouped authoring unit containing at most 12 sessions.
+
+Knowledge opportunity = nonbinding evidence that may support a runbook, ADR, or incident timeline.
+
+Opportunity disposition = authored, dismissed, merged, or changed kind, with evidence-backed rationale.
+
+Canary = the first staged assignment of at most 3 sessions, reviewed by an operator before publication.
+
+Next action = the single command Masthead requires from the agent at the current assignment state.
+
+The canary planner never breaks a strong opportunity merely to fill three slots. It chooses a
+complete strong group of at most three sessions or diverse dossier-only sessions; when neither is
+possible, request creation fails with `guided_canary_not_constructible` and leaves no durable request.
 
 ### Sources
 

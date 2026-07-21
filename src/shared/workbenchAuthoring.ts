@@ -22,7 +22,12 @@ export type WorkbenchClaimSupport = {
     | "verification"
     | "timeline"
     | "remediation"
-    | "root_cause";
+    | "root_cause"
+    | "purpose"
+    | "outcome"
+    | "blocker"
+    | "continuation"
+    | "reuse";
 };
 
 export type WorkbenchAuthoringContractVersion =
@@ -39,6 +44,10 @@ type WorkbenchAuthoringCapabilitiesBase = {
 };
 
 export type WorkbenchAuthoringCapabilitiesDto = WorkbenchAuthoringCapabilitiesBase & ({
+  baseUrl: string;
+  buildSha: string;
+  instanceManifest: string;
+  instanceId: string;
   operations: ["suggestions", "open", "status", "evidence", "context", "submit", "finish"];
   bundleVersion: "workbench-authoring-v3";
   evidencePolicy: "selected_session_canonical_evidence";
@@ -113,11 +122,28 @@ export function isWorkbenchAuthoringCapabilitiesDto(
     typeof capabilities.databaseId === "string" &&
     Boolean(capabilities.databaseId.trim()) &&
     capabilities.databaseId === capabilities.databaseId.trim() &&
+    typeof capabilities.buildSha === "string" &&
+    Boolean(capabilities.buildSha.trim()) &&
+    typeof capabilities.instanceId === "string" &&
+    Boolean(capabilities.instanceId.trim()) &&
+    typeof capabilities.baseUrl === "string" &&
+    isCanonicalAuthoringBaseUrl(capabilities.baseUrl) &&
+    typeof capabilities.instanceManifest === "string" &&
+    isAbsoluteAuthoringCommand(capabilities.instanceManifest) &&
     capabilities.command === command &&
     isAbsoluteAuthoringCommand(command) &&
     (!options.expectedCommand || command === options.expectedCommand) &&
     hasExactAuthoringOperations(capabilities.operations)
   );
+}
+
+function isCanonicalAuthoringBaseUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" && !url.username && !url.password && url.pathname === "/" && !url.search && !url.hash && !value.endsWith("/");
+  } catch {
+    return false;
+  }
 }
 
 export function isAbsoluteAuthoringCommand(command: string | undefined): boolean {
@@ -231,6 +257,8 @@ export type WorkbenchAuthoringFinding = {
   severity: "error" | "warning";
   path?: string;
   sessionId?: string;
+  artifactDraftId?: string;
+  opportunityId?: string;
   artifactKind?: "session_enrichment" | WorkbenchAuthoredArtifactKind;
 };
 

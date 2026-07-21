@@ -1,137 +1,120 @@
-# Workbench Artifact Authoring
+# Workbench Guided Artifact Authoring
 
-Masthead authoring is agent-authored and daemon-owned. The Workbench app is the
-human collaboration surface; the writable daemon owns evidence, validation,
-claims, database identity, output writes, publication, and completion. The
-installed CLI is a thin HTTP adapter and never opens SQLite for normal
-authoring.
+This reference defines the implemented `workbench-authoring-v4` contract. Masthead authoring is
+agent-authored and daemon-owned: Workbench is
+the human collaboration surface, while the writable daemon owns durable requests, assignment planning,
+evidence coverage, validation, editorial review, claims, identity checks, publication, and receipts.
+The instance-bound CLI will remain a thin HTTP adapter and will not open SQLite for normal authoring.
 
-See [ADR 0012](../adr/0012-daemon-owned-artifact-authoring.md).
+V1, V2, and V3 remain audit-only: legacy records and receipts stay readable, but mutation attempts
+fail with `authoring_contract_retired`. See
+[ADR 0015](../adr/0015-guided-authoring-campaigns.md) for the accepted decision.
 
-## Human and agent surfaces
+## V4 human handoff
 
-People select compile-ready sessions and copy a disposable plain-language
-handoff. The handoff says to complete the work automatically, but does not show
-commands, file recipes, privacy questions, or a step-by-step approval wizard.
+People select compile-ready sessions and choose **Copy Agent Prompt**. Workbench first creates one
+durable guided authoring request, then copies only its opaque request ID and one instance-bound start
+command. The handoff contains no session list, multi-step CLI recipe, file recipe, or privacy wizard.
 
-A user who wants to steer the work can direct an agent to Workbench and discuss
-artifact shape or provenance. Copied-handoff work and directed work still use
-the same authoring contract and quality rules; neither path is intentionally
-more conservative.
+Every authoring mutation verifies the daemon URL, database ID, build SHA, and instance manifest
+identity. This keeps simultaneous development and production installations from sharing a launcher or
+writing the wrong database.
 
-## Discovery
+## V4 vocabulary
 
-The agent first reads authoring capabilities from the active daemon. The
-response identifies:
+Guided authoring request = the durable Workbench selection and campaign policy.
 
-- protocol `masthead.workbench.authoring/v1`;
-- transport `daemon_http`;
-- the installed absolute CLI command;
-- the daemon’s database identity;
-- bundle version `workbench-authoring-v1`;
-- evidence policy `all_canonical_redacted_evidence`;
-- operations `open`, `status`, `evidence`, `submit`, and `finish`.
+Assignment = one daemon-grouped authoring unit containing at most 12 sessions.
 
-The database identity from capabilities must be passed unchanged to open. A
-different daemon is rejected before claims or artifact writes.
+Knowledge opportunity = nonbinding evidence that may support a runbook, ADR, or incident timeline.
 
-## Four-operation authoring flow
+Opportunity disposition = authored, dismissed, merged, or changed kind, with evidence-backed rationale.
 
-| Operation | Contract |
+Canary = the first staged assignment of at most 3 sessions, reviewed by an operator before publication.
+
+Next action = the single command Masthead requires from the agent at the current assignment state.
+
+## Request planning and canary
+
+The target bundle version is `workbench-authoring-v4` and the policy is `guided-authoring-v1`. The
+daemon groups a request into assignments of at most 12 sessions, using strong artifact-opportunity
+joins first and dossier-only groups second. The agent receives one assignment and one required next
+action; it never receives the full selection to partition.
+
+The first assignment is a three-session canary capped at three sessions. Masthead chooses a complete
+strong opportunity group of at most three sessions or diverse dossier-only sessions. It never splits
+a larger strong group merely to manufacture a canary. If every selected session belongs to a larger
+strong group, request creation returns `guided_canary_not_constructible` and persists nothing.
+
+## Guided workflow
+
+| State | Required behavior |
 | --- | --- |
-| **Open** | Open or reuse one durable authoring run for the actor and exact selected session set. Open verifies database identity, establishes one live claim per session, records the evidence revision, and returns the bundle schema plus evidence manifest. |
-| **Evidence** | Page through every canonical redacted evidence item for each selected session. Ascending and descending pagination cover the same complete catalog. Status is a read-only recovery check for run, claim, and evidence-revision state. |
-| **Submit** | Send one complete artifact bundle. The daemon stores the bundle and structured findings, but creates no enrichment or artifact rows. Revise deterministic findings and resubmit until accepted. |
-| **Finish** | Atomically apply enrichment, create and publish every output artifact, resolve every automatic kind, verify Logbook visibility, release claims, and store the automatic completion report. Retrying finish returns the same report. |
+| **Start** | Resolve the request through its instance-bound launcher, verify instance identity, and claim the released assignment. |
+| **Inspect** | Traverse every canonical redacted evidence page in ascending order. Masthead records only the exact returned refs at the current assignment revision and returns the next unread cursor. |
+| **Save** | Submit grounded enrichment for every assignment session, zero or more optional artifacts, and required high-signal opportunity dispositions. Saving creates no Logbook rows. |
+| **Review** | Resolve structured grounding, completion, enrichment-delta, protocol-leakage, reuse, and duplication findings. Masthead returns the single next revision action. |
+| **Canary decision** | The first accepted assignment remains staged until an operator approves or rejects it from Workbench. |
+| **Finish** | Atomically apply one accepted assignment, rebuild canonical dossiers, publish useful optional artifacts, update search and pipeline state, release claims, store the immutable receipt, and release the next assignment. |
 
-Agents should use the capabilities-reported command rather than guessing a
-binary or database path. User-facing Workbench copy remains plain language;
-this protocol is agent-facing machinery.
+Retrying a successful finish returns the same receipt and creates no duplicate output.
 
-## Evidence manifest
+## Complete evidence traversal
 
-Open returns an evidence manifest for every selected session:
+Each assignment pins one revision across all member sessions. Inspect starts with the first session
+that has unread evidence and pages in canonical ascending order. Supplementary query, kind-filtered,
+or descending reads do not count toward completion. If any member evidence changes, the assignment
+advances to the fresh revision and only access rows from that revision count.
 
-- total item count and kind counts;
-- user and assistant message, tool call/result, file, checkpoint, and runtime
-  signal coverage;
-- first and last observation times;
-- coverage warnings;
-- one revision fingerprint for the selected set.
+The agent must answer, with support, what the user asked for, what work occurred, what changed, which
+decisions were made, what verification proved, what failed or remains unresolved, and what another
+person could reuse without reopening the transcript.
 
-Evidence pages return stable item refs and complete redacted text. Agents must
-read all pages needed to account for the manifest rather than stopping at an
-early transcript preview. If canonical evidence changes, evidence and submit
-fail closed until open refreshes the same durable run to the new revision.
+## Grounded enrichment and artifacts
 
-All authoring evidence is already Masthead’s canonical redacted evidence. The
-authoring loop does not ask for a privacy or additional access decision.
-Source-scoped approval remains relevant to the separate act of importing new
-transcript data into Masthead.
+One draft contains grounded durable enrichment for every assignment session and zero or more
+`runbook`, `adr`, or `incident_timeline` artifacts. Agents never author a session dossier body; after
+acceptance the daemon rebuilds `canonical-session-dossier-v1` from current canonical data.
 
-## Artifact bundle
+Every substantive dossier and optional-artifact claim carries a typed canonical evidence reference
+and a verbatim excerpt of at least 20 normalized characters. Grounding covers the title, summary,
+purpose, outcome, key work, decisions, blockers, verification narrative, and continuation claims when
+present. A completed outcome cannot claim unknown verification; missing verification must be stated.
 
-One accepted bundle contains:
+Knowledge opportunities do not manufacture artifacts. Low-signal or unsupported kinds create no
+artifact and no blanket not-applicable text. High-signal opportunities require an evidence-backed
+authored, dismissed, merged, or changed-kind disposition. Authored and changed-kind dispositions link
+to a matching draft; merged dispositions resolve through another persisted opportunity that produces
+an artifact. Generic copied dismissals fail review even when they cite a real evidence ref.
 
-- exactly one `session_enrichment` and `session_dossier` package for every
-  selected session;
-- zero or more grounded `runbook`, `adr`, or `incident_timeline` artifacts;
-- explicit N/A decisions where reviewed evidence does not support a kind;
-- explicit contribution decisions where a selected session is already covered
-  by a current published multi-session artifact.
+## Editorial and reuse quality
 
-For each selected session, every automatic kind has exactly one resolution
-path: a new artifact whose provenance contains that session, N/A, or
-contribution. A multi-session artifact declares its full provenance set and a
-strong join rationale. All claims and N/A decisions cite evidence refs inside
-their allowed provenance.
+V4 rejects protocol narration copied from the handoff, unsupported completion, negligible enrichment
+that restates the deterministic baseline, weak joins, unsupported dispositions, secret-looking output,
+and materially duplicated templates across the request. Supported sessions whose actual subject is
+CLI or prompt design are valid; protocol language is rejected only when evidence does not establish it
+as the session's work.
 
-The first-class live taxonomy is:
+Optional artifacts must be independently reusable. A runbook includes trigger, preconditions,
+performed steps, expected results, verification, and failure or rollback handling. An ADR includes the
+durable decision, context, alternatives actually considered, consequences, and reversal conditions.
+An incident timeline includes symptoms or impact, ordered events, root cause, contributing factors,
+remediation, and recovery verification.
 
-- `session_dossier` — the required single-session artifact body;
-- `runbook` — a reproducible fix or operating recipe;
-- `adr` — a durable architecture or design decision;
-- `incident_timeline` — an ordered failure, impact, remediation, and prevention
-  narrative.
+## Atomic publication and retrieval
 
-## Findings and quality
+Finish runs inside one immediate SQLite transaction. Any failed invariant rolls back enrichment,
+artifacts, search indexing, pipeline state, claims, revisions, Activity, and the receipt together. The
+staged canary cannot finish before operator approval.
 
-Submit returns structured authoring findings with a stable code, severity,
-message, and when available an exact bundle path, session, and artifact kind.
-Validation covers schema shape, selected-session completeness, provenance,
-evidence refs, claim-level grounding, confidence, sparse coverage, duplicate
-signatures, secret-looking output, join strength, and one resolution per
-automatic kind.
+Published artifacts are searchable through Logbook and read-only MCP `search_artifacts` and
+`get_artifact`. Session and transcript tools remain available for evidence inspection. MCP has no
+authoring operations.
 
-Warnings can preserve honest coverage limitations. Errors require revision.
-Because submit has no output side effects, the agent can iterate without
-leaving partially applied artifacts in Logbook.
+## Legacy audit boundary
 
-## Atomic finish and resolution
-
-Finish runs inside one immediate SQLite transaction. Any failed invariant rolls
-back enrichment, artifacts, search indexing, pipeline state, claims, and the
-completion report together.
-
-Every artifact created by finish is published before the transaction commits
-and must be readable through Logbook detail. Optional status `applied` is only
-an intermediate compile state. Automatic resolution accepts only:
-
-- `published`;
-- `not_applicable`;
-- `contributed` to a current published artifact.
-
-The automatic completion report records the run id, completion time, published
-artifact ids, resolved sessions, N/A decisions, and contributions. It is
-immutable and makes finish idempotent across retries and daemon restarts.
-
-## Reuse and correction boundary
-
-Published artifacts are searchable by capsule fields and full body in Logbook.
-Read-only MCP exposes `search_artifacts` and `get_artifact` for reuse, with
-session/transcript tools retained for evidence inspection. MCP has no authoring
-operations.
-
-Logbook improve, rewrite, supersede, and remove tools are future scope. They
-should be added as explicit daemon-owned correction operations rather than by
-weakening authoring quality or making MCP write-capable.
+Historical V1, V2, and V3 status, evidence, findings, bundles, completion reports, and recovery
+receipts remain readable for audit. Legacy authoring protocol identifiers such as
+`masthead.workbench.authoring/v1`, `workbench-authoring-v1`, `workbench-authoring-v2`, and
+`workbench-authoring-v3` describe those immutable records only. They cannot be reopened, submitted,
+finished, or converted into V4 work.

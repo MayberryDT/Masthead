@@ -4,30 +4,30 @@ import { resolve } from "node:path";
 import { describe, expect, test } from "vitest";
 
 describe("artifact authoring product contract", () => {
-  test("documents agent-led enrichment and optional artifact judgment", async () => {
-    const paths = [
+  test("documents guided V4 authoring and retires V3 writes", async () => {
+    const active = await Promise.all([
       "CONTEXT.md",
+      "README.md",
       "design.md",
       "prd.md",
-      "README.md",
       "openwiki/quickstart.md",
       "openwiki/logbook-and-workbench.md",
-      "docs/adr/0014-agent-led-enriched-artifact-authoring.md",
-    ];
-    const activeDocs = (
-      await Promise.all(paths.map((path) => readFile(resolve(path), "utf8")))
-    ).join("\n");
-    const normalized = activeDocs.replace(/\s+/g, " ");
+      "openwiki/data-and-integrations.md",
+      "docs/reference/enrichment.md",
+      "docs/reference/session-dossier.md",
+      "docs/reference/artifact-first-logbook-cutover.md",
+      "docs/reference/daemon-api.md",
+      "docs/adr/0015-guided-authoring-campaigns.md",
+    ].map((path) => readFile(resolve(path), "utf8")));
+    const text = active.join("\n");
 
-    expect(activeDocs).toContain("Copy Agent Prompt");
-    expect(activeDocs).toContain("workbench-authoring-v3");
-    expect(activeDocs).toContain("suggestions are nonbinding");
-    expect(activeDocs).toContain("nothing enters Logbook until enrichment is current");
-    expect(activeDocs).toContain("zero or more optional artifacts");
-    expect(activeDocs).toContain("canonical dossier structure");
-    expect(normalized).not.toMatch(/Author candidate/i);
-    expect(normalized).not.toMatch(/Publish canonical dossiers/i);
-    expect(normalized).not.toMatch(/one candidate group/i);
-    expect(normalized).not.toMatch(/artifact candidate.*required/i);
+    expect(text).toContain("workbench-authoring-v4");
+    expect(text).toContain("guided authoring request");
+    expect(text).toContain("three-session canary");
+    expect(text).toContain("operator approval");
+    expect(text).toContain("instance-bound launcher");
+    expect(text).toContain("high-signal opportunities require an evidence-backed disposition");
+    expect(text).toContain("V1, V2, and V3 remain audit-only");
+    expect(text).not.toContain("the agent must partition them");
   });
 });

@@ -21,6 +21,7 @@ import type {
   SessionDossierUsage,
   SessionDossierVerification
 } from "../../shared/sessionDossier.ts";
+import { materializeDurableDossierPresentation } from "../../shared/sessionDossierMaterialization.ts";
 import type { SessionTranscriptCoverage } from "../../shared/sessionTranscript.ts";
 import { readCurrentSessionEnrichment, readLatestFailedSessionEnrichment } from "./enrichmentRepository.ts";
 import { listSessionArtifacts } from "./sessionArtifactRepository.ts";
@@ -127,7 +128,7 @@ export function getSessionDossier(db: MastheadDatabase, sessionId: string): Sess
   const artifacts = getDossierArtifacts(db, sessionId);
   const dossierIdentity = durableEnrichment ? { ...identity, title: durableEnrichment.sessionTitle.text } : identity;
   const narrative = withCoverageCaveat(getNarrative(db, sessionId, dossierIdentity, messages), coverage);
-  const partial: DossierWithoutReuse = {
+  const partial = materializeDurableDossierPresentation<DossierWithoutReuse>({
     attention,
     artifacts,
     coverage,
@@ -141,7 +142,7 @@ export function getSessionDossier(db: MastheadDatabase, sessionId: string): Sess
     tools,
     usage,
     verification
-  };
+  });
   const reuse: Omit<SessionDossierDto["reuse"], "copyableContext"> = {
     canonicalSessionId: dossierIdentity.sessionId,
     mcpIncluded: isMcpIncluded(db, sessionId),
@@ -858,6 +859,7 @@ function buildCopyableContext(dossier: DossierWithoutReuse, mcpIncluded: boolean
 
 function contextSummary(dossier: DossierWithoutReuse): string | undefined {
   return (
+    dossier.durableEnrichment?.sessionSummary.text ??
     dossier.narrative.finalAssistantMessage ??
     dossier.narrative.liveSummary ??
     dossier.narrative.outcome ??

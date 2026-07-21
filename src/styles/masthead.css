@@ -3070,6 +3070,182 @@ main {
   scrollbar-gutter: stable;
 }
 
+.workbench-activity-scroll {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.workbench-activity-scroll .workbench-activity-list {
+  max-height: none;
+  overflow: visible;
+}
+
+.authoring-canary-review {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  border: 1px solid rgba(247, 201, 72, 0.32);
+  border-radius: 5px;
+  background: #071b28;
+  padding: 12px;
+}
+
+.authoring-canary-head,
+.authoring-canary-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.authoring-canary-head p,
+.authoring-canary-questions p,
+.authoring-draft-capsule p,
+.authoring-canary-support p,
+.authoring-canary-error {
+  margin: 0;
+}
+
+.authoring-canary-identity,
+.authoring-draft-capsule small {
+  color: var(--mute);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  overflow-wrap: anywhere;
+}
+
+.authoring-canary-status,
+.authoring-draft-kind {
+  width: fit-content;
+  border: 1px solid rgba(247, 201, 72, 0.28);
+  border-radius: 9999px;
+  background: rgba(247, 201, 72, 0.12);
+  color: #f3d98a;
+  padding: 3px 7px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.authoring-canary-status {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.authoring-canary-drafts,
+.authoring-canary-questions,
+.authoring-canary-support,
+.authoring-canary-findings,
+.authoring-canary-decision {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.authoring-draft-capsule {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  border-top: 1px solid rgba(194, 221, 241, 0.1);
+  padding-top: 9px;
+}
+
+.authoring-draft-capsule strong,
+.authoring-draft-capsule p,
+.authoring-canary-questions p {
+  color: var(--body);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.authoring-canary-support blockquote {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  border-left: 2px solid rgba(46, 167, 255, 0.4);
+  padding-left: 8px;
+  color: var(--body);
+  font-size: 11px;
+}
+
+.authoring-canary-support cite {
+  color: var(--mute);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-style: normal;
+  overflow-wrap: anywhere;
+}
+
+.authoring-canary-findings ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.authoring-canary-findings li {
+  display: grid;
+  gap: 2px;
+  border-left: 2px solid var(--yellow);
+  padding-left: 8px;
+  color: var(--body);
+  font-size: 11px;
+}
+
+.authoring-canary-findings li.is-error {
+  border-left-color: var(--red);
+}
+
+.authoring-canary-decision label {
+  display: grid;
+  gap: 6px;
+}
+
+.authoring-canary-decision input,
+.authoring-canary-decision textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--control-bg);
+  color: var(--body);
+  padding: 8px;
+  font: 12px/1.4 var(--font-sans);
+  transition-property: border-color, background-color;
+  transition-duration: 160ms;
+}
+
+.authoring-canary-decision input {
+  min-height: 34px;
+}
+
+.authoring-canary-decision textarea {
+  min-height: 72px;
+  resize: vertical;
+}
+
+.authoring-canary-decision input:focus-visible,
+.authoring-canary-decision textarea:focus-visible {
+  border-color: var(--blue);
+  outline: 1px solid var(--blue);
+}
+
+.authoring-canary-error {
+  color: #ffaaa5;
+  font-size: 11px;
+}
+
+.authoring-canary-actions .app-button {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
 .workbench-activity-item {
   display: grid;
   grid-template-columns: 3px minmax(0, 1fr);

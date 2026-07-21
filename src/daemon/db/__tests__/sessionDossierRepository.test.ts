@@ -159,10 +159,27 @@ describe("session dossier repository", () => {
       sourceRefs: [],
       status: "current"
     });
+    db.prepare("DELETE FROM tool_calls WHERE session_id = ?").run("session-durable-dossier");
 
     const dossier = getSessionDossier(db, "session-durable-dossier");
 
     expect(dossier?.identity.title).toBe("Session Dossier enrichment exposure");
+    expect(dossier?.identity.outcome).toBe("Dossier durable enrichment is available to the UI.");
+    expect(dossier?.narrative).toMatchObject({
+      liveSummary: "Exposed durable enrichment through the Session Dossier endpoint.",
+      objective: "Expose durable enrichment through the Dossier endpoint.",
+      outcome: "Dossier durable enrichment is available to the UI."
+    });
+    expect(dossier?.verification).toMatchObject({
+      status: "passed",
+      summary: "Dossier repository tests passed."
+    });
+    expect(dossier?.attention.map(({ kind }) => kind)).not.toContain("missing_verification");
+    expect(dossier?.coverage.warnings.map(({ code }) => code)).not.toContain("verification_missing");
+    expect(dossier?.reuse.copyableContext).toContain(
+      "Summary: Exposed durable enrichment through the Session Dossier endpoint."
+    );
+    expect(dossier?.reuse.copyableContext).toContain("Verification: passed");
     expect(dossier?.durableEnrichment?.sessionTitle.text).toBe("Session Dossier enrichment exposure");
     expect(dossier?.durableEnrichment?.sessionDossier.decisions).toContain("Do not reuse Board live headlines as Logbook titles.");
     db.close();

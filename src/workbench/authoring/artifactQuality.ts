@@ -47,6 +47,33 @@ const SELF_PROCESS_PROTOCOL_PATTERNS = [
   }
 ] as const;
 
+export type ArtifactProtocolPolicy = "legacy" | "guided_v4";
+
+export type ArtifactProtocolField = {
+  path: string;
+  value: string;
+};
+
+export const GUIDED_V4_EVIDENCE_FRAMED_MISSING_VERIFICATION_PATTERN =
+  /\b(?:(?:the|available|canonical)\s+){0,2}evidence\s+(?:(?:records?|shows?|contains?)\s+(?:that\s+)?no\s+(?:specific\s+)?verification\s+(?:result|outcome)|does\s+not\s+establish\s+(?:a|any)\s+verification\s+(?:result|outcome))\b/i;
+
+export const GUIDED_V4_HARD_PROTOCOL_PATTERNS = [
+  /\b(?:reusable|supported|grounded) optional[- ]artifact (?:claims?|content|knowledge|outputs?)\b/i,
+  /(?:\bverification\b[^.!?\n]{0,40}\bboundar(?:y|ies)\b|\bboundar(?:y|ies)\b[^.!?\n]{0,40}\bverification\b)/i,
+  GUIDED_V4_EVIDENCE_FRAMED_MISSING_VERIFICATION_PATTERN
+] as const;
+
+export const GUIDED_V4_PROTOCOL_PATTERNS = [
+  /\b(?:i|we) (?:read|reviewed|inspected) (?:all|every) (?:the )?(?:evidence|session|transcript)s?\b/i,
+  /\b(?:i|we) (?:limited|restricted) (?:my|our|the) claims?\b/i,
+  /\b(?:masthead )?workbench author (?:start|inspect|save|review|finish)\b/i,
+  /\b(?:next action|handoff|continue in (?:a|the) next (?:task|session))\b/i,
+  ...GUIDED_V4_HARD_PROTOCOL_PATTERNS,
+  /<recommended_plugins>[\s\S]*?<\/recommended_plugins>/i,
+  /\b(?:AGENTS\.md|system message|developer message|developer instructions)\b/i,
+  /\bYou are (?:Codex|an AI assistant)\b/i
+] as const;
+
 const REQUIRED_SUPPORT_KINDS: Record<WorkbenchAutomaticArtifactKind, readonly WorkbenchClaimSupport["supportKind"][]> = {
   adr: ["decision", "alternative"],
   incident_timeline: ["problem", "timeline", "remediation"],
@@ -110,7 +137,7 @@ export type ArtifactQualityOutput = {
 export function validateClaimSupport(
   output: Record<string, unknown>,
   supports: WorkbenchClaimSupport[],
-  evidenceByRef: Map<string, WorkbenchValidationEvidence>
+  evidenceByRef: ReadonlyMap<string, WorkbenchValidationEvidence>
 ): ArtifactQualityFinding[] {
   const findings: ArtifactQualityFinding[] = [];
   supports.forEach((support) => {
@@ -133,13 +160,98 @@ export function validateClaimSupport(
   return findings;
 }
 
+export function findUnsupportedProtocolFields(
+  fields: ArtifactProtocolField[],
+  options: {
+    policy: ArtifactProtocolPolicy;
+    findingCode: "unsupported_authoring_protocol_language" | "authoring_protocol_leakage";
+    isSupportedMatch: (input: { path: string; matchedText: string }) => boolean;
+  }
+): ArtifactQualityFinding[] {
+  if (options.policy === "guided_v4") {
+    const findings: ArtifactQualityFinding[] = [];
+    for (const field of fields) {
+      for (const pattern of GUIDED_V4_PROTOCOL_PATTERNS) {
+        const matchedText = field.value.match(pattern)?.[0];
+        const isHardProtocol = GUIDED_V4_HARD_PROTOCOL_PATTERNS.includes(
+          pattern as typeof GUIDED_V4_HARD_PROTOCOL_PATTERNS[number]
+        );
+        if (!matchedText || (!isHardProtocol && options.isSupportedMatch({ path: field.path, matchedText }))) continue;
+        findings.push({
+          code: options.findingCode,
+          message: pattern === GUIDED_V4_EVIDENCE_FRAMED_MISSING_VERIFICATION_PATTERN
+            ? "State the verification boundary directly in human-facing prose: use 'Verification not run.' when no verification result exists; do not narrate what the evidence records, shows, contains, or fails to establish."
+            : `Human-facing artifact text contains unsupported guided-authoring protocol language: ${matchedText}.`,
+          path: field.path
+        });
+      }
+    }
+    return findings;
+  }
+
+  const findings: ArtifactQualityFinding[] = [];
+  for (const field of fields) {
+    const normalizedValue = normalizeWhitespace(field.value).toLowerCase();
+    const selfProcessLeak = SELF_PROCESS_PROTOCOL_PATTERNS.find(({ pattern }) => pattern.test(normalizedValue));
+    const selfProcessMatch = selfProcessLeak?.pattern.exec(normalizedValue)?.[0];
+    if (
+      selfProcessLeak &&
+      selfProcessMatch &&
+      !options.isSupportedMatch({ path: field.path, matchedText: selfProcessMatch })
+    ) {
+      findings.push({
+        code: options.findingCode,
+        message: `Human-facing artifact text contains unsupported authoring self-process language: ${selfProcessLeak.label}.`,
+        path: field.path
+      });
+      continue;
+    }
+    for (const phrase of PROTOCOL_PHRASES) {
+      if (
+        !normalizedValue.includes(phrase) ||
+        options.isSupportedMatch({ path: field.path, matchedText: phrase })
+      ) continue;
+      findings.push({
+        code: options.findingCode,
+        message: `Human-facing artifact text contains unsupported authoring-protocol language: ${phrase}.`,
+        path: field.path
+      });
+    }
+  }
+  return findings;
+}
+
 export function findUnsupportedProtocolLanguage(
   output: Record<string, unknown>,
   supports: WorkbenchClaimSupport[],
-  evidenceByRef: Map<string, WorkbenchValidationEvidence>,
+  evidenceByRef: ReadonlyMap<string, WorkbenchValidationEvidence>,
   findingCode: "unsupported_authoring_protocol_language" | "authoring_protocol_leakage" =
-    "unsupported_authoring_protocol_language"
+    "unsupported_authoring_protocol_language",
+  options: { policy?: ArtifactProtocolPolicy; provenanceSessionIds?: string[] } = {}
 ): ArtifactQualityFinding[] {
+  if (options.policy === "guided_v4") {
+    return findUnsupportedProtocolFields(humanFacingStrings(output), {
+      findingCode,
+      isSupportedMatch: ({ path, matchedText }) => supports.some((support) => {
+        if (support.path !== path || !resolvePath(output, support.path).exists) return false;
+        const evidence = evidenceByRef.get(support.evidenceRef);
+        if (!evidence || (options.provenanceSessionIds && !options.provenanceSessionIds.includes(evidence.sessionId))) {
+          return false;
+        }
+        const excerpt = normalizeWhitespace(support.excerpt);
+        const evidenceText = normalizeWhitespace(evidence.text);
+        const normalizedMatch = normalizeWhitespace(matchedText).toLowerCase();
+        return (
+          excerpt.length >= MIN_SUPPORT_EXCERPT_LENGTH &&
+          excerpt.toLowerCase().includes(normalizedMatch) &&
+          evidenceText.includes(excerpt) &&
+          evidenceText.toLowerCase().includes(normalizedMatch)
+        );
+      }),
+      policy: "guided_v4"
+    });
+  }
+
   const findings: ArtifactQualityFinding[] = [];
   for (const field of humanFacingStrings(output)) {
     const normalizedValue = normalizeWhitespace(field.value).toLowerCase();
@@ -190,17 +302,31 @@ export function validateArtifactQuality(input: {
   kind: WorkbenchAutomaticArtifactKind;
   output: Record<string, unknown>;
   supports: WorkbenchClaimSupport[];
-  evidenceByRef: Map<string, WorkbenchValidationEvidence>;
+  evidenceByRef: ReadonlyMap<string, WorkbenchValidationEvidence>;
   provenanceSessionIds: string[];
   protocolLeakageFindingCode?: "unsupported_authoring_protocol_language" | "authoring_protocol_leakage";
+  protocolPolicy?: ArtifactProtocolPolicy;
 }): ArtifactQualityFinding[] {
+  const protocolSupports = input.protocolPolicy === "guided_v4"
+    ? input.supports.filter((support) => {
+        const evidence = input.evidenceByRef.get(support.evidenceRef);
+        return Boolean(
+          evidence &&
+          input.provenanceSessionIds.includes(evidence.sessionId) &&
+          supportKindMatchesPath(input.kind, input.output, support) &&
+          supportKindMatchesEvidence(support, evidence) &&
+          !validateClaimSupport(input.output, [support], input.evidenceByRef).length
+        );
+      })
+    : input.supports;
   const findings = [
     ...validateClaimSupport(input.output, input.supports, input.evidenceByRef),
     ...findUnsupportedProtocolLanguage(
       input.output,
-      input.supports,
+      protocolSupports,
       input.evidenceByRef,
-      input.protocolLeakageFindingCode
+      input.protocolLeakageFindingCode,
+      { policy: input.protocolPolicy, provenanceSessionIds: input.provenanceSessionIds }
     )
   ];
   const validSupports = input.supports.filter(
@@ -399,39 +525,46 @@ function requiredClaimPaths(
   ];
 }
 
+export function isPositiveVerificationEvidence(
+  support: WorkbenchClaimSupport,
+  evidence: WorkbenchValidationEvidence
+): boolean {
+  if (support.supportKind !== "verification" || evidence.lowValue) return false;
+  if (evidence.kind === "tool_result") {
+    const normalizedStatus = evidence.status?.trim().toLowerCase();
+    const exitSucceeded = evidence.exitCode === undefined ? undefined : evidence.exitCode === 0;
+    const statusSucceeded = normalizedStatus ? PASSED_STATUSES.has(normalizedStatus) : undefined;
+    const succeeded =
+      exitSucceeded !== false &&
+      statusSucceeded !== false &&
+      (exitSucceeded === true || statusSucceeded === true);
+    const semanticText = `${evidence.toolName ?? ""} ${evidence.label ?? ""} ${evidence.text}`;
+    return succeeded &&
+      /\b(?:build|check|health|lint|probe|smoke|test|tests|verif(?:y|ied|ication))\b/i.test(semanticText) &&
+      !hasNegativeVerificationOutcome(evidence.text);
+  }
+  const checkpointLabel = evidence.label?.trim().toLowerCase() ?? "";
+  if (evidence.kind === "checkpoint") {
+    return PASSED_CHECKPOINT_LABELS.has(checkpointLabel) &&
+      !hasNegativeVerificationOutcome(`${checkpointLabel} ${evidence.text}`);
+  }
+  return evidence.kind === "message" &&
+    evidence.role === "assistant" &&
+    (hasPositiveVerificationOutcome(support.excerpt) || hasStructuredVerificationReport(support.excerpt)) &&
+    !hasNegativeVerificationOutcome(support.excerpt) &&
+    !hasLaterNegativeVerificationOutcome(evidence.text, support.excerpt);
+}
+
 function supportKindMatchesEvidence(
   support: WorkbenchClaimSupport,
   evidence: WorkbenchValidationEvidence
 ): boolean {
   if (evidence.lowValue) return false;
-  if (support.supportKind === "verification") {
-    if (evidence.kind === "tool_result") {
-      const normalizedStatus = evidence.status?.trim().toLowerCase();
-      const exitSucceeded = evidence.exitCode === undefined ? undefined : evidence.exitCode === 0;
-      const statusSucceeded = normalizedStatus ? PASSED_STATUSES.has(normalizedStatus) : undefined;
-      const succeeded =
-        exitSucceeded !== false &&
-        statusSucceeded !== false &&
-        (exitSucceeded === true || statusSucceeded === true);
-      const semanticText = `${evidence.toolName ?? ""} ${evidence.label ?? ""} ${evidence.text}`;
-      return succeeded &&
-        /\b(?:build|check|health|lint|smoke|test|tests|verif(?:y|ied|ication))\b/i.test(semanticText) &&
-        !hasNegativeVerificationOutcome(evidence.text);
-    }
-    const checkpointLabel = evidence.label?.trim().toLowerCase() ?? "";
-    if (evidence.kind === "checkpoint") {
-      return PASSED_CHECKPOINT_LABELS.has(checkpointLabel) &&
-        !hasNegativeVerificationOutcome(`${checkpointLabel} ${evidence.text}`);
-    }
-    return evidence.kind === "message" &&
-      evidence.role === "assistant" &&
-      (hasPositiveVerificationOutcome(support.excerpt) || hasStructuredVerificationReport(support.excerpt)) &&
-      !hasNegativeVerificationOutcome(support.excerpt) &&
-      !hasLaterNegativeVerificationOutcome(evidence.text, support.excerpt);
-  }
+  if (support.supportKind === "verification") return isPositiveVerificationEvidence(support, evidence);
   if (support.supportKind === "timeline") return Boolean(parseTimestamp(evidence.observedAt));
   if (support.supportKind === "change") {
-    if (evidence.kind === "file_effect" || evidence.kind === "tool_call") return true;
+    if (evidence.kind === "file_effect") return /^changedFiles\[[0-9]+\]$/u.test(support.path);
+    if (evidence.kind === "tool_call") return true;
     return evidence.role === "assistant" && /\b(?:added|aligned|applied|backed\s+up|bound|broadened|built|changed|cleaned|closed|committed|configured|corrected|created|deployed|disabled|edited|enabled|fixed|forced|implemented|installed|launched|migrated|modified|moved|patched|pointed|preserved|published|pushed|recovered|recreated|removed|rendered|repaired|replaced|repointed|restarted|restored|retained|rotated|ran|saved|set|shifted|updated|used|wrote)\b/i.test(evidence.text);
   }
   return true;
@@ -458,7 +591,7 @@ function supportKindMatchesPath(
 function validateTimelineOrder(
   output: Record<string, unknown>,
   supports: WorkbenchClaimSupport[],
-  evidenceByRef: Map<string, WorkbenchValidationEvidence>
+  evidenceByRef: ReadonlyMap<string, WorkbenchValidationEvidence>
 ): ArtifactQualityFinding[] {
   if (!Array.isArray(output.timeline)) return [];
   let previous = Number.NEGATIVE_INFINITY;

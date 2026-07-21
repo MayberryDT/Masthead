@@ -12,6 +12,10 @@ import {
 } from "./sessionArtifactRepository.ts";
 import { type MastheadDatabase, withImmediateTransaction } from "./sqlite.ts";
 import { getWorkbenchAuthoringRun } from "./workbenchAuthoringRepository.ts";
+import {
+  bumpDataRevisionInTransaction,
+  withDataRevisionOperation
+} from "./dataRevisionRepository.ts";
 
 export type WorkbenchPublicationStatus = "publish_path" | "published" | "not_added_to_logbook";
 export type WorkbenchNextAction =
@@ -56,6 +60,44 @@ export type WorkbenchClaimRecord = {
 };
 
 export type WorkbenchClaimBatch = { claims: WorkbenchClaimRecord[] };
+
+export type GuidedAssignmentWorkbenchReset = {
+  releasedClaimIds: string[];
+  sessionIds: string[];
+  states: WorkbenchSessionStateRecord[];
+};
+
+export type FailedV3TemplateWorkbenchReset = {
+  claimsReleased: number;
+  resetSessions: number;
+};
+
+/** Returns only an exact audited session set to the canonical publish path. */
+export function resetFailedV3TemplateSessionsInTransaction(
+  db: MastheadDatabase,
+  input: { releaseReason: string; sessionIds: string[]; updatedAt: string }
+): FailedV3TemplateWorkbenchReset {
+  return trackWorkbenchMutation(db, () => {
+    if (!db.isTransaction) throw new Error("workbench_recovery_transaction_required");
+    if (input.sessionIds.length === 0) throw new Error("workbench_recovery_empty_target");
+    const placeholders = input.sessionIds.map(() => "?").join(",");
+    const resetSessions = Number(db.prepare(
+      `UPDATE workbench_session_state
+       SET publication_status = 'publish_path', next_action = 'enrich', session_enrichment_status = 'missing',
+           session_dossier_status = 'missing', session_package_status = 'missing',
+           runbook_status = 'unknown', adr_status = 'unknown', incident_timeline_status = 'unknown',
+           bug_fix_trace_status = 'unknown', resolution_status = 'in_progress',
+           non_publication_reason = NULL, published_at = NULL, published_activity_id = NULL,
+           updated_at = ?
+       WHERE session_id IN (${placeholders})`
+    ).run(input.updatedAt, ...input.sessionIds).changes);
+    const claimsReleased = Number(db.prepare(
+      `UPDATE workbench_claims SET released_at = ?, release_reason = ?
+       WHERE session_id IN (${placeholders}) AND released_at IS NULL`
+    ).run(input.updatedAt, input.releaseReason, ...input.sessionIds).changes);
+    return { claimsReleased, resetSessions };
+  });
+}
 
 export type WorkbenchSessionStateRecord = {
   sessionId: string;
@@ -208,17 +250,22 @@ type WorkbenchClaimRow = {
 };
 
 export function ensureWorkbenchSessionState(db: MastheadDatabase, sessionId: string): WorkbenchSessionStateRecord {
-  const existing = readWorkbenchSessionState(db, sessionId);
-  if (existing) return existing;
-  const now = new Date().toISOString();
-  db.prepare(
-    `INSERT INTO workbench_session_state (
-      session_id, publication_status, next_action, transcript_status, quality_status,
-      session_enrichment_status, session_dossier_status, bug_fix_trace_status,
-      created_at, updated_at
-    ) VALUES (?, 'publish_path', 'check_transcript', 'unchecked', 'unchecked', 'missing', 'missing', 'unknown', ?, ?)`
-  ).run(sessionId, now, now);
-  return readWorkbenchSessionState(db, sessionId)!;
+  if (!db.isTransaction) {
+    return writeStateTransition(db, () => ensureWorkbenchSessionState(db, sessionId));
+  }
+  return trackWorkbenchMutation(db, () => {
+    const existing = readWorkbenchSessionState(db, sessionId);
+    if (existing) return existing;
+    const now = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO workbench_session_state (
+        session_id, publication_status, next_action, transcript_status, quality_status,
+        session_enrichment_status, session_dossier_status, bug_fix_trace_status,
+        created_at, updated_at
+      ) VALUES (?, 'publish_path', 'check_transcript', 'unchecked', 'unchecked', 'missing', 'missing', 'unknown', ?, ?)`
+    ).run(sessionId, now, now);
+    return readWorkbenchSessionState(db, sessionId)!;
+  });
 }
 
 /** Create publish_path state only when no workbench_session_state row exists. Never demotes published/not_added. */
@@ -246,6 +293,13 @@ export function enrollWorkbenchSession(
 
 /** Enroll non-deleted sessions that have never entered Workbench (no pipeline row). */
 export function enrollMissingWorkbenchSessions(
+  db: MastheadDatabase,
+  input: { actor: WorkbenchActor; limit?: number }
+): WorkbenchEnrollMissingResult {
+  return withDataRevisionOperation(db, () => enrollMissingWorkbenchSessionsOperation(db, input));
+}
+
+function enrollMissingWorkbenchSessionsOperation(
   db: MastheadDatabase,
   input: { actor: WorkbenchActor; limit?: number }
 ): WorkbenchEnrollMissingResult {
@@ -335,6 +389,7 @@ export function markWorkbenchPublishedInTransaction(
   db: MastheadDatabase,
   input: { actor: WorkbenchActor; publishedVia: string; sessionId: string }
 ): { state: WorkbenchSessionStateRecord; activity: WorkbenchActivityRecord } {
+  return trackWorkbenchMutation(db, () => {
   const existing = readWorkbenchSessionState(db, input.sessionId);
   if (existing?.publicationStatus === "published" && existing.publishedActivityId) {
     const activity = readWorkbenchActivity(db, existing.publishedActivityId);
@@ -373,7 +428,8 @@ export function markWorkbenchPublishedInTransaction(
     }
   }
   refreshResolutionAndNextAction(db, input.sessionId, now);
-  return { activity, state: readWorkbenchSessionState(db, input.sessionId)! };
+    return { activity, state: readWorkbenchSessionState(db, input.sessionId)! };
+  });
 }
 
 export function publishWorkbenchSession(
@@ -387,17 +443,19 @@ export function publishWorkbenchSessionInTransaction(
   db: MastheadDatabase,
   input: { actor: WorkbenchActor; sessionId: string }
 ): PublishWorkbenchSessionResult {
-  const state = ensureWorkbenchSessionState(db, input.sessionId);
-  const missing = publicationGateFailures(state);
-  if (missing.length > 0) {
-    return { code: "publication_gate_failed", missing, ok: false, state };
-  }
-  const result = markWorkbenchPublishedInTransaction(db, {
-    actor: input.actor,
-    publishedVia: "workbench_publish",
-    sessionId: input.sessionId
+  return trackWorkbenchMutation(db, () => {
+    const state = ensureWorkbenchSessionState(db, input.sessionId);
+    const missing = publicationGateFailures(state);
+    if (missing.length > 0) {
+      return { code: "publication_gate_failed", missing, ok: false, state };
+    }
+    const result = markWorkbenchPublishedInTransaction(db, {
+      actor: input.actor,
+      publishedVia: "workbench_publish",
+      sessionId: input.sessionId
+    });
+    return { activity: result.activity, ok: true, state: result.state };
   });
-  return { activity: result.activity, ok: true, state: result.state };
 }
 
 /**
@@ -408,14 +466,16 @@ export function publishWorkbenchCandidateSessionInTransaction(
   db: MastheadDatabase,
   input: { actor: WorkbenchActor; sessionId: string }
 ): { state: WorkbenchSessionStateRecord; activity: WorkbenchActivityRecord } {
-  const state = ensureWorkbenchSessionState(db, input.sessionId);
-  if (state.sessionDossierStatus !== "satisfied") {
-    throw new Error(`candidate_finish_dossier_required:${input.sessionId}`);
-  }
-  return markWorkbenchPublishedInTransaction(db, {
-    actor: input.actor,
-    publishedVia: "workbench_candidate_finish",
-    sessionId: input.sessionId
+  return trackWorkbenchMutation(db, () => {
+    const state = ensureWorkbenchSessionState(db, input.sessionId);
+    if (state.sessionDossierStatus !== "satisfied") {
+      throw new Error(`candidate_finish_dossier_required:${input.sessionId}`);
+    }
+    return markWorkbenchPublishedInTransaction(db, {
+      actor: input.actor,
+      publishedVia: "workbench_candidate_finish",
+      sessionId: input.sessionId
+    });
   });
 }
 
@@ -614,11 +674,13 @@ export function markWorkbenchQualityPassedInTransaction(
   db: MastheadDatabase,
   input: { actor: WorkbenchActor; sessionId: string }
 ): void {
-  const current = readWorkbenchSessionState(db, input.sessionId);
-  if (current?.publicationStatus === "not_added_to_logbook") {
-    throw new Error(`authoring_session_not_on_publish_path:${input.sessionId}`);
-  }
-  applyWorkbenchQualityPassedInTransaction(db, input);
+  trackWorkbenchMutation(db, () => {
+    const current = readWorkbenchSessionState(db, input.sessionId);
+    if (current?.publicationStatus === "not_added_to_logbook") {
+      throw new Error(`authoring_session_not_on_publish_path:${input.sessionId}`);
+    }
+    applyWorkbenchQualityPassedInTransaction(db, input);
+  });
 }
 
 function applyWorkbenchQualityPassedInTransaction(
@@ -687,17 +749,19 @@ export function recordWorkbenchActivity(
     summary: string;
   }
 ): WorkbenchActivityRecord {
-  const now = new Date().toISOString();
-  return insertWorkbenchActivity(db, {
-    activityId: stableRecordId("workbench_activity", [input.sessionId, input.eventType, now]),
-    actor: input.actor,
-    details: input.details ?? {},
-    eventAt: now,
-    eventType: input.eventType,
-    relatedClaimId: input.relatedClaimId,
-    relatedRunId: input.relatedRunId,
-    sessionId: input.sessionId,
-    summary: input.summary
+  return writeStateTransition(db, () => {
+    const now = new Date().toISOString();
+    return insertWorkbenchActivity(db, {
+      activityId: stableRecordId("workbench_activity", [input.sessionId, input.eventType, now]),
+      actor: input.actor,
+      details: input.details ?? {},
+      eventAt: now,
+      eventType: input.eventType,
+      relatedClaimId: input.relatedClaimId,
+      relatedRunId: input.relatedRunId,
+      sessionId: input.sessionId,
+      summary: input.summary
+    });
   });
 }
 
@@ -712,6 +776,7 @@ export function markWorkbenchSessionEnrichmentSatisfiedInTransaction(
   db: MastheadDatabase,
   input: { actor: WorkbenchActor; sessionId: string }
 ): { state: WorkbenchSessionStateRecord; activity: WorkbenchActivityRecord } {
+  return trackWorkbenchMutation(db, () => {
   const now = new Date().toISOString();
   ensureWorkbenchSessionState(db, input.sessionId);
   db.prepare(
@@ -740,7 +805,8 @@ export function markWorkbenchSessionEnrichmentSatisfiedInTransaction(
     now,
     input.sessionId
   );
-  return { activity, state: readWorkbenchSessionState(db, input.sessionId)! };
+    return { activity, state: readWorkbenchSessionState(db, input.sessionId)! };
+  });
 }
 
 export function markWorkbenchArtifactSatisfied(
@@ -754,7 +820,7 @@ export function markWorkbenchArtifactAppliedInTransaction(
   db: MastheadDatabase,
   input: { actor: WorkbenchActor; artifactKind: WorkbenchArtifactKind; sessionId: string }
 ): void {
-  applyWorkbenchArtifactAppliedInTransaction(db, input);
+  trackWorkbenchMutation(db, () => applyWorkbenchArtifactAppliedInTransaction(db, input));
 }
 
 function applyWorkbenchArtifactAppliedInTransaction(
@@ -807,6 +873,7 @@ export function markWorkbenchArtifactPublishedInTransaction(
     artifactId: string;
   }
 ): void {
+  trackWorkbenchMutation(db, () => {
   const now = new Date().toISOString();
   ensureWorkbenchSessionState(db, input.sessionId);
   setOptionalKindStatus(db, input.sessionId, input.artifactKind, "published", now);
@@ -825,6 +892,7 @@ export function markWorkbenchArtifactPublishedInTransaction(
     now,
     input.sessionId
   );
+  });
 }
 
 export function setWorkbenchArtifactApplicability(
@@ -850,6 +918,7 @@ export function setWorkbenchArtifactApplicabilityInTransaction(
     status: "not_applicable" | "contributed";
   }
 ): { state: WorkbenchSessionStateRecord; activity: WorkbenchActivityRecord } {
+  return trackWorkbenchMutation(db, () => {
   const now = new Date().toISOString();
   const eventType = `${input.artifactKind}_${input.status}`;
   const summary =
@@ -873,7 +942,8 @@ export function setWorkbenchArtifactApplicabilityInTransaction(
     now,
     input.sessionId
   );
-  return { activity, state: readWorkbenchSessionState(db, input.sessionId)! };
+    return { activity, state: readWorkbenchSessionState(db, input.sessionId)! };
+  });
 }
 
 /** Mark non-seed sessions contributed when they appear in a published multi-session artifact's provenance. */
@@ -904,24 +974,27 @@ export function markContributionSatisfactionForProvenanceInTransaction(
     seedSessionId: string;
   }
 ): void {
-  for (const sessionId of input.provenanceSessionIds) {
-    if (sessionId === input.seedSessionId) continue;
-    setWorkbenchArtifactApplicabilityInTransaction(db, {
-      actor: input.actor,
-      artifactKind: input.artifactKind,
-      reason: `contributed_to:${input.publishedArtifactId}`,
-      sessionId,
-      status: "contributed"
-    });
-  }
+  trackWorkbenchMutation(db, () => {
+    for (const sessionId of input.provenanceSessionIds) {
+      if (sessionId === input.seedSessionId) continue;
+      setWorkbenchArtifactApplicabilityInTransaction(db, {
+        actor: input.actor,
+        artifactKind: input.artifactKind,
+        reason: `contributed_to:${input.publishedArtifactId}`,
+        sessionId,
+        status: "contributed"
+      });
+    }
+  });
 }
 
 export function reconcileWorkbenchArtifactSatisfactionInTransaction(
   db: MastheadDatabase,
   input: { artifactKind: WorkbenchAutomaticKind; sessionIds: string[] }
 ): void {
-  const now = new Date().toISOString();
-  for (const sessionId of [...new Set(input.sessionIds)]) {
+  trackWorkbenchMutation(db, () => {
+    const now = new Date().toISOString();
+    for (const sessionId of [...new Set(input.sessionIds)]) {
     const state = readWorkbenchSessionState(db, sessionId);
     if (!state) continue;
     const existingStatus = optionalKindStatus(state, input.artifactKind);
@@ -950,8 +1023,9 @@ export function reconcileWorkbenchArtifactSatisfactionInTransaction(
         : existingStatus;
     if (reconciledStatus === existingStatus) continue;
     setOptionalKindStatus(db, sessionId, input.artifactKind, reconciledStatus, now);
-    refreshResolutionAndNextAction(db, sessionId, now);
-  }
+      refreshResolutionAndNextAction(db, sessionId, now);
+    }
+  });
 }
 
 export function markWorkbenchTranscriptStatus(
@@ -985,6 +1059,7 @@ export function markWorkbenchTranscriptAvailableInTransaction(
   db: MastheadDatabase,
   input: { actor: WorkbenchActor; sessionId: string }
 ): void {
+  trackWorkbenchMutation(db, () => {
   const now = new Date().toISOString();
   ensureWorkbenchSessionState(db, input.sessionId);
   db.prepare(
@@ -1004,6 +1079,7 @@ export function markWorkbenchTranscriptAvailableInTransaction(
     eventType: "authoring_evidence_ready",
     sessionId: input.sessionId,
     summary: "Canonical redacted evidence ready for authoring"
+  });
   });
 }
 
@@ -1119,21 +1195,24 @@ export function claimWorkbenchSessions(
   db: MastheadDatabase,
   input: { claimedBy: string; expiresAt: string; sessionIds: string[] }
 ): WorkbenchClaimBatch {
-  db.exec("BEGIN IMMEDIATE;");
-  try {
-    const batch = claimWorkbenchSessionsInTransaction(db, input);
-    db.exec("COMMIT;");
-    return batch;
-  } catch (error) {
-    db.exec("ROLLBACK;");
-    throw error;
-  }
+  return withDataRevisionOperation(db, () => {
+    db.exec("BEGIN IMMEDIATE;");
+    try {
+      const batch = claimWorkbenchSessionsInTransaction(db, input);
+      db.exec("COMMIT;");
+      return batch;
+    } catch (error) {
+      db.exec("ROLLBACK;");
+      throw error;
+    }
+  });
 }
 
 export function claimWorkbenchSessionsInTransaction(
   db: MastheadDatabase,
   input: { claimedBy: string; expiresAt: string; sessionIds: string[] }
 ): WorkbenchClaimBatch {
+  return trackWorkbenchMutation(db, () => {
   const now = new Date().toISOString();
   const claims: WorkbenchClaimRecord[] = [];
   for (const sessionId of input.sessionIds) {
@@ -1161,13 +1240,15 @@ export function claimWorkbenchSessionsInTransaction(
     });
     claims.push(readWorkbenchClaim(db, claimId)!);
   }
-  return { claims };
+    return { claims };
+  });
 }
 
 export function renewOrReacquireAuthoringClaimsInTransaction(
   db: MastheadDatabase,
   input: { actorId: string; expiresAt: string; runId: string }
 ): WorkbenchAuthoringRunDto {
+  return trackWorkbenchMutation(db, () => {
   const run = getWorkbenchAuthoringRun(db, input.runId);
   if (!run) throw new Error(`authoring_run_not_found:${input.runId}`);
   if (run.actorId !== input.actorId) throw new Error(`authoring_actor_mismatch:${input.runId}`);
@@ -1225,7 +1306,8 @@ export function renewOrReacquireAuthoringClaimsInTransaction(
     ).run(replacement.claimId, input.runId, sessionId);
   }
 
-  return getWorkbenchAuthoringRun(db, input.runId)!;
+    return getWorkbenchAuthoringRun(db, input.runId)!;
+  });
 }
 
 export function releaseWorkbenchClaim(db: MastheadDatabase, input: { claimId: string; reason: string }): WorkbenchClaimRecord | undefined {
@@ -1236,6 +1318,7 @@ export function releaseWorkbenchClaimInTransaction(
   db: MastheadDatabase,
   input: { claimId: string; reason: string }
 ): WorkbenchClaimRecord | undefined {
+  return trackWorkbenchMutation(db, () => {
   const now = new Date().toISOString();
   const existing = readWorkbenchClaim(db, input.claimId);
   if (!existing) return undefined;
@@ -1254,11 +1337,73 @@ export function releaseWorkbenchClaimInTransaction(
     sessionId: existing.sessionId,
     summary: "Workbench claim released"
   });
-  return readWorkbenchClaim(db, input.claimId);
+    return readWorkbenchClaim(db, input.claimId);
+  });
+}
+
+/**
+ * Finalizes only the persisted assignment sessions and releases only claims
+ * owned by that request's actor. The caller owns the surrounding transaction.
+ */
+export function resetGuidedAssignmentWorkbenchInTransaction(
+  db: MastheadDatabase,
+  input: { actorId: string; assignmentId: string }
+): GuidedAssignmentWorkbenchReset {
+  return trackWorkbenchMutation(db, () => {
+  const membership = db.prepare(
+    `SELECT membership.session_id AS sessionId, requests.actor_id AS actorId
+     FROM guided_authoring_assignment_sessions AS membership
+     JOIN guided_authoring_requests AS requests ON requests.request_id = membership.request_id
+     WHERE membership.assignment_id = ?
+     ORDER BY membership.ordinal`
+  ).all(input.assignmentId) as Array<{ actorId: string; sessionId: string }>;
+  if (membership.length === 0) throw new Error("guided_assignment_not_found");
+  if (membership.some(({ actorId }) => actorId !== input.actorId)) {
+    throw new Error("guided_authoring_actor_mismatch");
+  }
+
+  const actor = { id: input.actorId, kind: "agent" } as const;
+  const states: WorkbenchSessionStateRecord[] = [];
+  const releasedClaimIds: string[] = [];
+  for (const { sessionId } of membership) {
+    const published = publishWorkbenchSessionInTransaction(db, { actor, sessionId });
+    if (!published.ok) {
+      throw new Error(`guided_finish_package_gate_failed:${sessionId}:${published.missing.join(",")}`);
+    }
+    const actorClaims = db.prepare(
+      `SELECT claim_id AS claimId
+       FROM workbench_claims
+       WHERE session_id = ?
+         AND claimed_by = ?
+         AND released_at IS NULL
+       ORDER BY claimed_at, claim_id`
+    ).all(sessionId, input.actorId) as Array<{ claimId: string }>;
+    for (const { claimId } of actorClaims) {
+      releaseWorkbenchClaimInTransaction(db, { claimId, reason: "guided_authoring_finished" });
+      releasedClaimIds.push(claimId);
+    }
+    states.push(readWorkbenchSessionState(db, sessionId)!);
+  }
+    return {
+      releasedClaimIds,
+      sessionIds: membership.map(({ sessionId }) => sessionId),
+      states
+    };
+  });
 }
 
 function writeStateTransition<T>(db: MastheadDatabase, callback: () => T): T {
-  return withImmediateTransaction(db, callback);
+  return withImmediateTransaction(db, () => trackWorkbenchMutation(db, callback));
+}
+
+function trackWorkbenchMutation<T>(db: MastheadDatabase, callback: () => T): T {
+  return withDataRevisionOperation(db, () => {
+    const before = (db.prepare("SELECT total_changes() AS changes").get() as { changes: number }).changes;
+    const result = callback();
+    const after = (db.prepare("SELECT total_changes() AS changes").get() as { changes: number }).changes;
+    if (after > before) bumpDataRevisionInTransaction(db, "workbench");
+    return result;
+  });
 }
 
 function updateWorkbenchNextAction(db: MastheadDatabase, sessionId: string, updatedAt: string): void {

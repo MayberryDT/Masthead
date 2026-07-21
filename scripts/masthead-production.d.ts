@@ -5,6 +5,7 @@ export type ProductionConfig = {
   expectedDatabaseId?: string;
   expectedSchemaVersion?: number;
   gitSha?: string;
+  homeDir?: string;
   lifecycleLeasePath?: string;
   port: number;
   productionRoot: string;
@@ -22,6 +23,7 @@ export type ProductionProcessRecord = {
 };
 
 export type ProductionDesktopDependencies = {
+  onLifecycleLeaseAcquired?: () => void | Promise<void>;
   runDesktopDatabaseCommand?: (
     command: string,
     args: string[],
@@ -103,6 +105,7 @@ export function installProductionLauncher(input: {
   dataDirectory?: string;
   databasePath?: string;
   homeDir?: string;
+  lifecycleLeasePath?: string;
   port?: number;
   productionRoot?: string;
 }, dependencies?: ProductionDesktopDependencies): Promise<{ desktopPath: string; gitSha: string; launcherPath: string; target: string; version: string }>;
@@ -121,6 +124,7 @@ export function coldActivateProduction(input: {
   dataDirectory?: string;
   databasePath: string;
   homeDir?: string;
+  lifecycleLeasePath?: string;
   port?: number;
   productionRoot?: string;
 }, dependencies?: Record<string, unknown>): Promise<Record<string, unknown>>;
@@ -136,7 +140,61 @@ export function transitionProduction(input: {
   dataDirectory?: string;
   databasePath?: string;
   homeDir?: string;
+  lifecycleLeasePath?: string;
   port?: number;
   productionRoot?: string;
 }, dependencies?: Record<string, unknown>): Promise<Record<string, unknown>>;
-export function runCli(argv?: string[], environment?: NodeJS.ProcessEnv): Promise<Record<string, unknown>>;
+export type StagedProductionInstallationReceipt = {
+  receiptVersion: "masthead-production-stage-v1";
+  receiptPath: string;
+  staged: true;
+  launched: false;
+  databaseOpened: false;
+  activatedAt?: string;
+  stagingNonce: string;
+  sourceDigest: string;
+  buildSha: string;
+  buildVersion: string;
+  baseUrl: string;
+  dataDirectory: string;
+  databasePath: string;
+  port: number;
+  lifecycleLeasePath: string;
+  rollbackBundle: { path: string; buildSha: string; version: string; bundleDigest: string };
+  target: string;
+  productionRoot: string;
+  currentPath: string;
+  previousCurrentTarget: string;
+  instanceDir: string;
+  instanceManifestPath: string;
+  activeInstanceLauncherPath: string;
+  stagedInstanceLauncherPath: string;
+  previousInstanceLauncher: Record<string, unknown>;
+  stagedFiles: Array<{ path: string; sha256: string; mode: number }>;
+  previousLauncher: Record<string, unknown>;
+  previousDesktop: Record<string, unknown>;
+  stagedSurface: Record<string, unknown>;
+};
+export function stageProductionInstallation(input: {
+  sourceBundlePath?: string;
+  bundlePath?: string;
+  bundleDigest: string;
+  dataDirectory?: string;
+  databasePath?: string;
+  homeDir?: string;
+  port?: number;
+  productionRoot?: string;
+  lifecycleLeasePath?: string;
+  onLifecycleLeaseAcquired?: () => void | Promise<void>;
+  onStageStep?: (step: string) => void | Promise<void>;
+}, dependencies?: Record<string, unknown>): Promise<StagedProductionInstallationReceipt>;
+export function activateStagedProductionInstallation(
+  receipt: StagedProductionInstallationReceipt | string,
+  dependencies?: Record<string, unknown>
+): Promise<Record<string, unknown>>;
+export function loadStagedProductionInstallation(receiptPath: string): Promise<StagedProductionInstallationReceipt>;
+export function finalizeStagedProductionInstallation(
+  receipt: StagedProductionInstallationReceipt | string,
+  dependencies?: Record<string, unknown>
+): Promise<Record<string, unknown>>;
+export function runCli(argv?: string[], environment?: NodeJS.ProcessEnv, dependencies?: Record<string, unknown>): Promise<Record<string, unknown>>;

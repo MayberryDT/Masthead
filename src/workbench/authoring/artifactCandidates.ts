@@ -93,12 +93,18 @@ export type ArtifactSuggestionSeed = {
 
 type CandidateSeed = ArtifactSuggestionSeed;
 
+type ArtifactSuggestionSeedDetectionOptions = {
+  strongSignatureMemberLimit?: number;
+};
+
+const V2_STRONG_SIGNATURE_MEMBER_LIMIT = 12;
+
 /** Detects current positive signals without reading or writing candidate state. */
 export function detectArtifactSuggestionSeeds(
   db: MastheadDatabase,
   sessionIds: string[]
 ): ArtifactSuggestionSeed[] {
-  return detectArtifactSuggestionSeedResult(db, normalizedStrings(sessionIds)).grouped;
+  return detectArtifactSuggestionSeedResult(db, normalizedStrings(sessionIds), {}).grouped;
 }
 
 export function discoverArtifactCandidates(
@@ -414,7 +420,9 @@ function reconcileArtifactCandidates(
 
   const requested = normalizedStrings(requestedSessionIds);
   const previousSignatureMembers = listWorkbenchArtifactSignatureMembersForSessions(db, requested);
-  const preliminaryDetection = detectArtifactSuggestionSeedResult(db, requested);
+  const preliminaryDetection = detectArtifactSuggestionSeedResult(db, requested, {
+    strongSignatureMemberLimit: V2_STRONG_SIGNATURE_MEMBER_LIMIT
+  });
   const preliminaryIndividual = preliminaryDetection.individual;
   const preliminarySignatureMembers = signatureMembersFromSeeds(db, preliminaryIndividual);
   const preliminarySeeds = preliminaryDetection.grouped;
@@ -470,7 +478,9 @@ function reconcileArtifactCandidates(
   const acknowledgedSessionIds = requested.filter((sessionId) => !deferred.has(sessionId));
   if (acknowledgedSessionIds.length === 0) return { acknowledgedSessionIds, candidates: [] };
 
-  const activeDetection = detectArtifactSuggestionSeedResult(db, acknowledgedSessionIds);
+  const activeDetection = detectArtifactSuggestionSeedResult(db, acknowledgedSessionIds, {
+    strongSignatureMemberLimit: V2_STRONG_SIGNATURE_MEMBER_LIMIT
+  });
   const activeIndividual = activeDetection.individual;
   const activePreliminary = activeDetection.grouped;
   const affectedSignatureIdentities = uniqueSignatureIdentities([
@@ -609,13 +619,20 @@ function individualCandidateSeedsForSessions(db: MastheadDatabase, sessionIds: s
 
 function detectArtifactSuggestionSeedResult(
   db: MastheadDatabase,
-  sessionIds: string[]
+  sessionIds: string[],
+  options: ArtifactSuggestionSeedDetectionOptions
 ): { grouped: CandidateSeed[]; individual: CandidateSeed[] } {
   const individual = individualCandidateSeedsForSessions(db, sessionIds);
-  return { grouped: groupCandidateSeeds(individual), individual };
+  return {
+    grouped: groupCandidateSeeds(individual, options.strongSignatureMemberLimit),
+    individual
+  };
 }
 
-function groupCandidateSeeds(ungrouped: CandidateSeed[]): CandidateSeed[] {
+function groupCandidateSeeds(
+  ungrouped: CandidateSeed[],
+  strongSignatureMemberLimit?: number
+): CandidateSeed[] {
   const groups = new Map<string, CandidateSeed[]>();
   for (const seed of ungrouped) {
     const key = `${seed.kind}\0${seed.signatureKey ?? `session:${seed.seedSessionId}`}`;
@@ -623,9 +640,13 @@ function groupCandidateSeeds(ungrouped: CandidateSeed[]): CandidateSeed[] {
   }
   return [...groups.values()]
     .map((seeds) => {
-      // A current signature has one bounded candidate. Prefer the lexicographically
-      // smallest session IDs so selection is deterministic regardless of scan order.
-      const selected = [...seeds].sort((left, right) => left.seedSessionId.localeCompare(right.seedSessionId)).slice(0, 12);
+      const ordered = [...seeds].sort((left, right) => left.seedSessionId.localeCompare(right.seedSessionId));
+      // Guided advisory detection needs the complete signature membership so its
+      // planner can reject an oversized join. V2 reconciliation retains its
+      // historical deterministic cap and audit behavior.
+      const selected = strongSignatureMemberLimit === undefined
+        ? ordered
+        : ordered.slice(0, strongSignatureMemberLimit);
       const first = selected[0]!;
       const provenanceSessionIds = normalizedStrings(selected.flatMap((seed) => seed.provenanceSessionIds));
       return {

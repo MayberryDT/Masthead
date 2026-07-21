@@ -10,10 +10,22 @@ node dist/daemon/src/cli/mastheadctl.js workbench wipe-published --confirm --jso
 
 This deletes all `session_artifacts` and provenance rows and resets pipeline publish/resolution fields while leaving harness source session history on disk.
 
-## Rebuild path
+## V4 rebuild path
+
+The current runtime provides the guided evidence, canary, identity, and quality guarantees below.
+V3 remains audit-only and cannot run a new bulk or production rebuild. Production campaigns still
+require the V4 release evidence in `docs/acceptance/product-release-gate.md`.
 
 1. Enroll missing Workbench sessions.
-2. Run the automatic kind set (session package + runbook/ADR/timeline) via disposable handoff or directed agent.
-3. Publish artifacts after validate/apply.
+2. Create a durable guided authoring request for the compile-ready selection and give the agent its
+   request ID plus instance-bound start command.
+3. Let Masthead group assignments, record complete evidence traversal, review grounded enrichment and
+   knowledge-opportunity dispositions, and stage the three-session canary.
+4. After operator approval, atomically finish accepted assignments to rebuild dossiers and publish any
+   useful runbooks, ADRs, or incident timelines.
+
+Masthead never splits a larger strong opportunity group to manufacture the canary. It chooses a
+complete group of at most three sessions or diverse dossier-only sessions; otherwise request creation
+returns `guided_canary_not_constructible` and persists nothing.
 
 See ADR 0011 and CONTEXT.md for product vocabulary.

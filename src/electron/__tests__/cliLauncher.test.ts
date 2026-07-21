@@ -18,7 +18,7 @@ describe("Masthead CLI launcher", () => {
   test("writes a packaged POSIX launcher using quoted bundled paths", async () => {
     const home = await makeTempDir();
     const target = resolveMastheadCliLaunchTarget({
-      homeDir: home,
+      instanceDir: join(home, "masthead-production"),
       isPackaged: true,
       platform: "linux",
       resourcesPath: "/opt/Masthead Product/resources"
@@ -26,14 +26,15 @@ describe("Masthead CLI launcher", () => {
 
     expect(target).toEqual({
       cliEntry: "/opt/Masthead Product/resources/daemon/dist/src/cli/mastheadctl.js",
-      launcherPath: join(home, ".local", "bin", "mastheadctl"),
+      instanceManifest: join(home, "masthead-production", "masthead-instance.json"),
+      launcherPath: join(home, "masthead-production", "bin", "mastheadctl"),
       nodePath: "/opt/Masthead Product/resources/daemon/node"
     });
 
     await installMastheadCliLauncher(target);
     const body = await readFile(target.launcherPath, "utf8");
     expect(body).toBe(
-      "#!/bin/sh\nexec '/opt/Masthead Product/resources/daemon/node' '/opt/Masthead Product/resources/daemon/dist/src/cli/mastheadctl.js' \"$@\"\n"
+      `#!/bin/sh\nexec env MASTHEAD_INSTANCE_MANIFEST='${join(home, "masthead-production", "masthead-instance.json")}' '/opt/Masthead Product/resources/daemon/node' '/opt/Masthead Product/resources/daemon/dist/src/cli/mastheadctl.js' \"$@\"\n`
     );
   });
 
@@ -42,7 +43,7 @@ describe("Masthead CLI launcher", () => {
     const target = resolveMastheadCliLaunchTarget({
       devNodePath: "/usr/local/Node Runtime/bin/node",
       devProjectDir: "/home/test/Masthead checkout",
-      homeDir: home,
+      instanceDir: join(home, "masthead-dev"),
       isPackaged: false,
       platform: "linux",
       resourcesPath: "/ignored"
@@ -50,7 +51,8 @@ describe("Masthead CLI launcher", () => {
 
     expect(target).toEqual({
       cliEntry: "/home/test/Masthead checkout/dist/daemon/src/cli/mastheadctl.js",
-      launcherPath: join(home, ".local", "bin", "mastheadctl"),
+      instanceManifest: join(home, "masthead-dev", "masthead-instance.json"),
+      launcherPath: join(home, "masthead-dev", "bin", "mastheadctl"),
       nodePath: "/usr/local/Node Runtime/bin/node"
     });
 
@@ -61,12 +63,12 @@ describe("Masthead CLI launcher", () => {
     });
 
     expect(await readFile(target.launcherPath, "utf8")).toContain("replaced.js");
-    expect(await readdir(join(home, ".local", "bin"))).toEqual(["mastheadctl"]);
+    expect(await readdir(join(home, "masthead-dev", "bin"))).toEqual(["mastheadctl"]);
   });
 
   test("writes a Windows command launcher with quoted absolute bundled paths", async () => {
     const target = resolveMastheadCliLaunchTarget({
-      homeDir: "C:\\Users\\test",
+      instanceDir: "C:\\Users\\test\\masthead-production",
       isPackaged: true,
       platform: "win32",
       resourcesPath: "C:\\Program Files\\Masthead\\resources"
@@ -74,7 +76,8 @@ describe("Masthead CLI launcher", () => {
 
     expect(target).toEqual({
       cliEntry: "C:\\Program Files\\Masthead\\resources\\daemon\\dist\\src\\cli\\mastheadctl.js",
-      launcherPath: "C:\\Users\\test\\.local\\bin\\mastheadctl.cmd",
+      instanceManifest: "C:\\Users\\test\\masthead-production\\masthead-instance.json",
+      launcherPath: "C:\\Users\\test\\masthead-production\\bin\\mastheadctl.cmd",
       nodePath: "C:\\Program Files\\Masthead\\resources\\daemon\\node.exe"
     });
 
@@ -82,24 +85,28 @@ describe("Masthead CLI launcher", () => {
     const writableTarget = { ...target, launcherPath: join(home, "mastheadctl.cmd") };
     await installMastheadCliLauncher(writableTarget);
     expect(await readFile(writableTarget.launcherPath, "utf8")).toBe(
-      "@echo off\r\n@setlocal DisableDelayedExpansion\r\n\"C:\\Program Files\\Masthead\\resources\\daemon\\node.exe\" \"C:\\Program Files\\Masthead\\resources\\daemon\\dist\\src\\cli\\mastheadctl.js\" %*\r\n"
+      "@echo off\r\n@setlocal DisableDelayedExpansion\r\n@set \"MASTHEAD_INSTANCE_MANIFEST=C:\\Users\\test\\masthead-production\\masthead-instance.json\"\r\n\"C:\\Program Files\\Masthead\\resources\\daemon\\node.exe\" \"C:\\Program Files\\Masthead\\resources\\daemon\\dist\\src\\cli\\mastheadctl.js\" %*\r\n"
     );
   });
 
-  test("binds an installed launcher to a non-default active connector without changing its path", async () => {
+  test("production and dev resolve different launcher paths", async () => {
     const home = await makeTempDir();
-    const target = resolveMastheadCliLaunchTarget({
-      homeDir: home,
+    const production = resolveMastheadCliLaunchTarget({
+      instanceDir: join(home, "masthead-production"),
       isPackaged: true,
       platform: "linux",
       resourcesPath: "/opt/Masthead/resources"
     });
-
-    await installMastheadCliLauncher(target, { daemonUrl: "http://127.0.0.1:17379" });
-
-    expect(await readFile(target.launcherPath, "utf8")).toBe(
-      "#!/bin/sh\nexec env MASTHEAD_DAEMON_URL='http://127.0.0.1:17379' '/opt/Masthead/resources/daemon/node' '/opt/Masthead/resources/daemon/dist/src/cli/mastheadctl.js' \"$@\"\n"
-    );
+    const development = resolveMastheadCliLaunchTarget({
+      devNodePath: "/usr/bin/node",
+      devProjectDir: "/repo",
+      instanceDir: join(home, "masthead-dev"),
+      isPackaged: false,
+      platform: "linux",
+      resourcesPath: "/opt/Masthead/resources"
+    });
+    expect(production.launcherPath).toBe(join(home, "masthead-production", "bin", "mastheadctl"));
+    expect(development.launcherPath).toBe(join(home, "masthead-dev", "bin", "mastheadctl"));
   });
 });
 

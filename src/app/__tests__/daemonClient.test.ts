@@ -386,16 +386,19 @@ describe("daemon client review dispositions", () => {
 
   test("loads authoring capabilities relative to the active connector", async () => {
     const capabilities = {
-      bundleVersion: "workbench-authoring-v3",
+      baseUrl: "http://127.0.0.1:17374",
+      buildSha: "build:test",
+      bundleVersion: "workbench-authoring-v4",
+      canarySessions: 3,
       capability: "artifact_authoring",
       command: "/home/test/.local/bin/mastheadctl",
       databaseId: "database:test",
-      evidencePolicy: "selected_session_canonical_evidence",
-      maxSessionsPerRun: 12,
-      operations: ["suggestions", "open", "status", "evidence", "context", "submit", "finish"],
+      instanceId: "instance:test",
+      instanceManifest: "/home/test/.local/share/masthead/instance.json",
+      maxSessionsPerAssignment: 12,
+      operations: ["start", "inspect", "scaffold", "save", "review", "finish"],
+      policyVersion: "guided-authoring-v1",
       protocol: "masthead.workbench.authoring/v1",
-      suggestionsAreBinding: false,
-      transport: "daemon_http"
     };
     vi.stubGlobal("fetch", vi.fn(async () => response(capabilities)));
 
@@ -413,14 +416,19 @@ describe("daemon client review dispositions", () => {
       "fetch",
       vi.fn(async () =>
         response({
-          bundleVersion: "workbench-authoring-v1",
+          baseUrl: "http://127.0.0.1:17373",
+          buildSha: "build:test",
+          bundleVersion: "workbench-authoring-v4",
+          canarySessions: 3,
           capability: "artifact_authoring",
           command: "mastheadctl",
           databaseId: "database:test",
-          evidencePolicy: "all_canonical_redacted_evidence",
-          operations: ["open", "status", "evidence", "submit", "finish"],
+          instanceId: "instance:test",
+          instanceManifest: "/home/test/.local/share/masthead/instance.json",
+          maxSessionsPerAssignment: 12,
+          operations: ["start", "inspect", "scaffold", "save", "review", "finish"],
+          policyVersion: "guided-authoring-v1",
           protocol: "masthead.workbench.authoring/v1",
-          transport: "daemon_http"
         })
       )
     );
@@ -433,28 +441,33 @@ describe("daemon client review dispositions", () => {
   test.each([
     ["capability", { capability: "other" }],
     ["protocol", { protocol: "masthead.workbench.authoring/v0" }],
-    ["transport", { transport: "direct_sqlite" }],
+    ["baseUrl", { baseUrl: "https://example.com" }],
     ["bundleVersion", { bundleVersion: "workbench-authoring-v0" }],
-    ["evidencePolicy", { evidencePolicy: "preview" }],
+    ["policyVersion", { policyVersion: "guided-authoring-v0" }],
     ["databaseId", { databaseId: "   " }],
     ["padded databaseId", { databaseId: " database:test " }],
     ["padded command", { command: " /home/test/.local/bin/mastheadctl " }],
-    ["operations missing", { operations: ["open", "status", "evidence", "submit"] }],
-    ["operations extra", { operations: ["open", "status", "evidence", "submit", "finish", "apply"] }],
-    ["operations order", { operations: ["status", "open", "evidence", "submit", "finish"] }]
+    ["operations missing", { operations: ["start", "inspect", "scaffold", "save", "review"] }],
+    ["operations extra", { operations: ["start", "inspect", "scaffold", "save", "review", "finish", "apply"] }],
+    ["operations order", { operations: ["inspect", "start", "scaffold", "save", "review", "finish"] }]
   ])("rejects a mismatched authoring %s contract", async (_label, override) => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () =>
         response({
-          bundleVersion: "workbench-authoring-v1",
+          baseUrl: "http://127.0.0.1:17373",
+          buildSha: "build:test",
+          bundleVersion: "workbench-authoring-v4",
+          canarySessions: 3,
           capability: "artifact_authoring",
           command: "/home/test/.local/bin/mastheadctl",
           databaseId: "database:test",
-          evidencePolicy: "all_canonical_redacted_evidence",
-          operations: ["open", "status", "evidence", "submit", "finish"],
+          instanceId: "instance:test",
+          instanceManifest: "/home/test/.local/share/masthead/instance.json",
+          maxSessionsPerAssignment: 12,
+          operations: ["start", "inspect", "scaffold", "save", "review", "finish"],
+          policyVersion: "guided-authoring-v1",
           protocol: "masthead.workbench.authoring/v1",
-          transport: "daemon_http",
           ...override
         })
       )
@@ -462,7 +475,7 @@ describe("daemon client review dispositions", () => {
 
     await expect(
       getWorkbenchAuthoringCapabilities("http://127.0.0.1:17373/projection")
-    ).rejects.toThrow("complete daemon-owned contract");
+    ).rejects.toThrow("complete guided V4 contract");
   });
 
   test("posts Workbench pipeline write actions to the daemon", async () => {

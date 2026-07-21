@@ -1,16 +1,20 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  approveGuidedAuthoringCanary,
+  createGuidedAuthoringRequest,
   getWorkbenchAuthoringCapabilities,
   getWorkbenchActivity,
   getWorkbenchNotAddedSessions,
   getWorkbenchNotAddedSummary,
   getWorkbenchSessions,
+  listPendingGuidedCanaries,
   postWorkbenchCheckTranscript,
   postWorkbenchClaim,
   postWorkbenchEnrollMissing,
   postWorkbenchImportTranscript,
   postWorkbenchQuality,
-  postWorkbenchReleaseClaim
+  postWorkbenchReleaseClaim,
+  rejectGuidedAuthoringCanary
 } from "../daemonClient";
 import type {
   WorkbenchActivityDto,
@@ -19,8 +23,13 @@ import type {
   WorkbenchQueueSessionDto,
   WorkbenchSessionsResponse
 } from "../../shared/workbench";
-import type { WorkbenchAuthoringCapabilitiesDto } from "../../shared/workbenchAuthoring";
+import type {
+  GuidedAuthoringCapabilitiesDto,
+  GuidedAuthoringReviewDto
+} from "../../shared/guidedAuthoring";
+import { guidedAuthoringIdentityFromCapabilities } from "../../shared/guidedAuthoring";
 import { buildWorkbenchHandoff } from "../../ui/workbench/workbenchHandoff";
+import { useMastheadDataRevisions } from "../useMastheadDataRevisions";
 
 const TRANSCRIPT_PERMISSION_ERROR =
   "Transcript import needs source permission for this session's source. Grant it under Sources, then retry Import.";
@@ -56,8 +65,8 @@ export type UseWorkbenchControllerResult = {
   canRun: (kind: WorkbenchActionKind) => boolean;
   clearActionFeedback: () => void;
   clearSelection: () => void;
+  copyAgentPrompt: () => Promise<string>;
   error?: string;
-  handoffText: string;
   lastActionSummary?: string;
   loadNotAdded: () => void;
   loading: boolean;
@@ -66,6 +75,9 @@ export type UseWorkbenchControllerResult = {
   notAddedSummary?: WorkbenchNotAddedSummaryDto;
   page: number;
   pageSize: number;
+  pendingCanaryReviews: GuidedAuthoringReviewDto[];
+  approveCanary: (review: GuidedAuthoringReviewDto, reviewedBy: string) => Promise<void>;
+  rejectCanary: (review: GuidedAuthoringReviewDto, notes: string, reviewedBy: string) => Promise<void>;
   retry: () => void;
   runAction: (kind: WorkbenchActionKind) => Promise<void>;
   selectAll: () => Promise<void>;
@@ -89,7 +101,8 @@ export function useWorkbenchController({
   const [activity, setActivity] = useState<WorkbenchActivityDto[]>([]);
   const [notAddedSummary, setNotAddedSummary] = useState<WorkbenchNotAddedSummaryDto>();
   const [notAddedSessions, setNotAddedSessions] = useState<WorkbenchNotAddedSessionDto[]>([]);
-  const [authoringCapabilities, setAuthoringCapabilities] = useState<WorkbenchAuthoringCapabilitiesDto>();
+  const [authoringCapabilities, setAuthoringCapabilities] = useState<GuidedAuthoringCapabilitiesDto>();
+  const [pendingCanaryReviews, setPendingCanaryReviews] = useState<GuidedAuthoringReviewDto[]>([]);
   const [notAddedOpen, setNotAddedOpenState] = useState(false);
   const [selectedSessionIds, setSelectedSessionIds] = useState(() => new Set<string>());
   const [selectedCompileReadySessionIds, setSelectedCompileReadySessionIds] = useState(() => new Set<string>());
@@ -102,8 +115,14 @@ export function useWorkbenchController({
   const [total, setTotal] = useState(0);
   const pageSize = WORKBENCH_PAGE_SIZE;
   const loadRequestId = useRef(0);
+  const copyRequestInFlightRef = useRef<Promise<string> | null>(null);
   const selectedSessionIdsRef = useRef(selectedSessionIds);
   selectedSessionIdsRef.current = selectedSessionIds;
+  const { workbench: workbenchRevision } = useMastheadDataRevisions({
+    active,
+    activeProjectionUrl,
+    isLive
+  });
 
   const load = useCallback(async (options: { signal?: AbortSignal; page?: number } = {}) => {
     const requestId = ++loadRequestId.current;
@@ -115,7 +134,10 @@ export function useWorkbenchController({
       const capabilitiesPromise = getWorkbenchAuthoringCapabilities(activeProjectionUrl, {
         signal: options.signal
       }).catch(() => undefined);
-      const [response, activityResponse, notAdded, capabilities] = await Promise.all([
+      const pendingCanariesPromise = listPendingGuidedCanaries(activeProjectionUrl, {
+        signal: options.signal
+      }).catch(() => []);
+      const [response, activityResponse, notAdded, capabilities, pendingCanaries] = await Promise.all([
         getWorkbenchSessions(activeProjectionUrl, {
           limit: pageSize,
           offset: pageIndex * pageSize,
@@ -123,11 +145,12 @@ export function useWorkbenchController({
         }),
         getWorkbenchActivity(activeProjectionUrl, { limit: 30, signal: options.signal }),
         getWorkbenchNotAddedSummary(activeProjectionUrl, { signal: options.signal }),
-        capabilitiesPromise
+        capabilitiesPromise,
+        pendingCanariesPromise
       ]);
       if (options.signal?.aborted || requestId !== loadRequestId.current) return;
       const selectedAtLoad = new Set(selectedSessionIdsRef.current);
-      const compileReadySelected = await resolveSelectedCompileReadiness(
+      const selection = await resolveCurrentSelection(
         activeProjectionUrl,
         selectedAtLoad,
         response,
@@ -139,17 +162,9 @@ export function useWorkbenchController({
       setActivity(activityResponse.activity);
       setNotAddedSummary(notAdded);
       setAuthoringCapabilities(capabilities);
-      setSelectedCompileReadySessionIds((current) => {
-        const next = new Set(current);
-        for (const sessionId of selectedAtLoad) next.delete(sessionId);
-        for (const sessionId of compileReadySelected) {
-          if (selectedSessionIdsRef.current.has(sessionId)) next.add(sessionId);
-        }
-        for (const sessionId of next) {
-          if (!selectedSessionIdsRef.current.has(sessionId)) next.delete(sessionId);
-        }
-        return next;
-      });
+      setPendingCanaryReviews(pendingCanaries);
+      setSelectedSessionIds(selection.present);
+      setSelectedCompileReadySessionIds(selection.compileReady);
     } catch (loadError) {
       if (!options.signal?.aborted && requestId === loadRequestId.current) {
         setError(loadError instanceof Error ? loadError.message : String(loadError));
@@ -194,12 +209,13 @@ export function useWorkbenchController({
     if (!active || !isLive) {
       loadRequestId.current += 1;
       setAuthoringCapabilities(undefined);
+      setPendingCanaryReviews([]);
       return;
     }
     const controller = new AbortController();
     void load({ signal: controller.signal });
     return () => controller.abort();
-  }, [active, isLive, load, refreshKey]);
+  }, [active, isLive, load, refreshKey, workbenchRevision]);
 
   // Immediate selection for UI enablement / counts (must feel instant on checkbox click).
   const selectedSessions = useMemo(
@@ -207,39 +223,51 @@ export function useWorkbenchController({
     [selectedSessionIds, sessions]
   );
 
-  const deferredSelectedSessionIds = useDeferredValue(selectedSessionIds);
   const agentPromptSessionIds = useMemo(
     () => Array.from(selectedSessionIds).filter((sessionId) => selectedCompileReadySessionIds.has(sessionId)),
     [selectedCompileReadySessionIds, selectedSessionIds]
   );
   const agentPromptSessionCount = agentPromptSessionIds.length;
   const agentPromptExcludedCount = selectedSessionIds.size - agentPromptSessionCount;
-  const handoffSessions = useMemo(
-    () => sessions.filter((session) => deferredSelectedSessionIds.has(session.sessionId)),
-    [deferredSelectedSessionIds, sessions]
-  );
+  const copyAgentPrompt = useCallback((): Promise<string> => {
+    if (copyRequestInFlightRef.current) return copyRequestInFlightRef.current;
+    if (!isLive || actionBusy || !authoringCapabilities || agentPromptSessionIds.length === 0) {
+      return Promise.reject(new Error("Guided authoring is unavailable for this selection"));
+    }
 
-  const handoffText = useMemo(
-    () =>
-      authoringCapabilities?.bundleVersion === "workbench-authoring-v3" &&
-      agentPromptSessionCount > 0
-        ? buildWorkbenchHandoff({
-            authoringCommand: authoringCapabilities.command,
-            databaseId: authoringCapabilities.databaseId,
-            sessionIds: agentPromptSessionIds,
-            sessions: handoffSessions
-          })
-        : "",
-    [agentPromptSessionCount, agentPromptSessionIds, authoringCapabilities, handoffSessions]
-  );
+    const capabilities = authoringCapabilities;
+    const sessionIds = [...agentPromptSessionIds];
+    const operation = (async () => {
+      setActionBusy(true);
+      setActionError(undefined);
+      try {
+        const request = await createGuidedAuthoringRequest(activeProjectionUrl, {
+          buildSha: capabilities.buildSha,
+          databaseId: capabilities.databaseId,
+          expectedIdentity: guidedAuthoringIdentityFromCapabilities(capabilities),
+          sessionIds
+        });
+        return buildWorkbenchHandoff({ capabilities, request });
+      } catch (copyError) {
+        setActionError(formatActionError(copyError));
+        throw copyError;
+      } finally {
+        setActionBusy(false);
+      }
+    })();
+    copyRequestInFlightRef.current = operation;
+    void operation.finally(() => {
+      if (copyRequestInFlightRef.current === operation) copyRequestInFlightRef.current = null;
+    }).catch(() => undefined);
+    return operation;
+  }, [actionBusy, activeProjectionUrl, agentPromptSessionIds, authoringCapabilities, isLive]);
 
   const canRun = useCallback(
     (kind: WorkbenchActionKind): boolean => {
       if (!isLive || actionBusy) return false;
       if (kind === "enroll_missing") return true;
       if (kind === "copy_agent_prompt") {
-        return authoringCapabilities?.bundleVersion === "workbench-authoring-v3" &&
-          agentPromptSessionCount > 0;
+        return Boolean(authoringCapabilities) && agentPromptSessionCount > 0;
       }
       if (selectedSessions.length === 0) return false;
 
@@ -275,6 +303,62 @@ export function useWorkbenchController({
       }
     },
     [actionBusy, agentPromptSessionCount, authoringCapabilities, isLive, selectedSessions]
+  );
+
+  const decideCanary = useCallback(async (
+    review: GuidedAuthoringReviewDto,
+    decision: "approved" | "rejected",
+    notes: string,
+    reviewedBy: string
+  ): Promise<void> => {
+    if (!isLive || actionBusy || !authoringCapabilities) {
+      throw new Error("Guided authoring canary review is unavailable");
+    }
+    if (!review.draftRevision || review.draftRevision < 1) {
+      throw new Error("Guided authoring canary draft revision is unavailable");
+    }
+    const normalizedNotes = notes.trim();
+    if (!normalizedNotes) throw new Error("Canary review notes are required");
+    const normalizedReviewedBy = reviewedBy.trim();
+    if (!normalizedReviewedBy) throw new Error("Canary review operator identifier is required");
+
+    setActionBusy(true);
+    setActionError(undefined);
+    try {
+      const input = {
+        assignmentId: review.assignmentId,
+        draftRevision: review.draftRevision,
+        evidenceRevision: review.evidenceRevision,
+        expectedIdentity: guidedAuthoringIdentityFromCapabilities(authoringCapabilities),
+        notes: normalizedNotes,
+        requestId: review.requestId,
+        reviewedBy: normalizedReviewedBy
+      };
+      if (decision === "approved") {
+        await approveGuidedAuthoringCanary(activeProjectionUrl, input);
+      } else {
+        await rejectGuidedAuthoringCanary(activeProjectionUrl, input);
+      }
+      setLastActionSummary(decision === "approved" ? "Canary approved" : "Canary rejected for revision");
+      await load();
+    } catch (reviewError) {
+      setActionError(formatActionError(reviewError));
+      throw reviewError;
+    } finally {
+      setActionBusy(false);
+    }
+  }, [actionBusy, activeProjectionUrl, authoringCapabilities, isLive, load]);
+
+  const approveCanary = useCallback(
+    (review: GuidedAuthoringReviewDto, reviewedBy: string) =>
+      decideCanary(review, "approved", "Approved from Workbench canary review.", reviewedBy),
+    [decideCanary]
+  );
+
+  const rejectCanary = useCallback(
+    (review: GuidedAuthoringReviewDto, notes: string, reviewedBy: string) =>
+      decideCanary(review, "rejected", notes, reviewedBy),
+    [decideCanary]
   );
 
   const runAction = useCallback(
@@ -466,8 +550,8 @@ export function useWorkbenchController({
     canRun,
     clearActionFeedback,
     clearSelection,
+    copyAgentPrompt,
     error,
-    handoffText,
     lastActionSummary,
     loadNotAdded: () => {
       void loadNotAdded();
@@ -478,6 +562,9 @@ export function useWorkbenchController({
     notAddedSummary,
     page,
     pageSize,
+    pendingCanaryReviews,
+    approveCanary,
+    rejectCanary,
     retry,
     runAction,
     selectAll,
@@ -496,17 +583,17 @@ function isCompileReadySession(session: WorkbenchQueueSessionDto): boolean {
     session.qualityStatus === "passed";
 }
 
-async function resolveSelectedCompileReadiness(
+async function resolveCurrentSelection(
   activeProjectionUrl: string,
   selectedSessionIds: Set<string>,
   visibleResponse: WorkbenchSessionsResponse,
   signal?: AbortSignal
-): Promise<Set<string>> {
+): Promise<{ compileReady: Set<string>; present: Set<string> }> {
   const unresolved = new Set(selectedSessionIds);
   const compileReady = new Set<string>();
   collectCompileReadiness(visibleResponse.sessions, unresolved, compileReady);
   if (unresolved.size === 0 || visibleResponse.offset === 0 && visibleResponse.sessions.length >= visibleResponse.total) {
-    return compileReady;
+    return { compileReady, present: new Set([...selectedSessionIds].filter((sessionId) => !unresolved.has(sessionId))) };
   }
 
   const limit = 500;
@@ -519,7 +606,7 @@ async function resolveSelectedCompileReadiness(
     if (response.sessions.length === 0) break;
     offset += response.sessions.length;
   }
-  return compileReady;
+  return { compileReady, present: new Set([...selectedSessionIds].filter((sessionId) => !unresolved.has(sessionId))) };
 }
 
 function collectCompileReadiness(

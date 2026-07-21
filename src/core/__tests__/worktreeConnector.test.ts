@@ -142,6 +142,7 @@ describe("Masthead worktree connector planning", () => {
     "/imports",
     "/imports/job-1/report",
     "/data/summary",
+    "/data/revisions",
     "/knowledge-flow/summary",
     "/logbook/summary",
     "/logbook/artifacts",
@@ -157,6 +158,10 @@ describe("Masthead worktree connector planning", () => {
     "/workbench/import-health-summary",
     "/workbench/not-added",
     "/workbench/authoring/capabilities",
+    "/workbench/authoring/requests/request%3Aone",
+    "/workbench/authoring/canaries/pending",
+    "/workbench/authoring/assignments/assignment%3Aone/review",
+    "/workbench/authoring/assignments/assignment%3Aone/scaffold",
     "/workbench/authoring/runs/authoring%3Arun",
     "/workbench/authoring/runs/authoring%3Arun/evidence",
     "/workbench/authoring/runs/authoring%3Arun/context"
@@ -167,8 +172,7 @@ describe("Masthead worktree connector planning", () => {
   test.each([
     "/mcp/launch-config/validate",
     "/mcp/test-connection",
-    "/settings/llm-provider/models",
-    "/workbench/authoring/suggestions"
+    "/settings/llm-provider/models"
   ])("forwards read-only POST endpoint %s", async (pathname) => {
     expect(isAllowedReadOnlyBridgeRequest("POST", pathname)).toBe(true);
   });
@@ -191,6 +195,14 @@ describe("Masthead worktree connector planning", () => {
     expect(isAllowedReadOnlyBridgeRequest("POST", "/imports")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/imports/job-1/report")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/data/delete")).toBe(false);
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/capabilities")).toBe(false);
+    expect(isAllowedReadOnlyBridgeRequest("GET", "/workbench/authoring/assignments/assignment%3Aone/inspect")).toBe(false);
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/suggestions")).toBe(false);
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/requests")).toBe(false);
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/requests/request%3Aone/start")).toBe(false);
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/assignments/assignment%3Aone/draft")).toBe(false);
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/requests/request%3Aone/canary-decision")).toBe(false);
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/assignments/assignment%3Aone/finish")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/runs")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/runs/authoring%3Arun/submit")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/runs/authoring%3Arun/finish")).toBe(false);
@@ -225,6 +237,15 @@ describe("Masthead worktree connector planning", () => {
         sendJson(response, 200, {
           ok: true,
           sources: [{ sourceId: "codex-sessions", runtime: "codex", sourceKind: "jsonl", confidence: "authoritative" }]
+        });
+        return;
+      }
+
+      if (request.url === "/workbench/authoring/capabilities") {
+        sendJson(response, 200, {
+          ok: true,
+          bundleVersion: "workbench-authoring-v4",
+          policyVersion: "guided-authoring-v1"
         });
         return;
       }
@@ -271,6 +292,7 @@ describe("Masthead worktree connector planning", () => {
       ok: true,
       product: "masthead",
       runtime: {
+        baseUrl: bridge.baseUrl,
         mode: "read_only_bridge",
         writable: false,
         upstream: {
@@ -284,6 +306,18 @@ describe("Masthead worktree connector planning", () => {
       },
       projectionUrl: `${bridge.baseUrl}/projection`,
       readOnly: true
+    });
+    expect((health.runtime as Record<string, unknown>).instanceManifest).toBeUndefined();
+    expect((health.runtime as Record<string, unknown>).authoringCommand).toBeUndefined();
+
+    const authoringCapabilities = await fetch(`${bridge.baseUrl}/workbench/authoring/capabilities`, {
+      headers: { origin: "http://127.0.0.1:5180" }
+    });
+    expect(authoringCapabilities.status).toBe(200);
+    await expect(authoringCapabilities.json()).resolves.toMatchObject({
+      ok: true,
+      bundleVersion: "workbench-authoring-v4",
+      policyVersion: "guided-authoring-v1"
     });
 
     const projectionResponse = await fetch(`${bridge.baseUrl}/projection`, {

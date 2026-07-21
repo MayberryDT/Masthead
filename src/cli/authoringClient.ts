@@ -1,14 +1,27 @@
 import type {
-  WorkbenchAuthoringBundle,
-  WorkbenchAuthoringBundleV2,
-  WorkbenchAuthoringBundleV3,
-  WorkbenchArtifactSuggestionDto,
-  WorkbenchAuthoringCapabilitiesDto,
   WorkbenchAuthoringEvidencePage,
-  WorkbenchAuthoringReceipt,
+  WorkbenchArtifactSuggestionDto,
   WorkbenchAuthoringRunDto
 } from "../shared/workbenchAuthoring.ts";
+import {
+  GUIDED_AUTHORING_IDENTITY_HEADERS,
+  isGuidedAuthoringCapabilitiesDto,
+  type GuidedAuthoringBundleV4,
+  type GuidedAuthoringCapabilitiesDto,
+  type GuidedAuthoringNextAction,
+  type GuidedAuthoringReceiptDto,
+  type GuidedAuthoringReviewDto,
+  type GuidedInspectionDto
+} from "../shared/guidedAuthoring.ts";
 import type { SessionDossierDto } from "../shared/sessionDossier.ts";
+import {
+  assertGuidedAuthoringExpectedIdentity,
+  GuidedAuthoringIdentityError,
+  identityFromCapabilities,
+  identityFromManifest,
+  readMastheadInstanceManifest,
+  type GuidedAuthoringExpectedIdentity
+} from "../shared/instanceIdentity.ts";
 
 export const DEFAULT_MASTHEAD_DAEMON_URL = "http://127.0.0.1:17373";
 
@@ -27,26 +40,104 @@ export class MastheadAuthoringClientError extends Error {
 }
 
 export class MastheadAuthoringClient {
-  private readonly baseUrl: string;
+  private readonly configuredBaseUrl: string;
+  private readonly instanceManifest?: string;
 
-  constructor(baseUrl = DEFAULT_MASTHEAD_DAEMON_URL) {
-    this.baseUrl = (baseUrl.trim() || DEFAULT_MASTHEAD_DAEMON_URL).replace(/\/+$/, "");
+  constructor(input: string | { baseUrl?: string; instanceManifest?: string } = DEFAULT_MASTHEAD_DAEMON_URL) {
+    const options = typeof input === "string" ? { baseUrl: input } : input;
+    this.configuredBaseUrl = (options.baseUrl?.trim() || DEFAULT_MASTHEAD_DAEMON_URL).replace(/\/+$/, "");
+    this.instanceManifest = options.instanceManifest?.trim() || undefined;
   }
 
-  capabilities(): Promise<WorkbenchAuthoringCapabilitiesDto> {
-    return this.request("GET", "/workbench/authoring/capabilities");
+  async capabilities(): Promise<GuidedAuthoringCapabilitiesDto> {
+    const binding = await this.currentBinding();
+    const capabilities = await this.requestAt<GuidedAuthoringCapabilitiesDto>(
+      binding.baseUrl,
+      "GET",
+      "/workbench/authoring/capabilities"
+    );
+    if (!isGuidedAuthoringCapabilitiesDto(capabilities)) {
+      throw new MastheadAuthoringClientError({ code: "invalid_daemon_response", message: "Masthead daemon returned incompatible authoring capabilities" });
+    }
+    if (binding.expected) this.assertIdentity(identityFromCapabilities(capabilities), binding.expected);
+    return capabilities;
   }
 
-  suggestions(sessionIds: string[]): Promise<WorkbenchArtifactSuggestionDto[]> {
-    return this.request("POST", "/workbench/authoring/suggestions", { sessionIds });
+  async assertAuthoringIdentity(expected: GuidedAuthoringExpectedIdentity): Promise<GuidedAuthoringCapabilitiesDto> {
+    const actual = await this.capabilities();
+    this.assertIdentity(identityFromCapabilities(actual), expected);
+    return actual;
   }
 
-  open(input: { actorId: string; databaseId: string; sessionIds: string[] }): Promise<{
-    ok: true;
-    run: WorkbenchAuthoringRunDto;
-    [key: string]: unknown;
+  async guidedStart(requestId: string): Promise<GuidedAuthoringCommandDto> {
+    const binding = await this.verifiedGuidedMutationBinding();
+    return this.requestAt(
+      binding.baseUrl,
+      "POST",
+      `/workbench/authoring/requests/${encodeURIComponent(requestId)}/start`,
+      { expectedIdentity: binding.expected }
+    );
+  }
+
+  async guidedInspect(
+    assignmentId: string,
+    options: { cursor?: string; sessionId?: string } = {}
+  ): Promise<GuidedInspectionDto> {
+    const binding = await this.verifiedGuidedMutationBinding();
+    const query = new URLSearchParams();
+    if (options.sessionId) query.set("sessionId", options.sessionId);
+    if (options.cursor) query.set("cursor", options.cursor);
+    const suffix = query.size > 0 ? `?${query.toString()}` : "";
+    return this.requestAt(
+      binding.baseUrl,
+      "GET",
+      `/workbench/authoring/assignments/${encodeURIComponent(assignmentId)}/inspect${suffix}`,
+      undefined,
+      identityHeaders(binding.expected)
+    );
+  }
+
+  async guidedSave(assignmentId: string, draft: GuidedAuthoringBundleV4): Promise<GuidedAuthoringReviewDto> {
+    const binding = await this.verifiedGuidedMutationBinding();
+    return this.requestAt(
+      binding.baseUrl,
+      "POST",
+      `/workbench/authoring/assignments/${encodeURIComponent(assignmentId)}/draft`,
+      { draft, expectedIdentity: binding.expected }
+    );
+  }
+
+  async guidedReview(assignmentId: string): Promise<GuidedAuthoringReviewDto> {
+    const binding = await this.currentBinding();
+    return this.requestAt(
+      binding.baseUrl,
+      "GET",
+      `/workbench/authoring/assignments/${encodeURIComponent(assignmentId)}/review`
+    );
+  }
+
+  async guidedScaffold(assignmentId: string): Promise<{
+    assignmentId: string;
+    bundleSchema: unknown;
+    draft: GuidedAuthoringBundleV4;
+    nextAction: GuidedAuthoringNextAction;
   }> {
-    return this.request("POST", "/workbench/authoring/runs", input);
+    const binding = await this.currentBinding();
+    return this.requestAt(
+      binding.baseUrl,
+      "GET",
+      `/workbench/authoring/assignments/${encodeURIComponent(assignmentId)}/scaffold`
+    );
+  }
+
+  async guidedFinish(assignmentId: string): Promise<GuidedFinishCommandDto> {
+    const binding = await this.verifiedGuidedMutationBinding();
+    return this.requestAt(
+      binding.baseUrl,
+      "POST",
+      `/workbench/authoring/assignments/${encodeURIComponent(assignmentId)}/finish`,
+      { expectedIdentity: binding.expected }
+    );
   }
 
   status(runId: string): Promise<{ ok: true; run: WorkbenchAuthoringRunDto; evidenceStatus: "current" | "changed" }> {
@@ -68,34 +159,83 @@ export class MastheadAuthoringClient {
     return this.request("GET", `/workbench/authoring/runs/${encodeURIComponent(runId)}/evidence${suffix}`);
   }
 
-  submit(runId: string, bundle: WorkbenchAuthoringBundle | WorkbenchAuthoringBundleV2 | WorkbenchAuthoringBundleV3): Promise<{
-    accepted: boolean;
-    findings: unknown[];
-    ok: true;
-    run: WorkbenchAuthoringRunDto;
-  }> {
-    return this.request("POST", `/workbench/authoring/runs/${encodeURIComponent(runId)}/submit`, bundle);
-  }
-
-  finish(runId: string): Promise<{ ok: true; receipt: WorkbenchAuthoringReceipt }> {
-    return this.request("POST", `/workbench/authoring/runs/${encodeURIComponent(runId)}/finish`, {});
-  }
-
   private async request<T>(method: "GET" | "POST", pathname: string, body?: unknown): Promise<T> {
+    const binding = await this.currentBinding();
+    return this.requestAt(binding.baseUrl, method, pathname, body);
+  }
+
+  private async currentBinding(): Promise<{ baseUrl: string; expected?: GuidedAuthoringExpectedIdentity }> {
+    if (!this.instanceManifest) return { baseUrl: this.configuredBaseUrl };
+    try {
+      const manifest = await readMastheadInstanceManifest(this.instanceManifest);
+      return { baseUrl: manifest.baseUrl, expected: identityFromManifest(manifest, this.instanceManifest) };
+    } catch (error) {
+      throw new MastheadAuthoringClientError({
+        code: "instance_manifest_unavailable",
+        message: `Masthead instance manifest is unavailable at ${this.instanceManifest}: ${error instanceof Error ? error.message : String(error)}`
+      });
+    }
+  }
+
+  private async verifiedGuidedMutationBinding(): Promise<{
+    baseUrl: string;
+    expected: GuidedAuthoringExpectedIdentity;
+  }> {
+    const binding = await this.currentBinding();
+    if (!binding.expected) {
+      throw new MastheadAuthoringClientError({
+        code: "instance_manifest_required",
+        message: "Guided authoring mutations require MASTHEAD_INSTANCE_MANIFEST"
+      });
+    }
+    const capabilities = await this.requestAt<GuidedAuthoringCapabilitiesDto>(
+      binding.baseUrl,
+      "GET",
+      "/workbench/authoring/capabilities"
+    );
+    if (!isGuidedAuthoringCapabilitiesDto(capabilities)) {
+      throw new MastheadAuthoringClientError({
+        code: "invalid_daemon_response",
+        message: "Masthead daemon returned incompatible guided authoring capabilities"
+      });
+    }
+    this.assertIdentity(identityFromCapabilities(capabilities), binding.expected);
+    return { baseUrl: binding.baseUrl, expected: binding.expected };
+  }
+
+  private assertIdentity(actual: GuidedAuthoringExpectedIdentity, expected: GuidedAuthoringExpectedIdentity): void {
+    try {
+      assertGuidedAuthoringExpectedIdentity(actual, expected);
+    } catch (error) {
+      if (error instanceof GuidedAuthoringIdentityError) {
+        throw new MastheadAuthoringClientError({ code: error.code, message: error.message });
+      }
+      throw error;
+    }
+  }
+
+  private async requestAt<T>(
+    baseUrl: string,
+    method: "GET" | "POST",
+    pathname: string,
+    body?: unknown,
+    extraHeaders: Record<string, string> = {}
+  ): Promise<T> {
     let response: Response;
     try {
-      response = await fetch(`${this.baseUrl}${pathname}`, {
+      response = await fetch(`${baseUrl}${pathname}`, {
         body: body === undefined ? undefined : JSON.stringify(body),
         headers: {
           accept: "application/json",
-          ...(body === undefined ? {} : { "content-type": "application/json" })
+          ...(body === undefined ? {} : { "content-type": "application/json" }),
+          ...extraHeaders
         },
         method
       });
     } catch (error) {
       throw new MastheadAuthoringClientError({
         code: "daemon_unavailable",
-        message: `Masthead daemon is unavailable at ${this.baseUrl}: ${error instanceof Error ? error.message : String(error)}`
+        message: `Masthead daemon is unavailable at ${baseUrl}: ${error instanceof Error ? error.message : String(error)}`
       });
     }
 
@@ -111,6 +251,26 @@ export class MastheadAuthoringClient {
     }
     return responseBody as T;
   }
+}
+
+export type GuidedAuthoringCommandDto = {
+  nextAction: GuidedAuthoringNextAction;
+  [key: string]: unknown;
+};
+
+export type GuidedFinishCommandDto = {
+  receipt: GuidedAuthoringReceiptDto;
+  nextAction: GuidedAuthoringNextAction & { kind: "claim_next" | "complete" };
+};
+
+function identityHeaders(identity: GuidedAuthoringExpectedIdentity): Record<string, string> {
+  return {
+    [GUIDED_AUTHORING_IDENTITY_HEADERS.baseUrl]: identity.baseUrl,
+    [GUIDED_AUTHORING_IDENTITY_HEADERS.databaseId]: identity.databaseId,
+    [GUIDED_AUTHORING_IDENTITY_HEADERS.buildSha]: identity.buildSha,
+    [GUIDED_AUTHORING_IDENTITY_HEADERS.instanceManifest]: identity.instanceManifest,
+    [GUIDED_AUTHORING_IDENTITY_HEADERS.instanceId]: identity.instanceId
+  };
 }
 
 async function readResponseBody(response: Response): Promise<unknown> {

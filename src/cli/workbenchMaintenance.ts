@@ -1,4 +1,4 @@
-import { access } from "node:fs/promises";
+import { access, readFile, writeFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { resolveWorkbenchDatabasePath } from "./dbPath.ts";
@@ -15,6 +15,14 @@ import {
 } from "../daemon/databaseBackup.ts";
 import { migrateDatabase } from "../daemon/db/schema.ts";
 import { openMastheadDatabase } from "../daemon/db/sqlite.ts";
+import {
+  auditFailedV3TemplateGeneration,
+  invalidateFailedV3TemplateGenerationInsideExclusiveMaintenance,
+  prepareFailedV3TemplateRecovery,
+  readFailedV3TemplateIncidentContract,
+  restoreFailedV3TemplateRecoveryInsideExclusiveMaintenance,
+  type FailedV3TemplatePreparedRecovery
+} from "../daemon/db/v3TemplateRecovery.ts";
 
 export async function runWipePublishedMaintenance(
   args: string[],
@@ -46,7 +54,7 @@ export async function runFailedV1RecoveryMaintenance(
   try {
     await access(databasePath);
     if (command === "audit-v1-generation") {
-      await assertSelfContainedDatabase(databasePath);
+      await assertSelfContainedDatabase(databasePath, "v1");
       const databaseUrl = pathToFileURL(databasePath);
       databaseUrl.searchParams.set("immutable", "1");
       const db = new DatabaseSync(databaseUrl.href, { readOnly: true });
@@ -129,11 +137,68 @@ export async function runFailedV1RecoveryMaintenance(
   }
 }
 
-async function assertSelfContainedDatabase(databasePath: string): Promise<void> {
+export async function runFailedV3TemplateRecoveryMaintenance(
+  command: "audit-v3-template-generation" | "prepare-v3-template-recovery" |
+    "invalidate-v3-template-generation" | "restore-v3-template-recovery",
+  args: string[],
+  options: { env?: NodeJS.ProcessEnv },
+  json: boolean
+): Promise<CliResult> {
+  const explicitPath = optionValue(args, "--db");
+  if (!explicitPath) return errorResult("missing_argument", "Missing required option: --db", json);
+  const databasePath = resolveWorkbenchDatabasePath({ args, env: options.env });
+  const contractPath = optionValue(args, "--incident-contract");
+  const preparedPath = optionValue(args, "--prepared-receipt");
+  const receiptPath = optionValue(args, "--receipt");
+  if ((command === "audit-v3-template-generation" || command === "prepare-v3-template-recovery") && !contractPath) {
+    return errorResult("missing_argument", "Missing required option: --incident-contract", json);
+  }
+  if (command === "prepare-v3-template-recovery" && !receiptPath) {
+    return errorResult("missing_argument", "Missing required option: --receipt", json);
+  }
+  if ((command === "invalidate-v3-template-generation" || command === "restore-v3-template-recovery") && !preparedPath) {
+    return errorResult("missing_argument", "Missing required option: --prepared-receipt", json);
+  }
+  if ((command === "invalidate-v3-template-generation" || command === "restore-v3-template-recovery") && !args.includes("--confirm")) {
+    return errorResult("missing_argument", `Pass --confirm to ${command.startsWith("restore") ? "restore" : "invalidate"} the exact audited failed V3 template generation`, json);
+  }
+  try {
+    await access(databasePath);
+    if (command === "audit-v3-template-generation" || command === "prepare-v3-template-recovery") {
+      const incidentContract = await readFailedV3TemplateIncidentContract(contractPath!);
+      if (command === "audit-v3-template-generation") {
+        await assertSelfContainedDatabase(databasePath, "v3_template");
+        const databaseUrl = pathToFileURL(databasePath);
+        databaseUrl.searchParams.set("immutable", "1");
+        const db = new DatabaseSync(databaseUrl, { readOnly: true });
+        try {
+          return jsonResult({ databasePath, ok: true, audit: auditFailedV3TemplateGeneration(db, incidentContract) });
+        } finally {
+          db.close();
+        }
+      }
+      const prepared = await prepareFailedV3TemplateRecovery(databasePath, incidentContract);
+      await writeFile(receiptPath!, `${JSON.stringify(prepared, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
+      return jsonResult({ databasePath, ok: true, prepared, receiptPath });
+    }
+    const prepared = JSON.parse(await readFile(preparedPath!, "utf8")) as FailedV3TemplatePreparedRecovery;
+    return await withExclusiveDatabaseMaintenance(databasePath, async (ownership) => jsonResult({
+      databasePath,
+      ok: true,
+      receipt: command === "invalidate-v3-template-generation"
+        ? await invalidateFailedV3TemplateGenerationInsideExclusiveMaintenance(databasePath, prepared, ownership)
+        : await restoreFailedV3TemplateRecoveryInsideExclusiveMaintenance(databasePath, prepared, ownership)
+    }));
+  } catch (error) {
+    return errorResult("v3_template_recovery_refused", error instanceof Error ? error.message : String(error), json);
+  }
+}
+
+async function assertSelfContainedDatabase(databasePath: string, recovery: "v1" | "v3_template"): Promise<void> {
   for (const suffix of ["-wal", "-shm", "-journal"]) {
     try {
       await access(`${databasePath}${suffix}`);
-      throw new Error(`v1_recovery_audit_database_not_self_contained:${suffix.slice(1)}`);
+      throw new Error(`${recovery}_recovery_audit_database_not_self_contained:${suffix.slice(1)}`);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }

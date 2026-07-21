@@ -16,6 +16,11 @@ import type {
   WorkbenchClaimSupport
 } from "../../shared/workbenchAuthoring.ts";
 import type { SessionDossierDto } from "../../shared/sessionDossier.ts";
+import {
+  GUIDED_AUTHORING_FINDING_CODES,
+  validateGuidedAuthoringDraft,
+  type GuidedAuthoringFindingCode
+} from "./guidedAuthoringQuality.ts";
 import { substantiveFingerprint } from "./artifactQuality.ts";
 import {
   discoverArtifactCandidatePage,
@@ -29,10 +34,152 @@ import {
 } from "./authoringService.ts";
 import {
   buildDurableArtifactFixtureBundleV3,
+  buildGuidedQualityCorpusCases,
   corpusSessionIds,
-  seedDurableArtifactCorpus,
+  seedDurableArtifactCorpusWithPerformedActions,
   seedToolHeavyPerformanceSessions
 } from "./__fixtures__/durableArtifactCorpus.ts";
+
+export type GuidedQualityCorpusCaseResult = {
+  caseId: "sparse" | "supported_protocol" | "runbook" | "adr" | "incident" | "failed_v3_template";
+  accepted: boolean;
+  findingCodes: GuidedAuthoringFindingCode[];
+};
+
+export type GuidedArtifactReuseResult = {
+  kind: "runbook" | "adr" | "incident_timeline";
+  query: string;
+  expected: Record<string, unknown>;
+  derived: Record<string, unknown>;
+  toolCalls: [];
+  passed: boolean;
+};
+
+export type GuidedAuthoringQualityCorpusReport = {
+  cases: GuidedQualityCorpusCaseResult[];
+  reuseTasks: GuidedArtifactReuseResult[];
+  failures: string[];
+  passed: boolean;
+};
+
+export type GuidedAuthoringQualityCorpusOptions = {
+  reuseOutputsByKind?: Partial<Record<GuidedArtifactReuseResult["kind"], Record<string, unknown>>>;
+};
+
+export type GuidedAuthoringGateReport = {
+  failedV3TemplateRejected: boolean;
+  completeEvidenceCoverage: number;
+  sessionClaimSupportCoverage: number;
+  optionalClaimSupportCoverage: number;
+  opportunityDispositionCoverage: number;
+  duplicateSessionTemplateCount: number;
+  protocolLeakCount: number;
+  unsupportedCompletionCount: number;
+  artifactOnlyReusePassRate: number;
+  canaryPublishedBeforeApprovalCount: number;
+  identityMismatchMutationCount: number;
+};
+
+export const FAILED_V3_TEMPLATE_EXPECTED_FINDING_CODES = [
+  "incomplete_evidence_inspection",
+  "invalid_session_support_evidence",
+  "negligible_enrichment_delta",
+  "missing_session_claim_support",
+  "unsupported_completion",
+  "duplicate_session_template",
+  "protocol_leakage",
+  "unsupported_opportunity_dismissal"
+] as const satisfies readonly GuidedAuthoringFindingCode[];
+
+export const GUIDED_REUSE_SOURCE_PATHS = {
+  runbook: {
+    trigger: "/problemSignature/affectedScope",
+    actions: "/fixSteps",
+    verification: "/validationChecks",
+    failureHandling: "/risksOrGaps"
+  },
+  adr: {
+    decision: "/decision",
+    rejectedAlternative: "/alternatives/0",
+    revisitWhen: "/consequences/0"
+  },
+  incident_timeline: {
+    impact: "/impact",
+    cause: "/rootCause",
+    recovery: "/remediation/0",
+    verification: "/timeline/-1/summary"
+  }
+} as const;
+
+export const GUIDED_REUSE_CASES = [
+  {
+    kind: "runbook",
+    query: "When migration 41 hits the existing-index failure, what should I do, verify, and use for rollback or failure handling?",
+    expected: {
+      trigger: "Migration 41 fails because the target index already exists.",
+      actions: ["Confirm the existing index definition matches migration 41, then mark the migration applied."],
+      verification: ["Run the migration smoke check and confirm schema version 41."],
+      failureHandling: [
+        "Rollback remains required if the existing index definition does not match migration 41.",
+        "If the definitions differ, stop, restore the pre-migration backup, and reconcile the index manually."
+      ]
+    }
+  },
+  {
+    kind: "adr",
+    query: "What local-first storage decision was made, what alternative was rejected, and when should it be revisited?",
+    expected: {
+      decision: "Keep the canonical Masthead session database local in SQLite.",
+      rejectedAlternative: "Make a hosted service the canonical session store.",
+      revisitWhen: "Revisit when multi-device concurrent writers become a supported product requirement."
+    }
+  },
+  {
+    kind: "incident_timeline",
+    query: "What happened during the writer-lease outage, what caused it, how was it recovered, and how was recovery verified?",
+    expected: {
+      impact: "Workbench publishing was unavailable while reads remained available.",
+      cause: "A stale writer lease survived an unclean daemon exit.",
+      recovery: "Validate the stale owner, clear the lease, and restart the production daemon.",
+      verification: "A canary draft saved and published once, and the database integrity check passed."
+    }
+  }
+] as const;
+
+export function deriveGuidedReuseAnswer(
+  kind: GuidedArtifactReuseResult["kind"],
+  output: Record<string, unknown>,
+  query: string
+): Record<string, unknown> {
+  const reuseCase = GUIDED_REUSE_CASES.find((entry) => entry.kind === kind);
+  if (!reuseCase || query !== reuseCase.query) return {};
+  const answer: Record<string, unknown> = {};
+  for (const [resultKey, sourcePath] of Object.entries(GUIDED_REUSE_SOURCE_PATHS[kind])) {
+    const value = valueAtGuidedReusePointer(output, sourcePath);
+    const expectedValue = reuseCase.expected[resultKey as keyof typeof reuseCase.expected];
+    if (isValidGuidedReuseValue(value, Array.isArray(expectedValue))) answer[resultKey] = value;
+  }
+  return answer;
+}
+
+export function guidedReuseResult(
+  kind: GuidedArtifactReuseResult["kind"],
+  output: Record<string, unknown>,
+  query: string
+): GuidedArtifactReuseResult {
+  const reuseCase = GUIDED_REUSE_CASES.find((entry) => entry.kind === kind);
+  const expected = reuseCase ? structuredClone(reuseCase.expected) : {};
+  const derived = deriveGuidedReuseAnswer(kind, output, query);
+  const toolCalls: [] = [];
+  return {
+    kind,
+    query,
+    expected,
+    derived,
+    toolCalls,
+    passed: Boolean(reuseCase) && isDeepStrictEqual(derived, expected) && isDeepStrictEqual(toolCalls, [])
+  };
+}
 
 type KindMix = Record<WorkbenchAutomaticArtifactKind, number>;
 
@@ -79,6 +226,7 @@ export type DurableArtifactCorpusReport = {
   reportVersion: "durable-artifact-gate-v1";
   fixture: "durable-artifact-corpus-v1";
   productionAccessed: false;
+  guidedAuthoringGate: GuidedAuthoringGateReport;
   machineGatePassed: boolean;
   failures: string[];
   dossierFidelity: number;
@@ -144,6 +292,17 @@ export type DurableArtifactCorpusReport = {
     }>;
   };
 };
+
+const SESSION_SUPPORT_FINDINGS = new Set<GuidedAuthoringFindingCode>([
+  "invalid_session_claim_path", "missing_session_claim_support", "invalid_session_support_kind",
+  "invalid_session_support_evidence",
+  "unsupported_claim_excerpt", "evidence_outside_session", "claim_support_ref_not_declared"
+]);
+const OPTIONAL_SUPPORT_FINDINGS = new Set<GuidedAuthoringFindingCode>([
+  "incomplete_artifact_rubric", "artifact_requires_raw_evidence", "missing_claim_support",
+  "missing_required_support_kind", "missing_root_cause_support", "invalid_support_kind_evidence",
+  "invalid_timeline_order", "invalid_timeline_support"
+]);
 
 const EXPECTED_CANDIDATE_LABELS = [
   "adr|session:decision-artifact-logbook|session:decision-artifact-logbook",
@@ -213,6 +372,190 @@ const RAW_SESSION_TOOLS = new Set([
   "get_project_history"
 ]);
 
+export function guidedAuthoringQualityCorpusFailures(
+  report: Omit<GuidedAuthoringQualityCorpusReport, "failures" | "passed">
+): string[] {
+  const failures: string[] = [];
+  const cases = new Map(report.cases.map((entry) => [entry.caseId, entry]));
+  for (const [caseId, failure] of [
+    ["sparse", "guided_sparse_case_rejected"],
+    ["supported_protocol", "guided_supported_protocol_case_rejected"],
+    ["runbook", "guided_runbook_case_rejected"],
+    ["adr", "guided_adr_case_rejected"],
+    ["incident", "guided_incident_case_rejected"]
+  ] as const) {
+    const corpusCase = cases.get(caseId);
+    if (corpusCase?.accepted !== true || corpusCase.findingCodes.length > 0) failures.push(failure);
+  }
+
+  const failedTemplate = cases.get("failed_v3_template");
+  if (failedTemplate?.accepted !== false) failures.push("guided_failed_template_accepted");
+  for (const code of FAILED_V3_TEMPLATE_EXPECTED_FINDING_CODES) {
+    if (!failedTemplate?.findingCodes.includes(code)) failures.push(`guided_failed_template_missing:${code}`);
+  }
+  for (const code of GUIDED_AUTHORING_FINDING_CODES) {
+    if (
+      failedTemplate?.findingCodes.includes(code) &&
+      !FAILED_V3_TEMPLATE_EXPECTED_FINDING_CODES.includes(code as typeof FAILED_V3_TEMPLATE_EXPECTED_FINDING_CODES[number])
+    ) {
+      failures.push(`guided_failed_template_unexpected:${code}`);
+    }
+  }
+
+  const reuse = new Map(report.reuseTasks.map((entry) => [entry.kind, entry]));
+  for (const { kind } of GUIDED_REUSE_CASES) {
+    const task = reuse.get(kind);
+    if (task?.passed !== true) failures.push(`guided_reuse_answer_mismatch:${kind}`);
+    if (!isDeepStrictEqual(task?.toolCalls ?? [], [])) failures.push(`guided_reuse_used_tool:${kind}`);
+  }
+
+  const stableCases = isDeepStrictEqual(
+    report.cases.map(({ caseId }) => caseId),
+    ["sparse", "supported_protocol", "runbook", "adr", "incident", "failed_v3_template"]
+  );
+  const findingCodes = failedTemplate?.findingCodes ?? [];
+  const findingOrdinals = findingCodes.map((code) => GUIDED_AUTHORING_FINDING_CODES.indexOf(code));
+  const stableFindings = new Set(findingCodes).size === findingCodes.length && findingOrdinals.every(
+    (ordinal, index) => index === 0 || findingOrdinals[index - 1]! < ordinal
+  );
+  const stableReuse = isDeepStrictEqual(
+    report.reuseTasks.map(({ kind }) => kind),
+    GUIDED_REUSE_CASES.map(({ kind }) => kind)
+  );
+  if (!stableCases || !stableFindings || !stableReuse) failures.push("guided_corpus_finding_order_unstable");
+  return [...new Set(failures)];
+}
+
+export function runGuidedAuthoringQualityCorpus(
+  options: GuidedAuthoringQualityCorpusOptions = {}
+): GuidedAuthoringQualityCorpusReport {
+  const builtCases = buildGuidedQualityCorpusCases();
+  const cases = builtCases.map(({ caseId, input }) => {
+    const result = validateGuidedAuthoringDraft(input);
+    return {
+      caseId,
+      accepted: result.accepted,
+      findingCodes: [...new Set(result.findings.map(({ code }) => code))]
+    } satisfies GuidedQualityCorpusCaseResult;
+  });
+  const reuseCaseIdByKind = {
+    runbook: "runbook",
+    adr: "adr",
+    incident_timeline: "incident"
+  } as const;
+  const validatedCaseOutputByKind = Object.fromEntries(
+    GUIDED_REUSE_CASES.map(({ kind }) => [
+      kind,
+      requireGuidedCorpusArtifactOutput(
+        builtCases.find(({ caseId }) => caseId === reuseCaseIdByKind[kind]),
+        kind
+      )
+    ])
+  ) as Record<GuidedArtifactReuseResult["kind"], Record<string, unknown>>;
+  const reuseTasks = GUIDED_REUSE_CASES.map(({ kind, query }) => guidedReuseResult(
+    kind,
+    options.reuseOutputsByKind?.[kind] ?? validatedCaseOutputByKind[kind],
+    query
+  ));
+  const partial = { cases, reuseTasks };
+  const failures = guidedAuthoringQualityCorpusFailures(partial);
+  return { ...partial, failures, passed: failures.length === 0 };
+}
+
+export function guidedAuthoringGateReport(
+  report: GuidedAuthoringQualityCorpusReport,
+  observations: Pick<
+    GuidedAuthoringGateReport,
+    "canaryPublishedBeforeApprovalCount" | "identityMismatchMutationCount"
+  > = { canaryPublishedBeforeApprovalCount: 0, identityMismatchMutationCount: 0 }
+): GuidedAuthoringGateReport {
+  const builtCases = buildGuidedQualityCorpusCases();
+  const results = new Map(report.cases.map((entry) => [entry.caseId, entry]));
+  const acceptedCases = builtCases.filter(({ caseId }) => caseId !== "failed_v3_template");
+  const acceptedResults = acceptedCases.map(({ caseId }) => results.get(caseId));
+  const evidenceRows = acceptedCases.flatMap(({ input }) => input.assignment.sessionIds.map((sessionId) => {
+    const matches = input.coverage.filter((row) => row.sessionId === sessionId);
+    const row = matches[0];
+    return matches.length === 1 && row?.complete === true && row.accessedItems === row.totalItems &&
+      row.totalItems > 0 && row.evidenceRevision === input.assignment.evidenceRevision;
+  }));
+  const sessionDrafts = acceptedCases.flatMap(({ caseId, input }) => input.bundle.sessionEnrichments.map((draft) => ({
+    failed: (results.get(caseId)?.findingCodes ?? []).some((code) => SESSION_SUPPORT_FINDINGS.has(code)),
+    sessionId: draft.sessionId
+  })));
+  const artifactDrafts = acceptedCases.flatMap(({ caseId, input }) => input.bundle.artifacts.map(() => ({
+    failed: (results.get(caseId)?.findingCodes ?? []).some((code) => OPTIONAL_SUPPORT_FINDINGS.has(code))
+  })));
+  const dispositions = acceptedCases.flatMap(({ input }) => input.assignment.opportunityIds.map((opportunityId) => {
+    return input.bundle.opportunityDispositions.filter((entry) => entry.opportunityId === opportunityId).length === 1;
+  }));
+  const findingCodes = acceptedResults.flatMap((entry) => entry?.findingCodes ?? []);
+  const failedTemplate = results.get("failed_v3_template");
+  return {
+    failedV3TemplateRejected: failedTemplate?.accepted === false &&
+      FAILED_V3_TEMPLATE_EXPECTED_FINDING_CODES.every((code) => failedTemplate.findingCodes.includes(code)),
+    completeEvidenceCoverage: ratio(evidenceRows.filter(Boolean).length, evidenceRows.length),
+    sessionClaimSupportCoverage: ratio(sessionDrafts.filter(({ failed }) => !failed).length, sessionDrafts.length),
+    optionalClaimSupportCoverage: ratio(artifactDrafts.filter(({ failed }) => !failed).length, artifactDrafts.length),
+    opportunityDispositionCoverage: ratio(dispositions.filter(Boolean).length, dispositions.length),
+    duplicateSessionTemplateCount: findingCodes.filter((code) => code === "duplicate_session_template").length,
+    protocolLeakCount: findingCodes.filter((code) => code === "protocol_leakage").length,
+    unsupportedCompletionCount: findingCodes.filter((code) => code === "unsupported_completion").length,
+    artifactOnlyReusePassRate: ratio(report.reuseTasks.filter(({ passed, toolCalls }) =>
+      passed && toolCalls.length === 0
+    ).length, report.reuseTasks.length),
+    ...observations
+  };
+}
+
+export function guidedAuthoringGateFailures(report: GuidedAuthoringGateReport): string[] {
+  const failures: string[] = [];
+  if (!report.failedV3TemplateRejected) failures.push("failed_v3_template_not_rejected");
+  if (report.completeEvidenceCoverage < 1) failures.push("complete_evidence_coverage_below_1");
+  if (report.sessionClaimSupportCoverage < 1) failures.push("session_claim_support_below_1");
+  if (report.optionalClaimSupportCoverage < 1) failures.push("optional_claim_support_below_1");
+  if (report.opportunityDispositionCoverage < 1) failures.push("opportunity_disposition_below_1");
+  if (report.duplicateSessionTemplateCount > 0) failures.push("duplicate_session_template_detected");
+  if (report.protocolLeakCount > 0) failures.push("guided_protocol_leak_detected");
+  if (report.unsupportedCompletionCount > 0) failures.push("unsupported_completion_detected");
+  if (report.artifactOnlyReusePassRate < 1) failures.push("artifact_only_reuse_below_1");
+  if (report.canaryPublishedBeforeApprovalCount > 0) failures.push("canary_bypassed");
+  if (report.identityMismatchMutationCount > 0) failures.push("identity_mismatch_mutated");
+  return failures;
+}
+
+function requireGuidedCorpusArtifactOutput(
+  corpusCase: ReturnType<typeof buildGuidedQualityCorpusCases>[number] | undefined,
+  kind: GuidedArtifactReuseResult["kind"]
+): Record<string, unknown> {
+  const output = corpusCase?.input.bundle.artifacts.find((artifact) => artifact.kind === kind)?.output;
+  if (!output) throw new Error(`guided_corpus_reuse_output_missing:${kind}`);
+  return output;
+}
+
+function valueAtGuidedReusePointer(output: Record<string, unknown>, pointer: string): unknown {
+  let current: unknown = output;
+  for (const raw of pointer.split("/").slice(1)) {
+    const part = raw.replace(/~1/gu, "/").replace(/~0/gu, "~");
+    if (Array.isArray(current)) {
+      const index = part === "-1" ? current.length - 1 : /^(?:0|[1-9]\d*)$/u.test(part) ? Number(part) : -1;
+      if (index < 0 || index >= current.length) return undefined;
+      current = current[index];
+    } else if (isRecord(current)) {
+      if (!(part in current)) return undefined;
+      current = current[part];
+    } else return undefined;
+  }
+  return current;
+}
+
+function isValidGuidedReuseValue(value: unknown, expectsArray: boolean): value is string | string[] {
+  if (!expectsArray) return typeof value === "string" && Boolean(value.trim());
+  return Array.isArray(value) && value.length > 0 && value.every((entry) =>
+    typeof entry === "string" && Boolean(entry.trim())
+  );
+}
+
 export async function runDurableArtifactCorpus(): Promise<DurableArtifactCorpusReport> {
   const fixtureDir = await mkdtemp(join(tmpdir(), "masthead-durable-artifact-corpus-"));
   const performanceDir = await mkdtemp(join(tmpdir(), "masthead-durable-artifact-performance-"));
@@ -220,7 +563,7 @@ export async function runDurableArtifactCorpus(): Promise<DurableArtifactCorpusR
   let performanceDb: MastheadDatabase | undefined;
   try {
     db = await openFixtureDatabase(join(fixtureDir, "masthead.sqlite"));
-    seedDurableArtifactCorpus(db);
+    seedDurableArtifactCorpusWithPerformedActions(db);
     seedAcceptanceEnrichments(db);
     const candidates = discoverArtifactCandidates(db, corpusSessionIds());
     const postPublicationCanonicalDossiers = new Map<string, SessionDossierDto>();
@@ -352,10 +695,12 @@ export async function runDurableArtifactCorpus(): Promise<DurableArtifactCorpusR
       ...receipt.dossierArtifactIds.map((artifactId) => requireArtifact(db!, artifactId)),
       requireArtifact(db!, receipt.optionalArtifacts[0]!.artifactId)
     ]);
+    const guidedAuthoringGate = guidedAuthoringGateReport(runGuidedAuthoringQualityCorpus());
     const reportWithoutFailures = {
       reportVersion: "durable-artifact-gate-v1" as const,
       fixture: "durable-artifact-corpus-v1" as const,
       productionAccessed: false as const,
+      guidedAuthoringGate,
       dossierFidelity: ratio(dossierFidelityChecks.filter((check) => check.matched).length, dossierFidelityChecks.length),
       dossierFidelityChecks,
       claimSupportCoverage: ratio(claimSupportChecks.filter((check) => check.passed).length, claimSupportChecks.length),
@@ -425,7 +770,7 @@ export async function runDurableArtifactCorpus(): Promise<DurableArtifactCorpusR
 }
 
 export function durableArtifactMachineFailures(report: Omit<DurableArtifactCorpusReport, "failures" | "machineGatePassed">): string[] {
-  const failures: string[] = [];
+  const failures: string[] = [...guidedAuthoringGateFailures(report.guidedAuthoringGate)];
   if (report.dossierFidelity < 1) failures.push("dossier_fidelity_below_1");
   if (report.claimSupportCoverage < 1) failures.push("claim_support_coverage_below_1");
   if (report.claimSupportIntegrityFailureCount > 0) failures.push("claim_support_integrity_failed");

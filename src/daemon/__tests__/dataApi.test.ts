@@ -19,6 +19,17 @@ afterEach(async () => {
 });
 
 describe("data lifecycle API", () => {
+  test("returns cheap monotonic surface revisions", async () => {
+    const daemon = await createTestDaemon();
+    const baseUrl = await listen(daemon);
+
+    expect(await getJson(baseUrl, "/data/revisions")).toEqual({
+      ok: true,
+      logbook: 0,
+      workbench: 0
+    });
+  });
+
   test("summarizes storage classes and applies default retention without pruning sessions", async () => {
     const daemon = await createTestDaemon();
     seedCanonicalSessionGraph(daemon.database, { project: "Masthead", sessionId: "session:1" });

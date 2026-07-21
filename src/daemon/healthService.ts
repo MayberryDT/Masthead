@@ -22,6 +22,11 @@ const capabilities: MastheadCapability[] = [
 
 export type HealthServiceRuntime = {
   daemonInstanceId: string;
+  pid: number;
+  baseUrl: () => string;
+  instanceDir: string;
+  instanceManifest: string;
+  authoringCommand: string;
   startedAt: string;
   port: () => number;
 };
@@ -50,6 +55,11 @@ export function buildMastheadHealth(
     capabilities,
     runtime: {
       daemonInstanceId: runtime.daemonInstanceId,
+      pid: runtime.pid,
+      baseUrl: runtime.baseUrl(),
+      instanceDir: runtime.instanceDir,
+      instanceManifest: runtime.instanceManifest,
+      authoringCommand: runtime.authoringCommand,
       startedAt: runtime.startedAt,
       mode: "primary",
       writable: true,

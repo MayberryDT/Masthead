@@ -33,7 +33,12 @@ describe("buildMastheadHealth", () => {
       config,
       database,
       {
+        authoringCommand: "/tmp/masthead/bin/mastheadctl",
+        baseUrl: () => "http://127.0.0.1:17373",
+        instanceDir: "/tmp/masthead",
         daemonInstanceId: "daemon-test-id",
+        instanceManifest: "/tmp/masthead/masthead-instance.json",
+        pid: 12345,
         port: () => 17373,
         startedAt: "2026-06-29T00:00:00.000Z"
       },

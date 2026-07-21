@@ -14,16 +14,17 @@ not the product category.
 Start with agents: `openwiki/quickstart.md`, `CONTEXT.md`, and
 `docs/adr/0011-artifact-first-logbook.md`.
 
-## Stable Today
+## Current runtime during the V4 cutover
 
 - Canonical local SQLite ownership for Masthead-owned sessions, published
   artifacts + provenance, source/connector state, import jobs, settings, and MCP
   audit rows (schema 24; full-body artifact search arrived in schema 21).
 - Multi-adapter / multi-harness live connect (Sources V2) and conservative
   history adapters where coverage exists.
-- Workbench package path: transcript checks/import, quality, claims, Activity, selection-scoped
-  agent handoffs, current durable enrichment, daemon-rebuilt dossiers, optional-artifact judgment,
-  V3 authoring runs, and atomic publication.
+- Workbench package path: transcript checks/import, quality, claims, Activity, selection-scoped V3
+  authoring, durable enrichment, daemon-rebuilt dossiers, optional-artifact judgment, and atomic
+  publication. This is the installed runtime being replaced, not the desired authoring contract;
+  do not use it for a new bulk or production enrichment campaign during the V4 cutover.
 - Logbook artifact book: `GET /logbook/artifacts` + body/provenance inspector;
   full-body search plus kind · project · date filters; no bulk enrich /
   checkboxes / summary strip.
@@ -34,14 +35,23 @@ Start with agents: `openwiki/quickstart.md`, `CONTEXT.md`, and
   checkout you intend to run — path is hardwired into the desktop entry).
 - Product, surface, endpoint-matrix, doctor, smoke, build, and test gates.
 
+## Accepted V4 target — implementation in progress
+
+ADR 0015 defines durable guided authoring requests, daemon-grouped assignments, complete evidence
+traversal, progressive editorial review, the staged operator-approved canary, instance-bound
+launchers, and assignment-atomic finish. The detailed contract below guides implementation, but the
+current daemon and CLI do not advertise or execute V4 until their later implementation tasks land.
+At cutover, V1–V3 reads remain audit-only and all legacy mutations fail with
+`authoring_contract_retired`.
+
 ## Experimental
 
 - Deeper schema coverage for additional source adapters beyond the initial
   bounded scanners.
 - Transcript import breadth and exclusion policy tuning.
-- Legacy/dev native remote enrichment hooks. Agent-led authoring uses a user-facing selection
-  handoff plus a thin installed CLI to the daemon-owned V3 authoring module; no native remote model
-  key is required.
+- Legacy/dev native remote enrichment hooks. The accepted guided-authoring target uses a durable
+  Workbench request plus a thin instance-bound CLI to the daemon-owned V4 module; that target remains
+  pending implementation, and no native remote model key will be required.
 - Longer packaged desktop release-smoke automation.
 
 ## Install
@@ -74,34 +84,57 @@ MASTHEAD_CONNECTOR_MODE=bridge MASTHEAD_UPSTREAM_URL=http://127.0.0.1:17373 npm 
 MASTHEAD_BRIDGE_PORT=17374 npm run dev
 ```
 
-## Artifact Authoring
+## Accepted V4 Artifact Authoring Contract
 
-The user flow is:
+This is the accepted target flow and remains pending until the guided service, API, CLI, launcher,
+Workbench review, and cutover tasks land. The current runtime is described above.
 
-**Select sessions → Copy Agent Prompt → give it to the coding agent → agent enriches and authors →
-Masthead validates and atomically publishes → inspect/reuse in Logbook and MCP.**
+After cutover, the user flow is:
 
-The copied prompt is a disposable request for exactly the selected sessions. Under
-`workbench-authoring-v3`, the coding agent writes current durable enrichment for every selected
-session and chooses zero or more useful runbooks, ADRs, or incident timelines. Deterministic
-analysis may privately supply suggestions, but suggestions are nonbinding: they neither require nor
-prohibit an artifact kind.
+**Select sessions → create a guided request → copy its instance-bound start command → agent follows
+the next action → operator approves the canary → Masthead publishes accepted assignments →
+inspect/reuse in Logbook and MCP.**
 
-The daemon then rebuilds the original canonical dossier structure from current enriched session
-data; agents do not replace its presentation. Every substantive optional-artifact claim supplies a
-typed `claimSupport` entry whose at-least-20-character excerpt occurs verbatim in canonical
-evidence. Unsupported authoring-process language, weak joins, and duplicate substantive content
-are rejected. Publication is atomic admission of validated enriched artifacts into Logbook, and
-nothing enters Logbook until enrichment is current.
+Under `workbench-authoring-v4`, a Workbench selection creates one durable guided authoring request.
+The copied handoff contains only its opaque request ID and one instance-bound start command, with no
+session list or multi-step recipe. The daemon groups assignments of at most 12 sessions and guides the
+agent through complete canonical evidence traversal, grounded enrichment, optional-artifact judgment,
+and editorial review by returning one required next action at every state.
 
-The installed CLI is thin agent-facing transport to the daemon-owned V3 authoring boundary; it is
-not the user workflow and does not open SQLite. V1 and V2 authoring rows remain readable for audit
-but cannot be reopened or mutated as V3. V3 submit stores validation findings without publication;
-finish atomically applies enrichment, publishes rebuilt dossiers and useful optional artifacts,
-updates search and pipeline state, and persists one retry-safe receipt. See
-[ADR 0014](docs/adr/0014-agent-led-enriched-artifact-authoring.md),
+The daemon rebuilds the original canonical dossier structure from current enriched session data;
+agents do not replace its presentation. Every substantive dossier and optional-artifact claim
+supplies typed verbatim claim support from canonical evidence. Knowledge opportunities are
+nonbinding, but high-signal opportunities require an evidence-backed disposition. Unsupported
+completion, protocol narration, negligible enrichment, weak joins, and materially duplicated
+templates are rejected.
+
+The first accepted assignment is a three-session canary capped at three sessions and remains staged
+until operator approval. Masthead never splits a strong opportunity to manufacture that canary: it
+uses a complete strong group of at most three or diverse dossier-only sessions, otherwise request
+creation returns `guided_canary_not_constructible` and persists nothing. Finish atomically publishes
+one accepted assignment and releases the next.
+
+After cutover, the instance-bound CLI is thin agent-facing transport to the daemon-owned V4 authoring
+boundary and does not open SQLite for normal authoring. V1, V2, and V3 remain audit-only; their status
+and receipts stay readable, while legacy mutations fail with `authoring_contract_retired`. Every V4
+mutation verifies the daemon URL, database ID, build SHA, and manifest identity. See
+[ADR 0015](docs/adr/0015-guided-authoring-campaigns.md),
 [ADR 0012](docs/adr/0012-daemon-owned-artifact-authoring.md), and the
 [daemon API reference](docs/reference/daemon-api.md).
+
+### V4 vocabulary
+
+Guided authoring request = the durable Workbench selection and campaign policy.
+
+Assignment = one daemon-grouped authoring unit containing at most 12 sessions.
+
+Knowledge opportunity = nonbinding evidence that may support a runbook, ADR, or incident timeline.
+
+Opportunity disposition = authored, dismissed, merged, or changed kind, with evidence-backed rationale.
+
+Canary = the first staged assignment of at most 3 sessions, reviewed by an operator before publication.
+
+Next action = the single command Masthead requires from the agent at the current assignment state.
 
 ### Failed V1 generation recovery
 
@@ -122,10 +155,10 @@ dossiers, zero optional artifacts, and 66 completed V1 runs. Prepare acquires th
 daemon-equivalent writer locks, creates a SQLite-consistent backup, verifies its
 database identity and integrity, and retains exactly one backup. Invalidate removes
 only the hash-matched artifacts, search rows, and provenance, resets affected
-sessions for current enrichment and V3 authoring eligibility, releases
+sessions for current enrichment and V4 guided-authoring eligibility, releases
 matching claims, and preserves V1 runs and receipts as audit history. Never run
 production invalidation before the fixture gate, temporary-copy rehearsal, and
-separately authorized 25-session human-reviewed canary pass.
+separately authorized human-reviewed V4 canary pass.
 
 Restore is offline and fail-closed. It accepts only the exact sibling
 `masthead.sqlite.backup-current`, requires daemon-equivalent exclusive ownership,
@@ -160,12 +193,10 @@ Logbook state, read-only MCP status/tools, and local data summary. `npm run
 verify` runs the product and surface contracts, typecheck, Vitest, build,
 endpoint matrix, and smoke suite.
 
-`npm run dogfood:durable-artifacts` remains a fixture-only audit gate for the superseded V2 flow;
-its detector precision/recall is not a V3 product requirement. Current V3 release acceptance uses
-the focused isolated corpus in
-[durable-artifact-production-canary.md](docs/acceptance/durable-artifact-production-canary.md) to
-prove enrichment-only publication, agent judgment over optional kinds, grounded claim support,
-atomic publication, and Logbook/MCP retrieval without touching production data.
+`npm run dogfood:durable-artifacts` and the V3 acceptance worksheet are preserved audit evidence.
+V4 release acceptance must prove guided evidence traversal, grounded dossier deltas,
+opportunity dispositions, the staged operator-approved canary, instance identity, atomic publication,
+and Logbook/MCP retrieval on an isolated corpus without touching production data.
 
 ## Data Path
 

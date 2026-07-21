@@ -55,13 +55,20 @@ describe("Masthead Dev launcher template", () => {
   test("installs and advertises the current checkout authoring CLI before starting the daemon", async () => {
     const source = await readFile("scripts/install-electron-dev-launcher.js", "utf8");
 
-    expect(source).toContain('const cliLauncherPath = join(binDir, process.platform === "win32" ? "mastheadctl.cmd" : "mastheadctl");');
+    expect(source).toContain('const cliLauncherPath = join(devInstanceDir, "bin", process.platform === "win32" ? "mastheadctl.cmd" : "mastheadctl");');
     expect(source).toContain('const cliEntry = join(repo, "dist", "daemon", "src", "cli", "mastheadctl.js");');
     expect(source).toContain('CLI_LAUNCHER=${shellQuote(cliLauncherPath)}');
     expect(source).toContain('MASTHEAD_CLI_COMMAND="$CLI_LAUNCHER"');
     expect(source).toContain("install_active_cli_launcher");
-    expect(source).toContain("MASTHEAD_DAEMON_URL");
+    expect(source).toContain("MASTHEAD_INSTANCE_MANIFEST");
+    expect(source).not.toContain("exec env MASTHEAD_DAEMON_URL");
     expect(source).toContain("daemon_authoring_is_compatible");
+    expect(source).toContain('j?.bundleVersion === "workbench-authoring-v4"');
+    expect(source).toContain('j?.policyVersion === "guided-authoring-v1"');
+    expect(source).toContain('const expected = ["start", "inspect", "scaffold", "save", "review", "finish"]');
+    expect(source).toContain('EXPECTED_BASE_URL="http://127.0.0.1:$port"');
+    expect(source).toContain('j?.baseUrl === process.env.EXPECTED_BASE_URL');
+    expect(source).not.toContain('j?.bundleVersion === "workbench-authoring-v3"');
     expect(source).toContain("stop_stale_authoring_daemon");
     expect(source).toContain("await access(cliEntry, constants.R_OK)");
     expect(source).toContain('spawnSync(npmBin, ["run", "build:daemon"]');

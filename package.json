@@ -1,6 +1,6 @@
 {
   "name": "masthead",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "description": "Local-first session data layer and session manager.",
   "private": true,
   "license": "MIT",
@@ -34,9 +34,11 @@
     "prepare": "node scripts/setup-dev-hooks.js || echo 'dev-hook setup skipped (no .git or permissions)'",
     "prepare:electron-resources": "node scripts/prepare-electron-resources.js",
     "probe": "node scripts/masthead-endpoint-matrix.js",
+    "probe:authoring-perf": "npm run build:daemon && node scripts/masthead-authoring-perf-probe.js",
     "probe:local": "node scripts/masthead-endpoint-matrix.js http://127.0.0.1:17373",
     "typecheck": "tsc --noEmit",
     "test": "npm run build:daemon && NODE_OPTIONS=--max-old-space-size=4096 vitest",
+    "rehearse:production-activation": "node scripts/masthead-production-activation-rehearsal.js",
     "check:product-contract": "node scripts/masthead-product-contract.js",
     "check:surface-contract": "node scripts/masthead-surface-contract.js",
     "check:endpoint-matrix": "npm run build:daemon && node scripts/masthead-endpoint-matrix-smoke.js",
@@ -57,6 +59,7 @@
     "dogfood:fixture": "node scripts/masthead-dogfood.js",
     "dogfood:live": "node scripts/masthead-dogfood.js --live",
     "dogfood:durable-artifacts": "npm run build:daemon && node scripts/dogfood-durable-artifacts.js",
+    "canary:guided-agent": "npm run build:daemon && node scripts/masthead-guided-agent-canary.js",
     "ingest": "npm run build:daemon && node dist/daemon/src/daemon/main.js",
     "mcp": "npm run build:daemon && node dist/daemon/src/mcp/server.js",
     "demo:hook": "node scripts/masthead-demo.js"

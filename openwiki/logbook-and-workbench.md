@@ -1,6 +1,6 @@
 # Logbook and Workbench (artifact-first)
 
-**Decisions:** [ADR 0011](../docs/adr/0011-artifact-first-logbook.md) (Logbook unit), [ADR 0012](../docs/adr/0012-daemon-owned-artifact-authoring.md) (daemon seam), [ADR 0013](../docs/adr/0013-canonical-dossier-and-candidate-authoring.md) (preserved rendering/evidence findings), [ADR 0014](../docs/adr/0014-agent-led-enriched-artifact-authoring.md) (current V3 authoring), [ADR 0009](../docs/adr/0009-logbook-only-shows-published-sessions.md) (Workbench pipeline ownership).
+**Decisions:** [ADR 0011](../docs/adr/0011-artifact-first-logbook.md) (Logbook unit), [ADR 0012](../docs/adr/0012-daemon-owned-artifact-authoring.md) (daemon seam), [ADR 0013](../docs/adr/0013-canonical-dossier-and-candidate-authoring.md) (preserved rendering/evidence findings), [ADR 0014](../docs/adr/0014-agent-led-enriched-artifact-authoring.md) (superseded V3 audit history), [ADR 0015](../docs/adr/0015-guided-authoring-campaigns.md) (current implemented V4 contract), [ADR 0009](../docs/adr/0009-logbook-only-shows-published-sessions.md) (Workbench pipeline ownership).
 
 **Language:** `CONTEXT.md`.
 
@@ -67,41 +67,60 @@ a manual exclusion remains sticky.
 | Store | `src/daemon/db/sessionArtifactRepository.ts`, `logbookArtifactRepository.ts` |
 | HTTP | `GET /logbook/artifacts`, `GET /logbook/artifacts/:artifactId` |
 
-## Workbench (agent-led enriched artifact authoring)
+## Workbench (guided enriched artifact authoring)
 
-One selection-scoped V3 path produces enriched dossiers and any useful optional artifacts:
+This section defines the current V4 runtime. Selection-scoped V3 records remain readable for audit,
+but their mutation routes are retired and cannot run a new enrichment campaign.
+
+One durable `workbench-authoring-v4` request produces enriched dossiers and any useful optional artifacts:
 
 1. **Enriched dossier** — the agent writes current durable enrichment for every selected session;
    the daemon then renders the original canonical dossier structure.
 2. **Runbook**, **ADR**, **incident timeline** — the agent may create zero or more optional artifacts
-   from selected evidence. An artifact suggestion is a nonbinding detector hint supplied privately
-   to the agent; suggestions are nonbinding and cannot require or prohibit a kind.
+   from assignment evidence. A knowledge opportunity is nonbinding, but every high-signal opportunity
+   requires an evidence-backed authored, dismissed, merged, or changed-kind disposition.
 
-### Daemon-owned automatic authoring
+### Daemon-owned guided authoring
 
-Workbench gives people a disposable, plain-language handoff. It never gives
-them a CLI recipe. Whether that handoff is copied verbatim or the user directs
-the agent conversationally, one daemon-owned authoring module enforces the same
-quality behavior:
+Workbench creates a durable request before copying a handoff. The handoff contains only the opaque
+request ID and one instance-bound start command, with no multi-step recipe or session list. One
+daemon-owned authoring module then enforces the same quality behavior:
 
-1. accept the compile-ready subset of the selected sessions through **Copy Agent Prompt**, a
-   disposable request that discloses any review-needed sessions left out;
-2. open a durable `workbench-authoring-v3` run for the exact selection and evidence revision;
-3. read the canonical redacted evidence and enrich every selected session;
-4. choose and submit any useful optional artifacts whose claims carry verbatim supporting excerpts;
-5. reject unsupported claims, protocol leakage, weak joins, or template duplication; and
-6. atomically publish the enriched dossiers and optional artifacts.
+1. persist the compile-ready selection and campaign policy through **Copy Agent Prompt** while
+   disclosing any review-needed sessions left out;
+2. group assignments of at most 12 sessions using strong opportunity joins before dossier-only groups;
+3. return one required next action and record traversal of every canonical evidence page;
+4. review grounded enrichment, optional-artifact claims, and opportunity dispositions progressively;
+5. stage the first accepted assignment as a three-session canary for operator approval; and
+6. atomically publish one accepted assignment before releasing the next.
 
-The immutable completion report is the proof of success, and a finish retry returns the same
-report. V1 and V2 runs remain audit-only and are never reused by V3. Nothing enters Logbook until
-enrichment is current.
+Masthead never splits a strong opportunity merely to manufacture the canary. It uses a complete
+strong group of at most three sessions or diverse dossier-only sessions; if neither exists, request
+creation returns `guided_canary_not_constructible` and persists nothing. The immutable assignment
+receipt is the proof of success, and a finish retry returns the same receipt. V1, V2, and V3 remain
+audit-only; their mutation routes return `authoring_contract_retired`.
 
 ### Locked UI vocabulary
 
 - Columns include enrichment, dossier publication, and optional-artifact state.
-- Copy Agent Prompt is selection-scoped and contains no CLI recipes.
-- The agent enriches selected sessions and exercises optional-artifact judgment; detector hints are private context.
+- Copy Agent Prompt persists the selection and copies one instance-bound start command, no session list or multi-step recipe.
+- The agent enriches assignment sessions and exercises optional-artifact judgment; opportunities are nonbinding but require disposition when high signal.
+- Canary drafts remain staged until an operator approves or rejects them from Workbench Activity.
 - Apply ≠ publish.
+
+### Guided authoring vocabulary
+
+Guided authoring request = the durable Workbench selection and campaign policy.
+
+Assignment = one daemon-grouped authoring unit containing at most 12 sessions.
+
+Knowledge opportunity = nonbinding evidence that may support a runbook, ADR, or incident timeline.
+
+Opportunity disposition = authored, dismissed, merged, or changed kind, with evidence-backed rationale.
+
+Canary = the first staged assignment of at most 3 sessions, reviewed by an operator before publication.
+
+Next action = the single command Masthead requires from the agent at the current assignment state.
 
 ### Code map
 
@@ -125,8 +144,11 @@ Prefer for reuse:
 
 Session tools (`search_sessions`, `get_session`, transcript/excerpts) remain for compile evidence, not the primary memory API. See `docs/reference/mcp-tools.md`.
 
-MCP has no authoring mutations. Worktree bridges allow authoring capabilities,
-status, and evidence reads, but block open, submit, and finish.
+MCP has no authoring mutations. The V4 bridge policy allows capabilities, guided-request
+status, pending-canary discovery, and assignment review. It blocks guided-request creation,
+assignment start/claim, progress-recording assignment inspect, draft save, canary decisions, and
+assignment finish. Legacy V3 status and receipt reads remain audit-only; V3 mutations return
+`authoring_contract_retired`.
 
 ## Anti-patterns for agents
 

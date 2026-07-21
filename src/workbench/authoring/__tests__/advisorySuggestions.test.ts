@@ -71,6 +71,20 @@ describe("artifact suggestions", () => {
     db.close();
   });
 
+  test("preserves the pre-V4 single-session and joined suggestion identities byte for byte", async () => {
+    const db = await testDb();
+    seedDurableArtifactCorpus(db);
+
+    expect(getArtifactSuggestions(db, [oauthFailureFixedAndVerified.id])[0]?.suggestionId).toBe(
+      "artifact-suggestion:3643e87bbcc67d1dae134350e14985c5"
+    );
+    expect(
+      getArtifactSuggestions(db, [repeatedErrorPartOne.id, repeatedErrorPartTwo.id])
+        .find(({ kind }) => kind === "runbook")?.suggestionId
+    ).toBe("artifact-suggestion:86bdf9a27eacf858ba1e60bd147213e9");
+    db.close();
+  });
+
   test("returns no suggestion without positive evidence", async () => {
     const db = await testDb();
     seedDurableArtifactCorpus(db);

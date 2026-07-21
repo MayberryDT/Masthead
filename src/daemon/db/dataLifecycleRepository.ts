@@ -4,6 +4,10 @@ import {
   reconcileWorkbenchArtifactSatisfactionInTransaction,
   type WorkbenchAutomaticKind
 } from "./workbenchPipelineRepository.ts";
+import {
+  bumpDataRevisionInTransaction,
+  withDataRevisionOperation
+} from "./dataRevisionRepository.ts";
 
 const SQLITE_BATCH_SIZE = 400;
 
@@ -224,9 +228,11 @@ export function applyDefaultRetention(db: MastheadDatabase): RetentionApplyResul
 }
 
 export function deleteMastheadData(db: MastheadDatabase, scope: DeleteMastheadDataScope = { kind: "all" }): CanonicalDeleteResult {
-  if (scope.kind === "all") return deleteAllCanonicalData(db);
-  if (scope.kind === "raw_payloads") return deleteRawPayloads(db);
-  return deleteSessionScope(db, scope);
+  return withDataRevisionOperation(db, () => {
+    if (scope.kind === "all") return deleteAllCanonicalData(db);
+    if (scope.kind === "raw_payloads") return deleteRawPayloads(db);
+    return deleteSessionScope(db, scope);
+  });
 }
 
 function deleteAllCanonicalData(db: MastheadDatabase): CanonicalDeleteResult {
@@ -268,6 +274,10 @@ function deleteAllCanonicalData(db: MastheadDatabase): CanonicalDeleteResult {
       DELETE FROM app_settings WHERE setting_key <> 'database_identity';
       DELETE FROM legacy_migrations;
     `);
+    if (result.sessions > 0) {
+      bumpDataRevisionInTransaction(db, "logbook");
+      bumpDataRevisionInTransaction(db, "workbench");
+    }
     db.exec("COMMIT;");
     return result;
   } catch (error) {
@@ -320,6 +330,10 @@ function deleteSessionScope(
     deleteMcpAuditRowsForSessions(db, sessionIds);
     deleteWhereIn(db, "project_summaries", "project_key", projects);
     deleteWhereIn(db, "sessions", "session_id", sessionIds);
+    if (sessionIds.length > 0) {
+      bumpDataRevisionInTransaction(db, "logbook");
+      bumpDataRevisionInTransaction(db, "workbench");
+    }
     db.exec("COMMIT;");
     return result;
   } catch (error) {

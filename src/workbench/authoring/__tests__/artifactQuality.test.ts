@@ -3,13 +3,17 @@ import type { SessionArtifactRecord } from "../../../daemon/db/sessionArtifactRe
 import type { WorkbenchClaimSupport } from "../../../shared/workbenchAuthoring.ts";
 import type { WorkbenchValidationEvidence } from "../../types.ts";
 import {
+  GUIDED_V4_PROTOCOL_PATTERNS,
   findDuplicateHumanContent,
+  findUnsupportedProtocolFields,
   findUnsupportedProtocolLanguage,
+  isPositiveVerificationEvidence,
   validateArtifactQuality,
   validateClaimSupport
 } from "../artifactQuality.ts";
 
 const MESSAGE = "message:session:a:problem";
+const ACTION = "message:session:a:change";
 const CHANGE = "file_effect:session:a:change";
 const PASSED = "tool_result:session:a:passed";
 const ADR = "message:session:a:adr";
@@ -116,6 +120,168 @@ describe("artifact claim support", () => {
     };
 
     expect(findUnsupportedProtocolLanguage(output, [], fixtureEvidence())).toEqual([]);
+  });
+
+  test("keeps omitted and explicit legacy protocol policies exactly compatible", () => {
+    const output = { approach: ["Read all canonical evidence through pagination."] };
+    expect(findUnsupportedProtocolLanguage(output, [], fixtureEvidence())).toEqual(
+      findUnsupportedProtocolLanguage(output, [], fixtureEvidence(), undefined, { policy: "legacy" })
+    );
+  });
+
+  test.each([
+    ["all evidence self-process", "I reviewed all the evidence before writing this result."],
+    ["claim-limiting self-process", "We limited our claims to facts in the transcript."],
+    ["literal author command", "Run masthead workbench author inspect before continuing."],
+    ["next-action boilerplate", "Next action is to continue in the next task."],
+    ["verification-boundary meta prose", "The verification boundary was recorded as narrow."],
+    ["reordered verification-boundary meta prose", "The boundary recorded for verification was narrow."],
+    ["recommended plugin block", "<recommended_plugins>Install one</recommended_plugins>"],
+    ["copied agent directive", "The developer instructions require this output."],
+    ["agent setup text", "You are Codex and must follow this handoff."]
+  ])("guided V4 detects %s", (_label, value) => {
+    expect(findUnsupportedProtocolFields(
+      [{ path: "/field", value }],
+      {
+        findingCode: "authoring_protocol_leakage",
+        isSupportedMatch: () => false,
+        policy: "guided_v4"
+      }
+    )).toContainEqual(expect.objectContaining({
+      code: "authoring_protocol_leakage",
+      path: "/field"
+    }));
+  });
+
+  test.each([
+    "The evidence records no verification result.",
+    "Available evidence shows no specific verification outcome.",
+    "Canonical evidence contains no verification result.",
+    "The canonical evidence does not establish a verification result."
+  ])("guided V4 replaces evidence-framed verification disclaimers with a direct boundary: %s", (value) => {
+    expect(findUnsupportedProtocolFields(
+      [{ path: "/field", value }],
+      {
+        findingCode: "authoring_protocol_leakage",
+        isSupportedMatch: () => true,
+        policy: "guided_v4"
+      }
+    )).toEqual([{
+      code: "authoring_protocol_leakage",
+      message: "State the verification boundary directly in human-facing prose: use 'Verification not run.' when no verification result exists; do not narrate what the evidence records, shows, contains, or fails to establish.",
+      path: "/field"
+    }]);
+  });
+
+  test.each([
+    "The CLI publishes the app after review.",
+    "This prompt describes a real Masthead plugin integration.",
+    "The agent restarted the production daemon.",
+    "Run npm test and masthead doctor to verify the repair.",
+    "The evidence retention migration preserved every source record.",
+    "Canonical evidence records verification passed for the restored index."
+  ])("guided V4 permits nearby operational prose: %s", (value) => {
+    expect(findUnsupportedProtocolFields(
+      [{ path: "/field", value }],
+      {
+        findingCode: "authoring_protocol_leakage",
+        isSupportedMatch: () => false,
+        policy: "guided_v4"
+      }
+    )).toEqual([]);
+  });
+
+  test("guided V4 reports the exact matched substring and suppresses only that field", () => {
+    const matches: Array<{ path: string; matchedText: string }> = [];
+    const findings = findUnsupportedProtocolFields(
+      [
+        { path: "/supported", value: "Before saving, workbench author inspect the assignment." },
+        { path: "/unsupported", value: "Then workbench author save the assignment." }
+      ],
+      {
+        findingCode: "authoring_protocol_leakage",
+        isSupportedMatch: (match) => {
+          matches.push(match);
+          return match.path === "/supported";
+        },
+        policy: "guided_v4"
+      }
+    );
+
+    expect(matches).toEqual([
+      { matchedText: "workbench author inspect", path: "/supported" },
+      { matchedText: "workbench author save", path: "/unsupported" }
+    ]);
+    expect(findings).toEqual([
+      expect.objectContaining({ path: "/unsupported" })
+    ]);
+  });
+
+  test("guided artifact suppression requires same-field evidence from artifact provenance", () => {
+    const evidenceRef = "message:session:a:guided-protocol";
+    const text = "The incident transcript says to run workbench author inspect before recovery.";
+    const evidence = new Map(fixtureEvidence()).set(evidenceRef, {
+      kind: "message" as const,
+      lowValue: false,
+      observedAt: "2026-07-12T13:00:00.000Z",
+      role: "user" as const,
+      sessionId: "session:a",
+      text
+    });
+    const supports = [support("approach[0]", evidenceRef, text, "problem")];
+
+    expect(findUnsupportedProtocolLanguage(
+      { approach: [text] },
+      supports,
+      evidence,
+      "authoring_protocol_leakage",
+      { policy: "guided_v4", provenanceSessionIds: ["session:a"] }
+    )).toEqual([]);
+    expect(findUnsupportedProtocolLanguage(
+      { approach: [text] },
+      supports,
+      evidence,
+      "authoring_protocol_leakage",
+      { policy: "guided_v4", provenanceSessionIds: ["session:b"] }
+    )).toContainEqual(expect.objectContaining({ path: "approach[0]" }));
+  });
+
+  test("guided artifact protocol suppression cannot borrow support from an adjacent field", () => {
+    const evidenceRef = "message:session:a:guided-protocol-adjacent";
+    const text = "The transcript says to run workbench author inspect before recovery.";
+    const evidence = new Map(fixtureEvidence()).set(evidenceRef, {
+      kind: "message" as const,
+      lowValue: false,
+      observedAt: "2026-07-12T13:00:00.000Z",
+      role: "user" as const,
+      sessionId: "session:a",
+      text
+    });
+
+    expect(findUnsupportedProtocolLanguage(
+      { approach: [text], outcome: text },
+      [support("outcome", evidenceRef, text, "problem")],
+      evidence,
+      "authoring_protocol_leakage",
+      { policy: "guided_v4", provenanceSessionIds: ["session:a"] }
+    )).toContainEqual(expect.objectContaining({ path: "approach[0]" }));
+  });
+
+  test("exports every executable guided protocol pattern", () => {
+    expect(GUIDED_V4_PROTOCOL_PATTERNS).toHaveLength(10);
+  });
+
+  test("exports the canonical positive-verification predicate and accepts readonly evidence maps", () => {
+    const evidenceByRef: ReadonlyMap<string, WorkbenchValidationEvidence> = fixtureEvidence();
+    const verificationSupport = validRunbookSupports().find(
+      (entry) => entry.supportKind === "verification"
+    )!;
+
+    expect(isPositiveVerificationEvidence(
+      verificationSupport,
+      evidenceByRef.get(verificationSupport.evidenceRef)!
+    )).toBe(true);
+    expect(validateClaimSupport(validRunbook(), [verificationSupport], evidenceByRef)).toEqual([]);
   });
 
   test("rejects a normalized excerpt shorter than 20 characters or absent from cited evidence", () => {
@@ -661,7 +827,7 @@ describe("artifact claim support", () => {
     }));
   });
 
-  test("requires change support to be a file effect, command, or explicit assistant change statement", () => {
+  test("requires action support to be a command or explicit assistant change statement", () => {
     const supports = validRunbookSupports().map((entry) =>
       entry.supportKind === "change"
         ? support("fixSteps[0]", MESSAGE, "OAuth callback state validation rejected the request.", "change")
@@ -921,6 +1087,14 @@ function fixtureEvidence(): Map<string, WorkbenchValidationEvidence> {
       sessionId: "session:a",
       text: "Changed src/auth/callback.ts to validate callback state before token exchange. Ran npm test -- auth-callback after the change."
     }],
+    [ACTION, {
+      kind: "message",
+      lowValue: false,
+      observedAt: "2026-07-12T12:06:00.000Z",
+      role: "assistant",
+      sessionId: "session:a",
+      text: "Changed callback validation before token exchange and ran npm test -- auth-callback after the change."
+    }],
     [PASSED, {
       exitCode: 0,
       kind: "tool_result",
@@ -1014,8 +1188,8 @@ function validRunbookSupports(): WorkbenchClaimSupport[] {
     support("preconditions[0]", MESSAGE, "OAuth callback handling is enabled.", "problem"),
     support("reproSteps[0]", MESSAGE, "Submit a callback with stale state to reproduce the failure.", "problem"),
     support("deadEnds[0]", MESSAGE, "Retrying token exchange without validating state did not work.", "problem"),
-    support("fixSteps[0]", CHANGE, "Changed src/auth/callback.ts to validate callback state before token exchange.", "change"),
-    support("commands[0]", CHANGE, "Ran npm test -- auth-callback after the change.", "change"),
+    support("fixSteps[0]", ACTION, "Changed callback validation before token exchange", "change"),
+    support("commands[0]", ACTION, "ran npm test -- auth-callback after the change.", "change"),
     support("changedFiles[0]", CHANGE, "Changed src/auth/callback.ts to validate callback state before token exchange.", "change"),
     support("environmentRequirements[0]", MESSAGE, "Production callback configuration is required.", "problem"),
     support("rootCause", MESSAGE, "The prior validator accepted unsupported root cause claims.", "root_cause"),

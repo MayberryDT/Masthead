@@ -109,19 +109,19 @@ if (!app.requestSingleInstanceLock()) {
   });
 }
 
-async function configureCliLauncher(daemonUrl?: string, required = false): Promise<void> {
+async function configureCliLauncher(required = false): Promise<void> {
   try {
     const target = resolveMastheadCliLaunchTarget({
       devNodePath:
         process.env.MASTHEAD_NODE_PATH || process.env.npm_node_execpath || process.env.NODE || process.execPath,
       devProjectDir: process.env.MASTHEAD_PROJECT_DIR || process.cwd(),
-      homeDir: app.getPath("home"),
+      instanceDir: electronDataDirectory(),
       isPackaged: app.isPackaged,
       platform: process.platform,
       resourcesPath: process.resourcesPath
     });
-    const activeDaemonUrl = daemonUrl ?? configuredDaemonBaseUrl();
-    await installMastheadCliLauncher(target, { daemonUrl: activeDaemonUrl });
+    await installMastheadCliLauncher(target);
+    process.env.MASTHEAD_INSTANCE_MANIFEST = target.instanceManifest;
     process.env.MASTHEAD_CLI_COMMAND = target.launcherPath;
   } catch (error) {
     delete process.env.MASTHEAD_CLI_COMMAND;
@@ -170,7 +170,7 @@ async function runSmokeAndQuit(window: BrowserWindow): Promise<void> {
               rendererTrustedOrigins({ allowDevServer: isElectronDevMode() }),
               ownedDaemonChildren,
               {
-                prepareAuthoringLauncher: ({ baseUrl }) => configureCliLauncher(baseUrl, true)
+                prepareAuthoringLauncher: () => configureCliLauncher(true)
               }
             )
           : unsupportedSmokeMode(smokeMode);
@@ -371,7 +371,7 @@ function registerDesktopIpc(): void {
             rendererTrustedOrigins({ allowDevServer: isElectronDevMode() }),
             ownedDaemonChildren,
             {
-              prepareAuthoringLauncher: ({ baseUrl }) => configureCliLauncher(baseUrl, true)
+              prepareAuthoringLauncher: () => configureCliLauncher(true)
             }
           );
           if (process.env.MASTHEAD_ELECTRON_SMOKE === "1" && process.env.MASTHEAD_ELECTRON_SMOKE_MODE === "renderer-autostart") {

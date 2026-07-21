@@ -20,6 +20,11 @@
   ],
   "runtime": {
     "daemonInstanceId": "fixture-daemon",
+    "pid": 12345,
+    "baseUrl": "http://127.0.0.1:17373",
+    "instanceDir": "/tmp/masthead-fixture",
+    "instanceManifest": "/tmp/masthead-fixture/masthead-instance.json",
+    "authoringCommand": "/tmp/masthead-fixture/bin/mastheadctl",
     "startedAt": "2026-06-25T00:00:00.000Z",
     "mode": "primary",
     "writable": true,

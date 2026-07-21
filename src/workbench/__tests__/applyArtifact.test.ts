@@ -6,6 +6,7 @@ import { seedSession } from "../../daemon/db/__tests__/sessionTestHelpers.ts";
 import { listSessionArtifacts } from "../../daemon/db/sessionArtifactRepository.ts";
 import { migrateDatabase } from "../../daemon/db/schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../../daemon/db/sqlite.ts";
+import { getDataRevisions } from "../../daemon/db/dataRevisionRepository.ts";
 import {
   listWorkbenchActivity,
   readWorkbenchSessionState,
@@ -62,6 +63,7 @@ describe("applyArtifact", () => {
   test("applies a runbook artifact", async () => {
     const db = await testDb();
     seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:abc", title: "Bug fix session" });
+    const beforeApply = getDataRevisions(db);
 
     const result = applyArtifact(db, {
       kind: "runbook",
@@ -105,12 +107,21 @@ describe("applyArtifact", () => {
       publicationStatus: "publish_path",
       runbookStatus: "applied"
     });
+    expect(getDataRevisions(db)).toEqual({
+      logbook: beforeApply.logbook,
+      workbench: beforeApply.workbench + 1
+    });
     expect(listWorkbenchActivity(db, { limit: 10, sessionId: "session:abc" })).toEqual([
       expect.objectContaining({ eventType: "runbook_applied", summary: "Runbook applied" })
     ]);
 
+    const beforePublish = getDataRevisions(db);
     publishArtifact(db, result.artifactId!);
     expect(readWorkbenchSessionState(db, "session:abc")?.runbookStatus).toBe("published");
+    expect(getDataRevisions(db)).toEqual({
+      logbook: beforePublish.logbook + 1,
+      workbench: beforePublish.workbench + 1
+    });
     expect(
       db.prepare(
         `SELECT runbook_status AS runbookStatus,
