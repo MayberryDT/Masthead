@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { AuthoringCanaryReview } from "../../app/workbench/AuthoringCanaryReview";
 import type { WorkbenchActionKind, UseWorkbenchControllerResult } from "../../app/workbench/useWorkbenchController";
 import { AppButton } from "../primitives/AppButton";
 import { useNewItemIds } from "../motion/useNewItemIds";
@@ -15,13 +16,16 @@ type WorkbenchPanelProps = Partial<
     | "agentPromptSessionCount"
     | "canRun"
     | "clearActionFeedback"
+    | "copyAgentPrompt"
     | "error"
-    | "handoffText"
     | "lastActionSummary"
     | "loading"
     | "notAddedOpen"
     | "notAddedSessions"
     | "notAddedSummary"
+    | "pendingCanaryReviews"
+    | "approveCanary"
+    | "rejectCanary"
     | "page"
     | "pageSize"
     | "runAction"
@@ -30,8 +34,10 @@ type WorkbenchPanelProps = Partial<
     | "setNotAddedOpen"
     | "setPage"
     | "total"
-  >
+>
 > & {
+  /** Compatibility-only test input; V4 prompts are created durably on click. */
+  handoffText?: string;
   onClearSelection?: () => void;
   onRetry?: () => void;
   onSelectAll?: () => void;
@@ -91,15 +97,17 @@ export function WorkbenchPanel({
   activity = EMPTY_ACTIVITY,
   agentPromptExcludedCount = 0,
   agentPromptSessionCount = 0,
+  approveCanary,
   canRun = defaultCanRun,
   clearActionFeedback,
+  copyAgentPrompt,
   error,
-  handoffText = "",
   lastActionSummary,
   loading = false,
   notAddedOpen = false,
   notAddedSessions = EMPTY_NOT_ADDED,
   notAddedSummary,
+  pendingCanaryReviews = [],
   onClearSelection,
   onRetry,
   onSelectAll,
@@ -108,6 +116,7 @@ export function WorkbenchPanel({
   page = 0,
   pageSize = 100,
   runAction,
+  rejectCanary,
   selectedSessionIds = EMPTY_SELECTION,
   sessions = EMPTY_SESSIONS,
   setNotAddedOpen,
@@ -203,8 +212,12 @@ export function WorkbenchPanel({
   const run = async (kind: WorkbenchActionKind) => {
     if (!canRun(kind) || actionBusy) return;
     if (kind === "copy_agent_prompt") {
-      const copied = await copyTextToClipboard(handoffText);
-      if (!copied) return;
+      try {
+        const prompt = await copyAgentPrompt?.();
+        if (!prompt || !(await copyTextToClipboard(prompt))) return;
+      } catch {
+        return;
+      }
     }
     await runAction?.(kind);
   };
@@ -586,32 +599,43 @@ export function WorkbenchPanel({
         <aside className="workbench-activity-rail" aria-label="Workbench Activity">
           <div className="workbench-rail-block workbench-activity-block">
             <p className="mono-label">Workbench Activity</p>
-            {activity.length === 0 ? (
-              <p className="workbench-muted">No activity yet</p>
-            ) : (
-              <ol className="workbench-activity-list">
-                {activity.map((item) => (
-                  <li
-                    key={item.activityId}
-                    className={`workbench-activity-item is-${workbenchActivityTone(item.eventType)} ${newActivityIds.has(item.activityId) ? "is-new" : ""}`.trim()}
-                  >
-                    <span className="workbench-activity-gutter" aria-hidden="true" />
-                    <div className="workbench-activity-body">
-                      <div className="workbench-activity-meta">
-                        <time dateTime={item.eventAt}>{formatWorkbenchActivityTime(item.eventAt)}</time>
-                        <span className="workbench-activity-type">
-                          {sanitizeWorkbenchVisibleText(item.eventType)}
-                        </span>
-                        <span className="workbench-activity-actor">
-                          {sanitizeWorkbenchVisibleText(item.actorId ?? item.actorKind)}
-                        </span>
+            <div className="workbench-activity-scroll">
+              {pendingCanaryReviews.map((review) => (
+                <AuthoringCanaryReview
+                  key={review.assignmentId}
+                  busy={actionBusy}
+                  review={review}
+                  onApprove={(item, reviewedBy) => approveCanary?.(item, reviewedBy)}
+                  onReject={(item, notes, reviewedBy) => rejectCanary?.(item, notes, reviewedBy)}
+                />
+              ))}
+              {activity.length === 0 ? (
+                pendingCanaryReviews.length === 0 ? <p className="workbench-muted">No activity yet</p> : null
+              ) : (
+                <ol className="workbench-activity-list">
+                  {activity.map((item) => (
+                    <li
+                      key={item.activityId}
+                      className={`workbench-activity-item is-${workbenchActivityTone(item.eventType)} ${newActivityIds.has(item.activityId) ? "is-new" : ""}`.trim()}
+                    >
+                      <span className="workbench-activity-gutter" aria-hidden="true" />
+                      <div className="workbench-activity-body">
+                        <div className="workbench-activity-meta">
+                          <time dateTime={item.eventAt}>{formatWorkbenchActivityTime(item.eventAt)}</time>
+                          <span className="workbench-activity-type">
+                            {sanitizeWorkbenchVisibleText(item.eventType)}
+                          </span>
+                          <span className="workbench-activity-actor">
+                            {sanitizeWorkbenchVisibleText(item.actorId ?? item.actorKind)}
+                          </span>
+                        </div>
+                        <p className="workbench-activity-summary">{sanitizeWorkbenchVisibleText(item.summary)}</p>
                       </div>
-                      <p className="workbench-activity-summary">{sanitizeWorkbenchVisibleText(item.summary)}</p>
-                    </div>
-                  </li>
-                ))}
-              </ol>
-            )}
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </div>
           </div>
         </aside>
       </section>

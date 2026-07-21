@@ -24,6 +24,7 @@ import {
 } from "../../../daemon/db/workbenchPipelineRepository.ts";
 import { completeWorkbenchAuthoringRun } from "../../../daemon/db/workbenchAuthoringRepository.ts";
 import { getOrCreateDatabaseIdentity, migrateDatabase } from "../../../daemon/db/schema.ts";
+import { getDataRevisions } from "../../../daemon/db/dataRevisionRepository.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../../../daemon/db/sqlite.ts";
 import {
   finishAuthoringRun,
@@ -36,7 +37,10 @@ import {
   submitAuthoringBundle
 } from "../authoringService.ts";
 import { discoverArtifactCandidates } from "../artifactCandidates.ts";
-import { seedDurableArtifactCorpus } from "../__fixtures__/durableArtifactCorpus.ts";
+import {
+  seedDurableArtifactCorpus,
+  seedDurableArtifactCorpusWithPerformedActions
+} from "../__fixtures__/durableArtifactCorpus.ts";
 
 const tempDirs: string[] = [];
 
@@ -122,7 +126,7 @@ describe("Workbench authoring service", () => {
 
   test("publishes an agent-selected optional artifact without a candidate run", async () => {
     const db = await testDb();
-    seedDurableArtifactCorpus(db);
+    seedDurableArtifactCorpusWithPerformedActions(db);
     const candidate = discoverArtifactCandidates(db, ["session:oauth-fixed"]).find((entry) => entry.kind === "runbook")!;
     const opened = openAgentLedAuthoringRun(db, {
       actorId: "codex",
@@ -148,7 +152,7 @@ describe("Workbench authoring service", () => {
 
   test("publishes agent-selected runbook and ADR artifacts in one V3 bundle", async () => {
     const db = await testDb();
-    seedDurableArtifactCorpus(db);
+    seedDurableArtifactCorpusWithPerformedActions(db);
     const sessionIds = ["session:oauth-fixed", "session:decision-local-first"];
     const candidates = discoverArtifactCandidates(db, sessionIds);
     const runbook = candidates.find((entry) => entry.kind === "runbook")!;
@@ -177,17 +181,22 @@ describe("Workbench authoring service", () => {
     const submitted = submitAuthoringBundle(db, { bundle, runId: opened.run.runId });
     expect(submitted.accepted, JSON.stringify(submitted.findings, null, 2)).toBe(true);
 
+    const revisionsBeforeFinish = getDataRevisions(db);
     const receipt = finishAuthoringRun(db, { runId: opened.run.runId });
     if (receipt.contractVersion !== "workbench-authoring-v3") throw new Error("expected_v3_receipt");
     expect(receipt.optionalArtifacts.map(({ kind }) => kind)).toEqual(["runbook", "adr"]);
     expect(receipt.optionalArtifacts.map(({ artifactId }) => getSessionArtifact(db, artifactId)?.artifactKind))
       .toEqual(["runbook", "adr"]);
+    expect(getDataRevisions(db)).toEqual({
+      logbook: revisionsBeforeFinish.logbook + 1,
+      workbench: revisionsBeforeFinish.workbench + 1
+    });
     db.close();
   });
 
   test("rejects a duplicate optional artifact even when the matching current artifact is older than 100", async () => {
     const db = await testDb();
-    seedDurableArtifactCorpus(db);
+    seedDurableArtifactCorpusWithPerformedActions(db);
     const candidate = discoverArtifactCandidates(db, ["session:oauth-fixed"]).find((entry) => entry.kind === "runbook")!;
     const opened = openAgentLedAuthoringRun(db, {
       actorId: "codex",
@@ -1009,11 +1018,13 @@ function validCandidateBundle(
 ): WorkbenchAuthoringBundleV2 {
   const failureRef = candidate.signalEvidenceRefs.find((ref) => ref.startsWith("tool_result:"))!;
   const changeRef = overrides.changeRef ?? candidate.signalEvidenceRefs.find((ref) => ref.startsWith("file:"))!;
+  const actionRef = "message:oauth:action";
   const verificationRef = candidate.signalEvidenceRefs.find(
     (ref) => ref.startsWith("checkpoint:") || ref.includes(":verified")
   )!;
   const failureExcerpt = canonicalCandidateExcerpt(failureRef);
   const changeExcerpt = canonicalCandidateExcerpt(changeRef);
+  const actionExcerpt = canonicalCandidateExcerpt(actionRef);
   const verificationExcerpt = canonicalCandidateExcerpt(verificationRef);
   const joinSupports: WorkbenchClaimSupport[] = candidate.provenanceSessionIds.length > 1
     ? candidate.provenanceSessionIds.map((sessionId) => {
@@ -1065,14 +1076,14 @@ function validCandidateBundle(
             supportKind: "problem"
           },
           {
-            evidenceRef: changeRef,
-            excerpt: changeExcerpt,
+            evidenceRef: actionRef,
+            excerpt: actionExcerpt,
             path: "fixSteps[0]",
             supportKind: "change"
           },
           {
-            evidenceRef: changeRef,
-            excerpt: changeExcerpt,
+            evidenceRef: actionRef,
+            excerpt: actionExcerpt,
             path: "commands[0]",
             supportKind: "change"
           },
@@ -1112,7 +1123,7 @@ function validCandidateBundle(
         confidence: "low",
         deadEnds: [],
         environmentRequirements: ["Node.js"],
-        evidenceRefs: [...new Set([...candidate.signalEvidenceRefs, changeRef])],
+        evidenceRefs: [...new Set([...candidate.signalEvidenceRefs, actionRef, changeRef])],
         fixSteps: [`Apply the recorded change: ${changeExcerpt}.`],
         ...(candidate.provenanceSessionIds.length > 1
           ? { joinRationale: "The candidate groups the same normalized failure signature across both sessions." }
@@ -1185,6 +1196,7 @@ function canonicalCandidateExcerpt(ref: string): string {
     "file:repeated-error:1:change": "modified shell environment launcher",
     "file:repeated-error:2:change": "modified the remote PATH bootstrap",
     "file:repeated-error:revision-change": "modified remote shell bootstrap retry guard",
+    "message:oauth:action": "Implemented callback nonce validation and ran the OAuth callback regression test.",
     "tool_result:oauth:failure": "OAuth callback test failed with an invalid state nonce.",
     "tool_result:repeated-error:1:failure": "ssh: codex: command not found. ERROR_SIGNATURE: ssh codex command not found",
     "tool_result:repeated-error:2:failure": "ssh: codex: command not found. ERROR_SIGNATURE: SSH / Codex command not found",

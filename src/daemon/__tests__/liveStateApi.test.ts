@@ -26,7 +26,7 @@ describe("live state API", () => {
     tempDirs.push(resultDir);
     const resultPath = join(resultDir, "elapsed.txt");
     daemon.database.function("masthead_test_pause", () => {
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1_000);
       return 0;
     });
     daemon.database.exec(`
@@ -52,7 +52,7 @@ describe("live state API", () => {
     `;
     await childExit(spawn(process.execPath, ["--input-type=module", "-e", childScript, `${baseUrl}/ingest?runtime=codex`, resultPath]));
 
-    expect(Number(await readFile(resultPath, "utf8"))).toBeLessThan(150);
+    expect(Number(await readFile(resultPath, "utf8"))).toBeLessThan(500);
     expect(
       daemon.database.prepare("SELECT source_session_id FROM sessions WHERE source_session_id = ?").get("slow-live-ack")
     ).toEqual({ source_session_id: "slow-live-ack" });

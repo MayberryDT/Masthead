@@ -13,6 +13,7 @@ import {
 } from "../daemon/db/workbenchPipelineRepository.ts";
 import { stableRecordId } from "../daemon/identity.ts";
 import { type MastheadDatabase, withImmediateTransaction } from "../daemon/db/sqlite.ts";
+import { withDataRevisionOperation } from "../daemon/db/dataRevisionRepository.ts";
 import { buildWorkbenchEvidencePacket } from "./evidencePacket.ts";
 import { isWorkbenchArtifactKind } from "./schemas.ts";
 import type { WorkbenchOutputKind, WorkbenchValidationResult } from "./types.ts";
@@ -77,7 +78,7 @@ export function applyArtifact(
 
   const projectLabel = evidencePacket.session.project;
   const content = isRecord(options.output) ? options.output : {};
-  const artifact = withImmediateTransaction(db, () => {
+  const artifact = withDataRevisionOperation(db, () => withImmediateTransaction(db, () => {
     const applied = applySessionArtifactInTransaction(db, {
       artifactKind,
       confidence: confidenceFromOutput(options.output),
@@ -101,7 +102,7 @@ export function applyArtifact(
       sessionId: options.sessionId
     });
     return applied;
-  });
+  }));
 
   return {
     artifactId: artifact.artifactId,
@@ -117,7 +118,7 @@ export function applyArtifact(
 }
 
 export function publishArtifact(db: MastheadDatabase, artifactId: string): PublishArtifactResult {
-  const published = withImmediateTransaction(db, () => {
+  const published = withDataRevisionOperation(db, () => withImmediateTransaction(db, () => {
     const artifact = publishSessionArtifactInTransaction(db, artifactId);
     if (!artifact) throw new Error(`Artifact not found: ${artifactId}`);
     if (isAutomaticKind(artifact.artifactKind)) {
@@ -136,7 +137,7 @@ export function publishArtifact(db: MastheadDatabase, artifactId: string): Publi
       });
     }
     return artifact;
-  });
+  }));
   return {
     artifactId: published.artifactId,
     artifactKind: published.artifactKind,

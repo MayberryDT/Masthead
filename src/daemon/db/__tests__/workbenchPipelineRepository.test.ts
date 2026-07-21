@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import { seedSession } from "./sessionTestHelpers.ts";
 import { migrateDatabase } from "../schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../sqlite.ts";
+import { getDataRevisions } from "../dataRevisionRepository.ts";
 import {
   claimWorkbenchSessions,
   countWorkbenchQueue,
@@ -16,6 +17,7 @@ import {
   legacyBugFixTraceStatusForOptionalStatus,
   markContributionSatisfactionForProvenanceInTransaction,
   markWorkbenchArtifactAppliedInTransaction,
+  markWorkbenchArtifactPublishedInTransaction,
   markWorkbenchArtifactSatisfied,
   markWorkbenchNotAdded,
   markWorkbenchPublished,
@@ -38,6 +40,44 @@ afterEach(async () => {
 });
 
 describe("workbench pipeline repository", () => {
+  test("increments Workbench revision for exported mutation helpers called directly in an outer transaction", async () => {
+    const db = await testDb();
+    seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:1", title: "One" });
+    ensureWorkbenchSessionState(db, "session:1");
+    const before = getDataRevisions(db);
+
+    db.exec("BEGIN IMMEDIATE;");
+    markWorkbenchArtifactAppliedInTransaction(db, {
+      actor: { kind: "agent", id: "codex" },
+      artifactKind: "runbook",
+      sessionId: "session:1"
+    });
+    expect(getDataRevisions(db).workbench).toBe(before.workbench + 1);
+    markWorkbenchArtifactPublishedInTransaction(db, {
+      actor: { kind: "agent", id: "codex" },
+      artifactId: "artifact:runbook",
+      artifactKind: "runbook",
+      sessionId: "session:1"
+    });
+    expect(getDataRevisions(db).workbench).toBe(before.workbench + 2);
+    db.exec("COMMIT;");
+  });
+
+  test("increments Workbench revision once for a batch claim", async () => {
+    const db = await testDb();
+    seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:1", title: "One" });
+    seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:2", title: "Two" });
+    const before = getDataRevisions(db);
+
+    claimWorkbenchSessions(db, {
+      claimedBy: "codex",
+      expiresAt: "2026-07-20T13:00:00.000Z",
+      sessionIds: ["session:1", "session:2"]
+    });
+
+    expect(getDataRevisions(db)).toEqual({ logbook: before.logbook, workbench: before.workbench + 1 });
+  });
+
   test("creates default publish-path state for a captured session", async () => {
     const db = await testDb();
     seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:1", title: "Meaningful work" });

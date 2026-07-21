@@ -4,9 +4,10 @@
 
 Accepted.
 
-Implementation status: pending. The installed runtime still exposes selection-scoped
-`workbench-authoring-v3` compatibility during the cutover; acceptance of this decision does not mean
-the guided service, API, CLI, launcher, or canary workflow has shipped.
+Implementation status: implemented. The runtime advertises `workbench-authoring-v4`; the guided
+service, API, instance-bound CLI, Workbench canary review, and legacy mutation retirement are present.
+Production release acceptance remains separately gated by the final dogfood, signed human review,
+and production canary evidence in `docs/acceptance/product-release-gate.md`.
 
 ## Context
 

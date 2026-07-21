@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve, win32 } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { GuidedAuthoringRequestDto } from "./guidedAuthoring.ts";
+import type { GuidedAuthoringCapabilitiesDto, GuidedAuthoringRequestDto } from "./guidedAuthoring.ts";
 import type { WorkbenchAuthoringCapabilitiesDto } from "./workbenchAuthoring.ts";
 
 export type MastheadInstanceManifest = {
@@ -174,8 +174,12 @@ export function identityFromManifest(manifest: MastheadInstanceManifest, instanc
   };
 }
 
-export function identityFromCapabilities(capabilities: WorkbenchAuthoringCapabilitiesDto): GuidedAuthoringExpectedIdentity {
-  if (capabilities.bundleVersion !== "workbench-authoring-v3") throw new Error("authoring_identity_unavailable");
+export function identityFromCapabilities(
+  capabilities: WorkbenchAuthoringCapabilitiesDto | GuidedAuthoringCapabilitiesDto
+): GuidedAuthoringExpectedIdentity {
+  if (capabilities.bundleVersion !== "workbench-authoring-v3" && capabilities.bundleVersion !== "workbench-authoring-v4") {
+    throw new Error("authoring_identity_unavailable");
+  }
   if (
     typeof capabilities.baseUrl !== "string" ||
     typeof capabilities.buildSha !== "string" ||

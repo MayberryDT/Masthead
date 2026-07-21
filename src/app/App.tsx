@@ -753,13 +753,15 @@ export function App() {
           agentPromptSessionCount={workbench.agentPromptSessionCount}
           canRun={workbench.canRun}
           clearActionFeedback={workbench.clearActionFeedback}
+          copyAgentPrompt={workbench.copyAgentPrompt}
           error={workbench.error}
-          handoffText={workbench.handoffText}
           lastActionSummary={workbench.lastActionSummary}
           loading={workbench.loading}
           notAddedOpen={workbench.notAddedOpen}
           notAddedSessions={workbench.notAddedSessions}
           notAddedSummary={workbench.notAddedSummary}
+          pendingCanaryReviews={workbench.pendingCanaryReviews}
+          approveCanary={workbench.approveCanary}
           onClearSelection={workbench.clearSelection}
           onRetry={workbench.retry}
           onSelectAll={workbench.selectAll}
@@ -768,6 +770,7 @@ export function App() {
           page={workbench.page}
           pageSize={workbench.pageSize}
           runAction={workbench.runAction}
+          rejectCanary={workbench.rejectCanary}
           selectedSessionIds={workbench.selectedSessionIds}
           sessions={workbench.sessions}
           setNotAddedOpen={workbench.setNotAddedOpen}

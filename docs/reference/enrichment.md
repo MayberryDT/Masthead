@@ -1,19 +1,16 @@
 # Workbench Guided Artifact Authoring
 
-This reference defines the accepted `workbench-authoring-v4` target and remains pending
-implementation. Under that target, Masthead authoring is agent-authored and daemon-owned: Workbench is
+This reference defines the implemented `workbench-authoring-v4` contract. Masthead authoring is
+agent-authored and daemon-owned: Workbench is
 the human collaboration surface, while the writable daemon owns durable requests, assignment planning,
 evidence coverage, validation, editorial review, claims, identity checks, publication, and receipts.
 The instance-bound CLI will remain a thin HTTP adapter and will not open SQLite for normal authoring.
 
-The installed runtime still advertises selection-scoped `workbench-authoring-v3` with a shared CLI,
-run/context/evidence reads, and primary-daemon open, submit, and finish mutations. That compatibility
-runtime does not provide V4 guidance and must not be used for a new bulk or production enrichment
-campaign. At V4 cutover, V1, V2, and V3 remain audit-only: legacy records and receipts stay readable,
-but mutation attempts fail with `authoring_contract_retired`. See
+V1, V2, and V3 remain audit-only: legacy records and receipts stay readable, but mutation attempts
+fail with `authoring_contract_retired`. See
 [ADR 0015](../adr/0015-guided-authoring-campaigns.md) for the accepted decision.
 
-## Accepted V4 human handoff — pending implementation
+## V4 human handoff
 
 People select compile-ready sessions and choose **Copy Agent Prompt**. Workbench first creates one
 durable guided authoring request, then copies only its opaque request ID and one instance-bound start

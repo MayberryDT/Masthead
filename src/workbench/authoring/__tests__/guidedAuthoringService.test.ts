@@ -8,13 +8,18 @@ import type { WorkbenchArtifactSuggestionDto } from "../../../shared/workbenchAu
 import type { GuidedAuthoringAssignmentDto, GuidedAuthoringBundleV4 } from "../../../shared/guidedAuthoring.ts";
 import {
   getGuidedAssignment,
+  getGuidedAssignmentReceipt,
   getGuidedAssignments,
+  getGuidedAuthoringRequest,
+  listGuidedDraftReviews,
   listGuidedEvidenceAccess,
   listGuidedOpportunities
 } from "../../../daemon/db/guidedAuthoringRepository.ts";
+import { listGuidedEnrichmentProvenance } from "../../../daemon/db/enrichmentRepository.ts";
 import { migrateDatabase } from "../../../daemon/db/schema.ts";
 import { markSessionCompileReady, seedSession } from "../../../daemon/db/__tests__/sessionTestHelpers.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../../../daemon/db/sqlite.ts";
+import { getDataRevisions } from "../../../daemon/db/dataRevisionRepository.ts";
 import * as advisorySuggestions from "../advisorySuggestions.ts";
 import * as evidenceCatalog from "../evidenceCatalog.ts";
 import type { AuthoringEvidenceSnapshot } from "../evidenceCatalog.ts";
@@ -26,13 +31,23 @@ import {
   type GuidedPlanningSession
 } from "../guidedAuthoringPolicy.ts";
 import { assertGuidedSelectionCompileReady } from "../guidedAuthoringPreflight.ts";
+import * as guidedQuality from "../guidedAuthoringQuality.ts";
 import {
+  approveGuidedCanary,
+  buildGuidedDraftScaffold,
   buildGuidedAuthoringValidationInput,
-  createGuidedRequest,
-  inspectGuidedAssignment,
+  createGuidedRequest as createGuidedRequestService,
+  finishGuidedAssignment,
+  guidedDraftFilePath,
+  GUIDED_PUBLICATION_FAILURE_POINTS,
+  installGuidedAuthoringServiceTestHooks,
+  inspectGuidedAssignment as inspectGuidedAssignmentService,
+  rejectGuidedCanary,
   reviewGuidedAssignment,
-  startGuidedAssignment
+  saveGuidedDraft,
+  startGuidedAssignment as startGuidedAssignmentService
 } from "../guidedAuthoringService.ts";
+import { parseGuidedAuthoringBundleV4 } from "../authoringSchemas.ts";
 
 const tempDirs: string[] = [];
 
@@ -333,6 +348,266 @@ describe("guided authoring service", () => {
     db.close();
   });
 
+  test("builds a schema-valid scaffold from trusted assignment membership without authoring substantive prose", async () => {
+    const db = await serviceDb(2);
+    vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
+    const created = createGuidedRequest(db, requestInput(["session:0", "session:1"]));
+    const assignment = getGuidedAssignment(db, created.request.currentAssignmentId!)!;
+    const changesBefore = totalChanges(db);
+    const scaffold = buildGuidedDraftScaffold(db, { assignmentId: assignment.assignmentId, command: "/opt/mastheadctl" });
+    expect(totalChanges(db)).toBe(changesBefore);
+    expect(parseGuidedAuthoringBundleV4(scaffold.draft)).toEqual(scaffold.draft);
+    expect(scaffold.draft).toMatchObject({
+      assignmentId: assignment.assignmentId,
+      evidenceRevision: assignment.evidenceRevision,
+      sessionEnrichments: assignment.sessionIds.map((sessionId) => ({
+        sessionId,
+        enrichment: { sessionTitle: { text: "REPLACE_WITH_SPECIFIC_SESSION_TITLE" } },
+        claimSupport: expect.any(Array)
+      }))
+    });
+    expect(scaffold.bundleSchema).toMatchObject({ title: "GuidedAuthoringBundleV4" });
+    for (const session of scaffold.draft.sessionEnrichments) {
+      const supportByPath = new Map(session.claimSupport.map((support) => [support.path, support]));
+      expect(session.enrichment.sessionTitle.evidenceRefs.map(({ id }) => id)).toContain(
+        supportByPath.get("/sessionTitle/text")?.evidenceRef
+      );
+      expect(session.enrichment.sessionSummary.evidenceRefs.map(({ id }) => id)).toContain(
+        supportByPath.get("/sessionSummary/text")?.evidenceRef
+      );
+      expect(session.enrichment.sessionDossier.evidenceRefs.map(({ id }) => id)).toEqual(expect.arrayContaining([
+        supportByPath.get("/sessionDossier/purpose")?.evidenceRef,
+        supportByPath.get("/sessionDossier/outcome")?.evidenceRef,
+        supportByPath.get("/sessionDossier/keyWork/0")?.evidenceRef
+      ]));
+      expect(session.enrichment.sessionDossier.verification.evidenceRefs.map(({ id }) => id)).toContain(
+        supportByPath.get("/sessionDossier/verification/summary")?.evidenceRef
+      );
+      expect([
+        ...session.enrichment.sessionTitle.evidenceRefs,
+        ...session.enrichment.sessionSummary.evidenceRefs,
+        ...session.enrichment.sessionDossier.evidenceRefs,
+        ...session.enrichment.sessionDossier.verification.evidenceRefs
+      ]).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: expect.stringMatching(/^REPLACE_WITH_/), kind: "event", observedAt: expect.any(String), source: expect.any(String) })
+      ]));
+      expect(session.claimSupport.map(({ path, supportKind }) => ({ path, supportKind }))).toEqual([
+        { path: "/sessionTitle/text", supportKind: "reuse" },
+        { path: "/sessionSummary/text", supportKind: "outcome" },
+        { path: "/sessionDossier/purpose", supportKind: "purpose" },
+        { path: "/sessionDossier/outcome", supportKind: "outcome" },
+        { path: "/sessionDossier/keyWork/0", supportKind: "change" },
+        { path: "/sessionDossier/verification/summary", supportKind: "verification" }
+      ]);
+    }
+    expect(scaffold.nextAction).toMatchObject({
+      kind: "save",
+      command: `/opt/mastheadctl workbench author save --assignment ${assignment.assignmentId} --file ${guidedDraftFilePath(assignment.assignmentId)} --json`
+    });
+    expect(scaffold.nextAction.reason).toContain("put each supported result in its capsule summary");
+    expect(scaffold.nextAction.reason).toContain("never leave a result-bearing sessionSummary.state unknown");
+    expect(scaffold.nextAction.reason).toContain("preserve each prefilled claimSupport path and supportKind");
+    expect(scaffold.nextAction.reason).toContain("full {id, kind, observedAt, source} object");
+    expect(scaffold.nextAction.reason).toContain("fix its supportKind instead of deleting rootCause or replacing it with unknown");
+    db.close();
+  });
+
+  test.each(["runbook", "adr", "incident_timeline"] as const)(
+    "scaffolds a deterministic linked %s opportunity draft that remains quality-invalid",
+    async (kind) => {
+      const db = await serviceDb(1);
+      const semanticRefs = seedSemanticScaffoldEvidence(db, "session:0");
+      const evidenceRefs = Object.values(semanticRefs);
+      const created = createGuidedRequest(db, requestInput(
+        ["session:0"],
+        [suggestion(["session:0"], kind, `scaffold-${kind}`, evidenceRefs)]
+      ));
+      const assignment = getGuidedAssignment(db, created.request.currentAssignmentId!)!;
+      const changesBefore = totalChanges(db);
+
+      const first = buildGuidedDraftScaffold(db, { assignmentId: assignment.assignmentId, command: "/opt/mastheadctl" });
+      const second = buildGuidedDraftScaffold(db, { assignmentId: assignment.assignmentId, command: "/opt/mastheadctl" });
+
+      expect(totalChanges(db)).toBe(changesBefore);
+      expect(second.draft).toEqual(first.draft);
+      expect(parseGuidedAuthoringBundleV4(first.draft)).toEqual(first.draft);
+      expect(first.draft.opportunityDispositions).toEqual([expect.objectContaining({
+        artifactDraftId: first.draft.artifacts[0]?.draftId,
+        artifactKind: kind,
+        disposition: "authored",
+        evidenceRefs: expect.arrayContaining(evidenceRefs),
+        opportunityId: assignment.opportunityIds[0]
+      })]);
+      expect(first.draft.artifacts).toEqual([expect.objectContaining({
+        draftId: expect.stringMatching(/^guided-artifact-draft:/),
+        kind,
+        provenanceSessionIds: ["session:0"],
+        seedSessionId: "session:0",
+        output: expect.objectContaining({
+          claimSupport: expect.any(Array),
+          provenanceSessionIds: ["session:0"],
+          title: "REPLACE_WITH_SPECIFIC_ARTIFACT_TITLE"
+        })
+      })]);
+      const artifactSupports = first.draft.artifacts[0]!.output.claimSupport as Array<{
+        evidenceRef: string;
+        path: string;
+        supportKind: string;
+      }>;
+      const supportRef = (path: string) => artifactSupports.find((support) => support.path === path)?.evidenceRef;
+      if (kind === "runbook") {
+        expect(first.draft.artifacts[0]?.output.deadEnds).toEqual([]);
+        expect(supportRef("problemSignature.affectedScope")).toBe(semanticRefs.problem);
+        expect(supportRef("fixSteps[0]")).toBe(semanticRefs.performedAction);
+        expect(supportRef("changedFiles[0]")).toBe(semanticRefs.change);
+        expect(supportRef("validationChecks[0]")).toBe(semanticRefs.verification);
+        expect(supportRef("risksOrGaps[0]")).toBe(semanticRefs.problem);
+        expect(supportRef("rootCause")).toBe(semanticRefs.rootCause);
+      } else if (kind === "adr") {
+        expect(supportRef("context")).toBe(semanticRefs.problem);
+        expect(supportRef("decision")).toBe(semanticRefs.decision);
+        expect(supportRef("alternatives[0]")).toBe(semanticRefs.alternative);
+        expect(supportRef("consequences[0]")).toBe(semanticRefs.decision);
+      }
+      if (kind === "incident_timeline") {
+        expect(first.draft.artifacts[0]?.output).toMatchObject({
+          timeline: [
+            {
+              at: "2026-06-25T12:01:00.000Z",
+              evidenceRefs: [semanticRefs.problem],
+              summary: "REPLACE_WITH_DETECTION_OR_IMPACT_EVENT"
+            },
+            {
+              at: "2026-06-25T12:02:15.000Z",
+              evidenceRefs: [semanticRefs.performedAction],
+              summary: "REPLACE_WITH_REMEDIATION_EVENT"
+            },
+            {
+              at: "2026-06-25T12:03:00.000Z",
+              evidenceRefs: [semanticRefs.verification],
+              summary: "REPLACE_WITH_RECOVERY_VERIFICATION_EVENT"
+            }
+          ],
+          claimSupport: expect.arrayContaining([0, 1, 2].map((index) => expect.objectContaining({
+            path: `timeline[${index}].summary`,
+            supportKind: "timeline"
+          })))
+        });
+        expect(supportRef("timeline[0].summary")).toBe(semanticRefs.problem);
+        expect(supportRef("timeline[1].summary")).toBe(semanticRefs.performedAction);
+        expect(supportRef("timeline[2].summary")).toBe(semanticRefs.verification);
+        expect(supportRef("remediation[0]")).toBe(semanticRefs.performedAction);
+        expect(supportRef("status")).toBe(semanticRefs.verification);
+        expect(supportRef("rootCause")).toBe(semanticRefs.rootCause);
+      }
+
+      inspectAllAssignmentEvidence(db, assignment);
+      const review = saveGuidedDraft(db, saveInput(assignment, first.draft));
+      expect(review.findings).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          artifactDraftId: first.draft.artifacts[0]?.draftId,
+          severity: "error"
+        })
+      ]));
+      expect(review.nextAction.kind).toBe("revise");
+      db.close();
+    }
+  );
+
+  test.each([
+    {
+      combinedText: "Implemented the signed nonce store and OAuth verification tests passed successfully.",
+      kind: "runbook" as const,
+      paths: ["fixSteps[0]", "validationChecks[0]"]
+    },
+    {
+      combinedText: "Decided to adopt a signed nonce store after considering the alternative stateless callback design.",
+      kind: "adr" as const,
+      paths: ["decision", "alternatives[0]"]
+    }
+  ])("reuses one semantically strongest compact $kind ref instead of an irrelevant distinct ref", async ({ combinedText, kind, paths }) => {
+    const db = await serviceDb(1);
+    const refs = seedCompactScaffoldEvidence(db, "session:0", combinedText);
+    const created = createGuidedRequest(db, requestInput(
+      ["session:0"],
+      [suggestion(["session:0"], kind, `compact-${kind}`, Object.values(refs))]
+    ));
+    const assignment = getGuidedAssignment(db, created.request.currentAssignmentId!)!;
+
+    const scaffold = buildGuidedDraftScaffold(db, { assignmentId: assignment.assignmentId, command: "/opt/mastheadctl" });
+    const supports = scaffold.draft.artifacts[0]!.output.claimSupport as Array<{ evidenceRef: string; path: string }>;
+
+    expect(paths.map((path) => supports.find((support) => support.path === path)?.evidenceRef))
+      .toEqual([refs.combined, refs.combined]);
+    expect(supports.filter((support) => paths.includes(support.path)).every((support) => support.evidenceRef !== refs.irrelevant))
+      .toBe(true);
+    db.close();
+  });
+
+  test("repeated start returns the persisted canary, finish, and completed actions", async () => {
+    const db = await serviceDb(1);
+    vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
+    vi.spyOn(guidedQuality, "validateGuidedAuthoringDraft").mockReturnValue({ accepted: true, findings: [] });
+    const created = createGuidedRequest(db, requestInput(["session:0"]));
+    const assignment = getGuidedAssignment(db, created.request.currentAssignmentId!)!;
+    inspectAllAssignmentEvidence(db, assignment);
+    const staged = saveGuidedDraft(db, saveInput(assignment, publicationBundle(assignment)));
+
+    expect(startGuidedAssignment(db, { command: "masthead", requestId: created.request.requestId }).nextAction)
+      .toEqual(staged.nextAction);
+
+    const approved = approveGuidedCanary(db, decisionInput(staged));
+    expect(startGuidedAssignment(db, { command: "masthead", requestId: created.request.requestId }).nextAction)
+      .toEqual(approved.nextAction);
+
+    finishGuidedAssignment(db, finishInput(assignment.assignmentId));
+    expect(startGuidedAssignment(db, { command: "masthead", requestId: created.request.requestId }).nextAction)
+      .toEqual({
+        command: "",
+        kind: "complete",
+        reason: "The guided authoring request is complete."
+      });
+    db.close();
+  });
+
+  test("repeated start returns revise for rejected draft work", async () => {
+    const db = await serviceDb(1);
+    vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
+    vi.spyOn(guidedQuality, "validateGuidedAuthoringDraft").mockReturnValue({
+      accepted: false,
+      findings: [{ code: "missing_session_enrichment", message: "revise", severity: "error" }]
+    });
+    const created = createGuidedRequest(db, requestInput(["session:0"]));
+    const assignment = getGuidedAssignment(db, created.request.currentAssignmentId!)!;
+    inspectAllAssignmentEvidence(db, assignment);
+    const revision = saveGuidedDraft(db, saveInput(assignment, publicationBundle(assignment)));
+
+    expect(startGuidedAssignment(db, { command: "masthead", requestId: created.request.requestId }).nextAction)
+      .toEqual(revision.nextAction);
+    expect(revision.nextAction.kind).toBe("revise");
+    db.close();
+  });
+
+  test("repeated start returns finish for a non-canary ready assignment", async () => {
+    const db = await serviceDb(4);
+    vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
+    vi.spyOn(guidedQuality, "validateGuidedAuthoringDraft").mockReturnValue({ accepted: true, findings: [] });
+    const created = createGuidedRequest(db, requestInput(selectionIds(4)));
+    const canary = getGuidedAssignment(db, created.request.currentAssignmentId!)!;
+    inspectAllAssignmentEvidence(db, canary);
+    const staged = saveGuidedDraft(db, saveInput(canary, publicationBundle(canary)));
+    approveGuidedCanary(db, decisionInput(staged));
+    finishGuidedAssignment(db, finishInput(canary.assignmentId));
+    const nonCanary = startGuidedAssignment(db, { command: "masthead", requestId: created.request.requestId }).assignment;
+    inspectAllAssignmentEvidence(db, nonCanary);
+    const ready = saveGuidedDraft(db, saveInput(nonCanary, publicationBundle(nonCanary)));
+
+    expect(startGuidedAssignment(db, { command: "masthead", requestId: created.request.requestId }).nextAction)
+      .toEqual(ready.nextAction);
+    expect(ready.nextAction.kind).toBe("finish");
+    db.close();
+  });
+
   test("builds validation input from the trusted persisted assignment while preserving bundle mismatches", async () => {
     const db = await serviceDb(16);
     const firstOpportunity = suggestion(["session:0"], "adr", "first-persisted", ["message:session:0:seed-user"]);
@@ -472,6 +747,8 @@ describe("guided authoring service", () => {
     const review = reviewGuidedAssignment(db, { assignmentId, command: "masthead" });
 
     expect(first.progressRecorded).toBe(true);
+    expect(first.authoringContract.rule).toContain("the capsule summary must state that specific result");
+    expect(first.authoringContract.rule).toContain("keep work completion separate from explicit verification status and warnings");
     expect(first.evidenceRevision).not.toBe(first.evidence.evidenceRevision);
     expect(first.coverage.every(({ evidenceRevision }) => evidenceRevision === first.evidenceRevision)).toBe(true);
     expect(listGuidedEvidenceAccess(db, assignmentId).every(({ evidenceRevision }) => (
@@ -489,9 +766,9 @@ describe("guided authoring service", () => {
     }
     expect(current.coverage.every(({ complete }) => complete)).toBe(true);
     expect(current.nextAction).toEqual({
-      command: `masthead workbench author save --assignment ${assignmentId} --file <draft.json> --json`,
-      kind: "save",
-      reason: "Every assignment session has complete canonical evidence coverage."
+      command: `masthead workbench author scaffold --assignment ${assignmentId} --file ${guidedDraftFilePath(assignmentId)} --json`,
+      kind: "scaffold",
+      reason: "Every assignment session has complete canonical evidence coverage; generate the daemon-owned V4 scaffold before authoring."
     });
     db.close();
   });
@@ -718,6 +995,7 @@ describe("guided authoring service", () => {
       workerData: {
         assignmentId,
         databasePath: fixture.databasePath,
+        identity: testIdentity(),
         pauseAfterSelection: true,
         releaseIndex: 1,
         shared: state.buffer
@@ -730,6 +1008,7 @@ describe("guided authoring service", () => {
         workerData: {
           assignmentId,
           databasePath: fixture.databasePath,
+          identity: testIdentity(),
           pauseAfterSelection: false,
           releaseIndex: 2,
           shared: state.buffer
@@ -775,17 +1054,37 @@ describe("guided authoring service", () => {
       db.prepare("UPDATE messages SET text_redacted = text_redacted || ? WHERE session_id = ?")
         .run(` ${status}`, "session:0");
       expect(() => inspectGuidedAssignment(db, { assignmentId, command: "masthead" }))
-        .toThrow("guided_assignment_evidence_locked");
+        .toThrow("guided_assignment_not_inspectable");
       expect(reviewGuidedAssignment(db, { assignmentId, command: "masthead" }).nextAction.kind).toBe(nextKind);
     }
     db.prepare("UPDATE guided_authoring_assignments SET status = 'completed' WHERE assignment_id = ?").run(assignmentId);
     const completedReview = reviewGuidedAssignment(db, { assignmentId, command: "masthead" });
     db.prepare("UPDATE messages SET text_redacted = text_redacted || ' completed' WHERE session_id = ?").run("session:0");
     expect(() => inspectGuidedAssignment(db, { assignmentId, command: "masthead" }))
-      .toThrow("guided_assignment_evidence_locked");
+      .toThrow("guided_assignment_not_inspectable");
     expect(reviewGuidedAssignment(db, { assignmentId, command: "masthead" })).toEqual(completedReview);
     db.close();
   });
+
+  test.each(["staged_canary", "ready_to_finish", "completed"] as const)(
+    "refuses inspection in unchanged locked %s state before recording progress",
+    async (status) => {
+      const db = await serviceDb(1);
+      vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
+      const created = createGuidedRequest(db, requestInput(["session:0"]));
+      const assignmentId = created.request.currentAssignmentId!;
+      db.prepare("UPDATE guided_authoring_assignments SET status = ? WHERE assignment_id = ?")
+        .run(status, assignmentId);
+      const beforeAccess = listGuidedEvidenceAccess(db, assignmentId);
+      const beforeChanges = totalChanges(db);
+
+      expect(() => inspectGuidedAssignment(db, { assignmentId, command: "masthead", limit: 100 }))
+        .toThrow("guided_assignment_not_inspectable");
+      expect(listGuidedEvidenceAccess(db, assignmentId)).toEqual(beforeAccess);
+      expect(totalChanges(db)).toBe(beforeChanges);
+      db.close();
+    }
+  );
 
   test.each([
     ["staged_canary", "await_operator"],
@@ -808,6 +1107,418 @@ describe("guided authoring service", () => {
     expect(stale.coverage).toEqual(historical.coverage);
     expect(stale.coverage[0]).toMatchObject({ accessedItems: 4, complete: true, totalItems: 4 });
     expect(stale.nextAction.kind).toBe(nextKind);
+    db.close();
+  });
+
+  test("stages an accepted canary without publishing", async () => {
+    const db = await serviceDb(1);
+    vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
+    vi.spyOn(guidedQuality, "validateGuidedAuthoringDraft").mockReturnValue({ accepted: true, findings: [] });
+    const created = createGuidedRequest(db, requestInput(["session:0"]));
+    const assignment = getGuidedAssignment(db, created.request.currentAssignmentId!)!;
+    inspectGuidedAssignment(db, { assignmentId: assignment.assignmentId, command: "masthead", limit: 100 });
+
+    const review = saveGuidedDraft(db, saveInput(assignment, bundleFor(assignment)));
+
+    expect(review.status).toBe("staged_canary");
+    expect(review.nextAction.kind).toBe("await_operator");
+    expect(tableCount(db, "session_artifacts")).toBe(0);
+    expect(getGuidedAuthoringRequest(db, assignment.requestId)?.status).toBe("awaiting_canary_approval");
+    db.close();
+  });
+
+  test("approves and rejects only the exact current canary revision", async () => {
+    const db = await serviceDb(1);
+    vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
+    vi.spyOn(guidedQuality, "validateGuidedAuthoringDraft").mockReturnValue({ accepted: true, findings: [] });
+    const created = createGuidedRequest(db, requestInput(["session:0"]));
+    const assignment = getGuidedAssignment(db, created.request.currentAssignmentId!)!;
+    inspectGuidedAssignment(db, { assignmentId: assignment.assignmentId, command: "masthead", limit: 100 });
+    const staged = saveGuidedDraft(db, saveInput(assignment, bundleFor(assignment)));
+    const beforeApproval = approvalIsolationState(db);
+
+    const approved = approveGuidedCanary(db, decisionInput(staged));
+    expect(approved.nextAction.kind).toBe("finish");
+    expect(approvalIsolationState(db)).toEqual(beforeApproval);
+
+    expect(() => rejectGuidedCanary(db, {
+      ...decisionInput(staged),
+      notes: "A conflicting later decision."
+    })).toThrow("guided_canary_decision_conflict");
+    db.close();
+  });
+
+  test("rejects a canary into revision work without publishing", async () => {
+    const db = await serviceDb(1);
+    vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
+    vi.spyOn(guidedQuality, "validateGuidedAuthoringDraft").mockReturnValue({ accepted: true, findings: [] });
+    const created = createGuidedRequest(db, requestInput(["session:0"]));
+    const assignment = getGuidedAssignment(db, created.request.currentAssignmentId!)!;
+    inspectGuidedAssignment(db, { assignmentId: assignment.assignmentId, command: "masthead", limit: 100 });
+    const staged = saveGuidedDraft(db, saveInput(assignment, bundleFor(assignment)));
+
+    const rejected = rejectGuidedCanary(db, {
+      ...decisionInput(staged),
+      notes: "The canary needs a more specific reusable outcome."
+    });
+
+    expect(rejected).toMatchObject({
+      status: "needs_revision",
+      nextAction: {
+        command: `masthead workbench author save --assignment ${assignment.assignmentId} --file ${guidedDraftFilePath(assignment.assignmentId)} --json`,
+        kind: "revise",
+        reason: "The saved draft has blocking structured findings to resolve."
+      }
+    });
+    expect(getGuidedAuthoringRequest(db, assignment.requestId)?.status).toBe("open");
+    expect(tableCount(db, "session_artifacts")).toBe(0);
+    db.close();
+  });
+
+  test.each(["save", "approve", "reject", "finish"] as const)(
+    "refuses nested public %s before validation or mutation",
+    async (operation) => {
+      const db = await serviceDb(1);
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        const identity = testIdentity();
+        const invoke = {
+          save: () => saveGuidedDraft(db, { assignmentId: "missing", command: "masthead", currentIdentity: identity, draft: {} as GuidedAuthoringBundleV4, expectedIdentity: identity }),
+          approve: () => approveGuidedCanary(db, { assignmentId: "missing", command: "masthead", currentIdentity: identity, draftRevision: 1, evidenceRevision: "evidence", expectedIdentity: identity, notes: "notes", requestId: "missing", reviewedBy: "operator" }),
+          reject: () => rejectGuidedCanary(db, { assignmentId: "missing", command: "masthead", currentIdentity: identity, draftRevision: 1, evidenceRevision: "evidence", expectedIdentity: identity, notes: "notes", requestId: "missing", reviewedBy: "operator" }),
+          finish: () => finishGuidedAssignment(db, { assignmentId: "missing", command: "masthead", currentIdentity: identity, expectedIdentity: identity })
+        }[operation];
+        expect(invoke).toThrow("guided_authoring_public_mutation_requires_top_level_transaction");
+      } finally {
+        db.exec("ROLLBACK");
+      }
+      db.close();
+    }
+  );
+
+  test("guards save identity before opening its owned transaction or validating", async () => {
+    const db = await serviceDb(1);
+    vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
+    const created = createGuidedRequest(db, requestInput(["session:0"]));
+    const assignment = getGuidedAssignment(db, created.request.currentAssignmentId!)!;
+    const validation = vi.spyOn(guidedQuality, "validateGuidedAuthoringDraft");
+    const begin = vi.spyOn(db, "exec");
+
+    expect(() => saveGuidedDraft(db, {
+      ...saveInput(assignment, bundleFor(assignment)),
+      currentIdentity: { ...testIdentity(), instanceId: "instance:rotated" }
+    })).toThrow("instance_identity_mismatch");
+    expect(validation).not.toHaveBeenCalled();
+    expect(begin.mock.calls.flat()).not.toContain("BEGIN IMMEDIATE;");
+    db.close();
+  });
+
+  test("guards create, start, and progress-recording inspect before their first write", async () => {
+    const db = await serviceDb(1);
+    vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
+    const identity = testIdentity();
+    const swapped = { ...identity, instanceId: "instance:swapped" };
+    const beforeCreate = totalChanges(db);
+    expect(() => createGuidedRequestService(db, {
+      ...requestInput(["session:0"]),
+      expectedIdentity: swapped
+    })).toThrow("instance_identity_mismatch");
+    expect(totalChanges(db)).toBe(beforeCreate);
+
+    const created = createGuidedRequest(db, requestInput(["session:0"]));
+    const assignmentId = created.request.currentAssignmentId!;
+    const beforeStart = totalChanges(db);
+    expect(() => startGuidedAssignmentService(db, {
+      command: "masthead",
+      currentIdentity: identity,
+      expectedIdentity: swapped,
+      requestId: created.request.requestId
+    })).toThrow("instance_identity_mismatch");
+    expect(totalChanges(db)).toBe(beforeStart);
+
+    const beforeInspect = totalChanges(db);
+    expect(() => inspectGuidedAssignmentService(db, {
+      assignmentId,
+      command: "masthead",
+      currentIdentity: identity,
+      expectedIdentity: swapped
+    })).toThrow("instance_identity_mismatch");
+    expect(totalChanges(db)).toBe(beforeInspect);
+    db.close();
+  });
+
+  test.each(["save", "approve", "reject", "finish"] as const)(
+    "%s rejects a rotated current instance before its first write",
+    async (operation) => {
+      const db = await serviceDb(1);
+      vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
+      const created = createGuidedRequest(db, requestInput(["session:0"]));
+      const assignment = getGuidedAssignment(db, created.request.currentAssignmentId!)!;
+      const expectedIdentity = testIdentity();
+      const currentIdentity = { ...expectedIdentity, instanceId: "instance:rotated" };
+      const before = totalChanges(db);
+      const common = { command: "masthead", currentIdentity, expectedIdentity };
+      const invoke = {
+        save: () => saveGuidedDraft(db, { ...common, assignmentId: assignment.assignmentId, draft: bundleFor(assignment) }),
+        approve: () => approveGuidedCanary(db, { ...common, assignmentId: assignment.assignmentId, draftRevision: 1, evidenceRevision: assignment.evidenceRevision, notes: "notes", requestId: assignment.requestId, reviewedBy: "operator" }),
+        reject: () => rejectGuidedCanary(db, { ...common, assignmentId: assignment.assignmentId, draftRevision: 1, evidenceRevision: assignment.evidenceRevision, notes: "notes", requestId: assignment.requestId, reviewedBy: "operator" }),
+        finish: () => finishGuidedAssignment(db, { ...common, assignmentId: assignment.assignmentId })
+      }[operation];
+      expect(invoke).toThrow("instance_identity_mismatch");
+      expect(totalChanges(db)).toBe(before);
+      db.close();
+    }
+  );
+
+  test("runs the save probe before all six validation-state families", async () => {
+    const db = await serviceDb(1);
+    vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
+    vi.spyOn(guidedQuality, "validateGuidedAuthoringDraft").mockReturnValue({ accepted: false, findings: [{ code: "missing_session_enrichment", message: "revise", severity: "error" }] });
+    const created = createGuidedRequest(db, requestInput(["session:0"]));
+    const assignment = getGuidedAssignment(db, created.request.currentAssignmentId!)!;
+    inspectGuidedAssignment(db, { assignmentId: assignment.assignmentId, command: "masthead", limit: 100 });
+    const events: string[] = [];
+    const uninstall = installGuidedAuthoringServiceTestHooks(db, {
+      afterOwnedSaveBegin: () => {
+        expect(db.isTransaction).toBe(true);
+        events.push("begin");
+      },
+      beforeValidationStateRead: (family) => events.push(family)
+    });
+    try {
+      saveGuidedDraft(db, saveInput(assignment, bundleFor(assignment)));
+    } finally {
+      uninstall();
+    }
+    expect(events).toEqual([
+      "begin", "assignment", "canonical_dossier", "opportunity",
+      "accepted_revision", "coverage", "canonical_evidence"
+    ]);
+    db.close();
+  });
+
+  test.each([
+    "assignment",
+    "coverage",
+    "canonical_dossier",
+    "canonical_evidence",
+    "opportunity",
+    "accepted_revision"
+  ] as const)("serializes save validation and persistence against a %s writer", async (kind) => {
+    const fixture = await serviceDbWithPath(kind === "accepted_revision" ? 4 : 1);
+    vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([
+      suggestion(["session:0"], "adr", "wal-opportunity", ["message:session:0:message"])
+    ]);
+    const validation = vi.spyOn(guidedQuality, "validateGuidedAuthoringDraft").mockReturnValue({
+      accepted: false,
+      findings: [{ code: "missing_session_enrichment", message: "revise", severity: "error" }]
+    });
+    const created = createGuidedRequest(
+      fixture.db,
+      requestInput(kind === "accepted_revision" ? selectionIds(4) : ["session:0"])
+    );
+    let assignment = getGuidedAssignment(fixture.db, created.request.currentAssignmentId!)!;
+    let acceptedAssignmentId: string | undefined;
+    let acceptedSummarySeenBySaver: string | undefined;
+    if (kind === "accepted_revision") {
+      acceptedAssignmentId = assignment.assignmentId;
+      inspectAllAssignmentEvidence(fixture.db, assignment);
+      validation.mockReturnValue({ accepted: true, findings: [] });
+      const staged = saveGuidedDraft(fixture.db, saveInput(assignment, publicationBundle(assignment)));
+      approveGuidedCanary(fixture.db, decisionInput(staged));
+      finishGuidedAssignment(fixture.db, finishInput(assignment.assignmentId));
+      assignment = getGuidedAssignment(fixture.db, getGuidedAuthoringRequest(fixture.db, assignment.requestId)!.currentAssignmentId!)!;
+      validation.mockImplementation((input) => {
+        acceptedSummarySeenBySaver = input.requestAcceptedDrafts[0]?.draft.sessionEnrichments[0]?.enrichment.sessionSummary.text;
+        return {
+          accepted: false,
+          findings: [{ code: "missing_session_enrichment", message: "revise", severity: "error" }]
+        };
+      });
+    }
+    inspectGuidedAssignment(fixture.db, { assignmentId: assignment.assignmentId, command: "masthead", limit: 100 });
+    const state = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * 5));
+    const worker = new Worker(new URL("./fixtures/guidedSaveWalWriter.mjs", import.meta.url), {
+      workerData: {
+        assignmentId: assignment.assignmentId,
+        acceptedAssignmentId,
+        databasePath: fixture.databasePath,
+        evidenceRevision: assignment.evidenceRevision,
+        kind,
+        requestId: assignment.requestId,
+        sessionId: "session:0",
+        shared: state.buffer
+      }
+    });
+    const observed: string[] = [];
+    let probeCalls = 0;
+    const uninstall = installGuidedAuthoringServiceTestHooks(fixture.db, {
+      afterOwnedSaveBegin: () => {
+        probeCalls += 1;
+        expect(fixture.db.isTransaction).toBe(true);
+        Atomics.store(state, 0, 1);
+        Atomics.notify(state, 0);
+        expect(Atomics.wait(state, 1, 0, 2_000)).not.toBe("timed-out");
+        expect(Atomics.wait(state, 2, 0, 100)).toBe("timed-out");
+      },
+      beforeValidationStateRead: (family) => observed.push(family)
+    });
+    try {
+      saveGuidedDraft(fixture.db, saveInput(assignment, bundleFor(assignment)));
+      expect(Atomics.wait(state, 3, 0, 3_000)).not.toBe("timed-out");
+      expect(Atomics.load(state, 4)).toBe(0);
+      expect(probeCalls).toBe(1);
+      expect(observed).toEqual([
+        "assignment", "canonical_dossier", "opportunity",
+        "accepted_revision", "coverage", "canonical_evidence"
+      ]);
+      expect(listGuidedDraftReviews(fixture.db, assignment.assignmentId)).toHaveLength(1);
+      if (kind === "accepted_revision") {
+        expect(acceptedSummarySeenBySaver).toBe("Repaired and verified the OAuth authentication callback.");
+        const persistedAcceptedDraft = listGuidedDraftReviews(fixture.db, acceptedAssignmentId!)[0]!.draft;
+        expect(persistedAcceptedDraft.sessionEnrichments[0]?.enrichment.sessionSummary.text)
+          .toBe("Writer changed the accepted summary after the saver snapshot.");
+      }
+    } finally {
+      uninstall();
+      await worker.terminate();
+      fixture.db.close();
+    }
+  });
+
+  test.each(GUIDED_PUBLICATION_FAILURE_POINTS)(
+    "rolls back the entire finish boundary at %s",
+    async (failurePoint) => {
+      const db = await serviceDb(1);
+      vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
+      const assignment = seedReadyPublicationAssignment(db);
+      const before = publicationCounts(db);
+      const uninstall = installGuidedAuthoringServiceTestHooks(db, {
+        afterPublicationBoundary: (point) => {
+          if (point === failurePoint) throw new Error("injected_publication_failure");
+        }
+      });
+      try {
+        expect(() => finishGuidedAssignment(db, finishInput(assignment.assignmentId)))
+          .toThrow("injected_publication_failure");
+      } finally {
+        uninstall();
+      }
+      expect(publicationCounts(db)).toEqual(before);
+      expect(getGuidedAssignmentReceipt(db, assignment.assignmentId)).toBeUndefined();
+      db.close();
+    }
+  );
+
+  test("commits locked revision invalidation before finish throws", async () => {
+    const db = await serviceDb(1);
+    vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
+    const assignment = seedReadyPublicationAssignment(db);
+    db.prepare("UPDATE messages SET text_redacted = text_redacted || ' changed' WHERE session_id = 'session:0'").run();
+
+    expect(() => finishGuidedAssignment(db, finishInput(assignment.assignmentId)))
+      .toThrow("evidence_revision_changed");
+
+    const invalidated = getGuidedAssignment(db, assignment.assignmentId)!;
+    expect(invalidated).toMatchObject({
+      currentDraftRevision: 1,
+      status: "investigating"
+    });
+    expect(invalidated).not.toHaveProperty("acceptedDraftRevision");
+    expect(listGuidedDraftReviews(db, assignment.assignmentId)).toHaveLength(1);
+    expect(reviewGuidedAssignment(db, { assignmentId: assignment.assignmentId, command: "masthead" }))
+      .toMatchObject({ findings: [], nextAction: { kind: "inspect" } });
+    expect(getGuidedAssignmentReceipt(db, assignment.assignmentId)).toBeUndefined();
+    db.close();
+  });
+
+  test("requires canary finish from staged_canary with its exact current approval", async () => {
+    const db = await serviceDb(1);
+    vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
+    const assignment = seedReadyPublicationAssignment(db);
+    db.prepare("UPDATE guided_authoring_assignments SET status = 'ready_to_finish' WHERE assignment_id = ?")
+      .run(assignment.assignmentId);
+
+    expect(() => finishGuidedAssignment(db, finishInput(assignment.assignmentId)))
+      .toThrow("guided_assignment_not_ready");
+    expect(getGuidedAssignmentReceipt(db, assignment.assignmentId)).toBeUndefined();
+    db.close();
+  });
+
+  test("does not allow an outer transaction to capture locked invalidation", async () => {
+    const db = await serviceDb(1);
+    vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
+    const assignment = seedReadyPublicationAssignment(db);
+    db.prepare("UPDATE messages SET text_redacted = text_redacted || ' changed' WHERE session_id = 'session:0'").run();
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      expect(() => finishGuidedAssignment(db, finishInput(assignment.assignmentId)))
+        .toThrow("guided_authoring_public_mutation_requires_top_level_transaction");
+    } finally {
+      db.exec("ROLLBACK");
+    }
+    expect(getGuidedAssignment(db, assignment.assignmentId)).toMatchObject({
+      acceptedDraftRevision: 1,
+      status: "staged_canary"
+    });
+    db.close();
+  });
+
+  test("publishes atomically, records provenance for every enrichment, and retries immutably", async () => {
+    const db = await serviceDb(1);
+    vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
+    const assignment = seedReadyPublicationAssignment(db);
+    const revisionsBefore = getDataRevisions(db);
+    const first = finishGuidedAssignment(db, finishInput(assignment.assignmentId));
+    expect(first.nextAction).toEqual({
+      command: "",
+      kind: "complete",
+      reason: "The guided authoring request is complete."
+    });
+    expect(first.receipt.publishedArtifacts).toHaveLength(1);
+    expect(listGuidedEnrichmentProvenance(db, assignment.assignmentId)).toHaveLength(3);
+    expect(getDataRevisions(db)).toEqual({
+      logbook: revisionsBefore.logbook + 1,
+      workbench: revisionsBefore.workbench + 1
+    });
+
+    db.prepare("UPDATE messages SET text_redacted = text_redacted || ' later' WHERE session_id = 'session:0'").run();
+    expect(finishGuidedAssignment(db, finishInput(assignment.assignmentId))).toEqual(first);
+    db.close();
+  });
+
+  test("finishing a canary releases ordinal one for claim_next and a non-canary finishes from ready_to_finish", async () => {
+    const db = await serviceDb(4);
+    vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
+    vi.spyOn(guidedQuality, "validateGuidedAuthoringDraft").mockReturnValue({ accepted: true, findings: [] });
+    const created = createGuidedRequest(db, requestInput(selectionIds(4)));
+    const canary = getGuidedAssignment(db, created.request.currentAssignmentId!)!;
+    inspectAllAssignmentEvidence(db, canary);
+    const staged = saveGuidedDraft(db, saveInput(canary, publicationBundle(canary)));
+    approveGuidedCanary(db, decisionInput(staged));
+
+    const canaryFinished = finishGuidedAssignment(db, finishInput(canary.assignmentId));
+    expect(canaryFinished.nextAction).toEqual({
+      command: `masthead workbench author start --request ${canary.requestId} --json`,
+      kind: "claim_next",
+      reason: "The next guided assignment is ready to start."
+    });
+    expect(db.prepare(
+      `SELECT session_id AS sessionId, state FROM guided_authoring_request_sessions
+       WHERE request_id = ? ORDER BY ordinal`
+    ).all(canary.requestId)).toEqual([
+      { sessionId: "session:0", state: "completed" },
+      { sessionId: "session:1", state: "completed" },
+      { sessionId: "session:2", state: "completed" },
+      { sessionId: "session:3", state: "assigned" }
+    ]);
+
+    const started = startGuidedAssignment(db, { command: "masthead", requestId: canary.requestId });
+    expect(started.assignment).toMatchObject({ canary: false, ordinal: 1, status: "investigating" });
+    inspectGuidedAssignment(db, { assignmentId: started.assignment.assignmentId, command: "masthead", limit: 100 });
+    const ready = saveGuidedDraft(db, saveInput(started.assignment, publicationBundle(started.assignment)));
+    expect(ready).toMatchObject({ status: "ready_to_finish", nextAction: { kind: "finish" } });
+    expect(finishGuidedAssignment(db, finishInput(started.assignment.assignmentId)).nextAction.kind).toBe("complete");
     db.close();
   });
 });
@@ -837,6 +1548,115 @@ function suggestion(
   };
 }
 
+function seedSemanticScaffoldEvidence(db: MastheadDatabase, sessionId: string) {
+  const source = (id: string) => JSON.stringify({ id, source: "semantic-scaffold-test" });
+  db.prepare(
+    `INSERT INTO messages
+     (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    "opaque-z-problem", sessionId, "user",
+    "The production OAuth callback fails nonce validation and blocks sign-in.",
+    "hash:problem", "2026-06-25T12:01:00.000Z", source("opaque-z-problem"), "authoritative"
+  );
+  db.prepare(
+    `INSERT INTO messages
+     (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    "opaque-a-decision", sessionId, "assistant",
+    "Decided to adopt a signed nonce store for callback validation.",
+    "hash:decision", "2026-06-25T12:01:30.000Z", source("opaque-a-decision"), "authoritative"
+  );
+  db.prepare(
+    `INSERT INTO messages
+     (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    "opaque-y-alternative", sessionId, "assistant",
+    "The alternative considered was retaining stateless callback validation with shorter expiry.",
+    "hash:alternative", "2026-06-25T12:01:45.000Z", source("opaque-y-alternative"), "authoritative"
+  );
+  db.prepare(
+    `INSERT INTO file_effects
+     (file_effect_id, session_id, path, effect_kind, observed_at, source_ref_json)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(
+    "opaque-b-change", sessionId, "auth/callback.ts", "modified",
+    "2026-06-25T12:02:00.000Z", source("opaque-b-change")
+  );
+  db.prepare(
+    `INSERT INTO messages
+     (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    "opaque-x-performed-action", sessionId, "assistant",
+    "Cleared the stale nonce, bound the replacement nonce, and retried callback validation.",
+    "hash:performed-action", "2026-06-25T12:02:15.000Z", source("opaque-x-performed-action"), "authoritative"
+  );
+  db.prepare(
+    `INSERT INTO messages
+     (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    "opaque-root-cause", sessionId, "assistant",
+    "OAuth callback validation failed because the stored state nonce was stale.",
+    "hash:root-cause", "2026-06-25T12:02:30.000Z", source("opaque-root-cause"), "authoritative"
+  );
+  db.prepare(
+    `INSERT INTO tool_calls
+     (tool_call_id, session_id, tool_name, started_at, source_ref_json)
+     VALUES (?, ?, ?, ?, ?)`
+  ).run(
+    "opaque-c-verify-call", sessionId, "vitest", "2026-06-25T12:03:00.000Z", source("opaque-c-verify-call")
+  );
+  db.prepare(
+    `INSERT INTO tool_results
+     (tool_result_id, tool_call_id, session_id, status, output_redacted, exit_code, completed_at, source_ref_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    "opaque-c-verify", "opaque-c-verify-call", sessionId, "succeeded",
+    "OAuth callback tests passed with nonce validation verified.", 0,
+    "2026-06-25T12:03:00.000Z", source("opaque-c-verify")
+  );
+  return {
+    alternative: "message:opaque-y-alternative",
+    change: "file:opaque-b-change",
+    decision: "message:opaque-a-decision",
+    performedAction: "message:opaque-x-performed-action",
+    problem: "message:opaque-z-problem",
+    rootCause: "message:opaque-root-cause",
+    verification: "tool_result:opaque-c-verify"
+  };
+}
+
+function seedCompactScaffoldEvidence(db: MastheadDatabase, sessionId: string, combinedText: string) {
+  const insert = db.prepare(
+    `INSERT INTO messages
+     (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  );
+  insert.run(
+    "compact-z-problem", sessionId, "user",
+    "OAuth callback nonce validation fails and blocks sign-in.",
+    "hash:compact-problem", "2026-06-25T12:04:00.000Z", "{}", "authoritative"
+  );
+  insert.run(
+    "compact-a-combined", sessionId, "assistant", combinedText,
+    "hash:compact-combined", "2026-06-25T12:05:00.000Z", "{}", "authoritative"
+  );
+  insert.run(
+    "compact-m-irrelevant", sessionId, "assistant",
+    "The workspace remains available for later follow-up.",
+    "hash:compact-irrelevant", "2026-06-25T12:06:00.000Z", "{}", "authoritative"
+  );
+  return {
+    combined: "message:compact-a-combined",
+    irrelevant: "message:compact-m-irrelevant",
+    problem: "message:compact-z-problem"
+  };
+}
+
 function bundleFor(
   assignment: GuidedAuthoringAssignmentDto,
   overrides: Partial<GuidedAuthoringBundleV4> = {}
@@ -849,6 +1669,181 @@ function bundleFor(
     opportunityDispositions: [],
     sessionEnrichments: [],
     ...overrides
+  };
+}
+
+function testIdentity() {
+  return {
+    baseUrl: "http://127.0.0.1:17373",
+    buildSha: "build:test",
+    databaseId: "database:test",
+    instanceId: "instance:test",
+    instanceManifest: "/tmp/masthead-instance.json"
+  };
+}
+
+function createGuidedRequest(
+  db: MastheadDatabase,
+  input: Omit<Parameters<typeof createGuidedRequestService>[1], "expectedIdentity">
+) {
+  return createGuidedRequestService(db, { ...input, expectedIdentity: input.currentIdentity });
+}
+
+function startGuidedAssignment(
+  db: MastheadDatabase,
+  input: Omit<Parameters<typeof startGuidedAssignmentService>[1], "currentIdentity" | "expectedIdentity">
+) {
+  const identity = testIdentity();
+  return startGuidedAssignmentService(db, { ...input, currentIdentity: identity, expectedIdentity: identity });
+}
+
+function inspectGuidedAssignment(
+  db: MastheadDatabase,
+  input: Omit<Parameters<typeof inspectGuidedAssignmentService>[1], "currentIdentity" | "expectedIdentity">
+) {
+  const identity = testIdentity();
+  return inspectGuidedAssignmentService(db, { ...input, currentIdentity: identity, expectedIdentity: identity });
+}
+
+function saveInput(assignment: GuidedAuthoringAssignmentDto, draft: GuidedAuthoringBundleV4) {
+  const identity = testIdentity();
+  return {
+    assignmentId: assignment.assignmentId,
+    command: "masthead",
+    currentIdentity: identity,
+    draft,
+    expectedIdentity: identity
+  };
+}
+
+function decisionInput(review: ReturnType<typeof reviewGuidedAssignment>) {
+  const identity = testIdentity();
+  return {
+    assignmentId: review.assignmentId,
+    command: "masthead",
+    currentIdentity: identity,
+    draftRevision: review.draftRevision!,
+    evidenceRevision: review.evidenceRevision,
+    expectedIdentity: identity,
+    notes: "The evidence-backed canary is ready.",
+    requestId: review.requestId,
+    reviewedBy: "operator:test"
+  };
+}
+
+function finishInput(assignmentId: string) {
+  const identity = testIdentity();
+  return { assignmentId, command: "masthead", currentIdentity: identity, expectedIdentity: identity };
+}
+
+function inspectAllAssignmentEvidence(db: MastheadDatabase, assignment: GuidedAuthoringAssignmentDto): void {
+  for (const sessionId of assignment.sessionIds) {
+    inspectGuidedAssignment(db, {
+      assignmentId: assignment.assignmentId,
+      command: "masthead",
+      limit: 100,
+      sessionId
+    });
+  }
+}
+
+function seedReadyPublicationAssignment(db: MastheadDatabase): GuidedAuthoringAssignmentDto {
+  const created = createGuidedRequest(db, requestInput(["session:0"]));
+  const assignment = getGuidedAssignment(db, created.request.currentAssignmentId!)!;
+  inspectGuidedAssignment(db, { assignmentId: assignment.assignmentId, command: "masthead", limit: 100 });
+  vi.spyOn(guidedQuality, "validateGuidedAuthoringDraft").mockReturnValue({ accepted: true, findings: [] });
+  const staged = saveGuidedDraft(db, saveInput(assignment, publicationBundle(assignment)));
+  approveGuidedCanary(db, decisionInput(staged));
+  return getGuidedAssignment(db, assignment.assignmentId)!;
+}
+
+function publicationBundle(assignment: GuidedAuthoringAssignmentDto): GuidedAuthoringBundleV4 {
+  return {
+    artifacts: [],
+    assignmentId: assignment.assignmentId,
+    bundleVersion: "workbench-authoring-v4",
+    evidenceRevision: assignment.evidenceRevision,
+    opportunityDispositions: [],
+    sessionEnrichments: assignment.sessionIds.map((sessionId) => ({
+      claimSupport: [],
+      enrichment: {
+        sessionDossier: {
+          blockers: [],
+          continuation: { constraints: ["Keep the callback contract stable."], openQuestions: [] },
+          decisions: ["Keep callback verification local and deterministic."],
+          evidenceRefs: [],
+          keyWork: ["Repaired the OAuth callback path and verified the resulting state."],
+          outcome: "The OAuth callback now returns the authenticated session safely.",
+          purpose: "Repair the OAuth authentication callback for this application.",
+          verification: {
+            commands: ["npm test"],
+            evidenceRefs: [],
+            failures: [],
+            status: "passed",
+            summary: "The focused callback verification completed successfully."
+          },
+          warnings: []
+        },
+        sessionSummary: {
+          confidence: "high",
+          evidenceRefs: [],
+          state: "completed",
+          text: "Repaired and verified the OAuth authentication callback."
+        },
+        sessionTitle: {
+          basis: "dominant_work",
+          confidence: "high",
+          evidenceRefs: [],
+          text: "Repair OAuth authentication callback"
+        },
+        source: "manual",
+        version: "session-capsule-v4"
+      },
+      sessionId
+    }))
+  };
+}
+
+function tableCount(db: MastheadDatabase, table: string): number {
+  return Number((db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }).count);
+}
+
+function publicationCounts(db: MastheadDatabase): Record<string, unknown> {
+  return {
+    artifacts: tableCount(db, "session_artifacts"),
+    enrichmentProvenance: tableCount(db, "guided_authoring_enrichment_provenance"),
+    enrichments: tableCount(db, "session_enrichments"),
+    request: db.prepare(
+      `SELECT status, completed_at AS completedAt,
+              (SELECT COUNT(*) FROM guided_authoring_request_sessions WHERE state = 'completed') AS completedSessionCount
+       FROM guided_authoring_requests LIMIT 1`
+    ).get(),
+    assignment: db.prepare(
+      `SELECT status, receipt_json AS receiptJson, completed_at AS completedAt
+       FROM guided_authoring_assignments LIMIT 1`
+    ).get(),
+    workbench: db.prepare(
+      `SELECT publication_status AS publicationStatus, session_enrichment_status AS enrichmentStatus,
+              session_dossier_status AS dossierStatus, next_action AS nextAction
+       FROM workbench_session_state WHERE session_id = 'session:0'`
+    ).get()
+  };
+}
+
+function approvalIsolationState(db: MastheadDatabase): Record<string, unknown> {
+  return {
+    artifacts: tableCount(db, "session_artifacts"),
+    enrichmentProvenance: tableCount(db, "guided_authoring_enrichment_provenance"),
+    enrichments: tableCount(db, "session_enrichments"),
+    requestSessions: db.prepare(
+      `SELECT session_id AS sessionId, state FROM guided_authoring_request_sessions ORDER BY ordinal`
+    ).all(),
+    workbench: db.prepare(
+      `SELECT session_id AS sessionId, publication_status AS publicationStatus,
+              session_enrichment_status AS enrichmentStatus, session_dossier_status AS dossierStatus,
+              next_action AS nextAction
+       FROM workbench_session_state ORDER BY session_id`
+    ).all()
   };
 }
 

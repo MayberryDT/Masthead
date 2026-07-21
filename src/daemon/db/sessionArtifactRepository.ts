@@ -3,10 +3,14 @@ import { stableRecordId } from "../identity.ts";
 import type { PublishedSessionDossierV1 } from "../../shared/sessionDossier.ts";
 import { type MastheadDatabase, withImmediateTransaction } from "./sqlite.ts";
 import { listCompletedV1AuthoringRunsForRecovery } from "./workbenchAuthoringRepository.ts";
+import {
+  bumpDataRevisionInTransaction,
+  withDataRevisionOperation
+} from "./dataRevisionRepository.ts";
 
 export type SessionArtifactKind = "session_dossier" | "runbook" | "adr" | "incident_timeline";
 export type SessionArtifactStatus = "current" | "superseded" | "invalid";
-export type SessionArtifactPublicationStatus = "applied" | "published";
+export type SessionArtifactPublicationStatus = "applied" | "published" | "invalidated";
 export type SessionArtifactConfidence = "high" | "medium" | "low";
 
 export type SessionArtifactInput = {
@@ -83,6 +87,26 @@ export type SearchPublishedArtifactsQuery = {
 
 export const FAILED_V1_DOSSIER_COUNT = 1_283;
 export const FAILED_V1_RUN_COUNT = 66;
+
+/** Invalidates an already audited exact artifact set without deleting immutable bodies or provenance. */
+export function invalidatePublishedArtifactsForRecoveryInTransaction(
+  db: MastheadDatabase,
+  input: { artifactIds: string[]; updatedAt: string }
+): { invalidatedArtifacts: number; searchRowsDeleted: number } {
+  if (!db.isTransaction) throw new Error("artifact_recovery_transaction_required");
+  if (input.artifactIds.length === 0) throw new Error("artifact_recovery_empty_target");
+  const placeholders = input.artifactIds.map(() => "?").join(",");
+  const invalidatedArtifacts = Number(db.prepare(
+    `UPDATE session_artifacts
+     SET status = 'superseded', publication_status = 'invalidated', updated_at = ?
+     WHERE artifact_id IN (${placeholders}) AND status = 'current' AND publication_status = 'published'`
+  ).run(input.updatedAt, ...input.artifactIds).changes);
+  const searchRowsDeleted = Number(db.prepare(
+    `DELETE FROM session_artifact_search WHERE artifact_id IN (${placeholders})`
+  ).run(...input.artifactIds).changes);
+  bumpDataRevisionInTransaction(db, "logbook");
+  return { invalidatedArtifacts, searchRowsDeleted };
+}
 
 export type FailedGenerationAudit = {
   auditHash: string;
@@ -210,13 +234,28 @@ const ARTIFACT_SELECT = `SELECT
 FROM session_artifacts`;
 
 export function applySessionArtifact(db: MastheadDatabase, input: SessionArtifactInput): SessionArtifactRecord {
-  return withImmediateTransaction(db, () => applySessionArtifactInTransaction(db, input));
+  return withDataRevisionOperation(db, () =>
+    withImmediateTransaction(db, () => applySessionArtifactInTransaction(db, input))
+  );
 }
 
 export function applySessionArtifactInTransaction(
   db: MastheadDatabase,
   input: SessionArtifactInput
 ): SessionArtifactRecord {
+  return withDataRevisionOperation(db, () => {
+    const result = applySessionArtifactOperationInTransaction(db, input);
+    if (result.logbookMembershipChanged) {
+      bumpDataRevisionInTransaction(db, "logbook");
+    }
+    return result.artifact;
+  });
+}
+
+function applySessionArtifactOperationInTransaction(
+  db: MastheadDatabase,
+  input: SessionArtifactInput
+): { artifact: SessionArtifactRecord; logbookMembershipChanged: boolean } {
   const artifactInput = {
     ...input,
     signatureKey: normalizeSessionArtifactSignatureKey(input.signatureKey)
@@ -226,9 +265,12 @@ export function applySessionArtifactInTransaction(
 
   const existing = readArtifactByFingerprint(db, artifactInput);
   if (existing) {
-    makeCurrentInTransaction(db, existing);
+    const logbookMembershipChanged = makeCurrentInTransaction(db, existing);
     indexArtifactScope(db, existing);
-    return readArtifactById(db, existing.artifactId)!;
+    return {
+      artifact: readArtifactById(db, existing.artifactId)!,
+      logbookMembershipChanged
+    };
   }
 
   const now = new Date().toISOString();
@@ -241,7 +283,7 @@ export function applySessionArtifactInTransaction(
   const lineageId = resolveLineageId(db, artifactInput, artifactId);
   const capsule = capsuleFieldsFromInput(artifactInput);
 
-  supersedeForApply(db, artifactInput, lineageId);
+  const logbookMembershipChanged = supersedeForApply(db, artifactInput, lineageId);
   db.prepare(
     `INSERT INTO session_artifacts (
       artifact_id, session_id, artifact_kind, status, content_fingerprint, created_at, updated_at,
@@ -273,7 +315,10 @@ export function applySessionArtifactInTransaction(
   );
   replaceProvenance(db, artifactId, provenanceSessionIds);
   indexArtifactScope(db, artifactInput);
-  return readArtifactById(db, artifactId)!;
+  return {
+    artifact: readArtifactById(db, artifactId)!,
+    logbookMembershipChanged
+  };
 }
 
 export function normalizeSessionArtifactSignatureKey(value: unknown): string | undefined {
@@ -285,7 +330,9 @@ export function publishSessionArtifact(
   db: MastheadDatabase,
   artifactId: string
 ): SessionArtifactRecord | undefined {
-  return withImmediateTransaction(db, () => publishSessionArtifactInTransaction(db, artifactId));
+  return withDataRevisionOperation(db, () =>
+    withImmediateTransaction(db, () => publishSessionArtifactInTransaction(db, artifactId))
+  );
 }
 
 export function publishSessionArtifactInTransaction(
@@ -309,6 +356,7 @@ export function publishSessionArtifactInTransaction(
      WHERE artifact_id = ?`
   ).run(now, now, artifactId);
   indexSessionArtifactSearch(db, artifactId);
+  bumpDataRevisionInTransaction(db, "logbook");
   return readArtifactById(db, artifactId)!;
 }
 
@@ -485,7 +533,7 @@ export function invalidateFailedV1Generation(
 ): FailedGenerationReceipt {
   if (!/^[a-f0-9]{64}$/u.test(expectedAuditHash)) throw new Error("failed_v1_recovery_audit_hash_invalid");
   if (!recoveryBackup) throw new Error("failed_v1_recovery_backup_evidence_required");
-  return withImmediateTransaction(db, () => {
+  return withDataRevisionOperation(db, () => withImmediateTransaction(db, () => {
     const selection = selectFailedV1Generation(db);
     if (selection.audit.auditHash !== expectedAuditHash) {
       throw new Error(
@@ -563,6 +611,9 @@ export function invalidateFailedV1Generation(
     );
     options.onMutationBoundary?.("activity_recorded");
 
+    bumpDataRevisionInTransaction(db, "logbook");
+    bumpDataRevisionInTransaction(db, "workbench");
+
     return {
       activityId,
       artifactsInvalidated,
@@ -573,7 +624,7 @@ export function invalidateFailedV1Generation(
       searchRowsDeleted,
       sessionsReset
     };
-  });
+  }));
 }
 
 function validateFailedGenerationRecoveryBackup(
@@ -1043,16 +1094,17 @@ function compareRecoveryRows(...keys: string[]): (left: Record<string, unknown>,
 }
 
 export function wipePublishedArtifactState(db: MastheadDatabase): { artifactsDeleted: number; provenanceDeleted: number } {
-  const provenanceDeleted = (
-    db.prepare("SELECT COUNT(*) AS count FROM session_artifact_provenance").get() as { count: number }
-  ).count;
-  const artifactsDeleted = (
-    db.prepare("SELECT COUNT(*) AS count FROM session_artifacts").get() as { count: number }
-  ).count;
-  db.exec("DELETE FROM session_artifact_provenance;");
-  db.exec("DELETE FROM session_artifact_search;");
-  db.exec("DELETE FROM session_artifacts;");
-  db.prepare(
+  return withDataRevisionOperation(db, () => withImmediateTransaction(db, () => {
+    const provenanceDeleted = (
+      db.prepare("SELECT COUNT(*) AS count FROM session_artifact_provenance").get() as { count: number }
+    ).count;
+    const artifactsDeleted = (
+      db.prepare("SELECT COUNT(*) AS count FROM session_artifacts").get() as { count: number }
+    ).count;
+    db.exec("DELETE FROM session_artifact_provenance;");
+    db.exec("DELETE FROM session_artifact_search;");
+    db.exec("DELETE FROM session_artifacts;");
+    db.prepare(
     `UPDATE workbench_session_state
      SET publication_status = 'publish_path',
          published_at = NULL,
@@ -1079,8 +1131,13 @@ export function wipePublishedArtifactState(db: MastheadDatabase): { artifactsDel
            ELSE incident_timeline_status
          END,
          updated_at = ?`
-  ).run(new Date().toISOString());
-  return { artifactsDeleted, provenanceDeleted };
+    ).run(new Date().toISOString());
+    if (artifactsDeleted > 0) {
+      bumpDataRevisionInTransaction(db, "logbook");
+      bumpDataRevisionInTransaction(db, "workbench");
+    }
+    return { artifactsDeleted, provenanceDeleted };
+  }));
 }
 
 function indexArtifactScope(
@@ -1139,23 +1196,37 @@ function resolveLineageId(db: MastheadDatabase, input: SessionArtifactInput, new
   return current?.lineageId ?? newArtifactId;
 }
 
-function supersedeForApply(db: MastheadDatabase, input: SessionArtifactInput, lineageId: string): void {
+function supersedeForApply(db: MastheadDatabase, input: SessionArtifactInput, lineageId: string): boolean {
   const now = new Date().toISOString();
   if (input.signatureKey) {
+    const logbookMembershipChanged = Boolean(db.prepare(
+      `SELECT 1
+       FROM session_artifacts
+       WHERE artifact_kind = ? AND signature_key = ?
+         AND status = 'current' AND publication_status = 'published'
+       LIMIT 1`
+    ).get(input.artifactKind, input.signatureKey));
     db.prepare(
       `UPDATE session_artifacts
        SET status = 'superseded', updated_at = ?
        WHERE artifact_kind = ? AND signature_key = ? AND status = 'current'`
     ).run(now, input.artifactKind, input.signatureKey);
-    return;
+    return logbookMembershipChanged;
   }
   if (input.artifactKind === "session_dossier") {
+    const logbookMembershipChanged = Boolean(db.prepare(
+      `SELECT 1
+       FROM session_artifacts
+       WHERE session_id = ? AND artifact_kind = ?
+         AND status = 'current' AND publication_status = 'published'
+       LIMIT 1`
+    ).get(input.sessionId, input.artifactKind));
     db.prepare(
       `UPDATE session_artifacts
        SET status = 'superseded', updated_at = ?
        WHERE session_id = ? AND artifact_kind = ? AND status = 'current'`
     ).run(now, input.sessionId, input.artifactKind);
-    return;
+    return logbookMembershipChanged;
   }
   // Multi-session capable without signature: supersede same primary session + kind current draft only
   db.prepare(
@@ -1168,6 +1239,7 @@ function supersedeForApply(db: MastheadDatabase, input: SessionArtifactInput, li
      SET status = 'superseded', updated_at = ?
      WHERE session_id = ? AND artifact_kind = ? AND status = 'current' AND publication_status = 'applied'`
   ).run(now, input.sessionId, input.artifactKind);
+  return false;
 }
 
 function replaceProvenance(db: MastheadDatabase, artifactId: string, sessionIds: string[]): void {
@@ -1196,14 +1268,29 @@ function readArtifactById(db: MastheadDatabase, artifactId: string): SessionArti
   return row ? rowToRecord(db, row) : undefined;
 }
 
-function makeCurrentInTransaction(db: MastheadDatabase, artifact: SessionArtifactRecord): void {
+function makeCurrentInTransaction(db: MastheadDatabase, artifact: SessionArtifactRecord): boolean {
   const now = new Date().toISOString();
+  let publishedCompetitorSuperseded = false;
   if (artifact.signatureKey) {
+    publishedCompetitorSuperseded = Boolean(db.prepare(
+      `SELECT 1
+       FROM session_artifacts
+       WHERE artifact_kind = ? AND signature_key = ? AND status = 'current'
+         AND publication_status = 'published' AND artifact_id <> ?
+       LIMIT 1`
+    ).get(artifact.artifactKind, artifact.signatureKey, artifact.artifactId));
     db.prepare(
       `UPDATE session_artifacts SET status = 'superseded', updated_at = ?
        WHERE artifact_kind = ? AND signature_key = ? AND status = 'current' AND artifact_id <> ?`
     ).run(now, artifact.artifactKind, artifact.signatureKey, artifact.artifactId);
   } else if (artifact.artifactKind === "session_dossier") {
+    publishedCompetitorSuperseded = Boolean(db.prepare(
+      `SELECT 1
+       FROM session_artifacts
+       WHERE session_id = ? AND artifact_kind = ? AND status = 'current'
+         AND publication_status = 'published' AND artifact_id <> ?
+       LIMIT 1`
+    ).get(artifact.sessionId, artifact.artifactKind, artifact.artifactId));
     db.prepare(
       `UPDATE session_artifacts SET status = 'superseded', updated_at = ?
        WHERE session_id = ? AND artifact_kind = ? AND status = 'current' AND artifact_id <> ?`
@@ -1212,6 +1299,9 @@ function makeCurrentInTransaction(db: MastheadDatabase, artifact: SessionArtifac
   db.prepare(
     "UPDATE session_artifacts SET status = 'current', updated_at = ? WHERE artifact_id = ? AND status <> 'current'"
   ).run(now, artifact.artifactId);
+  const publishedArtifactReactivated =
+    artifact.publicationStatus === "published" && artifact.status !== "current";
+  return publishedCompetitorSuperseded || publishedArtifactReactivated;
 }
 
 function provenanceFor(db: MastheadDatabase, artifactId: string): string[] {

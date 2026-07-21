@@ -31,6 +31,8 @@ try {
   const result = inspectGuidedAssignment(db, {
     assignmentId: workerData.assignmentId,
     command: "masthead",
+    currentIdentity: workerData.identity,
+    expectedIdentity: workerData.identity,
     limit: 1
   });
   send("committed", { result });

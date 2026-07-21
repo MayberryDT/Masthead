@@ -40,6 +40,11 @@ export type GuidedDraftReviewRecord = {
   createdAt: string;
 };
 
+export type GuidedAuthoringStableRequestBinding = Pick<
+  GuidedAuthoringRequestDto,
+  "baseUrl" | "databaseId" | "buildSha" | "instanceManifest" | "creationInstanceId"
+>;
+
 export type CreateGuidedAuthoringRequestInput = {
   requestId: string;
   actorId: string;
@@ -251,6 +256,23 @@ export function getGuidedAuthoringRequest(
   };
 }
 
+export function getGuidedAuthoringRequestForAssignment(
+  db: MastheadDatabase,
+  assignmentId: string
+): GuidedAuthoringStableRequestBinding | undefined {
+  return db.prepare(
+    `SELECT request.base_url AS baseUrl,
+            request.database_id AS databaseId,
+            request.build_sha AS buildSha,
+            request.instance_manifest AS instanceManifest,
+            request.creation_instance_id AS creationInstanceId
+     FROM guided_authoring_assignments AS assignment
+     JOIN guided_authoring_requests AS request
+       ON request.request_id = assignment.request_id
+     WHERE assignment.assignment_id = ?`
+  ).get(assignmentId) as GuidedAuthoringStableRequestBinding | undefined;
+}
+
 export function getGuidedAssignment(
   db: MastheadDatabase,
   assignmentId: string
@@ -259,8 +281,50 @@ export function getGuidedAssignment(
   return row ? mapAssignment(db, row) : undefined;
 }
 
+export function getGuidedAssignmentReceipt(
+  db: MastheadDatabase,
+  assignmentId: string
+): GuidedAuthoringReceiptDto | undefined {
+  const row = db.prepare(
+    `SELECT receipt_json AS receiptJson
+     FROM guided_authoring_assignments
+     WHERE assignment_id = ?`
+  ).get(assignmentId) as { receiptJson: string | null } | undefined;
+  return row?.receiptJson ? parseJson(row.receiptJson) : undefined;
+}
+
 export function getGuidedAssignments(db: MastheadDatabase, requestId: string): GuidedAuthoringAssignmentDto[] {
   const rows = db.prepare(`${assignmentSelect} WHERE request_id = ? ORDER BY ordinal`).all(requestId) as AssignmentRow[];
+  return rows.map((row) => mapAssignment(db, row));
+}
+
+export function listPendingGuidedCanaryAssignments(
+  db: MastheadDatabase
+): GuidedAuthoringAssignmentDto[] {
+  const rows = db.prepare(
+    `SELECT assignment.assignment_id AS assignmentId, assignment.request_id AS requestId,
+            assignment.ordinal, assignment.status, assignment.canary,
+            assignment.evidence_revision AS evidenceRevision,
+            assignment.current_draft_revision AS currentDraftRevision,
+            assignment.accepted_draft_revision AS acceptedDraftRevision,
+            assignment.receipt_json AS receiptJson, assignment.created_at AS createdAt,
+            assignment.updated_at AS updatedAt, assignment.completed_at AS completedAt
+     FROM guided_authoring_assignments AS assignment
+     JOIN guided_authoring_requests AS request
+       ON request.request_id = assignment.request_id
+     WHERE assignment.canary = 1
+       AND assignment.status = 'staged_canary'
+       AND assignment.accepted_draft_revision IS NOT NULL
+       AND assignment.receipt_json IS NULL
+       AND request.status = 'awaiting_canary_approval'
+       AND NOT EXISTS (
+         SELECT 1 FROM guided_authoring_operator_reviews AS operator_review
+         WHERE operator_review.assignment_id = assignment.assignment_id
+           AND operator_review.draft_revision = assignment.accepted_draft_revision
+       )
+     ORDER BY request.updated_at, request.request_id,
+              assignment.ordinal, assignment.assignment_id`
+  ).all() as AssignmentRow[];
   return rows.map((row) => mapAssignment(db, row));
 }
 
@@ -391,6 +455,48 @@ export function advanceGuidedAssignmentEvidenceRevisionInTransaction(
   return requireGuidedAssignment(db, input.assignmentId);
 }
 
+export function invalidateLockedGuidedAssignmentEvidenceInTransaction(
+  db: MastheadDatabase,
+  input: {
+    assignmentId: string;
+    expectedStatus: "staged_canary" | "ready_to_finish";
+    expectedEvidenceRevision: string;
+    nextEvidenceRevision: string;
+  }
+): { assignment: GuidedAuthoringAssignmentDto; request: GuidedAuthoringRequestDto } {
+  requireNonblank(
+    [input.assignmentId, input.expectedEvidenceRevision, input.nextEvidenceRevision],
+    "invalid_guided_evidence_revision_advance"
+  );
+  const assignment = getAssignmentRow(db, input.assignmentId);
+  if (!assignment) throw new Error("guided_assignment_not_found");
+  const now = new Date().toISOString();
+  const changed = db.prepare(
+    `UPDATE guided_authoring_assignments
+     SET evidence_revision = ?, status = 'investigating', accepted_draft_revision = NULL, updated_at = ?
+     WHERE assignment_id = ? AND status = ? AND evidence_revision = ?
+       AND accepted_draft_revision IS NOT NULL`
+  ).run(
+    input.nextEvidenceRevision,
+    now,
+    input.assignmentId,
+    input.expectedStatus,
+    input.expectedEvidenceRevision
+  );
+  if (changed.changes !== 1) throw new Error("guided_evidence_revision_conflict");
+  if (assignment.canary === 1) {
+    db.prepare(
+      `UPDATE guided_authoring_requests
+       SET status = 'open', canary_approved_at = NULL, canary_approved_by = NULL, updated_at = ?
+       WHERE request_id = ?`
+    ).run(now, assignment.requestId);
+  }
+  return {
+    assignment: requireGuidedAssignment(db, input.assignmentId),
+    request: requireGuidedRequest(db, assignment.requestId)
+  };
+}
+
 export function listGuidedEvidenceAccess(
   db: MastheadDatabase,
   assignmentId: string,
@@ -423,13 +529,11 @@ export function storeGuidedDraftReviewInTransaction(
 ): GuidedAuthoringAssignmentDto {
   const assignment = getAssignmentRow(db, input.assignmentId);
   if (!assignment) throw new Error("guided_assignment_not_found");
-  const approvedCanaryReview = assignment.canary === 1
-    ? db.prepare(
-      `SELECT 1 AS found FROM guided_authoring_operator_reviews
-       WHERE assignment_id = ? AND decision = 'approved' LIMIT 1`
-    ).get(assignment.assignmentId)
-    : undefined;
+  const approvedCanaryReview = currentAcceptedCanaryApproval(db, assignment);
   if (approvedCanaryReview) throw new Error("guided_canary_review_locked");
+  if (!["investigating", "drafting", "needs_revision"].includes(assignment.status)) {
+    throw new Error("guided_assignment_not_draftable");
+  }
   if (
     assignment.status === "completed" ||
     input.draft.assignmentId !== assignment.assignmentId ||
@@ -467,8 +571,17 @@ export function storeGuidedDraftReviewInTransaction(
   db.prepare(
     `UPDATE guided_authoring_assignments
      SET status = ?, current_draft_revision = ?, accepted_draft_revision = ?, updated_at = ?
-     WHERE assignment_id = ?`
-  ).run(status, revision, accepted ? revision : assignment.acceptedDraftRevision, now, assignment.assignmentId);
+     WHERE assignment_id = ? AND status = ? AND evidence_revision = ? AND current_draft_revision = ?`
+  ).run(
+    status,
+    revision,
+    accepted ? revision : null,
+    now,
+    assignment.assignmentId,
+    assignment.status,
+    assignment.evidenceRevision,
+    assignment.currentDraftRevision
+  );
   if (accepted && assignment.canary === 1) {
     db.prepare(
       `UPDATE guided_authoring_requests SET status = 'awaiting_canary_approval', updated_at = ? WHERE request_id = ?`
@@ -528,6 +641,30 @@ export function recordCanaryDecisionInTransaction(
   }
 ): GuidedAuthoringRequestDto {
   requireNonblank([input.requestId, input.assignmentId, input.notes, input.reviewedBy], "invalid_canary_decision");
+  if (!Number.isSafeInteger(input.draftRevision) || input.draftRevision < 1) {
+    throw new Error("invalid_canary_decision");
+  }
+  const assignment = getAssignmentRow(db, input.assignmentId);
+  const request = getGuidedAuthoringRequest(db, input.requestId);
+  const acceptedDraft = assignment
+    ? db.prepare(
+      `SELECT accepted, evidence_revision AS evidenceRevision
+       FROM guided_authoring_draft_reviews
+       WHERE assignment_id = ? AND revision = ?`
+    ).get(input.assignmentId, input.draftRevision) as { accepted: number; evidenceRevision: string } | undefined
+    : undefined;
+  if (
+    !assignment ||
+    request?.status !== "awaiting_canary_approval" ||
+    assignment.requestId !== input.requestId ||
+    assignment.canary !== 1 ||
+    assignment.status !== "staged_canary" ||
+    assignment.acceptedDraftRevision !== input.draftRevision ||
+    acceptedDraft?.accepted !== 1 ||
+    acceptedDraft.evidenceRevision !== assignment.evidenceRevision
+  ) {
+    throw new Error("guided_canary_not_ready");
+  }
   const existingDecision = db.prepare(
     `SELECT request_id AS requestId, decision, notes, reviewed_by AS reviewedBy
      FROM guided_authoring_operator_reviews
@@ -549,22 +686,6 @@ export function recordCanaryDecisionInTransaction(
     }
     throw new Error("guided_canary_decision_conflict");
   }
-  const assignment = getAssignmentRow(db, input.assignmentId);
-  const request = getGuidedAuthoringRequest(db, input.requestId);
-  if (
-    !assignment ||
-    request?.status !== "awaiting_canary_approval" ||
-    assignment.requestId !== input.requestId ||
-    assignment.canary !== 1 ||
-    assignment.status !== "staged_canary" ||
-    assignment.acceptedDraftRevision !== input.draftRevision
-  ) {
-    throw new Error("guided_canary_not_ready");
-  }
-  const acceptedDraft = db.prepare(
-    `SELECT accepted FROM guided_authoring_draft_reviews WHERE assignment_id = ? AND revision = ?`
-  ).get(input.assignmentId, input.draftRevision) as { accepted: number } | undefined;
-  if (acceptedDraft?.accepted !== 1) throw new Error("guided_canary_not_ready");
   const now = new Date().toISOString();
   db.prepare(
     `INSERT INTO guided_authoring_operator_reviews
@@ -579,8 +700,11 @@ export function recordCanaryDecisionInTransaction(
     ).run(now, input.reviewedBy, now, input.requestId);
   } else {
     db.prepare(
-      `UPDATE guided_authoring_assignments SET status = 'needs_revision', updated_at = ? WHERE assignment_id = ?`
-    ).run(now, input.assignmentId);
+      `UPDATE guided_authoring_assignments
+       SET status = 'needs_revision', accepted_draft_revision = NULL, updated_at = ?
+       WHERE assignment_id = ? AND status = 'staged_canary'
+         AND accepted_draft_revision = ? AND evidence_revision = ?`
+    ).run(now, input.assignmentId, input.draftRevision, assignment.evidenceRevision);
     db.prepare(
       `UPDATE guided_authoring_requests
        SET status = 'open', canary_approved_at = NULL, canary_approved_by = NULL, updated_at = ?
@@ -618,24 +742,177 @@ export function completeGuidedAssignmentInTransaction(
   const assignment = getAssignmentRow(db, assignmentId);
   if (!assignment) throw new Error("guided_assignment_not_found");
   if (assignment.status === "completed" && assignment.receiptJson) return parseJson(assignment.receiptJson);
+  persistGuidedAssignmentReceiptInTransaction(db, assignmentId, receipt);
+  return transitionGuidedAssignmentAfterReceiptInTransaction(db, assignmentId, receipt).receipt;
+}
+
+export function persistGuidedAssignmentReceiptInTransaction(
+  db: MastheadDatabase,
+  assignmentId: string,
+  receipt: GuidedAuthoringReceiptDto
+): GuidedAuthoringReceiptDto {
+  const assignment = getAssignmentRow(db, assignmentId);
+  if (!assignment) throw new Error("guided_assignment_not_found");
+  if (assignment.status === "completed" && assignment.receiptJson) return parseJson(assignment.receiptJson);
   const request = getGuidedAuthoringRequest(db, assignment.requestId);
-  const approvedCanaryReview = assignment.acceptedDraftRevision === null
+  assertGuidedAssignmentReadyForCompletion(db, assignment, request);
+  validateGuidedAssignmentReceipt(db, assignment, request, receipt);
+  if (assignment.receiptJson) {
+    if (assignment.receiptJson !== JSON.stringify(receipt)) {
+      throw new Error("guided_assignment_receipt_mismatch");
+    }
+    return parseJson(assignment.receiptJson);
+  }
+  const persisted = db.prepare(
+    `UPDATE guided_authoring_assignments
+     SET receipt_json = ?, updated_at = ?
+     WHERE assignment_id = ? AND status = ? AND evidence_revision = ?
+       AND accepted_draft_revision = ? AND receipt_json IS NULL`
+  ).run(
+    JSON.stringify(receipt),
+    receipt.completedAt,
+    assignment.assignmentId,
+    assignment.status,
+    assignment.evidenceRevision,
+    assignment.acceptedDraftRevision
+  );
+  if (persisted.changes !== 1) throw new Error("guided_assignment_receipt_conflict");
+  return receipt;
+}
+
+export function transitionGuidedAssignmentAfterReceiptInTransaction(
+  db: MastheadDatabase,
+  assignmentId: string,
+  receipt: GuidedAuthoringReceiptDto
+): { receipt: GuidedAuthoringReceiptDto; request: GuidedAuthoringRequestDto } {
+  const assignment = getAssignmentRow(db, assignmentId);
+  if (!assignment) throw new Error("guided_assignment_not_found");
+  if (!assignment.receiptJson) throw new Error("guided_assignment_receipt_not_persisted");
+  if (assignment.receiptJson !== JSON.stringify(receipt)) {
+    throw new Error("guided_assignment_receipt_mismatch");
+  }
+  const storedReceipt = parseJson<GuidedAuthoringReceiptDto>(assignment.receiptJson);
+  if (assignment.status === "completed") {
+    return { receipt: storedReceipt, request: requireGuidedRequest(db, assignment.requestId) };
+  }
+  const request = getGuidedAuthoringRequest(db, assignment.requestId);
+  assertGuidedAssignmentReadyForCompletion(db, assignment, request);
+  validateGuidedAssignmentReceipt(db, assignment, request, storedReceipt);
+  const expectedRequestStatus = assignment.canary === 1 ? "awaiting_canary_approval" : "active";
+  const now = storedReceipt.completedAt;
+  const completed = db.prepare(
+    `UPDATE guided_authoring_assignments
+     SET status = 'completed', completed_at = ?, updated_at = ?
+     WHERE assignment_id = ? AND status = ? AND evidence_revision = ?
+       AND accepted_draft_revision = ? AND receipt_json = ?`
+  ).run(
+    now,
+    now,
+    assignment.assignmentId,
+    assignment.status,
+    assignment.evidenceRevision,
+    assignment.acceptedDraftRevision,
+    assignment.receiptJson
+  );
+  if (completed.changes !== 1) throw new Error("guided_assignment_transition_conflict");
+  const sessionIds = assignmentMembership(
+    db,
+    assignmentId,
+    "guided_authoring_assignment_sessions",
+    "session_id"
+  );
+  const completedSessions = db.prepare(
+    `UPDATE guided_authoring_request_sessions SET state = 'completed'
+     WHERE request_id = ? AND state = 'assigned' AND session_id IN (
+       SELECT session_id FROM guided_authoring_assignment_sessions WHERE assignment_id = ?
+     )`
+  ).run(assignment.requestId, assignmentId);
+  if (completedSessions.changes !== sessionIds.length) {
+    throw new Error("guided_assignment_transition_conflict");
+  }
+  const next = db.prepare(
+    `SELECT assignment_id AS assignmentId FROM guided_authoring_assignments
+     WHERE request_id = ? AND status != 'completed' ORDER BY ordinal LIMIT 1`
+  ).get(assignment.requestId) as { assignmentId: string } | undefined;
+  if (next) {
+    const nextSessionIds = assignmentMembership(
+      db,
+      next.assignmentId,
+      "guided_authoring_assignment_sessions",
+      "session_id"
+    );
+    const released = db.prepare(
+      `UPDATE guided_authoring_request_sessions SET state = 'assigned'
+       WHERE request_id = ? AND state = 'pending' AND session_id IN (
+         SELECT session_id FROM guided_authoring_assignment_sessions WHERE assignment_id = ?
+       )`
+    ).run(assignment.requestId, next.assignmentId);
+    if (released.changes !== nextSessionIds.length) {
+      throw new Error("guided_assignment_transition_conflict");
+    }
+    const requestChanged = db.prepare(
+      `UPDATE guided_authoring_requests SET status = 'active', updated_at = ?
+       WHERE request_id = ? AND status = ?`
+    ).run(now, assignment.requestId, expectedRequestStatus);
+    if (requestChanged.changes !== 1) throw new Error("guided_assignment_transition_conflict");
+  } else {
+    const requestChanged = db.prepare(
+      `UPDATE guided_authoring_requests SET status = 'completed', completed_at = ?, updated_at = ?
+       WHERE request_id = ? AND status = ?`
+    ).run(now, now, assignment.requestId, expectedRequestStatus);
+    if (requestChanged.changes !== 1) throw new Error("guided_assignment_transition_conflict");
+  }
+  return { receipt: storedReceipt, request: requireGuidedRequest(db, assignment.requestId) };
+}
+
+function assertGuidedAssignmentReadyForCompletion(
+  db: MastheadDatabase,
+  assignment: AssignmentRow,
+  request: GuidedAuthoringRequestDto | undefined
+): void {
+  const acceptedDraft = assignment.acceptedDraftRevision === null
     ? undefined
     : db.prepare(
-      `SELECT 1 AS found FROM guided_authoring_operator_reviews
-       WHERE assignment_id = ? AND draft_revision = ? AND decision = 'approved' LIMIT 1`
-    ).get(assignment.assignmentId, assignment.acceptedDraftRevision);
-  const ready = assignment.status === "ready_to_finish" || (
+      `SELECT accepted, evidence_revision AS evidenceRevision
+       FROM guided_authoring_draft_reviews
+       WHERE assignment_id = ? AND revision = ?`
+    ).get(assignment.assignmentId, assignment.acceptedDraftRevision) as {
+      accepted: number;
+      evidenceRevision: string;
+    } | undefined;
+  const acceptedDraftIsCurrent = acceptedDraft?.accepted === 1 &&
+    acceptedDraft.evidenceRevision === assignment.evidenceRevision;
+  const approvedCanaryReview = currentAcceptedCanaryApproval(db, assignment);
+  const ready = (assignment.canary === 0 && assignment.status === "ready_to_finish" && acceptedDraftIsCurrent) || (
     assignment.canary === 1 &&
     assignment.status === "staged_canary" &&
     request?.status === "awaiting_canary_approval" &&
+    acceptedDraftIsCurrent &&
     Boolean(approvedCanaryReview)
   );
   if (!ready) throw new Error("guided_assignment_not_ready");
-  const sessionIds = assignmentMembership(db, assignmentId, "guided_authoring_assignment_sessions", "session_id");
-  const opportunityIds = assignmentMembership(db, assignmentId, "guided_authoring_assignment_opportunities", "opportunity_id");
+}
+
+function validateGuidedAssignmentReceipt(
+  db: MastheadDatabase,
+  assignment: AssignmentRow,
+  request: GuidedAuthoringRequestDto | undefined,
+  receipt: GuidedAuthoringReceiptDto
+): void {
+  const sessionIds = assignmentMembership(
+    db,
+    assignment.assignmentId,
+    "guided_authoring_assignment_sessions",
+    "session_id"
+  );
+  const opportunityIds = assignmentMembership(
+    db,
+    assignment.assignmentId,
+    "guided_authoring_assignment_opportunities",
+    "opportunity_id"
+  );
   if (
-    receipt.assignmentId !== assignmentId ||
+    receipt.assignmentId !== assignment.assignmentId ||
     receipt.requestId !== assignment.requestId ||
     receipt.evidenceRevision !== assignment.evidenceRevision ||
     receipt.draftRevision !== assignment.acceptedDraftRevision ||
@@ -645,40 +922,11 @@ export function completeGuidedAssignmentInTransaction(
     request.instanceManifest !== receipt.instanceManifest ||
     !sameOrderedValues(receipt.sessionIds, sessionIds) ||
     !sameOrderedValues(receipt.opportunityIds, opportunityIds) ||
-    !isNonblank(receipt.publicationInstanceId)
+    !isNonblank(receipt.publicationInstanceId) ||
+    !isNonblank(receipt.completedAt)
   ) {
     throw new Error("invalid_guided_assignment_receipt");
   }
-  const now = receipt.completedAt;
-  db.prepare(
-    `UPDATE guided_authoring_assignments
-     SET status = 'completed', receipt_json = ?, completed_at = ?, updated_at = ? WHERE assignment_id = ?`
-  ).run(JSON.stringify(receipt), now, now, assignmentId);
-  db.prepare(
-    `UPDATE guided_authoring_request_sessions SET state = 'completed'
-     WHERE request_id = ? AND session_id IN (
-       SELECT session_id FROM guided_authoring_assignment_sessions WHERE assignment_id = ?
-     )`
-  ).run(assignment.requestId, assignmentId);
-  const next = db.prepare(
-    `SELECT assignment_id AS assignmentId FROM guided_authoring_assignments
-     WHERE request_id = ? AND status != 'completed' ORDER BY ordinal LIMIT 1`
-  ).get(assignment.requestId) as { assignmentId: string } | undefined;
-  if (next) {
-    db.prepare(
-      `UPDATE guided_authoring_request_sessions SET state = 'assigned'
-       WHERE request_id = ? AND session_id IN (
-         SELECT session_id FROM guided_authoring_assignment_sessions WHERE assignment_id = ?
-       )`
-    ).run(assignment.requestId, next.assignmentId);
-    db.prepare("UPDATE guided_authoring_requests SET status = 'active', updated_at = ? WHERE request_id = ?")
-      .run(now, assignment.requestId);
-  } else {
-    db.prepare(
-      `UPDATE guided_authoring_requests SET status = 'completed', completed_at = ?, updated_at = ? WHERE request_id = ?`
-    ).run(now, now, assignment.requestId);
-  }
-  return receipt;
 }
 
 const assignmentSelect = `SELECT assignment_id AS assignmentId, request_id AS requestId, ordinal, status,
@@ -689,6 +937,30 @@ const assignmentSelect = `SELECT assignment_id AS assignmentId, request_id AS re
 
 function getAssignmentRow(db: MastheadDatabase, assignmentId: string): AssignmentRow | undefined {
   return db.prepare(`${assignmentSelect} WHERE assignment_id = ?`).get(assignmentId) as AssignmentRow | undefined;
+}
+
+function currentAcceptedCanaryApproval(
+  db: MastheadDatabase,
+  assignment: AssignmentRow
+): { found: number } | undefined {
+  if (assignment.canary !== 1 || assignment.acceptedDraftRevision === null) return undefined;
+  return db.prepare(
+    `SELECT 1 AS found
+     FROM guided_authoring_operator_reviews AS operator_review
+     JOIN guided_authoring_draft_reviews AS draft_review
+       ON draft_review.assignment_id = operator_review.assignment_id
+      AND draft_review.revision = operator_review.draft_revision
+     WHERE operator_review.assignment_id = ?
+       AND operator_review.decision = 'approved'
+       AND operator_review.draft_revision = ?
+       AND draft_review.evidence_revision = ?
+       AND draft_review.accepted = 1
+     LIMIT 1`
+  ).get(
+    assignment.assignmentId,
+    assignment.acceptedDraftRevision,
+    assignment.evidenceRevision
+  ) as { found: number } | undefined;
 }
 
 function mapAssignment(db: MastheadDatabase, row: AssignmentRow): GuidedAuthoringAssignmentDto {

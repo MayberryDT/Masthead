@@ -1,8 +1,11 @@
 import type { LogbookSearchFilters, LogbookSearchResult, LogbookSort } from "./daemonClient";
 
+export const MAX_LOGBOOK_PAGE_CACHE_ENTRIES = 50;
+
 export type LogbookPageCacheRequest = {
   baseUrl: string;
   filters: LogbookSearchFilters;
+  logbookRevision: number;
   pageIndex: number;
   pageSize: number;
   query: string;
@@ -24,6 +27,7 @@ export function logbookPageCacheKey(request: LogbookPageCacheRequest): string {
   return JSON.stringify({
     baseUrl: request.baseUrl,
     filters: sortSearchFilters(logbookPageSearchFilters(request)),
+    logbookRevision: request.logbookRevision,
     retryKey: request.retryKey ?? 0
   });
 }
@@ -33,7 +37,35 @@ export function readCachedLogbookPage(cache: Map<string, LogbookSearchResult>, r
 }
 
 export function writeCachedLogbookPage(cache: Map<string, LogbookSearchResult>, request: LogbookPageCacheRequest, result: LogbookSearchResult): void {
+  const cachedRequests = [...cache.keys()].map((key) => ({ key, request: parseLogbookPageCacheKey(key) }));
+  const newestRevision = cachedRequests.reduce((revision, entry) => (
+    entry.request?.baseUrl === request.baseUrl
+      ? Math.max(revision, entry.request.logbookRevision)
+      : revision
+  ), -1);
+  if (newestRevision > request.logbookRevision) return;
+  for (const entry of cachedRequests) {
+    if (
+      entry.request?.baseUrl === request.baseUrl &&
+      entry.request.logbookRevision !== request.logbookRevision
+    ) cache.delete(entry.key);
+  }
   cache.set(logbookPageCacheKey(request), result);
+  while (cache.size > MAX_LOGBOOK_PAGE_CACHE_ENTRIES) {
+    const oldestKey = cache.keys().next().value as string | undefined;
+    if (!oldestKey) break;
+    cache.delete(oldestKey);
+  }
+}
+
+function parseLogbookPageCacheKey(key: string): { baseUrl: string; logbookRevision: number } | undefined {
+  try {
+    const parsed = JSON.parse(key) as { baseUrl?: unknown; logbookRevision?: unknown };
+    if (typeof parsed.baseUrl !== "string" || typeof parsed.logbookRevision !== "number") return undefined;
+    return { baseUrl: parsed.baseUrl, logbookRevision: parsed.logbookRevision };
+  } catch {
+    return undefined;
+  }
 }
 
 function compactSearchFilters(filters: LogbookSearchFilters): LogbookSearchFilters {

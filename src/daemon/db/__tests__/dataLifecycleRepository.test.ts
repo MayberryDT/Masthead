@@ -11,6 +11,7 @@ import { applySessionArtifact, publishSessionArtifact } from "../sessionArtifact
 import { getOrCreateDatabaseIdentity, migrateDatabase } from "../schema.ts";
 import { indexSessionSearch } from "../searchRepository.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../sqlite.ts";
+import { getDataRevisions } from "../dataRevisionRepository.ts";
 
 const tempDirs: string[] = [];
 
@@ -20,6 +21,24 @@ afterEach(async () => {
 });
 
 describe("data lifecycle repository", () => {
+  test("increments both revisions for scoped session deletion", async () => {
+    const db = await openTestDatabase();
+    seedScopedAuthoredSession(db, {
+      hostId: "host:target",
+      hostname: "target-host",
+      project: "Target project",
+      runtimeId: "runtime:target",
+      runtimeKind: "target-runtime",
+      sessionId: "session:target"
+    });
+    const before = getDataRevisions(db);
+
+    deleteMastheadData(db, { kind: "session", sessionId: "session:target" });
+
+    expect(getDataRevisions(db)).toEqual({ logbook: before.logbook + 1, workbench: before.workbench + 1 });
+    db.close();
+  });
+
   test("deleteAllMastheadData removes every canonical and derived record", async () => {
     const db = await openTestDatabase();
     const databaseId = getOrCreateDatabaseIdentity(db);

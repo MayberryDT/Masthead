@@ -54,11 +54,21 @@ export type ArtifactProtocolField = {
   value: string;
 };
 
+export const GUIDED_V4_EVIDENCE_FRAMED_MISSING_VERIFICATION_PATTERN =
+  /\b(?:(?:the|available|canonical)\s+){0,2}evidence\s+(?:(?:records?|shows?|contains?)\s+(?:that\s+)?no\s+(?:specific\s+)?verification\s+(?:result|outcome)|does\s+not\s+establish\s+(?:a|any)\s+verification\s+(?:result|outcome))\b/i;
+
+export const GUIDED_V4_HARD_PROTOCOL_PATTERNS = [
+  /\b(?:reusable|supported|grounded) optional[- ]artifact (?:claims?|content|knowledge|outputs?)\b/i,
+  /(?:\bverification\b[^.!?\n]{0,40}\bboundar(?:y|ies)\b|\bboundar(?:y|ies)\b[^.!?\n]{0,40}\bverification\b)/i,
+  GUIDED_V4_EVIDENCE_FRAMED_MISSING_VERIFICATION_PATTERN
+] as const;
+
 export const GUIDED_V4_PROTOCOL_PATTERNS = [
   /\b(?:i|we) (?:read|reviewed|inspected) (?:all|every) (?:the )?(?:evidence|session|transcript)s?\b/i,
   /\b(?:i|we) (?:limited|restricted) (?:my|our|the) claims?\b/i,
   /\b(?:masthead )?workbench author (?:start|inspect|save|review|finish)\b/i,
   /\b(?:next action|handoff|continue in (?:a|the) next (?:task|session))\b/i,
+  ...GUIDED_V4_HARD_PROTOCOL_PATTERNS,
   /<recommended_plugins>[\s\S]*?<\/recommended_plugins>/i,
   /\b(?:AGENTS\.md|system message|developer message|developer instructions)\b/i,
   /\bYou are (?:Codex|an AI assistant)\b/i
@@ -163,10 +173,15 @@ export function findUnsupportedProtocolFields(
     for (const field of fields) {
       for (const pattern of GUIDED_V4_PROTOCOL_PATTERNS) {
         const matchedText = field.value.match(pattern)?.[0];
-        if (!matchedText || options.isSupportedMatch({ path: field.path, matchedText })) continue;
+        const isHardProtocol = GUIDED_V4_HARD_PROTOCOL_PATTERNS.includes(
+          pattern as typeof GUIDED_V4_HARD_PROTOCOL_PATTERNS[number]
+        );
+        if (!matchedText || (!isHardProtocol && options.isSupportedMatch({ path: field.path, matchedText }))) continue;
         findings.push({
           code: options.findingCode,
-          message: `Human-facing artifact text contains unsupported guided-authoring protocol language: ${matchedText}.`,
+          message: pattern === GUIDED_V4_EVIDENCE_FRAMED_MISSING_VERIFICATION_PATTERN
+            ? "State the verification boundary directly in human-facing prose: use 'Verification not run.' when no verification result exists; do not narrate what the evidence records, shows, contains, or fails to establish."
+            : `Human-facing artifact text contains unsupported guided-authoring protocol language: ${matchedText}.`,
           path: field.path
         });
       }
@@ -525,7 +540,7 @@ export function isPositiveVerificationEvidence(
       (exitSucceeded === true || statusSucceeded === true);
     const semanticText = `${evidence.toolName ?? ""} ${evidence.label ?? ""} ${evidence.text}`;
     return succeeded &&
-      /\b(?:build|check|health|lint|smoke|test|tests|verif(?:y|ied|ication))\b/i.test(semanticText) &&
+      /\b(?:build|check|health|lint|probe|smoke|test|tests|verif(?:y|ied|ication))\b/i.test(semanticText) &&
       !hasNegativeVerificationOutcome(evidence.text);
   }
   const checkpointLabel = evidence.label?.trim().toLowerCase() ?? "";
@@ -548,7 +563,8 @@ function supportKindMatchesEvidence(
   if (support.supportKind === "verification") return isPositiveVerificationEvidence(support, evidence);
   if (support.supportKind === "timeline") return Boolean(parseTimestamp(evidence.observedAt));
   if (support.supportKind === "change") {
-    if (evidence.kind === "file_effect" || evidence.kind === "tool_call") return true;
+    if (evidence.kind === "file_effect") return /^changedFiles\[[0-9]+\]$/u.test(support.path);
+    if (evidence.kind === "tool_call") return true;
     return evidence.role === "assistant" && /\b(?:added|aligned|applied|backed\s+up|bound|broadened|built|changed|cleaned|closed|committed|configured|corrected|created|deployed|disabled|edited|enabled|fixed|forced|implemented|installed|launched|migrated|modified|moved|patched|pointed|preserved|published|pushed|recovered|recreated|removed|rendered|repaired|replaced|repointed|restarted|restored|retained|rotated|ran|saved|set|shifted|updated|used|wrote)\b/i.test(evidence.text);
   }
   return true;

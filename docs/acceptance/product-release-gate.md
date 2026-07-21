@@ -1,11 +1,13 @@
 # Masthead Product Release Gate
 
-> **V4 supersession:** The checked V1–V3 items below are preserved historical evidence. They do not
-> prove `workbench-authoring-v4`, authorize production recovery, or satisfy the guided-authoring
+> **V4 release status:** The V4 implementation is present, while the checked V1–V3 items below remain
+> historical evidence only. They do not authorize production recovery or satisfy the guided-authoring
 > release gate. Every V4 item remains unchecked until new evidence is recorded against the exact
 > release candidate.
 
 ## Guided authoring V4 gates
+
+Task 14 fixture status: the hard-metric corpus and isolated-harness cleanup/refusal suites pass locally. The public-interface dogfood, separate fresh-agent report, signed human review, and production canary remain release blockers until their commands complete against the final build. The prior production-copy recovery rehearsal was superseded by Tyler's explicit full reset on 2026-07-20; no legacy corpus or rollback snapshot remains.
 
 - [ ] Capabilities advertise `workbench-authoring-v4`, one next action, and an instance-bound launcher;
       V1, V2, and V3 remain audit-only and mutation attempts return `authoring_contract_retired`.
@@ -19,6 +21,12 @@
       substantive dossier or optional-artifact claim has typed verbatim support.
 - [ ] High-signal opportunities require an evidence-backed disposition, while unsupported optional
       kinds create neither artifacts nor blanket not-applicable output.
+- [ ] Rich synthetic evidence produces and persists at least one runbook, one ADR, and one incident
+      timeline; opportunity and optional-artifact coverage have nonzero denominators, so an all-dossier
+      packet or universal dismissal cannot pass vacuously.
+- [ ] Artifact-only consumer tasks semantically recover a runbook procedure and check, an ADR rationale
+      and rejected alternative, and an ordered incident sequence using only published artifact
+      search/detail; fixture-title echoes and generic verification words fail a negative control.
 - [ ] The failed bulk-template corpus is rejected for incomplete inspection, protocol leakage,
       negligible enrichment, unsupported completion, duplicate templates, and copied dismissals.
 - [ ] The first accepted assignment remains staged until operator approval, then finish publishes one
@@ -28,6 +36,13 @@
 - [ ] Workbench and Logbook refresh after external authoring writes without requiring an app restart.
 - [ ] Isolated fixture, latency, packaged smoke, responsive inspection, and human-reviewed production
       canary evidence are complete under the separate production authorization boundary.
+
+### Task 14 command evidence
+
+- `npx vitest run src/workbench/authoring/__tests__/durableArtifactCorpus.test.ts src/workbench/authoring/__tests__/guidedAgentCanaryHarness.test.ts` must pass the hard metrics, minimal launch package, production refusal, non-production port, and startup/agent/gate cleanup cases.
+- `npm run dogfood:durable-artifacts` must pass through the isolated daemon’s public V4 HTTP surface and emit `durable-artifact-gate-v2` with every hard metric satisfied.
+- `npm run canary:guided-agent -- --agent-command <absolute-wrapper> --report <new-absolute-report.json>` must run the fresh model once, write the unsigned `guided-agent-canary-v1` report with mode `0600`, and fail only the `human_review_not_signed` gate when its trusted machine evidence passes. That trusted evidence must include persisted runbook, ADR, and incident-timeline outputs from rich synthetic evidence, nonzero opportunity and optional-artifact denominators, and semantic artifact-only consumer tasks that cannot pass by repeating fixture-title words plus generic verification language. A human reviews the persisted artifact packet, copies its exact review challenge into a signed receipt, then runs `npm run canary:guided-agent -- --verify-review --report <absolute-report.json> --human-review-file <absolute-review.json>`. Verification never reruns the model and accepts only a post-run receipt bound to the request ID, sorted artifact IDs, and trusted report hash. The wrapper receives only the launch package; the model never receives the report or review file.
+- The root-authorized read-only rehearsal must create the real incident contract from the complete copied population, audit the copy, recover and restore the copy, flush a redacted acceptance record, and remove all rehearsal state. Until that happens, `docs/acceptance/guided-authoring-v3-incident-contract.json` must not be created from fixture or guessed values.
 
 ## Preserved historical V3 release record
 

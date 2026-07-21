@@ -22,12 +22,11 @@ function topLevelHelp(): string {
     "Usage: mastheadctl <command>",
     "",
     "Commands:",
-    "  mastheadctl workbench    Agent-authored local enrichment and artifacts",
+    "  mastheadctl workbench    Guided local enrichment and artifact authoring",
     "  mastheadctl import repair Preview or apply provenance-scoped import repair",
     "",
     "Try:",
-    "  mastheadctl workbench capabilities --json",
-    "  mastheadctl workbench open --database-id <id> --session <id> --json",
+    "  mastheadctl workbench author start --request <request-id> --json",
     `  ${importRepairHelp().trim()}`
   ].join("\n") + "\n";
 }

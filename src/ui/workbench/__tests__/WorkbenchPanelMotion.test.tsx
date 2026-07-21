@@ -2,7 +2,7 @@
 
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { WorkbenchActivityDto, WorkbenchQueueSessionDto } from "../../../shared/workbench";
 import { WorkbenchPanel } from "../WorkbenchPanel";
 
@@ -20,6 +20,7 @@ describe("WorkbenchPanel live update motion", () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    vi.restoreAllMocks();
   });
 
   test("marks only genuinely new sessions and activity after the initial render", () => {
@@ -75,6 +76,51 @@ describe("WorkbenchPanel live update motion", () => {
     expect(sessionRow("incoming").classList.contains("is-new")).toBe(true);
   });
 
+  test("creates the durable request before copying its prompt", async () => {
+    const order: string[] = [];
+    const copyAgentPrompt = vi.fn(async () => {
+      order.push("request");
+      return "durable guided prompt";
+    });
+    vi.spyOn(navigator.clipboard, "writeText").mockImplementation(async (text) => {
+      order.push(`clipboard:${text}`);
+    });
+    const runAction = vi.fn(async () => {
+      order.push("success");
+    });
+    act(() => {
+      root.render(
+        <WorkbenchPanel
+          copyAgentPrompt={copyAgentPrompt}
+          canRun={(kind) => kind === "copy_agent_prompt"}
+          runAction={runAction}
+        />
+      );
+    });
+
+    await act(async () => copyButton().click());
+
+    expect(order).toEqual(["request", "clipboard:durable guided prompt", "success"]);
+  });
+
+  test("does not copy stale text when request creation fails", async () => {
+    const writeText = vi.spyOn(navigator.clipboard, "writeText");
+    act(() => {
+      root.render(
+        <WorkbenchPanel
+          copyAgentPrompt={vi.fn().mockRejectedValue(new Error("request_failed"))}
+          canRun={(kind) => kind === "copy_agent_prompt"}
+          handoffText="stale V3 prompt"
+          runAction={vi.fn()}
+        />
+      );
+    });
+
+    await act(async () => copyButton().click());
+
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
   function sessionRow(id: string): HTMLElement {
     const title = `Session ${id}`;
     const row = Array.from(container.querySelectorAll<HTMLElement>(".workbench-session-table tbody tr"))
@@ -89,6 +135,13 @@ describe("WorkbenchPanel live update motion", () => {
       .find((element) => element.textContent?.includes(summary));
     if (!item) throw new Error(`Missing activity for ${summary}`);
     return item;
+  }
+
+  function copyButton(): HTMLButtonElement {
+    const button = Array.from(container.querySelectorAll("button"))
+      .find((element) => element.textContent?.includes("Copy Agent Prompt"));
+    if (!button) throw new Error("Missing Copy Agent Prompt button");
+    return button;
   }
 });
 

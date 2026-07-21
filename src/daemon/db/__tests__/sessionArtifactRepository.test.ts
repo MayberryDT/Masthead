@@ -1,4 +1,4 @@
-import { access, mkdtemp, readFile, readdir, rm, symlink } from "node:fs/promises";
+import { access, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,6 +21,7 @@ import {
 import { getOrCreateDatabaseIdentity, migrateDatabase } from "../schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../sqlite.ts";
 import { createSingleConsistentBackup } from "../../databaseBackup.ts";
+import { getDataRevisions } from "../dataRevisionRepository.ts";
 import { acquireDatabaseWriterLock, acquireLegacyDataDirectoryGuard } from "../../../core/daemonOwnership.ts";
 import { fingerprintWorkbenchOutput } from "../../../workbench/applyArtifact.ts";
 import {
@@ -189,6 +190,59 @@ describe("session artifact repository", () => {
       project: "Masthead",
       title: "Published runbook"
     });
+  });
+
+  test("increments the Logbook revision for direct artifact publication", async () => {
+    const db = await testDb();
+    seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:abc", title: "Revision" });
+    const applied = applySessionArtifact(db, runbookInput("fp-revision", "Revisioned runbook"));
+    const before = getDataRevisions(db);
+
+    publishSessionArtifact(db, applied.artifactId);
+
+    expect(getDataRevisions(db)).toEqual({ logbook: before.logbook + 1, workbench: before.workbench });
+    db.close();
+  });
+
+  test("does not increment the Logbook revision when applying an unrelated unpublished artifact", async () => {
+    const db = await testDb();
+    seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:abc", title: "Revision" });
+    const published = applySessionArtifact(db, runbookInput("fp-published", "Published runbook"));
+    publishSessionArtifact(db, published.artifactId);
+    const before = getDataRevisions(db);
+
+    applySessionArtifact(db, {
+      ...runbookInput("fp-unrelated", "Unrelated draft"),
+      signatureKey: "signature:unrelated"
+    });
+
+    expect(getDataRevisions(db)).toEqual(before);
+    db.close();
+  });
+
+  test("increments the Logbook revision once when reactivating a superseded published artifact", async () => {
+    const db = await testDb();
+    seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:abc", title: "Revision" });
+    const originalInput = {
+      ...runbookInput("fp-original", "Original runbook"),
+      signatureKey: "signature:shared"
+    };
+    const original = applySessionArtifact(db, originalInput);
+    publishSessionArtifact(db, original.artifactId);
+    const replacement = applySessionArtifact(db, {
+      ...runbookInput("fp-replacement", "Replacement runbook"),
+      signatureKey: "signature:shared"
+    });
+    publishSessionArtifact(db, replacement.artifactId);
+    const before = getDataRevisions(db);
+
+    applySessionArtifact(db, originalInput);
+
+    expect(getDataRevisions(db)).toEqual({
+      logbook: before.logbook + 1,
+      workbench: before.workbench
+    });
+    db.close();
   });
 
   test("finds a published artifact by a body-only phrase", async () => {
@@ -366,6 +420,7 @@ describe("session artifact repository", () => {
     });
     publishSessionArtifact(db, first.artifactId);
     expect(searchPublishedArtifactCapsules(db, { q: "legacy descriptor" }).total).toBe(1);
+    const beforeReplacement = getDataRevisions(db);
 
     const replacement = applySessionArtifact(db, {
       ...runbookInput("fp-new-search", "New runbook"),
@@ -375,6 +430,10 @@ describe("session artifact repository", () => {
 
     expect(searchPublishedArtifactCapsules(db, { q: "legacy descriptor" }).total).toBe(0);
     expect(searchPublishedArtifactCapsules(db, { q: "replacement ownership" }).total).toBe(0);
+    expect(getDataRevisions(db)).toEqual({
+      logbook: beforeReplacement.logbook + 1,
+      workbench: beforeReplacement.workbench
+    });
     publishSessionArtifact(db, replacement.artifactId);
     expect(searchPublishedArtifactCapsules(db, { q: "replacement ownership" }).artifacts).toEqual([
       expect.objectContaining({ artifactId: replacement.artifactId })
@@ -611,6 +670,7 @@ describe("session artifact repository", () => {
     }
 
     const mutableRecoveryBackup = { ...recoveryBackup };
+    const revisionsBefore = getDataRevisions(db);
     const receipt = invalidateFailedV1Generation(db, audit.auditHash, mutableRecoveryBackup, {
       onMutationBoundary(boundary) {
         if (boundary === "search_deleted") mutableRecoveryBackup.auditHash = "0".repeat(64);
@@ -624,6 +684,10 @@ describe("session artifact repository", () => {
       recoveryBackup,
       searchRowsDeleted: FAILED_V1_DOSSIER_COUNT,
       sessionsReset: FAILED_V1_DOSSIER_COUNT
+    });
+    expect(getDataRevisions(db)).toEqual({
+      logbook: revisionsBefore.logbook + 1,
+      workbench: revisionsBefore.workbench + 1
     });
     expect(recoveryCounts(db)).toMatchObject({
       activities: 1,
@@ -770,6 +834,15 @@ describe("session artifact repository", () => {
     await symlink(outsidePath, aliasPath, "file");
     await expect(createSingleConsistentBackup(aliasPath)).rejects.toThrow("outside");
     await expect(access(`${aliasPath}.lease.sqlite`)).rejects.toMatchObject({ code: "ENOENT" });
+
+    const daemonManifestPath = join(tempDir, "runtime", "daemon.json");
+    await writeFile(daemonManifestPath, JSON.stringify({ pid: process.pid }));
+    await expect(createSingleConsistentBackup(databasePath)).rejects.toThrow("database_maintenance_live_daemon_manifest");
+    await writeFile(daemonManifestPath, JSON.stringify({ pid: 2_147_483_647 }));
+    await expect(createSingleConsistentBackup(databasePath)).rejects.toThrow("database_maintenance_stale_daemon_manifest");
+    await writeFile(daemonManifestPath, JSON.stringify({ pid: "stale" }));
+    await expect(createSingleConsistentBackup(databasePath)).rejects.toThrow("database_maintenance_daemon_manifest_invalid");
+    await rm(daemonManifestPath);
 
     const final = await createSingleConsistentBackup(databasePath);
     expect(final.integrityResult).toBe("ok");

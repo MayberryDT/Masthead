@@ -1,6 +1,6 @@
 # Logbook and Workbench (artifact-first)
 
-**Decisions:** [ADR 0011](../docs/adr/0011-artifact-first-logbook.md) (Logbook unit), [ADR 0012](../docs/adr/0012-daemon-owned-artifact-authoring.md) (daemon seam), [ADR 0013](../docs/adr/0013-canonical-dossier-and-candidate-authoring.md) (preserved rendering/evidence findings), [ADR 0014](../docs/adr/0014-agent-led-enriched-artifact-authoring.md) (superseded V3 decision and installed compatibility), [ADR 0015](../docs/adr/0015-guided-authoring-campaigns.md) (accepted V4 target, pending implementation), [ADR 0009](../docs/adr/0009-logbook-only-shows-published-sessions.md) (Workbench pipeline ownership).
+**Decisions:** [ADR 0011](../docs/adr/0011-artifact-first-logbook.md) (Logbook unit), [ADR 0012](../docs/adr/0012-daemon-owned-artifact-authoring.md) (daemon seam), [ADR 0013](../docs/adr/0013-canonical-dossier-and-candidate-authoring.md) (preserved rendering/evidence findings), [ADR 0014](../docs/adr/0014-agent-led-enriched-artifact-authoring.md) (superseded V3 audit history), [ADR 0015](../docs/adr/0015-guided-authoring-campaigns.md) (current implemented V4 contract), [ADR 0009](../docs/adr/0009-logbook-only-shows-published-sessions.md) (Workbench pipeline ownership).
 
 **Language:** `CONTEXT.md`.
 
@@ -69,9 +69,8 @@ a manual exclusion remains sticky.
 
 ## Workbench (guided enriched artifact authoring)
 
-This section defines the accepted V4 target and is pending implementation. The installed runtime
-still exposes selection-scoped V3 compatibility during the cutover; it is not the desired contract
-and must not be used for a new bulk or production enrichment campaign.
+This section defines the current V4 runtime. Selection-scoped V3 records remain readable for audit,
+but their mutation routes are retired and cannot run a new enrichment campaign.
 
 One durable `workbench-authoring-v4` request produces enriched dossiers and any useful optional artifacts:
 
@@ -145,14 +144,10 @@ Prefer for reuse:
 
 Session tools (`search_sessions`, `get_session`, transcript/excerpts) remain for compile evidence, not the primary memory API. See `docs/reference/mcp-tools.md`.
 
-MCP has no authoring mutations. In the current V3 runtime, worktree bridges allow capabilities,
-run status/context/evidence, and advisory-suggestion reads while blocking open, submit, and finish.
-That is compatibility behavior during the cutover, not the desired authoring contract.
-
-The accepted V4 bridge policy is pending implementation: it allows capabilities, guided-request
+MCP has no authoring mutations. The V4 bridge policy allows capabilities, guided-request
 status, pending-canary discovery, and assignment review. It blocks guided-request creation,
 assignment start/claim, progress-recording assignment inspect, draft save, canary decisions, and
-assignment finish. Legacy V3 status and receipt reads remain audit-only after cutover; V3 mutations return
+assignment finish. Legacy V3 status and receipt reads remain audit-only; V3 mutations return
 `authoring_contract_retired`.
 
 ## Anti-patterns for agents

@@ -5,6 +5,13 @@ import type {
   WorkbenchAutomaticArtifactKind,
   WorkbenchClaimSupport
 } from "../../../shared/workbenchAuthoring.ts";
+import type { EvidenceRef } from "../../../core/types.ts";
+import type { GuidedAuthoringBundleV4 } from "../../../shared/guidedAuthoring.ts";
+import type { DurableSessionEnrichment } from "../../../shared/sessionEnrichment.ts";
+import type { SessionDossierDto } from "../../../shared/sessionDossier.ts";
+import type { WorkbenchValidationEvidence } from "../../types.ts";
+import type { GuidedAuthoringValidationInput } from "../guidedAuthoringQuality.ts";
+import { failedV3TemplateBundle } from "./failedV3TemplateCampaign.ts";
 import type { WorkbenchArtifactCandidate } from "../artifactCandidates.ts";
 
 type CorpusEvidence = {
@@ -129,6 +136,20 @@ export const databaseMigrationFailureFixedAndVerified: DurableArtifactCorpusSess
       exitCode: 0
     }
   ]
+};
+
+const oauthPerformedActionEvidence: CorpusEvidence = {
+  id: "message:oauth:action",
+  kind: "message",
+  observedAt: at(1),
+  text: "Implemented callback nonce validation and ran the OAuth callback regression test."
+};
+
+const migrationPerformedActionEvidence: CorpusEvidence = {
+  id: "message:migration:action",
+  kind: "message",
+  observedAt: at(1),
+  text: "Applied the migration 41 repair and ran the migration smoke check on a restored snapshot."
 };
 
 export const explicitArchitectureDecision: DurableArtifactCorpusSession = {
@@ -373,10 +394,443 @@ export const durableArtifactCorpus = [
 
 export const focusedAgentLedCorpus = [
   completedImplementationForEnrichedDossier,
-  databaseMigrationFailureFixedAndVerified,
+  {
+    ...databaseMigrationFailureFixedAndVerified,
+    evidence: [
+      ...databaseMigrationFailureFixedAndVerified.evidence.slice(0, 2),
+      migrationPerformedActionEvidence,
+      ...databaseMigrationFailureFixedAndVerified.evidence.slice(2)
+    ]
+  },
   explicitArchitectureDecision,
   productionIncidentWithRootCause
 ] as const;
+
+export type GuidedQualityCorpusFixtureCase = {
+  caseId: "sparse" | "supported_protocol" | "runbook" | "adr" | "incident" | "failed_v3_template";
+  input: GuidedAuthoringValidationInput;
+};
+
+export function buildGuidedQualityCorpusCases(): GuidedQualityCorpusFixtureCase[] {
+  return [
+    { caseId: "sparse", input: guidedDossierOnlyInput("sparse") },
+    { caseId: "supported_protocol", input: guidedDossierOnlyInput("supported_protocol") },
+    { caseId: "runbook", input: guidedArtifactInput("runbook") },
+    { caseId: "adr", input: guidedArtifactInput("adr") },
+    { caseId: "incident", input: guidedArtifactInput("incident_timeline") },
+    { caseId: "failed_v3_template", input: guidedFailedTemplateInput() }
+  ];
+}
+
+export function guidedAcceptedArtifactOutput(
+  kind: "runbook" | "adr" | "incident_timeline"
+): Record<string, unknown> {
+  if (kind === "runbook") return guidedRunbookOutput();
+  if (kind === "adr") return guidedAdrOutput();
+  return guidedIncidentOutput();
+}
+
+function guidedDossierOnlyInput(kind: "sparse" | "supported_protocol"): GuidedAuthoringValidationInput {
+  const sessionId = kind === "sparse" ? "session:guided:sparse" : "session:guided:protocol";
+  const assignmentId = `assignment:guided:${kind}`;
+  const evidenceRevision = `revision:guided:${kind}`;
+  const text = kind === "sparse"
+    ? "The repository orientation identified the Workbench authoring module, but verification was not run."
+    : "The requested work debugged the workbench author save command and confirmed its bundle validation behavior; verification was not run.";
+  const title = kind === "sparse"
+    ? "Map the Workbench authoring boundary"
+    : "Debug workbench author save validation";
+  const purpose = kind === "sparse"
+    ? "Map the repository boundary for Workbench authoring without changing runtime behavior."
+    : "Debug the workbench author save command because that protocol was the requested product subject.";
+  const outcome = kind === "sparse"
+    ? "Located the authoring boundary and recorded the relevant validation module."
+    : "Confirmed how the workbench author save command validates its bundle.";
+  const evidenceRef = `evidence:guided:${kind}`;
+  const evidenceText = `${title}. ${purpose} ${outcome} ${text}`;
+  return guidedInput({
+    assignmentId,
+    evidenceRevision,
+    sessionId,
+    evidence: new Map([[evidenceRef, guidedEvidence(sessionId, "message", evidenceText, { role: "assistant" })]]),
+    enrichment: guidedEnrichment({ evidenceRef, outcome, purpose, summary: text, title }),
+    claimSupport: guidedSessionSupports(evidenceRef, { title, summary: text, purpose, outcome })
+  });
+}
+
+function guidedArtifactInput(kind: "runbook" | "adr" | "incident_timeline"): GuidedAuthoringValidationInput {
+  const sessionId = `session:guided:${kind}`;
+  const assignmentId = `assignment:guided:${kind}`;
+  const evidenceRevision = `revision:guided:${kind}`;
+  const opportunityId = `opportunity:guided:${kind}`;
+  const draftId = `draft:guided:${kind}`;
+  const sessionRef = `evidence:guided:${kind}:session`;
+  const title = kind === "runbook" ? "Recover migration 41 safely"
+    : kind === "adr" ? "Keep canonical sessions local-first"
+      : "Recover a stale writer lease";
+  const purpose = kind === "runbook" ? "Document the migration 41 existing-index recovery procedure."
+    : kind === "adr" ? "Record the durable local-first storage decision and its reversal condition."
+      : "Record the writer-lease outage, cause, recovery, and verification.";
+  const outcome = kind === "runbook" ? "Captured an executable migration recovery with verification and rollback handling."
+    : kind === "adr" ? "Captured the SQLite decision, rejected hosted alternative, and revisit condition."
+      : "Captured the writer-lease incident sequence and verified recovery.";
+  const verification = kind === "runbook"
+    ? { evidenceRef: "evidence:guided:runbook:verification", summary: "Run the migration smoke check and confirm schema version 41." }
+    : kind === "incident_timeline"
+      ? { evidenceRef: "evidence:guided:incident_timeline:verification", summary: "A canary draft saved and published once, and the database integrity check passed." }
+      : undefined;
+  const summary = verification
+    ? `${outcome} ${verification.summary}`
+    : `${outcome} Verification was not run for the dossier enrichment itself.`;
+  const evidence = guidedArtifactEvidence(kind, sessionId, sessionRef, `${title}. ${purpose} ${outcome} ${summary}`);
+  const output = guidedAcceptedArtifactOutput(kind);
+  const artifact = {
+    draftId,
+    kind,
+    seedSessionId: sessionId,
+    provenanceSessionIds: [sessionId],
+    output
+  } satisfies GuidedAuthoringBundleV4["artifacts"][number];
+  const opportunityRef = kind === "runbook" ? "evidence:guided:runbook:problem"
+    : kind === "adr" ? "evidence:guided:adr:decision"
+      : "evidence:guided:incident_timeline:problem";
+  const opportunitySummary = kind === "runbook"
+    ? "A repeated migration recovery procedure needs trigger, verification, and rollback guidance."
+    : kind === "adr"
+      ? "A durable storage decision needs alternatives, consequences, and reversal conditions."
+      : "A production outage needs impact, timeline, root cause, remediation, and recovery verification.";
+  return guidedInput({
+    assignmentId,
+    evidenceRevision,
+    sessionId,
+    evidence,
+    enrichment: guidedEnrichment({ evidenceRef: sessionRef, outcome, purpose, summary, title, verification }),
+    claimSupport: guidedSessionSupports(sessionRef, { title, summary, purpose, outcome, verification }),
+    opportunity: {
+      opportunityId,
+      suggestedKind: kind,
+      signalStrength: "high",
+      summary: opportunitySummary,
+      evidenceRefs: [opportunityRef],
+      provenanceSessionIds: [sessionId]
+    },
+    disposition: {
+      opportunityId,
+      disposition: "authored",
+      rationale: `The ${kind} captures the specific evidence-backed reusable result.`,
+      evidenceRefs: [opportunityRef],
+      artifactKind: kind,
+      artifactDraftId: draftId
+    },
+    artifact
+  });
+}
+
+function guidedInput(input: {
+  assignmentId: string;
+  evidenceRevision: string;
+  sessionId: string;
+  evidence: Map<string, WorkbenchValidationEvidence>;
+  enrichment: DurableSessionEnrichment;
+  claimSupport: WorkbenchClaimSupport[];
+  opportunity?: GuidedAuthoringValidationInput["opportunities"][number];
+  disposition?: GuidedAuthoringBundleV4["opportunityDispositions"][number];
+  artifact?: GuidedAuthoringBundleV4["artifacts"][number];
+}): GuidedAuthoringValidationInput {
+  return {
+    bundle: {
+      bundleVersion: "workbench-authoring-v4",
+      assignmentId: input.assignmentId,
+      evidenceRevision: input.evidenceRevision,
+      sessionEnrichments: [{ sessionId: input.sessionId, enrichment: input.enrichment, claimSupport: input.claimSupport }],
+      opportunityDispositions: input.disposition ? [input.disposition] : [],
+      artifacts: input.artifact ? [input.artifact] : []
+    },
+    assignment: {
+      assignmentId: input.assignmentId,
+      requestId: `request:${input.assignmentId}`,
+      evidenceRevision: input.evidenceRevision,
+      sessionIds: [input.sessionId],
+      opportunityIds: input.opportunity ? [input.opportunity.opportunityId] : []
+    },
+    canonicalDossiersBySession: new Map([[input.sessionId, guidedCanonicalDossier(input.sessionId)]]),
+    evidenceByRef: input.evidence,
+    coverage: [{
+      sessionId: input.sessionId,
+      evidenceRevision: input.evidenceRevision,
+      accessedItems: input.evidence.size,
+      totalItems: input.evidence.size,
+      complete: true
+    }],
+    opportunities: input.opportunity ? [input.opportunity] : [],
+    requestAcceptedDrafts: []
+  };
+}
+
+function guidedEnrichment(input: {
+  evidenceRef: string;
+  title: string;
+  summary: string;
+  purpose: string;
+  outcome: string;
+  verification?: { evidenceRef: string; summary: string };
+}): DurableSessionEnrichment {
+  const ref = guidedEvidenceRef(input.evidenceRef);
+  const verificationRef = input.verification
+    ? guidedEvidenceRef(input.verification.evidenceRef)
+    : undefined;
+  return {
+    version: "session-capsule-v4",
+    sessionTitle: { text: input.title, basis: "dominant_work", confidence: "high", evidenceRefs: [ref] },
+    sessionSummary: { text: input.summary, state: "partial", confidence: "high", evidenceRefs: [ref] },
+    sessionDossier: {
+      purpose: input.purpose,
+      outcome: input.outcome,
+      keyWork: [], decisions: [], blockers: [],
+      verification: input.verification && verificationRef
+        ? { status: "passed", summary: input.verification.summary, commands: [], failures: [], evidenceRefs: [verificationRef] }
+        : { status: "missing", summary: "", commands: [], failures: [], evidenceRefs: [] },
+      continuation: { openQuestions: [], constraints: [] },
+      evidenceRefs: [ref],
+      warnings: input.verification ? [] : ["Verification was not run for this dossier enrichment."]
+    }
+  };
+}
+
+function guidedSessionSupports(
+  evidenceRef: string,
+  claims: {
+    title: string;
+    summary: string;
+    purpose: string;
+    outcome: string;
+    verification?: { evidenceRef: string; summary: string };
+  }
+): WorkbenchClaimSupport[] {
+  const supports: WorkbenchClaimSupport[] = [
+    guidedSupport("/sessionTitle/text", evidenceRef, claims.title, "reuse"),
+    guidedSupport("/sessionSummary/text", evidenceRef, claims.summary, "outcome"),
+    guidedSupport("/sessionDossier/purpose", evidenceRef, claims.purpose, "purpose"),
+    guidedSupport("/sessionDossier/outcome", evidenceRef, claims.outcome, "outcome")
+  ];
+  if (claims.verification) {
+    supports.push(guidedSupport(
+      "/sessionDossier/verification/summary",
+      claims.verification.evidenceRef,
+      claims.verification.summary,
+      "verification"
+    ));
+  }
+  return supports;
+}
+
+function guidedRunbookOutput(): Record<string, unknown> {
+  const problem = "evidence:guided:runbook:problem";
+  const change = "evidence:guided:runbook:change";
+  const verification = "evidence:guided:runbook:verification";
+  return {
+    title: "Recover migration 41 from an existing-index failure",
+    confidence: "high",
+    evidenceRefs: [problem, change, verification],
+    missingEvidence: [],
+    problemSignature: { symptoms: [], errorStrings: [], affectedScope: "Migration 41 fails because the target index already exists." },
+    preconditions: ["A restorable pre-migration database backup is available."],
+    reproSteps: [], deadEnds: [],
+    fixSteps: ["Confirm the existing index definition matches migration 41, then mark the migration applied."],
+    commands: [], changedFiles: [],
+    validationChecks: ["Run the migration smoke check and confirm schema version 41."],
+    environmentRequirements: [],
+    rootCause: "Root cause is unknown from the available evidence.",
+    preventionNotes: [],
+    risksOrGaps: [
+      "Rollback remains required if the existing index definition does not match migration 41.",
+      "If the definitions differ, stop, restore the pre-migration backup, and reconcile the index manually."
+    ],
+    provenanceSessionIds: ["session:guided:runbook"],
+    claimSupport: [
+      guidedSupport("problemSignature.affectedScope", problem, "Migration 41 fails because the target index already exists.", "problem"),
+      guidedSupport("preconditions[0]", problem, "A restorable pre-migration database backup is available.", "problem"),
+      guidedSupport("fixSteps[0]", change, "Confirm the existing index definition matches migration 41, then mark the migration applied.", "change"),
+      guidedSupport("validationChecks[0]", verification, "Run the migration smoke check and confirm schema version 41.", "verification"),
+      guidedSupport("risksOrGaps[0]", problem, "Rollback remains required if the existing index definition does not match migration 41.", "problem"),
+      guidedSupport("risksOrGaps[1]", problem, "If the definitions differ, stop, restore the pre-migration backup, and reconcile the index manually.", "problem")
+    ]
+  };
+}
+
+function guidedAdrOutput(): Record<string, unknown> {
+  const evidenceRef = "evidence:guided:adr:decision";
+  return {
+    title: "Keep canonical Masthead session storage local-first",
+    confidence: "high",
+    evidenceRefs: [evidenceRef],
+    missingEvidence: [],
+    context: "Masthead must preserve offline operation and local ownership of canonical session data.",
+    decision: "Keep the canonical Masthead session database local in SQLite.",
+    status: "accepted",
+    alternatives: ["Make a hosted service the canonical session store."],
+    consequences: ["Revisit when multi-device concurrent writers become a supported product requirement."],
+    affectedPaths: [], supersedes: [],
+    provenanceSessionIds: ["session:guided:adr"],
+    claimSupport: [
+      guidedSupport("context", evidenceRef, "Masthead must preserve offline operation and local ownership of canonical session data.", "problem"),
+      guidedSupport("decision", evidenceRef, "Keep the canonical Masthead session database local in SQLite.", "decision"),
+      guidedSupport("status", evidenceRef, "The local-first storage decision was accepted.", "decision"),
+      guidedSupport("alternatives[0]", evidenceRef, "Make a hosted service the canonical session store.", "alternative"),
+      guidedSupport("consequences[0]", evidenceRef, "Revisit when multi-device concurrent writers become a supported product requirement.", "decision")
+    ]
+  };
+}
+
+function guidedIncidentOutput(): Record<string, unknown> {
+  const problem = "evidence:guided:incident_timeline:problem";
+  const recovery = "evidence:guided:incident_timeline:recovery";
+  const verification = "evidence:guided:incident_timeline:verification";
+  return {
+    title: "Recover Workbench publishing after a stale writer lease",
+    confidence: "high",
+    evidenceRefs: [problem, recovery, verification],
+    missingEvidence: [],
+    symptom: "Workbench publish attempts could not acquire the writer lease.",
+    impact: "Workbench publishing was unavailable while reads remained available.",
+    timeline: [
+      { at: "2026-07-19T12:00:00.000Z", evidenceRefs: [problem], summary: "Workbench publish attempts could not acquire the writer lease." },
+      { at: "2026-07-19T12:05:00.000Z", evidenceRefs: [recovery], summary: "Validate the stale owner, clear the lease, and restart the production daemon." },
+      { at: "2026-07-19T12:10:00.000Z", evidenceRefs: [verification], summary: "A canary draft saved and published once, and the database integrity check passed." }
+    ],
+    rootCause: "A stale writer lease survived an unclean daemon exit.",
+    contributingFactors: ["The unclean exit prevented normal writer-lease cleanup."],
+    remediation: ["Validate the stale owner, clear the lease, and restart the production daemon."],
+    prevention: [],
+    status: "resolved",
+    provenanceSessionIds: ["session:guided:incident_timeline"],
+    claimSupport: [
+      guidedSupport("symptom", problem, "Workbench publish attempts could not acquire the writer lease.", "problem"),
+      guidedSupport("impact", problem, "Workbench publishing was unavailable while reads remained available.", "problem"),
+      guidedSupport("timeline[0].summary", problem, "Workbench publish attempts could not acquire the writer lease.", "timeline"),
+      guidedSupport("timeline[1].summary", recovery, "Validate the stale owner, clear the lease, and restart the production daemon.", "timeline"),
+      guidedSupport("timeline[2].summary", verification, "A canary draft saved and published once, and the database integrity check passed.", "timeline"),
+      guidedSupport("rootCause", problem, "A stale writer lease survived an unclean daemon exit.", "root_cause"),
+      guidedSupport("contributingFactors[0]", problem, "The unclean exit prevented normal writer-lease cleanup.", "problem"),
+      guidedSupport("remediation[0]", recovery, "Validate the stale owner, clear the lease, and restart the production daemon.", "remediation"),
+      guidedSupport("status", verification, "A canary draft saved and published once, and the database integrity check passed.", "verification")
+    ]
+  };
+}
+
+function guidedArtifactEvidence(
+  kind: "runbook" | "adr" | "incident_timeline",
+  sessionId: string,
+  sessionRef: string,
+  sessionText: string
+): Map<string, WorkbenchValidationEvidence> {
+  const evidence = new Map<string, WorkbenchValidationEvidence>([
+    [sessionRef, guidedEvidence(sessionId, "message", sessionText, { role: "assistant" })]
+  ]);
+  if (kind === "runbook") {
+    evidence.set("evidence:guided:runbook:problem", guidedEvidence(sessionId, "message", [
+      "Migration 41 fails because the target index already exists.",
+      "A restorable pre-migration database backup is available.",
+      "Rollback remains required if the existing index definition does not match migration 41.",
+      "If the definitions differ, stop, restore the pre-migration backup, and reconcile the index manually."
+    ].join(" "), { role: "user" }));
+    evidence.set("evidence:guided:runbook:change", guidedEvidence(sessionId, "message", "Implemented the migration 41 recovery: Confirm the existing index definition matches migration 41, then mark the migration applied.", { role: "assistant" }));
+    evidence.set("evidence:guided:runbook:verification", guidedEvidence(sessionId, "tool_result", "Run the migration smoke check and confirm schema version 41.", { role: "tool", status: "passed", exitCode: 0, toolName: "migration smoke test" }));
+  } else if (kind === "adr") {
+    evidence.set("evidence:guided:adr:decision", guidedEvidence(sessionId, "message", [
+      "Masthead must preserve offline operation and local ownership of canonical session data.",
+      "Keep the canonical Masthead session database local in SQLite.",
+      "The local-first storage decision was accepted.",
+      "Make a hosted service the canonical session store.",
+      "Revisit when multi-device concurrent writers become a supported product requirement."
+    ].join(" "), { role: "user" }));
+  } else {
+    evidence.set("evidence:guided:incident_timeline:problem", guidedEvidence(sessionId, "message", [
+      "Workbench publish attempts could not acquire the writer lease.",
+      "Workbench publishing was unavailable while reads remained available.",
+      "A stale writer lease survived an unclean daemon exit.",
+      "The unclean exit prevented normal writer-lease cleanup."
+    ].join(" "), { role: "user", observedAt: "2026-07-19T12:00:00.000Z" }));
+    evidence.set("evidence:guided:incident_timeline:recovery", guidedEvidence(sessionId, "message", "Validate the stale owner, clear the lease, and restart the production daemon.", { role: "assistant", observedAt: "2026-07-19T12:05:00.000Z" }));
+    evidence.set("evidence:guided:incident_timeline:verification", guidedEvidence(sessionId, "tool_result", "A canary draft saved and published once, and the database integrity check passed.", { role: "tool", observedAt: "2026-07-19T12:10:00.000Z", status: "passed", exitCode: 0, toolName: "database integrity check" }));
+  }
+  return evidence;
+}
+
+function guidedEvidence(
+  sessionId: string,
+  kind: WorkbenchValidationEvidence["kind"],
+  text: string,
+  options: Partial<WorkbenchValidationEvidence> = {}
+): WorkbenchValidationEvidence {
+  return {
+    sessionId,
+    kind,
+    role: "system",
+    text,
+    observedAt: "2026-07-19T12:00:00.000Z",
+    lowValue: false,
+    ...options
+  };
+}
+
+function guidedEvidenceRef(id: string): EvidenceRef {
+  return { id, kind: "event", observedAt: "2026-07-19T12:00:00.000Z", source: "guided-quality-corpus" };
+}
+
+function guidedSupport(
+  path: string,
+  evidenceRef: string,
+  excerpt: string,
+  supportKind: WorkbenchClaimSupport["supportKind"]
+): WorkbenchClaimSupport {
+  return { path, evidenceRef, excerpt, supportKind };
+}
+
+function guidedCanonicalDossier(sessionId: string): SessionDossierDto {
+  return {
+    identity: { sessionId }, enrichment: { status: "not_enriched" },
+    coverage: { level: "complete", warnings: [], transcript: {} }, narrative: {}, files: [], tools: [],
+    verification: {}, attention: [], excerpts: [], timeline: [], reuse: {}, artifacts: [],
+    usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, usageRows: 0 }
+  } as unknown as SessionDossierDto;
+}
+
+function guidedFailedTemplateInput(): GuidedAuthoringValidationInput {
+  const sessions = Array.from({ length: 12 }, (_, index) => ({
+    sessionId: `session:guided:template:${index}`,
+    title: "Process selected authoring request",
+    request: "Publish enriched session dossiers and identify reusable operational knowledge",
+    evidence: [
+      { id: `evidence:guided:template:${index}:first`, text: "Publish enriched session dossiers and identify reusable operational knowledge for the selected work." },
+      { id: `evidence:guided:template:${index}:middle`, text: "The implementation changed a session-specific component and recorded its local result." },
+      { id: `evidence:guided:template:${index}:last`, text: "The selected authoring request reached a final response without a recorded verification run." }
+    ]
+  }));
+  const opportunities = (["runbook", "adr", "incident_timeline"] as const).map((kind, index) => ({
+    opportunityId: `opportunity:guided:template:${kind}`,
+    evidenceRefs: [`evidence:guided:template:${index}:middle`],
+    suggestedKind: kind,
+    signalStrength: "high" as const,
+    summary: kind === "runbook" ? "Repeated procedure needs trigger verification and rollback guidance."
+      : kind === "adr" ? "Decision needs alternatives consequences and reversal conditions."
+        : "Incident needs impact timeline root cause remediation and recovery verification.",
+    provenanceSessionIds: [`session:guided:template:${index}`]
+  }));
+  return {
+    bundle: failedV3TemplateBundle({ assignmentId: "assignment:guided:template", evidenceRevision: "revision:guided:template", sessions, opportunities }),
+    assignment: {
+      assignmentId: "assignment:guided:template", requestId: "request:guided:template",
+      evidenceRevision: "revision:guided:template", sessionIds: sessions.map(({ sessionId }) => sessionId),
+      opportunityIds: opportunities.map(({ opportunityId }) => opportunityId)
+    },
+    canonicalDossiersBySession: new Map(sessions.map(({ sessionId }) => [sessionId, guidedCanonicalDossier(sessionId)])),
+    evidenceByRef: new Map(sessions.flatMap((session) => session.evidence.map((item) => [item.id, guidedEvidence(session.sessionId, "message", item.text, { role: "user" })]))),
+    coverage: sessions.map(({ sessionId }) => ({ sessionId, evidenceRevision: "revision:guided:template", accessedItems: 2, totalItems: 3, complete: false })),
+    opportunities,
+    requestAcceptedDrafts: []
+  };
+}
 
 export function corpusSessionIds(): string[] {
   return durableArtifactCorpus.map((session) => session.id);
@@ -384,6 +838,12 @@ export function corpusSessionIds(): string[] {
 
 export function seedDurableArtifactCorpus(db: MastheadDatabase): void {
   seedFocusedAgentLedCorpus(db, durableArtifactCorpus);
+}
+
+export function seedDurableArtifactCorpusWithPerformedActions(db: MastheadDatabase): void {
+  seedDurableArtifactCorpus(db);
+  insertEvidence(db, oauthFailureFixedAndVerified.id, oauthPerformedActionEvidence);
+  insertEvidence(db, databaseMigrationFailureFixedAndVerified.id, migrationPerformedActionEvidence);
 }
 
 export function seedFocusedAgentLedCorpus(
@@ -612,6 +1072,7 @@ function focusedMigrationRunbook(
 ): WorkbenchAuthoringBundleV3["artifacts"][number] {
   const session = requireFocusedSession(sessions, databaseMigrationFailureFixedAndVerified.id);
   const failure = requireFocusedEvidence(session, "tool_result:migration:failure");
+  const action = requireFocusedEvidence(session, "message:migration:action");
   const change = requireFocusedEvidence(session, "file:migration:change");
   const verified = requireFocusedEvidence(session, "tool_result:migration:verified");
   return {
@@ -624,8 +1085,8 @@ function focusedMigrationRunbook(
         durableSupport("problemSignature.affectedScope", failure.id, failure.text, "problem"),
         durableSupport("preconditions[0]", failure.id, failure.text, "problem"),
         durableSupport("reproSteps[0]", failure.id, failure.text, "problem"),
-        durableSupport("fixSteps[0]", change.id, change.text, "change"),
-        durableSupport("commands[0]", change.id, change.text, "change"),
+        durableSupport("fixSteps[0]", action.id, action.text, "change"),
+        durableSupport("commands[0]", action.id, action.text, "change"),
         durableSupport("changedFiles[0]", change.id, change.text, "change"),
         durableSupport("environmentRequirements[0]", failure.id, failure.text, "problem"),
         durableSupport("rootCause", failure.id, failure.text, "root_cause"),
@@ -636,7 +1097,7 @@ function focusedMigrationRunbook(
       confidence: "low",
       deadEnds: [],
       environmentRequirements: ["A restorable database snapshot is available."],
-      evidenceRefs: [failure.id, change.id, verified.id],
+      evidenceRefs: [failure.id, action.id, change.id, verified.id],
       fixSteps: [`Apply the recorded migration change: ${change.text}.`],
       missingEvidence: [],
       preconditions: [failure.text],
@@ -793,6 +1254,8 @@ function durableRunbookOutput(candidate: WorkbenchArtifactCandidate): Record<str
   const problem = "OAuth callback test failed with an invalid state nonce.";
   const changeRef = "file:oauth:change";
   const change = "modified auth/callback.ts";
+  const actionRef = "message:oauth:action";
+  const action = "Implemented callback nonce validation and ran the OAuth callback regression test.";
   const verificationRef = "checkpoint:oauth:verified";
   const verification = "Callback regression test passed after the nonce repair.";
   return {
@@ -803,8 +1266,8 @@ function durableRunbookOutput(candidate: WorkbenchArtifactCandidate): Record<str
       durableSupport("problemSignature.affectedScope", problemRef, problem, "problem"),
       durableSupport("preconditions[0]", problemRef, problem, "problem"),
       durableSupport("reproSteps[0]", problemRef, problem, "problem"),
-      durableSupport("fixSteps[0]", changeRef, change, "change"),
-      durableSupport("commands[0]", changeRef, change, "change"),
+      durableSupport("fixSteps[0]", actionRef, action, "change"),
+      durableSupport("commands[0]", actionRef, action, "change"),
       durableSupport("changedFiles[0]", changeRef, change, "change"),
       durableSupport("environmentRequirements[0]", problemRef, problem, "problem"),
       durableSupport("preventionNotes[0]", verificationRef, verification, "remediation"),
@@ -814,7 +1277,7 @@ function durableRunbookOutput(candidate: WorkbenchArtifactCandidate): Record<str
     confidence: "low",
     deadEnds: [],
     environmentRequirements: ["OAuth callback test environment"],
-    evidenceRefs: [problemRef, changeRef, verificationRef],
+    evidenceRefs: [problemRef, actionRef, changeRef, verificationRef],
     fixSteps: [`Apply the recorded callback change: ${change}.`],
     missingEvidence: [],
     preconditions: ["The callback regression reproduces an invalid state nonce."],

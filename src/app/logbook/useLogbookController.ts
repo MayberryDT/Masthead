@@ -4,6 +4,7 @@ import type { AppSurface } from "../../ui/ObservabilitySidebar";
 import { getLogbookArtifact, getSessionTranscript, listProjects, searchLogbook, type AdapterStatus, type LogbookSearchResult, type LogbookSort } from "../daemonClient";
 import { logbookPageSearchFilters, readCachedLogbookPage, writeCachedLogbookPage, type LogbookPageCacheRequest } from "../logbookPageCache";
 import { CANONICAL_SESSION_DOSSIER_SCHEMA, isPublishedSessionDossierV1, toLogbookInspectorArtifact, type LogbookInspectorArtifact } from "./logbookInspectorModel";
+import { useMastheadDataRevisions } from "../useMastheadDataRevisions";
 
 const LOGBOOK_PAGE_SIZE = 50;
 
@@ -31,6 +32,11 @@ export function useLogbookController({ activeProjectionUrl, activeSurface, adapt
   const [detailError, setDetailError] = useState<string>();
   const pageCacheRef = useRef(new Map<string, LogbookSearchResult>());
   const effectiveRetryKey = retryKey + externalRefreshKey;
+  const { logbook: logbookRevision } = useMastheadDataRevisions({
+    active: activeSurface === "logbook",
+    activeProjectionUrl,
+    isLive
+  });
 
   const loadState = useMemo<LogbookLoadState>(() => {
     if (result) {
@@ -56,13 +62,14 @@ export function useLogbookController({ activeProjectionUrl, activeSurface, adapt
     () => ({
       baseUrl: activeProjectionUrl,
       filters,
+      logbookRevision,
       pageIndex,
       pageSize: LOGBOOK_PAGE_SIZE,
       query,
       retryKey: effectiveRetryKey,
       sort
     }),
-    [activeProjectionUrl, effectiveRetryKey, filters, pageIndex, query, sort]
+    [activeProjectionUrl, effectiveRetryKey, filters, logbookRevision, pageIndex, query, sort]
   );
 
   useEffect(() => {
@@ -84,7 +91,9 @@ export function useLogbookController({ activeProjectionUrl, activeSurface, adapt
         writeCachedLogbookPage(pageCacheRef.current, pageRequest, nextResult);
         setResult(nextResult);
         setError(undefined);
-        setSelectedSessionId(undefined);
+        setSelectedSessionId((current) =>
+          current && !nextResult.sessions.some((session) => session.sessionId === current) ? undefined : current
+        );
       })
       .catch((searchError: unknown) => {
         if (!controller.signal.aborted) {

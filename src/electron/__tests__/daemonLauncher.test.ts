@@ -217,7 +217,16 @@ describe("Electron daemon launcher policy", () => {
   test.each([
     ["bare command", authoringCapabilities("mastheadctl")],
     ["wrong absolute command", authoringCapabilities("/other/mastheadctl")],
-    ["incomplete contract", { ...authoringCapabilities("/tmp/masthead/bin/mastheadctl"), operations: ["open"] }]
+    ["incomplete contract", { ...authoringCapabilities("/tmp/masthead/bin/mastheadctl"), operations: ["open"] }],
+    ["legacy V3 contract", {
+      ...authoringCapabilities("/tmp/masthead/bin/mastheadctl"),
+      bundleVersion: "workbench-authoring-v3",
+      operations: ["suggestions", "open", "status", "evidence", "context", "submit", "finish"]
+    }],
+    ["reordered V4 contract", {
+      ...authoringCapabilities("/tmp/masthead/bin/mastheadctl"),
+      operations: ["inspect", "start", "scaffold", "save", "review", "finish"]
+    }]
   ])("refuses a same-database collector with %s without starting a duplicate", async (_label, capabilities) => {
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
       const url = new URL(String(input));
@@ -483,7 +492,7 @@ function compatibleHealth(dataDirectory: string, databasePath = `${dataDirectory
 
 function authoringCapabilities(command: string) {
   return {
-    bundleVersion: "workbench-authoring-v3",
+    bundleVersion: "workbench-authoring-v4",
     capability: "artifact_authoring",
     command,
     baseUrl: "http://127.0.0.1:17373",
@@ -491,12 +500,11 @@ function authoringCapabilities(command: string) {
     databaseId: "database:test",
     instanceId: "instance:test",
     instanceManifest: "/tmp/masthead/masthead-instance.json",
-    evidencePolicy: "selected_session_canonical_evidence",
-    maxSessionsPerRun: 12,
-    operations: ["suggestions", "open", "status", "evidence", "context", "submit", "finish"],
+    policyVersion: "guided-authoring-v1",
+    maxSessionsPerAssignment: 12,
+    canarySessions: 3,
+    operations: ["start", "inspect", "scaffold", "save", "review", "finish"],
     protocol: "masthead.workbench.authoring/v1",
-    suggestionsAreBinding: false,
-    transport: "daemon_http"
   };
 }
 

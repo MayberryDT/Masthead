@@ -201,7 +201,7 @@ describe("hook ingestion", () => {
         setTimeout(() => {
           response.writeHead(202, { "content-type": "application/json" });
           response.end(JSON.stringify({ ok: true }));
-        }, 500);
+        }, 1_000);
       });
     });
     server.listen(0, "127.0.0.1");
@@ -218,7 +218,9 @@ describe("hook ingestion", () => {
 
     expect(exitCode).toBe(0);
     expect(received).toBe(true);
-    expect(Date.now() - startedAt).toBeLessThan(250);
+    // Keep a wide scheduler margin under the full 3k-test suite while still
+    // proving the hook exits well before the delayed daemon response.
+    expect(Date.now() - startedAt).toBeLessThan(500);
   });
 
   test("hook helper exits zero when Masthead is unavailable", async () => {

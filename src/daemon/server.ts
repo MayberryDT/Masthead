@@ -51,6 +51,7 @@ import {
   getDataSummary,
   type DeleteMastheadDataScope
 } from "./db/dataLifecycleRepository.ts";
+import { getDataRevisions } from "./db/dataRevisionRepository.ts";
 import {
   createImportJob,
   getImportJob,
@@ -2001,10 +2002,13 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     }
 
     if (request.method === "GET" && url.pathname === "/health") {
-
       if (!instanceManifestPublished) {
-        sendJson(request, response, config.allowedOrigins, 503, { ok: false, error: "instance_manifest_not_ready" });
-        return;
+        try {
+          await publishInstanceManifest();
+        } catch {
+          sendJson(request, response, config.allowedOrigins, 503, { ok: false, error: "instance_manifest_not_ready" });
+          return;
+        }
       }
 
       const health = buildMastheadHealth(
@@ -2695,7 +2699,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           identity: guidedIdentity(),
           db: database
         },
-        { body, method: request.method ?? "GET", url }
+        { body, headers: request.headers, method: request.method ?? "GET", url }
       );
       if (result) {
         sendJson(request, response, config.allowedOrigins, result.status, result.body);
@@ -3455,6 +3459,14 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           error: error instanceof Error ? error.message : String(error)
         });
       }
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/data/revisions") {
+      sendJson(request, response, config.allowedOrigins, 200, {
+        ok: true,
+        ...getDataRevisions(database)
+      });
       return;
     }
 

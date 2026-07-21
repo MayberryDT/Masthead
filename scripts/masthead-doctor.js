@@ -12,7 +12,7 @@ import { buildPackagedCliInvocation } from "./packaged-cli-command.js";
 
 const REQUIRED_HOOK_EVENTS = ["SessionStart", "PermissionRequest", "PostToolUse", "Stop"];
 const MASTHEAD_HOOK_MARKER = "masthead-hook.js";
-const AUTHORING_OPERATIONS = ["suggestions", "open", "status", "evidence", "context", "submit", "finish"];
+const AUTHORING_OPERATIONS = ["start", "inspect", "scaffold", "save", "review", "finish"];
 const REQUIRED_CAPABILITIES = [
   "live_projection",
   "canonical_sessions",
@@ -212,14 +212,14 @@ function checkDatabaseIdentity(body) {
 export function inspectAuthoringCapabilities(value, expectedIdentity) {
   const capabilities = isRecord(value) ? value : {};
   const problems = [];
-  const command = stringValue(capabilities.command);
-  const databaseId = stringValue(capabilities.databaseId);
+  const command = typeof capabilities.command === "string" ? capabilities.command : undefined;
+  const databaseId = typeof capabilities.databaseId === "string" ? capabilities.databaseId : undefined;
   const capabilityIdentity = {
-    baseUrl: stringValue(capabilities.baseUrl),
-    buildSha: stringValue(capabilities.buildSha),
+    baseUrl: typeof capabilities.baseUrl === "string" ? capabilities.baseUrl : undefined,
+    buildSha: typeof capabilities.buildSha === "string" ? capabilities.buildSha : undefined,
     databaseId,
-    instanceManifest: stringValue(capabilities.instanceManifest),
-    instanceId: stringValue(capabilities.instanceId)
+    instanceManifest: typeof capabilities.instanceManifest === "string" ? capabilities.instanceManifest : undefined,
+    instanceId: typeof capabilities.instanceId === "string" ? capabilities.instanceId : undefined
   };
   const operations = Array.isArray(capabilities.operations)
     ? capabilities.operations.filter((operation) => typeof operation === "string")
@@ -227,11 +227,17 @@ export function inspectAuthoringCapabilities(value, expectedIdentity) {
 
   if (capabilities.capability !== "artifact_authoring") problems.push("artifact_authoring capability is missing");
   if (capabilities.protocol !== "masthead.workbench.authoring/v1") problems.push("authoring protocol is incompatible");
-  if (capabilities.transport !== "daemon_http") problems.push("authoring transport is not daemon_http");
-  if (capabilities.bundleVersion !== "workbench-authoring-v3") problems.push("authoring bundle version is incompatible");
-  if (capabilities.evidencePolicy !== "selected_session_canonical_evidence") problems.push("authoring evidence policy is incomplete");
-  if (capabilities.maxSessionsPerRun !== 12 || capabilities.suggestionsAreBinding !== false) problems.push("authoring V3 policy is incomplete");
+  if (capabilities.bundleVersion !== "workbench-authoring-v4") problems.push("authoring bundle version is incompatible");
+  if (capabilities.policyVersion !== "guided-authoring-v1") problems.push("guided authoring policy is incompatible");
+  if (capabilities.maxSessionsPerAssignment !== 12) problems.push("guided assignment session limit is incompatible");
+  if (capabilities.canarySessions !== 3) problems.push("guided canary session limit is incompatible");
   if (!command) problems.push("authoring command is missing");
+  else if (!isCanonicalAbsoluteAuthoringPath(command)) problems.push("authoring command is invalid");
+  if (!isCanonicalGuidedAuthoringBaseUrl(capabilities.baseUrl)) problems.push("baseUrl identity is invalid");
+  for (const field of ["databaseId", "buildSha", "instanceId"]) {
+    if (!isRequiredTrimmedString(capabilities[field])) problems.push(`${field} identity is invalid`);
+  }
+  if (!isCanonicalAbsoluteAuthoringPath(capabilities.instanceManifest)) problems.push("instanceManifest identity is invalid");
   if (!isRecord(expectedIdentity)) problems.push("expected authoring identity is missing");
   else {
     for (const field of ["baseUrl", "databaseId", "buildSha", "instanceManifest", "instanceId"]) {
@@ -247,6 +253,36 @@ export function inspectAuthoringCapabilities(value, expectedIdentity) {
   }
 
   return { command, databaseId, identity: capabilityIdentity, ok: problems.length === 0, operations, problems };
+}
+
+function isRequiredTrimmedString(value) {
+  return typeof value === "string" && Boolean(value.trim()) && value === value.trim();
+}
+
+function isCanonicalGuidedAuthoringBaseUrl(value) {
+  if (!isRequiredTrimmedString(value)) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" && !url.username && !url.password && url.pathname === "/" && !url.search && !url.hash && !value.endsWith("/");
+  } catch {
+    return false;
+  }
+}
+
+function isCanonicalAbsoluteAuthoringPath(value) {
+  if (!isRequiredTrimmedString(value) || !(value.startsWith("/") || /^(?:[A-Za-z]:[\\/]|\\\\)/.test(value))) return false;
+  if (value.startsWith("/")) {
+    return (value === "/" || !value.endsWith("/")) &&
+      !value.includes("//") &&
+      value.slice(1).split("/").every((segment) => segment !== "." && segment !== "..");
+  }
+  if (value.includes("/")) return false;
+  const rootLength = value.startsWith("\\\\") ? 2 : 3;
+  const remainder = value.slice(rootLength);
+  return Boolean(remainder) &&
+    !value.endsWith("\\") &&
+    !remainder.includes("\\\\") &&
+    remainder.split("\\").every((segment) => Boolean(segment) && segment !== "." && segment !== "..");
 }
 
 export function inspectInstanceManifestIdentity(manifestValue, healthValue, expectedBaseUrl) {
@@ -346,7 +382,7 @@ async function checkAuthoring() {
       label: "artifact authoring",
       status: ok ? "ok" : "fail",
       message: ok
-        ? `Installed authoring CLI is ready for ${expectedDatabaseId}; open, status, evidence, submit, and finish are available.`
+        ? `Installed guided authoring CLI is ready for ${expectedDatabaseId}; start, inspect, save, review, and finish are available.`
         : "Daemon authoring capabilities, installed command, or CLI database identity are invalid.",
       details: {
         capability: capabilities.capability,

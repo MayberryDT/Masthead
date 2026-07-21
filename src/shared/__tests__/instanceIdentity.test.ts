@@ -8,6 +8,7 @@ import {
   assertStableGuidedRequestBinding,
   canonicalInstancePaths,
   acquireMastheadInstanceManifestGuard,
+  identityFromCapabilities,
   removeOwnedMastheadInstanceManifest,
   writeMastheadInstanceManifestAtomic,
   type GuidedAuthoringExpectedIdentity
@@ -22,6 +23,24 @@ const identity = (instanceId = "instance:current"): GuidedAuthoringExpectedIdent
 });
 
 describe("Masthead instance identity", () => {
+  test("extracts current identity from V4 capabilities", () => {
+    expect(identityFromCapabilities({
+      capability: "artifact_authoring",
+      protocol: "masthead.workbench.authoring/v1",
+      bundleVersion: "workbench-authoring-v4",
+      policyVersion: "guided-authoring-v1",
+      command: "/state/masthead/bin/mastheadctl",
+      baseUrl: "http://127.0.0.1:17373",
+      databaseId: "database:test",
+      buildSha: "build:test",
+      instanceManifest: "/state/masthead/masthead-instance.json",
+      instanceId: "instance:test",
+      maxSessionsPerAssignment: 12,
+      canarySessions: 3,
+      operations: ["start", "inspect", "scaffold", "save", "review", "finish"]
+    })).toEqual(identity("instance:test"));
+  });
+
   test("resolves canonical per-instance manifest and launcher paths", () => {
     expect(canonicalInstancePaths("/state/masthead-production", "linux")).toEqual({
       instanceDir: "/state/masthead-production",

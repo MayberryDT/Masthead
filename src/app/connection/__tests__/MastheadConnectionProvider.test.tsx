@@ -238,12 +238,18 @@ describe("MastheadConnectionProvider helpers", () => {
   });
 
   test("marks bridge health as read_only when writable is false", async () => {
+    const {
+      instanceDir: _instanceDir,
+      instanceManifest: _instanceManifest,
+      authoringCommand: _authoringCommand,
+      ...bridgeRuntime
+    } = currentHealth.runtime;
     vi.stubGlobal(
       "fetch",
       vi.fn(async () =>
         jsonResponse({
           ...currentHealth,
-          runtime: { ...currentHealth.runtime, mode: "read_only_bridge", writable: false }
+          runtime: { ...bridgeRuntime, mode: "read_only_bridge", writable: false }
         })
       )
     );

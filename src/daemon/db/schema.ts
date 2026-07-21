@@ -165,6 +165,16 @@ const migrations = [
     version: 32,
     name: "032_guided_enrichment_provenance",
     path: resolve(currentDir, "migrations/032_guided_enrichment_provenance.sql")
+  },
+  {
+    version: 33,
+    name: "033_data_revisions",
+    path: resolve(currentDir, "migrations/033_data_revisions.sql")
+  },
+  {
+    version: 34,
+    name: "034_artifact_first_summary",
+    path: resolve(currentDir, "migrations/034_artifact_first_summary.sql")
   }
 ];
 
@@ -237,7 +247,8 @@ const criticalTables = [
   "guided_authoring_evidence_access",
   "guided_authoring_draft_reviews",
   "guided_authoring_operator_reviews",
-  "guided_authoring_enrichment_provenance"
+  "guided_authoring_enrichment_provenance",
+  "masthead_data_revisions"
 ];
 
 export function migrateDatabase(db: MastheadDatabase): void {
@@ -265,6 +276,36 @@ export function migrateDatabase(db: MastheadDatabase): void {
   }
   repairHistoricalSchemaDrift(db);
   validateCriticalTables(db);
+}
+
+/**
+ * Applies every unapplied migration inside a transaction already owned by the
+ * caller. Recovery tooling uses this to make schema cutover and data mutation
+ * one rollback boundary; this function never begins or commits a transaction.
+ */
+export function applyPendingMigrationsInTransaction(db: MastheadDatabase): void {
+  if (!db.isTransaction) throw new Error("schema_migration_transaction_required");
+  db.exec("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY NOT NULL, name TEXT NOT NULL, applied_at TEXT NOT NULL);");
+  const appliedRows = db.prepare("SELECT version, name FROM schema_migrations ORDER BY version").all() as Array<{
+    name: string;
+    version: number;
+  }>;
+  const knownByVersion = new Map(migrations.map((migration) => [migration.version, migration.name]));
+  for (const row of appliedRows) {
+    if (knownByVersion.get(row.version) !== row.name) {
+      throw new Error(`schema_migration_ledger_mismatch:${row.version}:${row.name}`);
+    }
+  }
+  const applied = new Set(appliedRows.map((row) => row.version));
+  for (const migration of migrations) {
+    if (applied.has(migration.version)) continue;
+    db.exec(readFileSync(migration.path, "utf8"));
+    db.prepare("INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)").run(
+      migration.version,
+      migration.name,
+      new Date().toISOString()
+    );
+  }
 }
 
 export function hasPendingMigrations(db: MastheadDatabase): boolean {

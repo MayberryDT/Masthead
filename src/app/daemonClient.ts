@@ -26,9 +26,13 @@ import type {
   WorkbenchSessionsResponse
 } from "../shared/workbench";
 import {
-  isWorkbenchAuthoringCapabilitiesDto,
-  type WorkbenchAuthoringCapabilitiesDto
-} from "../shared/workbenchAuthoring";
+  isGuidedAuthoringCapabilitiesDto,
+  type GuidedAuthoringCapabilitiesDto,
+  type GuidedAuthoringExpectedIdentity,
+  type GuidedAuthoringNextAction,
+  type GuidedAuthoringRequestDto,
+  type GuidedAuthoringReviewDto
+} from "../shared/guidedAuthoring";
 
 export type { SessionTranscriptCoverage, SessionTranscriptItem, SessionTranscriptResult };
 export type { SourcesAdvancedDto, SourcesOnboardingScanDto, SourcesSetupDto, SourcesSetupRunRequest };
@@ -212,16 +216,11 @@ export type LogbookSearchResult = {
 export type LogbookSort = "recent" | "oldest" | "duration_desc" | "files_desc" | "tools_desc" | "errors_desc" | "project";
 
 export type LogbookSummary = {
-  sessions: number;
+  artifacts: number;
+  byKind: Record<"session_dossier" | "runbook" | "adr" | "incident_timeline", number>;
   projects: number;
-  runtimes: Array<{ runtime: string; count: number }>;
-  models: Array<{ model: string; count: number }>;
-  lifecycles: Array<{ lifecycle: string; count: number }>;
-  messages: number;
-  toolCalls: number;
-  fileEffects: number;
-  earliestActivityAt?: string;
-  latestActivityAt?: string;
+  earliestPublishedAt?: string;
+  latestPublishedAt?: string;
 };
 
 export type UsageWindow = "today" | "24h" | "7d" | "30d" | "all";
@@ -1308,17 +1307,95 @@ export async function getWorkbenchSessions(
 export async function getWorkbenchAuthoringCapabilities(
   activeProjectionUrl: string,
   options: { signal?: AbortSignal } = {}
-): Promise<WorkbenchAuthoringCapabilitiesDto> {
-  const capabilities = await getJson<WorkbenchAuthoringCapabilitiesDto>(activeProjectionUrl, "/workbench/authoring/capabilities", {
+): Promise<GuidedAuthoringCapabilitiesDto> {
+  const capabilities = await getJson<GuidedAuthoringCapabilitiesDto>(activeProjectionUrl, "/workbench/authoring/capabilities", {
     label: "workbench authoring capabilities",
     signal: options.signal
   });
-  if (!isWorkbenchAuthoringCapabilitiesDto(capabilities)) {
+  if (!isGuidedAuthoringCapabilitiesDto(capabilities)) {
     throw new Error(
-      "Workbench authoring capabilities require the complete daemon-owned contract and an absolute installed command"
+      "Workbench authoring capabilities require the complete guided V4 contract and an absolute installed command"
     );
   }
   return capabilities;
+}
+
+export type CreateGuidedAuthoringRequestInput = {
+  expectedIdentity: GuidedAuthoringExpectedIdentity;
+  databaseId: string;
+  buildSha: string;
+  sessionIds: string[];
+};
+
+export type CreateGuidedAuthoringRequestResponse = {
+  request: GuidedAuthoringRequestDto;
+  nextAction: GuidedAuthoringNextAction & { kind: "claim_next" };
+};
+
+export async function createGuidedAuthoringRequest(
+  activeProjectionUrl: string,
+  input: CreateGuidedAuthoringRequestInput,
+  options: { signal?: AbortSignal } = {}
+): Promise<CreateGuidedAuthoringRequestResponse> {
+  return postJson<CreateGuidedAuthoringRequestResponse>(activeProjectionUrl, "/workbench/authoring/requests", {
+    body: input,
+    label: "create guided authoring request",
+    signal: options.signal
+  });
+}
+
+export async function listPendingGuidedCanaries(
+  activeProjectionUrl: string,
+  options: { signal?: AbortSignal } = {}
+): Promise<GuidedAuthoringReviewDto[]> {
+  return getJson<GuidedAuthoringReviewDto[]>(activeProjectionUrl, "/workbench/authoring/canaries/pending", {
+    label: "pending guided authoring canaries",
+    signal: options.signal
+  });
+}
+
+export type GuidedAuthoringCanaryDecisionInput = {
+  expectedIdentity: GuidedAuthoringExpectedIdentity;
+  requestId: string;
+  assignmentId: string;
+  evidenceRevision: string;
+  draftRevision: number;
+  notes: string;
+  reviewedBy: string;
+};
+
+export function approveGuidedAuthoringCanary(
+  activeProjectionUrl: string,
+  input: GuidedAuthoringCanaryDecisionInput,
+  options: { signal?: AbortSignal } = {}
+): Promise<GuidedAuthoringReviewDto> {
+  return decideGuidedAuthoringCanary(activeProjectionUrl, input, "approved", options);
+}
+
+export function rejectGuidedAuthoringCanary(
+  activeProjectionUrl: string,
+  input: GuidedAuthoringCanaryDecisionInput,
+  options: { signal?: AbortSignal } = {}
+): Promise<GuidedAuthoringReviewDto> {
+  return decideGuidedAuthoringCanary(activeProjectionUrl, input, "rejected", options);
+}
+
+function decideGuidedAuthoringCanary(
+  activeProjectionUrl: string,
+  input: GuidedAuthoringCanaryDecisionInput,
+  decision: "approved" | "rejected",
+  options: { signal?: AbortSignal }
+): Promise<GuidedAuthoringReviewDto> {
+  const { requestId, ...body } = input;
+  return postJson<GuidedAuthoringReviewDto>(
+    activeProjectionUrl,
+    `/workbench/authoring/requests/${encodeURIComponent(requestId)}/canary-decision`,
+    {
+      body: { ...body, decision },
+      label: `${decision === "approved" ? "approve" : "reject"} guided authoring canary`,
+      signal: options.signal
+    }
+  );
 }
 
 export async function getWorkbenchActivity(
@@ -1736,6 +1813,22 @@ export async function getDataSummary(
   if (!response.ok) throw new Error(`data summary request failed: ${response.status}`);
   const body = (await response.json()) as { ok: true; summary: DataSummary };
   return body.summary;
+}
+
+export type MastheadDataRevisions = {
+  logbook: number;
+  workbench: number;
+};
+
+export async function getDataRevisions(
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { signal?: AbortSignal } = {}
+): Promise<MastheadDataRevisions> {
+  const body = await getJson<{ ok: true } & MastheadDataRevisions>(baseUrl, "/data/revisions", {
+    label: "data revisions",
+    signal: options.signal
+  });
+  return { logbook: Number(body.logbook), workbench: Number(body.workbench) };
 }
 
 export async function applyDefaultRetention(

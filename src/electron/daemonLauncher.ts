@@ -13,9 +13,9 @@ import {
   type GuidedAuthoringExpectedIdentity
 } from "../shared/instanceIdentity";
 import {
-  isAbsoluteAuthoringCommand,
-  isWorkbenchAuthoringCapabilitiesDto
+  isAbsoluteAuthoringCommand
 } from "../shared/workbenchAuthoring";
+import { isGuidedAuthoringCapabilitiesDto } from "../shared/guidedAuthoring";
 import { packagedDaemonPaths } from "./pathPolicy";
 import { renderLiveDevInstanceLauncher } from "../core/liveDevLauncher";
 import { classifyDaemonHealth } from "../shared/protocol";
@@ -409,7 +409,7 @@ async function probeCollector(
       signal: AbortSignal.timeout(500)
     });
     const capabilities = capabilitiesResponse.ok ? await capabilitiesResponse.json() : undefined;
-    if (!isWorkbenchAuthoringCapabilitiesDto(capabilities, { expectedCommand: expectedCliCommand })) {
+    if (!isGuidedAuthoringCapabilitiesDto(capabilities, { expectedCommand: expectedCliCommand })) {
       return { state: "same_database_authoring_incompatible" };
     }
     const healthIdentity = identityFromHealth(healthBody);

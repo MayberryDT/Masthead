@@ -3,22 +3,21 @@ import { describe, expect, test } from "vitest";
 import { inspectAuthoringCapabilities, inspectInstanceManifestIdentity, resolveAuthoringCommand } from "../../../scripts/masthead-doctor.js";
 
 describe("Doctor authoring checks", () => {
-  test("requires the complete authoring contract and the health database identity", () => {
+  test("requires the exact guided V4 authoring contract and current instance identity", () => {
     const valid = {
-      bundleVersion: "workbench-authoring-v3",
+      bundleVersion: "workbench-authoring-v4",
       capability: "artifact_authoring",
       command: "/opt/masthead/bin/mastheadctl",
       baseUrl: "http://127.0.0.1:17373",
       buildSha: "build-1",
       databaseId: "database-1",
-      evidencePolicy: "selected_session_canonical_evidence",
       instanceManifest: "/state/masthead/masthead-instance.json",
       instanceId: "instance-1",
-      maxSessionsPerRun: 12,
-      suggestionsAreBinding: false,
-      operations: ["suggestions", "open", "status", "evidence", "context", "submit", "finish"],
-      protocol: "masthead.workbench.authoring/v1",
-      transport: "daemon_http"
+      maxSessionsPerAssignment: 12,
+      canarySessions: 3,
+      operations: ["start", "inspect", "scaffold", "save", "review", "finish"],
+      policyVersion: "guided-authoring-v1",
+      protocol: "masthead.workbench.authoring/v1"
     };
 
     const expected = {
@@ -40,13 +39,52 @@ describe("Doctor authoring checks", () => {
         instanceManifest: valid.instanceManifest,
         instanceId: valid.instanceId
       },
-      operations: ["suggestions", "open", "status", "evidence", "context", "submit", "finish"],
+      operations: ["start", "inspect", "scaffold", "save", "review", "finish"],
       problems: []
     });
-    expect(inspectAuthoringCapabilities({ ...valid, databaseId: "database-2", operations: ["open"] }, expected)).toMatchObject({
-      ok: false,
-      problems: ["databaseId identity mismatch", "authoring operations are incomplete"]
-    });
+
+    const invalidCases = [
+      [{ ...valid, capability: "legacy_authoring" }, "artifact_authoring capability is missing"],
+      [{ ...valid, protocol: "masthead.workbench.authoring/v2" }, "authoring protocol is incompatible"],
+      [{ ...valid, bundleVersion: "workbench-authoring-v3" }, "authoring bundle version is incompatible"],
+      [{ ...valid, policyVersion: "guided-authoring-v2" }, "guided authoring policy is incompatible"],
+      [{ ...valid, maxSessionsPerAssignment: 11 }, "guided assignment session limit is incompatible"],
+      [{ ...valid, canarySessions: 2 }, "guided canary session limit is incompatible"],
+      [{ ...valid, operations: ["inspect", "start", "scaffold", "save", "review", "finish"] }, "authoring operations are incomplete"],
+      [{ ...valid, operations: ["start", "inspect", "save", "review", "finish"] }, "authoring operations are incomplete"],
+      [{ ...valid, operations: [...valid.operations, "open"] }, "authoring operations are incomplete"],
+      [{ ...valid, command: "" }, "authoring command is missing"],
+      [{ ...valid, command: "/opt/other/bin/mastheadctl" }, "authoring command identity mismatch"],
+      [{ ...valid, baseUrl: "http://127.0.0.1:17374" }, "baseUrl identity mismatch"],
+      [{ ...valid, databaseId: "database-2" }, "databaseId identity mismatch"],
+      [{ ...valid, buildSha: "build-2" }, "buildSha identity mismatch"],
+      [{ ...valid, instanceManifest: "/state/other/masthead-instance.json" }, "instanceManifest identity mismatch"],
+      [{ ...valid, instanceId: "instance-2" }, "instanceId identity mismatch"]
+    ] as const;
+    for (const [capabilities, problem] of invalidCases) {
+      const inspected = inspectAuthoringCapabilities(capabilities, expected);
+      expect(inspected.ok).toBe(false);
+      expect(inspected.problems).toContain(problem);
+    }
+
+    const noncanonicalCases = [
+      ["command", ` ${valid.command}`, "authoring command is invalid"],
+      ["command", "/opt/masthead/bin/../bin/mastheadctl", "authoring command is invalid"],
+      ["baseUrl", ` ${valid.baseUrl}`, "baseUrl identity is invalid"],
+      ["baseUrl", `${valid.baseUrl}/`, "baseUrl identity is invalid"],
+      ["databaseId", ` ${valid.databaseId}`, "databaseId identity is invalid"],
+      ["buildSha", `${valid.buildSha} `, "buildSha identity is invalid"],
+      ["instanceManifest", ` ${valid.instanceManifest}`, "instanceManifest identity is invalid"],
+      ["instanceManifest", "/state/masthead/./masthead-instance.json", "instanceManifest identity is invalid"],
+      ["instanceId", `${valid.instanceId} `, "instanceId identity is invalid"]
+    ] as const;
+    for (const [field, value, problem] of noncanonicalCases) {
+      const capabilities = { ...valid, [field]: value };
+      const matchingExpected = { ...expected, [field]: value };
+      const inspected = inspectAuthoringCapabilities(capabilities, matchingExpected);
+      expect(inspected.ok).toBe(false);
+      expect(inspected.problems).toContain(problem);
+    }
   });
 
   test("accepts an executable absolute command or a bare command found on PATH", async () => {

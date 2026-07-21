@@ -66,6 +66,7 @@ const staticReadOnlyBridgePaths = new Set([
   "/projects",
   "/imports",
   "/data/summary",
+  "/data/revisions",
   "/knowledge-flow/summary",
   "/usage/summary",
   "/mcp/status",
@@ -80,6 +81,8 @@ const staticReadOnlyBridgePaths = new Set([
   "/workbench/not-added-summary",
   "/workbench/import-health-summary",
   "/workbench/not-added",
+  "/workbench/authoring/capabilities",
+  "/workbench/authoring/canaries/pending",
   "/logbook/summary",
   "/logbook/artifacts",
   "/logbook/search"
@@ -89,8 +92,7 @@ const staticReadOnlyBridgePostPaths: Record<string, true> = {
   "/imports/repair/preview": true,
   "/mcp/launch-config/validate": true,
   "/mcp/test-connection": true,
-  "/settings/llm-provider/models": true,
-  "/workbench/authoring/suggestions": true
+  "/settings/llm-provider/models": true
 };
 
 export function isAllowedReadOnlyBridgeRequest(method: string | undefined, pathname: string): boolean {
@@ -98,6 +100,8 @@ export function isAllowedReadOnlyBridgeRequest(method: string | undefined, pathn
   if (method !== "GET") return false;
   if (staticReadOnlyBridgePaths.has(pathname)) return true;
   return (
+    /^\/workbench\/authoring\/requests\/[^/]+$/.test(pathname) ||
+    /^\/workbench\/authoring\/assignments\/[^/]+\/(?:review|scaffold)$/.test(pathname) ||
     /^\/workbench\/authoring\/runs\/[^/]+(?:\/(?:context|evidence))?$/.test(pathname) ||
     /^\/settings\/hooks\/[^/]+$/.test(pathname) ||
     /^\/logbook\/artifacts\/[^/]+$/.test(pathname) ||

@@ -22,6 +22,63 @@ describe("published session dossier snapshot", () => {
     );
   });
 
+  test("materializes passed durable verification over stale deterministic presentation fields", () => {
+    const dossier = fixtureSessionDossier();
+    dossier.identity.title = "Deterministic title";
+    dossier.identity.outcome = "No outcome captured.";
+    dossier.narrative.objective = "Deterministic objective";
+    dossier.narrative.finalAssistantMessage = "Completed the authoring workflow without creating reusable optional-artifact claims.";
+    dossier.narrative.liveSummary = "No summary captured.";
+    dossier.narrative.outcome = "No outcome captured.";
+    dossier.durableEnrichment!.sessionDossier.purpose = "Restore the original human-readable dossier.";
+    dossier.durableEnrichment!.sessionDossier.outcome = "The canonical dossier snapshot was restored.";
+    dossier.verification = {
+      commands: dossier.verification.commands,
+      status: "missing",
+      summary: "No reliable verification evidence was captured."
+    };
+    dossier.coverage.warnings.push({
+      code: "verification_missing",
+      message: "Verification evidence was not captured."
+    });
+
+    const snapshot = buildPublishedEnrichedDossierSnapshot(dossier);
+
+    expect(snapshot.identity).toMatchObject({
+      outcome: "The canonical dossier snapshot was restored.",
+      title: "Restore the canonical dossier"
+    });
+    expect(snapshot.narrative).toMatchObject({
+      finalAssistantMessage: "Completed the authoring workflow without creating reusable optional-artifact claims.",
+      liveSummary: "Canonical dossier snapshot restored.",
+      objective: "Restore the original human-readable dossier.",
+      outcome: "The canonical dossier snapshot was restored."
+    });
+    expect(snapshot.verification).toMatchObject({ status: "passed", summary: "Focused tests passed." });
+    expect(snapshot.attention.map(({ kind }) => kind)).not.toContain("missing_verification");
+    expect(snapshot.coverage.warnings.map(({ code }) => code)).not.toContain("verification_missing");
+    expect(dossier.verification.status).toBe("missing");
+    expect(dossier.narrative.finalAssistantMessage).toContain("optional-artifact claims");
+    expect(dossier.attention.map(({ kind }) => kind)).toContain("missing_verification");
+  });
+
+  test("keeps a durable missing-verification boundary honest", () => {
+    const dossier = fixtureSessionDossier();
+    dossier.verification = { commands: [], status: "passed", summary: "Stale deterministic pass." };
+    dossier.durableEnrichment!.sessionDossier.verification = {
+      commands: [],
+      evidenceRefs: [],
+      failures: [],
+      status: "missing",
+      summary: "Verification not run."
+    };
+
+    const snapshot = buildPublishedEnrichedDossierSnapshot(dossier);
+
+    expect(snapshot.verification).toEqual({ commands: [], status: "missing", summary: "Verification not run." });
+    expect(snapshot.attention.map(({ kind }) => kind)).toContain("missing_verification");
+  });
+
   test("preserves every original human-facing section without recursive artifacts", () => {
     const canonical = fixtureSessionDossier();
 

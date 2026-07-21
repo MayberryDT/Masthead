@@ -8,7 +8,7 @@ import { ARTIFACT_CANDIDATE_DETECTOR_REVISION } from "../../../workbench/authori
 import { migrateTestDatabaseThrough } from "./schemaTestHelpers.ts";
 import { seedSession } from "./sessionTestHelpers.ts";
 import { applySessionArtifact, publishSessionArtifact } from "../sessionArtifactRepository.ts";
-import { CURRENT_SCHEMA_VERSION, migrateDatabase } from "../schema.ts";
+import { applyPendingMigrationsInTransaction, CURRENT_SCHEMA_VERSION, migrateDatabase } from "../schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../sqlite.ts";
 import {
   hasWorkbenchArtifactCandidateScan,
@@ -25,6 +25,26 @@ afterEach(async () => {
 });
 
 describe("daemon database schema", () => {
+  test("applies pending migrations inside the caller transaction and rolls them back together", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-db-transactional-migrations-"));
+    tempDirs.push(tempDir);
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+    migrateTestDatabaseThrough(db, 30);
+
+    expect(() => applyPendingMigrationsInTransaction(db)).toThrow("schema_migration_transaction_required");
+    db.exec("BEGIN IMMEDIATE");
+    applyPendingMigrationsInTransaction(db);
+    expect(db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({
+      version: CURRENT_SCHEMA_VERSION
+    });
+    db.exec("ROLLBACK");
+
+    expect(db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 30 });
+    expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'masthead_data_revisions'").get())
+      .toBeUndefined();
+    db.close();
+  });
+
   test("migration 032 adds guided enrichment provenance to a schema-31 database", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-db-v32-guided-provenance-"));
     tempDirs.push(tempDir);
@@ -33,7 +53,7 @@ describe("daemon database schema", () => {
 
     migrateDatabase(db);
 
-    expect(db.prepare("SELECT version, name FROM schema_migrations ORDER BY version DESC LIMIT 1").get()).toEqual({
+    expect(db.prepare("SELECT version, name FROM schema_migrations WHERE version = 32").get()).toEqual({
       name: "032_guided_enrichment_provenance",
       version: 32
     });
@@ -210,7 +230,7 @@ describe("daemon database schema", () => {
     migrateDatabase(db);
     migrateDatabase(db);
 
-    expect(CURRENT_SCHEMA_VERSION).toBe(32);
+    expect(CURRENT_SCHEMA_VERSION).toBe(34);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'virtual') ORDER BY name").all() as Array<{ name: string }>;
     expect(tables.map((row) => row.name)).toEqual(
@@ -282,7 +302,8 @@ describe("daemon database schema", () => {
         "guided_authoring_evidence_access",
         "guided_authoring_draft_reviews",
         "guided_authoring_operator_reviews",
-        "guided_authoring_enrichment_provenance"
+        "guided_authoring_enrichment_provenance",
+        "masthead_data_revisions"
       ])
     );
     const applied = db.prepare("SELECT version, name FROM schema_migrations").all();
@@ -318,7 +339,9 @@ describe("daemon database schema", () => {
       { version: 29, name: "029_import_repair_replacements" },
       { version: 30, name: "030_session_search_rowids" },
       { version: 31, name: "031_guided_authoring" },
-      { version: 32, name: "032_guided_enrichment_provenance" }
+      { version: 32, name: "032_guided_enrichment_provenance" },
+      { version: 33, name: "033_data_revisions" },
+      { version: 34, name: "034_artifact_first_summary" }
     ]);
     expect(
       (db.prepare("PRAGMA table_info(workbench_artifact_candidate_scans)").all() as Array<{ name: string }>).map(
@@ -596,7 +619,7 @@ describe("daemon database schema", () => {
       "2026-07-15T00:00:00.000Z"
     );
 
-    expect(CURRENT_SCHEMA_VERSION).toBe(32);
+    expect(CURRENT_SCHEMA_VERSION).toBe(34);
     expect(db.prepare("SELECT version, name FROM schema_migrations ORDER BY version DESC LIMIT 1").get()).toEqual({
       name: "024_artifact_candidate_detector_revision",
       version: 24

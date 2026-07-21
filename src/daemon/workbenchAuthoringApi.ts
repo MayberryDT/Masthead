@@ -1,25 +1,19 @@
 import type { SessionTranscriptOrder } from "../shared/sessionTranscript.ts";
-import type {
-  WorkbenchAuthoringBundle,
-  WorkbenchAuthoringBundleV2,
-  WorkbenchAuthoringBundleV3,
-  WorkbenchAuthoringCapabilitiesDto
-} from "../shared/workbenchAuthoring.ts";
-import { isAbsoluteAuthoringCommand } from "../shared/workbenchAuthoring.ts";
 import {
-  finishAuthoringRun,
   getAuthoringRunContext,
   getAuthoringRunEvidence,
-  getAuthoringRunStatus,
-  openAgentLedAuthoringRun,
-  submitAuthoringBundle
+  getAuthoringRunStatus
 } from "../workbench/authoring/authoringService.ts";
-import { getArtifactSuggestions } from "../workbench/authoring/advisorySuggestions.ts";
-import { parseAuthoringBundleV2, parseAuthoringBundleV3 } from "../workbench/authoring/authoringSchemas.ts";
 import type { SessionTranscriptKindFilter } from "./db/sessionTranscriptRepository.ts";
-import { getOrCreateDatabaseIdentity } from "./db/schema.ts";
 import type { MastheadDatabase } from "./db/sqlite.ts";
 import type { GuidedAuthoringExpectedIdentity } from "../shared/instanceIdentity.ts";
+import {
+  getGuidedAuthoringBodyLimit,
+  guidedAuthoringCapabilities,
+  isGuidedAuthoringPath,
+  routeGuidedAuthoringRequest,
+  type GuidedAuthoringHttpHeaders
+} from "./guidedAuthoringApi.ts";
 
 const SUBMIT_BODY_LIMIT_BYTES = 5 * 1024 * 1024;
 const evidenceKinds = new Set<SessionTranscriptKindFilter>([
@@ -39,7 +33,7 @@ export type WorkbenchAuthoringHttpResult = {
 
 export async function routeWorkbenchAuthoringRequest(
   context: { authoringCommand: string; db: MastheadDatabase; identity?: GuidedAuthoringExpectedIdentity },
-  request: { method: string; url: URL; body?: unknown }
+  request: { method: string; url: URL; body?: unknown; headers?: GuidedAuthoringHttpHeaders }
 ): Promise<WorkbenchAuthoringHttpResult | undefined> {
   const { pathname } = request.url;
   if (!isWorkbenchAuthoringPath(pathname)) return undefined;
@@ -48,44 +42,22 @@ export async function routeWorkbenchAuthoringRequest(
     if (pathname === "/workbench/authoring/capabilities") {
       if (request.method !== "GET") return methodNotAllowed();
       if (!context.identity) throw new Error("authoring_identity_unavailable");
-      if (!isAbsoluteAuthoringCommand(context.authoringCommand.trim())) throw new Error("authoring_command_unavailable");
-      const body: WorkbenchAuthoringCapabilitiesDto = {
-        bundleVersion: "workbench-authoring-v3",
-        capability: "artifact_authoring",
-        command: context.authoringCommand.trim(),
-        baseUrl: context.identity.baseUrl,
-        databaseId: getOrCreateDatabaseIdentity(context.db),
-        buildSha: context.identity.buildSha,
-        instanceManifest: context.identity.instanceManifest,
-        instanceId: context.identity.instanceId,
-        evidencePolicy: "selected_session_canonical_evidence",
-        maxSessionsPerRun: 12,
-        operations: ["suggestions", "open", "status", "evidence", "context", "submit", "finish"],
-        protocol: "masthead.workbench.authoring/v1",
-        suggestionsAreBinding: false,
-        transport: "daemon_http"
-      };
-      return { body, status: 200 };
+      return { body: guidedAuthoringCapabilities({ ...context, identity: context.identity }), status: 200 };
+    }
+
+    if (isGuidedAuthoringPath(pathname)) {
+      if (!context.identity) throw new Error("authoring_identity_unavailable");
+      return routeGuidedAuthoringRequest({ ...context, identity: context.identity }, request);
     }
 
     if (pathname === "/workbench/authoring/suggestions") {
       if (request.method !== "POST") return methodNotAllowed();
-      const body = requireRecord(request.body);
-      const sessionIds = requireSessionIds(body.sessionIds);
-      return { body: getArtifactSuggestions(context.db, sessionIds), status: 200 };
+      return retiredContract();
     }
 
     if (pathname === "/workbench/authoring/runs") {
       if (request.method !== "POST") return methodNotAllowed();
-      const body = requireRecord(request.body);
-      const actorId = requireNonBlankString(body.actorId, "actorId");
-      const databaseId = requireNonBlankString(body.databaseId, "databaseId");
-      if (body.candidateId !== undefined) throw new Error("candidate_id_not_allowed");
-      const sessionIds = requireSessionIds(body.sessionIds);
-      return {
-        body: openAgentLedAuthoringRun(context.db, { actorId, databaseId, sessionIds }),
-        status: 201
-      };
+      return retiredContract();
     }
 
     const match = pathname.match(/^\/workbench\/authoring\/runs\/([^/]+)(?:\/(context|evidence|submit|finish))?$/);
@@ -126,21 +98,11 @@ export async function routeWorkbenchAuthoringRequest(
 
     if (operation === "submit") {
       if (request.method !== "POST") return methodNotAllowed();
-      const bundle = requireBundleEnvelope(request.body);
-      return {
-        body: submitAuthoringBundle(context.db, { bundle, runId }),
-        status: 200
-      };
+      return retiredContract();
     }
 
     if (request.method !== "POST") return methodNotAllowed();
-    if (request.body !== undefined && !isRecord(request.body)) {
-      throw invalidRequest("finish body must be a JSON object");
-    }
-    return {
-      body: { ok: true, receipt: finishAuthoringRun(context.db, { runId }) },
-      status: 200
-    };
+    return retiredContract();
   } catch (error) {
     return authoringErrorResult(error);
   }
@@ -149,6 +111,7 @@ export async function routeWorkbenchAuthoringRequest(
 export function isWorkbenchAuthoringPath(pathname: string): boolean {
   return (
     pathname === "/workbench/authoring/capabilities" ||
+    isGuidedAuthoringPath(pathname) ||
     pathname === "/workbench/authoring/suggestions" ||
     pathname === "/workbench/authoring/runs" ||
     /^\/workbench\/authoring\/runs\/[^/]+(?:\/(?:context|evidence|submit|finish))?$/.test(pathname)
@@ -156,6 +119,7 @@ export function isWorkbenchAuthoringPath(pathname: string): boolean {
 }
 
 export function getWorkbenchAuthoringBodyLimit(pathname: string, defaultLimitBytes: number): number {
+  if (isGuidedAuthoringPath(pathname)) return getGuidedAuthoringBodyLimit(pathname, defaultLimitBytes);
   return /^\/workbench\/authoring\/runs\/[^/]+\/submit$/.test(pathname)
     ? SUBMIT_BODY_LIMIT_BYTES
     : defaultLimitBytes;
@@ -199,6 +163,7 @@ const authoringBadRequestCodes = new Set([
 ]);
 
 const authoringConflictCodes = new Set([
+  "authoring_contract_retired",
   "authoring_actor_mismatch",
   "authoring_claim_conflict",
   "authoring_claim_missing",
@@ -220,6 +185,19 @@ const authoringConflictCodes = new Set([
   "unsupported_authoring_bundle_version"
 ]);
 
+function retiredContract(): WorkbenchAuthoringHttpResult {
+  return {
+    body: {
+      error: {
+        code: "authoring_contract_retired",
+        message: "Legacy Workbench authoring mutations are retired; use guided authoring V4."
+      },
+      ok: false
+    },
+    status: 409
+  };
+}
+
 function methodNotAllowed(): WorkbenchAuthoringHttpResult {
   return {
     body: { error: { code: "method_not_allowed", message: "Method not allowed for Workbench authoring route" }, ok: false },
@@ -227,44 +205,9 @@ function methodNotAllowed(): WorkbenchAuthoringHttpResult {
   };
 }
 
-function requireBundleEnvelope(value: unknown): WorkbenchAuthoringBundle | WorkbenchAuthoringBundleV2 | WorkbenchAuthoringBundleV3 {
-  const bundle = requireRecord(value);
-  if (bundle.bundleVersion === "workbench-authoring-v3") return parseAuthoringBundleV3(bundle);
-  if (bundle.bundleVersion === "workbench-authoring-v2") return parseAuthoringBundleV2(bundle);
-  if (bundle.bundleVersion !== "workbench-authoring-v1") {
-    throw invalidRequest("bundleVersion must be workbench-authoring-v1, workbench-authoring-v2, or workbench-authoring-v3");
-  }
-  requireNonBlankString(bundle.runId, "runId");
-  requireNonBlankString(bundle.evidenceRevision, "evidenceRevision");
-  for (const key of ["sessionPackages", "artifacts", "notApplicable", "contributions"] as const) {
-    if (!Array.isArray(bundle[key])) throw invalidRequest(`${key} must be an array`);
-  }
-  return bundle as WorkbenchAuthoringBundle;
-}
-
-function requireRecord(value: unknown): Record<string, unknown> {
-  if (!isRecord(value)) throw invalidRequest("request body must be a JSON object");
-  return value;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function requireNonBlankString(value: unknown, name: string): string {
   if (typeof value !== "string" || !value.trim()) throw invalidRequest(`${name} is required`);
   return value.trim();
-}
-
-function requireStringArray(value: unknown, name: string): string[] {
-  if (!Array.isArray(value) || value.length === 0) throw invalidRequest(`${name} must be a non-empty array`);
-  return value.map((item) => requireNonBlankString(item, `${name}[]`));
-}
-
-function requireSessionIds(value: unknown): string[] {
-  const requestedSessionIds = requireStringArray(value, "sessionIds");
-  if (requestedSessionIds.length > 12) throw new Error("authoring_session_count_invalid");
-  return [...new Set(requestedSessionIds)];
 }
 
 function optionalNonBlank(value: string | null): string | undefined {

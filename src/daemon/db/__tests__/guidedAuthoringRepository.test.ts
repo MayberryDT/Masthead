@@ -13,18 +13,24 @@ import {
   createGuidedAuthoringRequest,
   createGuidedAuthoringRequestInTransaction,
   getGuidedAssignment,
+  getGuidedAssignmentReceipt,
   getGuidedAssignments,
   getGuidedAuthoringRequest,
+  getGuidedAuthoringRequestForAssignment,
+  invalidateLockedGuidedAssignmentEvidenceInTransaction,
   listGuidedDraftReviews,
   listGuidedEvidenceAccess,
   listGuidedOperatorReviews,
   listGuidedOpportunities,
+  listPendingGuidedCanaryAssignments,
+  persistGuidedAssignmentReceiptInTransaction,
   recordCanaryDecision,
   recordCanaryDecisionInTransaction,
   recordGuidedEvidenceAccess,
   recordGuidedEvidenceAccessInTransaction,
   storeGuidedDraftReview,
   storeGuidedDraftReviewInTransaction,
+  transitionGuidedAssignmentAfterReceiptInTransaction,
   type CreateGuidedAuthoringRequestInput
 } from "../guidedAuthoringRepository.ts";
 import { migrateDatabase } from "../schema.ts";
@@ -48,8 +54,8 @@ describe("guided authoring repository", () => {
     migrateDatabase(db);
 
     expect(db.prepare("SELECT version, name FROM schema_migrations ORDER BY version DESC LIMIT 1").get()).toEqual({
-      name: "031_guided_authoring",
-      version: 31
+      name: "034_artifact_first_summary",
+      version: 34
     });
     expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });
@@ -73,6 +79,19 @@ describe("guided authoring repository", () => {
       expect.objectContaining({ opportunityId: "opportunity:shared", provenanceSessionIds: ["session:0"] }),
       expect.objectContaining({ opportunityId: "opportunity:one:1", provenanceSessionIds: ["session:3"] })
     ]);
+  });
+
+  test("loads only stable request binding fields for a pre-transaction assignment guard", async () => {
+    const db = await createdDb();
+
+    expect(getGuidedAuthoringRequestForAssignment(db, "assignment:one:0")).toEqual({
+      baseUrl: "http://127.0.0.1:17373",
+      buildSha: "build:test",
+      creationInstanceId: "instance:creation-only",
+      databaseId: "database:test",
+      instanceManifest: "manifest:test"
+    });
+    expect(getGuidedAuthoringRequestForAssignment(db, "assignment:missing")).toBeUndefined();
   });
 
   test("rolls back request membership, opportunities, assignments, and canary together", async () => {
@@ -241,6 +260,20 @@ describe("guided authoring repository", () => {
     expect(getGuidedAssignment(db, "assignment:one:0")?.status).toBe("staged_canary");
   });
 
+  test("rediscovers staged canaries deterministically from durable state", async () => {
+    const db = await createdDb();
+    storeGuidedDraftReview(db, { assignmentId: "assignment:one:0", draft: draft(1), findings: [] });
+
+    expect(listPendingGuidedCanaryAssignments(db).map(({ assignmentId }) => assignmentId))
+      .toEqual(["assignment:one:0"]);
+    expect(listPendingGuidedCanaryAssignments(db).map(({ assignmentId }) => assignmentId))
+      .toEqual(["assignment:one:0"]);
+
+    recordCanaryDecision(db, decision(1, "approved"));
+    expect(listPendingGuidedCanaryAssignments(db).map(({ assignmentId }) => assignmentId))
+      .toEqual([]);
+  });
+
   test("rejects conflicting canary decision retries without changing approved state", async () => {
     const db = await createdDb();
     storeGuidedDraftReview(db, { assignmentId: "assignment:one:0", draft: draft(1), findings: [] });
@@ -304,6 +337,298 @@ describe("guided authoring repository", () => {
 
     completeGuidedAssignment(db, "assignment:one:0", receipt());
     expect(getGuidedAuthoringRequest(db, "request:one")?.status).toBe("active");
+  });
+
+  test("does not treat ready_to_finish as a legal canary completion state", async () => {
+    const db = await createdDb();
+    storeGuidedDraftReview(db, { assignmentId: "assignment:one:0", draft: draft(1), findings: [] });
+    recordCanaryDecision(db, decision(1, "approved"));
+    db.prepare("UPDATE guided_authoring_assignments SET status = 'ready_to_finish' WHERE assignment_id = ?")
+      .run("assignment:one:0");
+
+    expect(() => completeGuidedAssignment(db, "assignment:one:0", receipt()))
+      .toThrow("guided_assignment_not_ready");
+    expect(getGuidedAssignmentReceipt(db, "assignment:one:0")).toBeUndefined();
+  });
+
+  test("rejecting a canary clears its accepted revision and request approval state", async () => {
+    const db = await createdDb();
+    storeGuidedDraftReview(db, { assignmentId: "assignment:one:0", draft: draft(1), findings: [] });
+    recordCanaryDecision(db, decision(1, "approved"));
+
+    db.prepare("DELETE FROM guided_authoring_operator_reviews WHERE assignment_id = ?")
+      .run("assignment:one:0");
+    const rejected = recordCanaryDecision(db, decision(1, "rejected"));
+
+    expect(rejected).toMatchObject({ status: "open" });
+    expect(rejected).not.toHaveProperty("canaryApprovedAt");
+    expect(rejected).not.toHaveProperty("canaryApprovedBy");
+    expect(getGuidedAssignment(db, "assignment:one:0")).toMatchObject({
+      currentDraftRevision: 1,
+      status: "needs_revision"
+    });
+    expect(getGuidedAssignment(db, "assignment:one:0")).not.toHaveProperty("acceptedDraftRevision");
+    expect(listGuidedOperatorReviews(db, "assignment:one:0").map(({ decision: value }) => value))
+      .toEqual(["rejected"]);
+  });
+
+  test("invalidates a locked canary by exact status, evidence revision, and accepted draft", async () => {
+    const db = await createdDb();
+    storeGuidedDraftReview(db, { assignmentId: "assignment:one:0", draft: draft(1), findings: [] });
+    recordCanaryDecision(db, decision(1, "approved"));
+
+    const result = withImmediateTransaction(db, () =>
+      invalidateLockedGuidedAssignmentEvidenceInTransaction(db, {
+        assignmentId: "assignment:one:0",
+        expectedEvidenceRevision: "evidence:one:0",
+        expectedStatus: "staged_canary",
+        nextEvidenceRevision: "evidence:one:0:revised"
+      })
+    );
+
+    expect(result.assignment).toMatchObject({
+      currentDraftRevision: 1,
+      evidenceRevision: "evidence:one:0:revised",
+      status: "investigating"
+    });
+    expect(result.assignment).not.toHaveProperty("acceptedDraftRevision");
+    expect(result.request).toMatchObject({ status: "open" });
+    expect(result.request).not.toHaveProperty("canaryApprovedAt");
+    expect(result.request).not.toHaveProperty("canaryApprovedBy");
+    expect(listGuidedDraftReviews(db, "assignment:one:0")).toHaveLength(1);
+    expect(listGuidedOperatorReviews(db, "assignment:one:0")).toHaveLength(1);
+  });
+
+  test.each([
+    { expectedEvidenceRevision: "evidence:wrong", expectedStatus: "staged_canary" as const },
+    { expectedEvidenceRevision: "evidence:one:0", expectedStatus: "ready_to_finish" as const }
+  ])("refuses a loose locked invalidation CAS for $expectedStatus", async (input) => {
+    const db = await createdDb();
+    storeGuidedDraftReview(db, { assignmentId: "assignment:one:0", draft: draft(1), findings: [] });
+    const beforeAssignment = getGuidedAssignment(db, "assignment:one:0");
+    const beforeRequest = getGuidedAuthoringRequest(db, "request:one");
+
+    expect(() => withImmediateTransaction(db, () =>
+      invalidateLockedGuidedAssignmentEvidenceInTransaction(db, {
+        assignmentId: "assignment:one:0",
+        nextEvidenceRevision: "evidence:one:0:revised",
+        ...input
+      })
+    )).toThrow("guided_evidence_revision_conflict");
+
+    expect(getGuidedAssignment(db, "assignment:one:0")).toEqual(beforeAssignment);
+    expect(getGuidedAuthoringRequest(db, "request:one")).toEqual(beforeRequest);
+  });
+
+  test("refuses locked invalidation without a non-null accepted draft", async () => {
+    const db = await createdDb();
+    db.prepare(
+      `UPDATE guided_authoring_assignments
+       SET status = 'staged_canary'
+       WHERE assignment_id = ?`
+    ).run("assignment:one:0");
+    const before = getGuidedAssignment(db, "assignment:one:0");
+
+    expect(() => withImmediateTransaction(db, () =>
+      invalidateLockedGuidedAssignmentEvidenceInTransaction(db, {
+        assignmentId: "assignment:one:0",
+        expectedEvidenceRevision: "evidence:one:0",
+        expectedStatus: "staged_canary",
+        nextEvidenceRevision: "evidence:one:0:revised"
+      })
+    )).toThrow("guided_evidence_revision_conflict");
+    expect(getGuidedAssignment(db, "assignment:one:0")).toEqual(before);
+  });
+
+  test("invalidating a ready non-canary keeps its request active", async () => {
+    const db = await createdDb();
+    storeGuidedDraftReview(db, { assignmentId: "assignment:one:0", draft: draft(1), findings: [] });
+    recordCanaryDecision(db, decision(1, "approved"));
+    completeGuidedAssignment(db, "assignment:one:0", receipt());
+    const nonCanaryDraft = {
+      ...draft(1),
+      assignmentId: "assignment:one:1",
+      evidenceRevision: "evidence:one:1"
+    };
+    storeGuidedDraftReview(db, {
+      assignmentId: "assignment:one:1",
+      draft: nonCanaryDraft,
+      findings: []
+    });
+
+    const result = withImmediateTransaction(db, () =>
+      invalidateLockedGuidedAssignmentEvidenceInTransaction(db, {
+        assignmentId: "assignment:one:1",
+        expectedEvidenceRevision: "evidence:one:1",
+        expectedStatus: "ready_to_finish",
+        nextEvidenceRevision: "evidence:one:1:revised"
+      })
+    );
+
+    expect(result.assignment).toMatchObject({
+      currentDraftRevision: 1,
+      evidenceRevision: "evidence:one:1:revised",
+      status: "investigating"
+    });
+    expect(result.assignment).not.toHaveProperty("acceptedDraftRevision");
+    expect(result.request).toMatchObject({ status: "active" });
+  });
+
+  test("historical approval does not lock a fresh evidence revision", async () => {
+    const db = await createdDb();
+    storeGuidedDraftReview(db, { assignmentId: "assignment:one:0", draft: draft(1), findings: [] });
+    recordCanaryDecision(db, decision(1, "approved"));
+    withImmediateTransaction(db, () => invalidateLockedGuidedAssignmentEvidenceInTransaction(db, {
+      assignmentId: "assignment:one:0",
+      expectedEvidenceRevision: "evidence:one:0",
+      expectedStatus: "staged_canary",
+      nextEvidenceRevision: "evidence:one:0:revised"
+    }));
+
+    const freshDraft = {
+      ...draft(2),
+      evidenceRevision: "evidence:one:0:revised"
+    };
+    expect(() => storeGuidedDraftReview(db, {
+      assignmentId: "assignment:one:0",
+      draft: freshDraft,
+      findings: []
+    })).not.toThrow();
+    expect(getGuidedAssignment(db, "assignment:one:0")).toMatchObject({
+      acceptedDraftRevision: 2,
+      currentDraftRevision: 2,
+      status: "staged_canary"
+    });
+    expect(listGuidedOperatorReviews(db, "assignment:one:0")).toHaveLength(1);
+  });
+
+  test("does not accept an approval whose draft belongs to an older evidence revision", async () => {
+    const db = await createdDb();
+    storeGuidedDraftReview(db, { assignmentId: "assignment:one:0", draft: draft(1), findings: [] });
+    recordCanaryDecision(db, decision(1, "approved"));
+    db.prepare(
+      `UPDATE guided_authoring_assignments
+       SET evidence_revision = ?
+       WHERE assignment_id = ?`
+    ).run("evidence:one:0:revised", "assignment:one:0");
+
+    expect(() => completeGuidedAssignment(db, "assignment:one:0", {
+      ...receipt(),
+      evidenceRevision: "evidence:one:0:revised"
+    })).toThrow("guided_assignment_not_ready");
+    expect(getGuidedAssignment(db, "assignment:one:0")?.status).toBe("staged_canary");
+  });
+
+  test("returns the immutable stored receipt from a completed retry", async () => {
+    const db = await createdDb();
+    storeGuidedDraftReview(db, { assignmentId: "assignment:one:0", draft: draft(1), findings: [] });
+    recordCanaryDecision(db, decision(1, "approved"));
+    const stored = completeGuidedAssignment(db, "assignment:one:0", receipt());
+    const assignmentBeforeRetry = getGuidedAssignment(db, "assignment:one:0");
+    const requestBeforeRetry = getGuidedAuthoringRequest(db, "request:one");
+
+    const retried = completeGuidedAssignment(db, "assignment:one:0", {
+      ...receipt(),
+      completedAt: "2099-01-01T00:00:00.000Z",
+      publicationInstanceId: "instance:untrusted-retry"
+    });
+
+    expect(retried).toEqual(stored);
+    expect(getGuidedAssignment(db, "assignment:one:0")).toEqual(assignmentBeforeRetry);
+    expect(getGuidedAuthoringRequest(db, "request:one")).toEqual(requestBeforeRetry);
+  });
+
+  test("can observe receipt persistence before transition and rolls both phases back together", async () => {
+    const db = await createdDb();
+    storeGuidedDraftReview(db, { assignmentId: "assignment:one:0", draft: draft(1), findings: [] });
+    recordCanaryDecision(db, decision(1, "approved"));
+    const beforeAssignment = getGuidedAssignment(db, "assignment:one:0");
+    const beforeRequest = getGuidedAuthoringRequest(db, "request:one");
+
+    expect(() => withImmediateTransaction(db, () => {
+      const persisted = persistGuidedAssignmentReceiptInTransaction(
+        db,
+        "assignment:one:0",
+        receipt()
+      );
+      expect(persisted).toEqual(receipt());
+      expect(getGuidedAssignmentReceipt(db, "assignment:one:0")).toEqual(receipt());
+      expect(getGuidedAssignment(db, "assignment:one:0")?.status).toBe("staged_canary");
+      expect(getGuidedAuthoringRequest(db, "request:one")?.status).toBe("awaiting_canary_approval");
+      throw new Error("injected_between_receipt_and_transition");
+    })).toThrow("injected_between_receipt_and_transition");
+
+    expect(getGuidedAssignmentReceipt(db, "assignment:one:0")).toBeUndefined();
+    expect(getGuidedAssignment(db, "assignment:one:0")).toEqual(beforeAssignment);
+    expect(getGuidedAuthoringRequest(db, "request:one")).toEqual(beforeRequest);
+
+    expect(() => withImmediateTransaction(db, () => {
+      persistGuidedAssignmentReceiptInTransaction(db, "assignment:one:0", receipt());
+      db.prepare("UPDATE guided_authoring_assignments SET status = 'investigating' WHERE assignment_id = ?")
+        .run("assignment:one:0");
+      transitionGuidedAssignmentAfterReceiptInTransaction(db, "assignment:one:0", receipt());
+    })).toThrow("guided_assignment_not_ready");
+    expect(getGuidedAssignmentReceipt(db, "assignment:one:0")).toBeUndefined();
+    expect(getGuidedAssignment(db, "assignment:one:0")).toEqual(beforeAssignment);
+    expect(getGuidedAuthoringRequest(db, "request:one")).toEqual(beforeRequest);
+  });
+
+  test("refuses completion transition without the matching stored receipt and state", async () => {
+    const db = await createdDb();
+    storeGuidedDraftReview(db, { assignmentId: "assignment:one:0", draft: draft(1), findings: [] });
+    recordCanaryDecision(db, decision(1, "approved"));
+    const beforeAssignment = getGuidedAssignment(db, "assignment:one:0");
+    const beforeRequest = getGuidedAuthoringRequest(db, "request:one");
+
+    expect(() => withImmediateTransaction(db, () =>
+      transitionGuidedAssignmentAfterReceiptInTransaction(db, "assignment:one:0", receipt())
+    )).toThrow("guided_assignment_receipt_not_persisted");
+    expect(getGuidedAssignment(db, "assignment:one:0")).toEqual(beforeAssignment);
+    expect(getGuidedAuthoringRequest(db, "request:one")).toEqual(beforeRequest);
+
+    expect(() => withImmediateTransaction(db, () => {
+      persistGuidedAssignmentReceiptInTransaction(db, "assignment:one:0", receipt());
+      transitionGuidedAssignmentAfterReceiptInTransaction(db, "assignment:one:0", {
+        ...receipt(),
+        publicationInstanceId: "instance:mismatch"
+      });
+    })).toThrow("guided_assignment_receipt_mismatch");
+    expect(getGuidedAssignmentReceipt(db, "assignment:one:0")).toBeUndefined();
+    expect(getGuidedAssignment(db, "assignment:one:0")).toEqual(beforeAssignment);
+    expect(getGuidedAuthoringRequest(db, "request:one")).toEqual(beforeRequest);
+  });
+
+  test("composes receipt persistence and request transition with an exact result", async () => {
+    const db = await createdDb();
+    storeGuidedDraftReview(db, { assignmentId: "assignment:one:0", draft: draft(1), findings: [] });
+    recordCanaryDecision(db, decision(1, "approved"));
+
+    const result = withImmediateTransaction(db, () => {
+      persistGuidedAssignmentReceiptInTransaction(db, "assignment:one:0", receipt());
+      return transitionGuidedAssignmentAfterReceiptInTransaction(db, "assignment:one:0", receipt());
+    });
+
+    expect(result.receipt).toEqual(receipt());
+    expect(result.request).toMatchObject({
+      completedSessionCount: 3,
+      currentAssignmentId: "assignment:one:1",
+      status: "active"
+    });
+    expect(getGuidedAssignment(db, "assignment:one:0")?.status).toBe("completed");
+    expect(getGuidedAssignmentReceipt(db, "assignment:one:0")).toEqual(receipt());
+  });
+
+  test("rejects saving another draft from staged canary state before writing", async () => {
+    const db = await createdDb();
+    storeGuidedDraftReview(db, { assignmentId: "assignment:one:0", draft: draft(1), findings: [] });
+    const before = listGuidedDraftReviews(db, "assignment:one:0");
+
+    expect(() => storeGuidedDraftReview(db, {
+      assignmentId: "assignment:one:0",
+      draft: draft(2),
+      findings: []
+    })).toThrow("guided_assignment_not_draftable");
+    expect(listGuidedDraftReviews(db, "assignment:one:0")).toEqual(before);
   });
 
   test("requires an approved operator review for the exact accepted canary draft", async () => {

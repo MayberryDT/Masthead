@@ -63,6 +63,12 @@ describe("Masthead Dev launcher template", () => {
     expect(source).toContain("MASTHEAD_INSTANCE_MANIFEST");
     expect(source).not.toContain("exec env MASTHEAD_DAEMON_URL");
     expect(source).toContain("daemon_authoring_is_compatible");
+    expect(source).toContain('j?.bundleVersion === "workbench-authoring-v4"');
+    expect(source).toContain('j?.policyVersion === "guided-authoring-v1"');
+    expect(source).toContain('const expected = ["start", "inspect", "scaffold", "save", "review", "finish"]');
+    expect(source).toContain('EXPECTED_BASE_URL="http://127.0.0.1:$port"');
+    expect(source).toContain('j?.baseUrl === process.env.EXPECTED_BASE_URL');
+    expect(source).not.toContain('j?.bundleVersion === "workbench-authoring-v3"');
     expect(source).toContain("stop_stale_authoring_daemon");
     expect(source).toContain("await access(cliEntry, constants.R_OK)");
     expect(source).toContain('spawnSync(npmBin, ["run", "build:daemon"]');

@@ -36,15 +36,12 @@ original dossier. It preserves identity, coverage, narrative, files, tools,
 verification, attention, excerpts, timeline, durable enrichment and state, reuse,
 and usage. Only the live DTO's recursive `artifacts` listing is excluded.
 
-The installed compatibility runtime currently publishes through selection-scoped V3 finish. It is
-being replaced and must not be used for a new bulk or production enrichment campaign during cutover.
-
-The accepted V4 publication target remains pending implementation. Assignment finish will require
+The current V4 publication path uses guided assignment finish. Assignment finish requires
 complete canonical evidence traversal and typed, verbatim claim support for every substantive
-enrichment claim. It will apply that enrichment, rebuild the canonical snapshot from current data,
+enrichment claim. It applies that enrichment, rebuilds the canonical snapshot from current data,
 publish and index it atomically, and record exactly one provenance session. Agents never author or
 replace dossier presentation; optional-artifact drafts cannot contain a dossier. A dossier in the
-three-session canary will remain staged until operator approval. At V4 cutover, V1, V2, and V3
+three-session canary remains staged until operator approval. V1, V2, and V3
 publication records remain audit-only and legacy mutations return `authoring_contract_retired`.
 
 Logbook recognizes the exact `canonical-session-dossier-v1` schema and renders it

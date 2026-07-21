@@ -15,7 +15,7 @@ describe("packaged authoring CLI smoke coverage", () => {
     expect(source).toContain('execFileSync("git", ["rev-parse", "HEAD"]');
   });
 
-  test("packaged smoke invokes the capability-reported launcher from an isolated home", async () => {
+  test("packaged smoke invokes the capability-reported launcher from the isolated instance directory", async () => {
     const source = await readFile("scripts/masthead-electron-packaged-smoke.js", "utf8");
     const cleanupSource = await readFile("scripts/packaged-process-cleanup.js", "utf8");
 
@@ -23,6 +23,11 @@ describe("packaged authoring CLI smoke coverage", () => {
     expect(source).toContain("HOME: homeDir");
     expect(source).toContain('fetch(`${baseUrl}/workbench/authoring/capabilities`');
     expect(source).toContain("capabilities.command");
+    expect(source).toContain("verifyPackagedAuthoringCli(");
+    expect(source).toContain("dataDir,");
+    expect(source).toContain("const commandRelativeToDataDirectory = relative(dataDir, capabilities.command)");
+    expect(source).toContain("Packaged authoring CLI was installed outside the smoke data directory");
+    expect(source).not.toContain("commandRelativeToHome");
     expect(source).toContain('["workbench", "capabilities", "--json"]');
     expect(source).not.toContain("MASTHEAD_DAEMON_URL: baseUrl");
     expect(source).toContain("buildPackagedCliInvocation");

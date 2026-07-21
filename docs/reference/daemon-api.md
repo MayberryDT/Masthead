@@ -37,38 +37,29 @@ Clients should reject a daemon that does not identify `product: "masthead"` with
 - `GET /workbench/not-added?includeDetails=true&limit=...` explicitly inspects Not Added to Logbook sessions.
 - `GET /workbench/missing-sessions?limit=...` remains a compatibility read endpoint backed by the Workbench pipeline queue.
 
-### Current authoring runtime during V4 implementation
+### Current V4 authoring runtime
 
-- `GET /workbench/authoring/capabilities` currently returns the stable daemon transport protocol
-  `masthead.workbench.authoring/v1`, the installed shared CLI command, database identity,
-  `workbench-authoring-v3`, selected-session evidence policy, 12-session run limit, nonbinding
-  suggestions, and V3 operations. This is runtime compatibility during cutover, not the accepted
-  target contract. Bridge-safe read.
-- `GET /workbench/authoring/runs/:runId` currently returns one V3 run, selected sessions and claims,
+- `GET /workbench/authoring/capabilities` returns the stable daemon transport protocol
+  `masthead.workbench.authoring/v1`, instance-bound CLI command, database/build/manifest identity,
+  `workbench-authoring-v4`, policy `guided-authoring-v1`, assignment limits, and guided operations.
+  Bridge-safe read.
+- `GET /workbench/authoring/runs/:runId` returns one historical V3 run, selected sessions and claims,
   evidence revision state, findings, accepted bundle, and completion report. Historical V1 and V2
   runs are audit-only. Bridge-safe read.
 - `GET /workbench/authoring/runs/:runId/context` and
-  `GET /workbench/authoring/runs/:runId/evidence?sessionId=...` currently expose V3 canonical context,
-  advisory suggestions, and cursor-paginated evidence. Bridge-safe reads.
-
-### Accepted V4 target — pending implementation
-
-- `GET /workbench/authoring/capabilities` advertises `workbench-authoring-v4`, policy
-  `guided-authoring-v1`, the instance-bound launcher, database/build/manifest identity, assignment
-  limits, and the guided operations `start`, `inspect`, `save`, `review`, and `finish`. This response
-  shape is not available until the V4 API and launcher tasks land. Bridge-safe read after cutover.
+  `GET /workbench/authoring/runs/:runId/evidence?sessionId=...` expose historical V3 canonical context,
+  advisory suggestions, and cursor-paginated evidence. Bridge-safe audit reads.
 - `GET /workbench/authoring/requests/:requestId` returns one durable guided authoring request, its
-  assignments, campaign state, and single required next action. Pending implementation; bridge-safe
-  after cutover.
+  assignments, campaign state, and single required next action. Bridge-safe read.
 - `GET /workbench/authoring/canaries/pending` returns staged V4 canary drafts awaiting operator review.
-  Pending implementation; bridge-safe after cutover.
+  Bridge-safe read.
 - `GET /workbench/authoring/assignments/:assignmentId/inspect` returns the next canonical evidence
-  page and records returned refs as evidence-coverage progress. Pending implementation; primary-only
+  page and records returned refs as evidence-coverage progress. Primary-only
   and never forwarded by the read-only worktree bridge.
 - `GET /workbench/authoring/assignments/:assignmentId/review` returns structured editorial findings
-  and the next required action. Pending implementation; bridge-safe after cutover.
+  and the next required action. Bridge-safe read.
 - Legacy `GET /workbench/authoring/runs/:runId`, context, evidence, status, and completion-receipt reads
-  remain available after cutover for immutable V1, V2, and V3 audit history; they are not resumable
+  remain available for immutable V1, V2, and V3 audit history; they are not resumable
   authoring work.
 - `GET /live/state` returns latest live runtime-state reports. Optional query params include `runtime`, `sourceSessionId`, `canonicalSessionId`, and `freshOnly=0|1`.
 - `GET /projects` lists known projects.
@@ -80,6 +71,7 @@ Clients should reject a daemon that does not identify `product: "masthead"` with
   are excluded without a cursor; an old changed unit is an incremental refresh only with its
   existing cursor; unit-limit deferrals are disclosed as capped/deferred work.
 - `GET /data/summary` returns Masthead-owned data counts for a scope.
+- `GET /logbook/summary` returns artifact-native published Logbook totals as `{ artifacts, byKind, projects, earliestPublishedAt?, latestPublishedAt? }`. It reads only current published `session_artifacts`; it does not scan sessions, messages, tools, or file effects.
 - `GET /knowledge-flow/summary` returns `{ ok: true, summary: { capturedSessions, workbenchSessions, publishedArtifacts, automaticallyResolvedSessions } }`. `capturedSessions` counts non-deleted canonical sessions; `workbenchSessions` counts non-deleted sessions currently on the Workbench `publish_path`; `publishedArtifacts` counts published artifacts whose status is `current`; and `automaticallyResolvedSessions` counts non-deleted Workbench sessions whose resolution status is `automatic_resolved`. This endpoint is GET-only, read-only, and safe through a worktree bridge; there is no mutation counterpart.
 - `GET /data/export` exports the local session graph.
 - `GET /usage/summary?window=today|24h|7d|30d|all` returns canonical usage totals, token aggregates, model/project/runtime breakdowns, activity buckets, and source coverage. It does not estimate cost.
@@ -115,37 +107,27 @@ Write endpoints are local daemon operations. They are not exposed through MCP.
 - `POST /workbench/claims/:claimId/release` releases an active claim. Optional body: `{ "reason"?: string }` (default `released`). Returns `{ ok: true, claim }` or `404` when the claim is missing. Primary-only; not bridge-safe.
 - `POST /workbench/sessions/:sessionId/quality` marks capture quality. Body is either `{ "status": "passed" | "failed", "reason"?: string, "actorId"?: string }` or `{ "mode": "precheck", "actorId"?: string }`. Precheck runs capture quality heuristics then marks pass/fail. Actor defaults to user `workbench_ui`. Failing quality on an already published session returns `409` with `cannot_fail_quality_on_published_session`. Primary-only; not bridge-safe.
 
-### Current authoring runtime during V4 implementation
+### Current V4 authoring runtime
 
-- `POST /workbench/authoring/suggestions` currently returns advisory suggestions for 1–12 selected
-  sessions and is allowed through the read-only bridge.
-- `POST /workbench/authoring/runs` currently opens or reuses one selection-scoped V3 run; submit stores
-  a `workbench-authoring-v3` bundle without output rows, and finish atomically applies enrichment and
-  publishes rebuilt dossiers plus accepted optional artifacts. These primary-only mutations are the
-  installed compatibility runtime while V4 is implemented. They are not the desired contract and
-  must not be used for a new bulk or production enrichment campaign during cutover.
-
-### Accepted V4 target — pending implementation
+- `POST /workbench/authoring/suggestions` returns advisory suggestions for 1–12 selected sessions and
+  is allowed through the read-only bridge.
 
 - `POST /workbench/authoring/requests` creates one durable V4 request from the Workbench selection and
   campaign policy. The daemon plans assignments and a legal canary before committing anything. If it
   cannot choose a complete strong group of at most three sessions or diverse dossier-only sessions,
-  returns `guided_canary_not_constructible` and persists nothing. Pending implementation; primary
-  daemon only after cutover.
+  returns `guided_canary_not_constructible` and persists nothing. Primary daemon only.
 - `POST /workbench/authoring/requests/:requestId/start` claims and starts the released assignment.
-  Pending implementation.
 - `POST /workbench/authoring/assignments/:assignmentId/draft` validates and saves one grounded
   `workbench-authoring-v4` draft after complete evidence traversal. It creates no Logbook rows.
-  Pending implementation.
 - `POST /workbench/authoring/requests/:requestId/canary-decision` records operator approval or rejection
-  of the staged three-session canary. Pending implementation.
+  of the staged three-session canary.
 - `POST /workbench/authoring/assignments/:assignmentId/finish` atomically applies enrichment, rebuilds
   canonical dossiers, publishes accepted optional artifacts, records revisions and Activity, releases
   claims, stores an idempotent receipt, and releases the next assignment. All V4 mutations verify
   daemon URL, database ID, build SHA, canonical manifest path, and instance identity immediately before
-  calling the service. Pending implementation; primary-only and blocked by the read-only bridge.
-- At V4 cutover, legacy V3 `POST /workbench/authoring/runs`, submit, and finish mutations become
-  audit-only endpoints. They return HTTP 409 with `{ "code": "authoring_contract_retired" }` before
+  calling the service. Primary-only and blocked by the read-only bridge.
+- Legacy V3 `POST /workbench/authoring/runs`, submit, and finish mutations are retired. They return
+  HTTP 409 with `{ "code": "authoring_contract_retired" }` before
   opening claims or writing enrichment, drafts, artifacts, or receipts. V1 and V2 mutations remain
   retired on the same boundary.
 - `POST /imports/:importJobId/cancel` cancels an import job.
