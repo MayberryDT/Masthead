@@ -180,6 +180,11 @@ const migrations = [
     version: 35,
     name: "035_artifact_skill_search",
     path: resolve(currentDir, "migrations/035_artifact_skill_search.sql")
+  },
+  {
+    version: 36,
+    name: "036_workbench_authoring_v5",
+    path: resolve(currentDir, "migrations/036_workbench_authoring_v5.sql")
   }
 ];
 
@@ -247,6 +252,11 @@ const criticalTables = [
   "guided_authoring_request_sessions",
   "guided_authoring_opportunities",
   "guided_authoring_assignments",
+  "workbench_authoring_v5_requests",
+  "workbench_authoring_v5_request_sessions",
+  "workbench_authoring_v5_packs",
+  "workbench_authoring_v5_pack_sessions",
+  "workbench_authoring_v5_evidence_access",
   "guided_authoring_assignment_sessions",
   "guided_authoring_assignment_opportunities",
   "guided_authoring_evidence_access",

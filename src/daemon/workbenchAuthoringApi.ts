@@ -9,11 +9,16 @@ import type { MastheadDatabase } from "./db/sqlite.ts";
 import type { GuidedAuthoringExpectedIdentity } from "../shared/instanceIdentity.ts";
 import {
   getGuidedAuthoringBodyLimit,
-  guidedAuthoringCapabilities,
   isGuidedAuthoringPath,
   routeGuidedAuthoringRequest,
   type GuidedAuthoringHttpHeaders
 } from "./guidedAuthoringApi.ts";
+import {
+  getWorkbenchAuthoringV5BodyLimit,
+  isWorkbenchAuthoringV5Path,
+  routeWorkbenchAuthoringV5Request,
+  workbenchAuthoringV5Capabilities
+} from "./workbenchAuthoringV5Api.ts";
 
 const SUBMIT_BODY_LIMIT_BYTES = 5 * 1024 * 1024;
 const evidenceKinds = new Set<SessionTranscriptKindFilter>([
@@ -42,7 +47,12 @@ export async function routeWorkbenchAuthoringRequest(
     if (pathname === "/workbench/authoring/capabilities") {
       if (request.method !== "GET") return methodNotAllowed();
       if (!context.identity) throw new Error("authoring_identity_unavailable");
-      return { body: guidedAuthoringCapabilities({ ...context, identity: context.identity }), status: 200 };
+      return { body: workbenchAuthoringV5Capabilities({ ...context, identity: context.identity }), status: 200 };
+    }
+
+    if (isWorkbenchAuthoringV5Path(pathname)) {
+      if (!context.identity) throw new Error("authoring_identity_unavailable");
+      return routeWorkbenchAuthoringV5Request({ ...context, identity: context.identity }, request);
     }
 
     if (isGuidedAuthoringPath(pathname)) {
@@ -111,6 +121,7 @@ export async function routeWorkbenchAuthoringRequest(
 export function isWorkbenchAuthoringPath(pathname: string): boolean {
   return (
     pathname === "/workbench/authoring/capabilities" ||
+    isWorkbenchAuthoringV5Path(pathname) ||
     isGuidedAuthoringPath(pathname) ||
     pathname === "/workbench/authoring/suggestions" ||
     pathname === "/workbench/authoring/runs" ||
@@ -119,6 +130,7 @@ export function isWorkbenchAuthoringPath(pathname: string): boolean {
 }
 
 export function getWorkbenchAuthoringBodyLimit(pathname: string, defaultLimitBytes: number): number {
+  if (isWorkbenchAuthoringV5Path(pathname)) return getWorkbenchAuthoringV5BodyLimit(pathname, defaultLimitBytes);
   if (isGuidedAuthoringPath(pathname)) return getGuidedAuthoringBodyLimit(pathname, defaultLimitBytes);
   return /^\/workbench\/authoring\/runs\/[^/]+\/submit$/.test(pathname)
     ? SUBMIT_BODY_LIMIT_BYTES

@@ -90,7 +90,7 @@ describe("Workbench authoring HTTP API", () => {
       .toBe(scaffolded.body.draft.artifacts[0].draftId);
   });
 
-  test("exposes the exact V4 contract and guided request flow", async () => {
+  test("advertises V5 while preserving the V4 compatibility flow", async () => {
     const { baseUrl, daemon } = await startTestDaemon();
     seedAuthoringSession(daemon, "session:guided");
 
@@ -98,16 +98,16 @@ describe("Workbench authoring HTTP API", () => {
     expect(capabilities.body).toEqual({
       baseUrl,
       buildSha: "development",
-      bundleVersion: "workbench-authoring-v4",
-      canarySessions: 3,
+      bundleVersion: "workbench-authoring-v5",
       capability: "artifact_authoring",
       command: expect.any(String),
       databaseId: getOrCreateDatabaseIdentity(daemon.database),
       instanceId: expect.any(String),
       instanceManifest: expect.stringMatching(/masthead-instance\.json$/),
-      maxSessionsPerAssignment: 12,
-      operations: ["start", "inspect", "scaffold", "save", "review", "finish"],
-      policyVersion: "guided-authoring-v1",
+      maximumSessionsPerPack: 12,
+      minimumSessionsPerPack: 5,
+      operations: ["bootstrap", "start", "claim", "inspect", "scaffold", "save", "finish", "status", "receipt"],
+      policyVersion: "workbench-authoring-v5",
       protocol: "masthead.workbench.authoring/v1"
     });
     const expectedIdentity = authoringIdentity(capabilities.body);
@@ -298,11 +298,20 @@ describe("Workbench authoring HTTP API", () => {
       "/workbench/authoring/assignments/assignment%3Aone/draft",
       "/workbench/authoring/assignments/assignment%3Aone/review",
       "/workbench/authoring/requests/request%3Aone/canary-decision",
-      "/workbench/authoring/assignments/assignment%3Aone/finish"
+      "/workbench/authoring/assignments/assignment%3Aone/finish",
+      "/workbench/authoring/v5/requests",
+      "/workbench/authoring/v5/requests/authoring-v5-request%3Aone/bootstrap",
+      "/workbench/authoring/v5/packs/authoring-v5-pack%3Aone/inspect",
+      "/workbench/authoring/v5/packs/authoring-v5-pack%3Aone/scaffold",
+      "/workbench/authoring/v5/packs/authoring-v5-pack%3Aone/draft",
+      "/workbench/authoring/v5/packs/authoring-v5-pack%3Aone/finish"
     ]) expect(isWorkbenchAuthoringPath(pathname)).toBe(true);
     expect(isWorkbenchAuthoringPath("/workbench/authoring/candidates")).toBe(false);
     expect(getWorkbenchAuthoringBodyLimit(
       "/workbench/authoring/assignments/assignment%3Aone/draft", 1024
+    )).toBe(5 * 1024 * 1024);
+    expect(getWorkbenchAuthoringBodyLimit(
+      "/workbench/authoring/v5/packs/authoring-v5-pack%3Aone/draft", 1024
     )).toBe(5 * 1024 * 1024);
     expect(getWorkbenchAuthoringBodyLimit("/workbench/authoring/requests", 1024)).toBe(1024);
   });

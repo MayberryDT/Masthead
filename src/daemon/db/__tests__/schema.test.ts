@@ -230,7 +230,7 @@ describe("daemon database schema", () => {
     migrateDatabase(db);
     migrateDatabase(db);
 
-    expect(CURRENT_SCHEMA_VERSION).toBe(35);
+    expect(CURRENT_SCHEMA_VERSION).toBe(36);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'virtual') ORDER BY name").all() as Array<{ name: string }>;
     expect(tables.map((row) => row.name)).toEqual(
@@ -303,6 +303,11 @@ describe("daemon database schema", () => {
         "guided_authoring_draft_reviews",
         "guided_authoring_operator_reviews",
         "guided_authoring_enrichment_provenance",
+        "workbench_authoring_v5_requests",
+        "workbench_authoring_v5_request_sessions",
+        "workbench_authoring_v5_packs",
+        "workbench_authoring_v5_pack_sessions",
+        "workbench_authoring_v5_evidence_access",
         "masthead_data_revisions"
       ])
     );
@@ -342,7 +347,8 @@ describe("daemon database schema", () => {
       { version: 32, name: "032_guided_enrichment_provenance" },
       { version: 33, name: "033_data_revisions" },
       { version: 34, name: "034_artifact_first_summary" },
-      { version: 35, name: "035_artifact_skill_search" }
+      { version: 35, name: "035_artifact_skill_search" },
+      { version: 36, name: "036_workbench_authoring_v5" }
     ]);
     expect(
       (db.prepare("PRAGMA table_info(workbench_artifact_candidate_scans)").all() as Array<{ name: string }>).map(
@@ -620,7 +626,7 @@ describe("daemon database schema", () => {
       "2026-07-15T00:00:00.000Z"
     );
 
-    expect(CURRENT_SCHEMA_VERSION).toBe(35);
+    expect(CURRENT_SCHEMA_VERSION).toBe(36);
     expect(db.prepare("SELECT version, name FROM schema_migrations ORDER BY version DESC LIMIT 1").get()).toEqual({
       name: "024_artifact_candidate_detector_revision",
       version: 24

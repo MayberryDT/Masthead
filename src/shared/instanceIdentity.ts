@@ -177,7 +177,8 @@ export function identityFromManifest(manifest: MastheadInstanceManifest, instanc
 export function identityFromCapabilities(
   capabilities: WorkbenchAuthoringCapabilitiesDto | GuidedAuthoringCapabilitiesDto
 ): GuidedAuthoringExpectedIdentity {
-  if (capabilities.bundleVersion !== "workbench-authoring-v3" && capabilities.bundleVersion !== "workbench-authoring-v4") {
+  if (capabilities.bundleVersion !== "workbench-authoring-v3" && capabilities.bundleVersion !== "workbench-authoring-v4" &&
+      capabilities.bundleVersion !== "workbench-authoring-v5") {
     throw new Error("authoring_identity_unavailable");
   }
   if (

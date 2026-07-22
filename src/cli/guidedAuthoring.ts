@@ -1,5 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import type { GuidedAuthoringNextAction } from "../shared/guidedAuthoring.ts";
+import type { WorkbenchAuthoringV5Draft, WorkbenchAuthoringV5NextAction } from "../shared/workbenchAuthoringV5.ts";
 import { parseGuidedAuthoringBundleV4 } from "../workbench/authoring/authoringSchemas.ts";
 import { MastheadAuthoringClient, MastheadAuthoringClientError } from "./authoringClient.ts";
 import { errorResult, jsonResult, textResult, type CliResult } from "./output.ts";
@@ -8,7 +9,9 @@ export type GuidedAuthoringCliOptions = {
   env?: NodeJS.ProcessEnv;
 };
 
-const guidedCommands = new Set(["start", "inspect", "scaffold", "save", "review", "finish"]);
+const guidedCommands = new Set([
+  "bootstrap", "start", "claim", "inspect", "scaffold", "save", "review", "finish", "status", "receipt"
+]);
 
 export async function runGuidedAuthoringCli(
   args: string[],
@@ -20,13 +23,13 @@ export async function runGuidedAuthoringCli(
   if (!guidedCommands.has(command)) {
     return errorResult("unknown_command", `Unknown guided authoring command: ${command}`, json);
   }
-  const allowedOptions = command === "start"
+  const allowedOptions = ["bootstrap", "start", "claim", "status", "receipt"].includes(command)
     ? new Set(["--request", "--json"])
     : command === "save" || command === "scaffold"
-      ? new Set(["--assignment", "--file", "--json"])
+      ? new Set(["--assignment", "--pack", "--file", "--json"])
       : command === "inspect"
-        ? new Set(["--assignment", "--session", "--cursor", "--json"])
-        : new Set(["--assignment", "--json"]);
+        ? new Set(["--assignment", "--pack", "--session", "--cursor", "--json"])
+        : new Set(["--assignment", "--pack", "--json"]);
   const optionFailure = validateOptions(args.slice(1), allowedOptions, json);
   if (optionFailure) return optionFailure;
 
@@ -36,53 +39,79 @@ export async function runGuidedAuthoringCli(
   });
 
   try {
-    let dto: { nextAction: GuidedAuthoringNextAction; [key: string]: unknown };
-    if (command === "start") {
+    let dto: { nextAction: GuidedAuthoringNextAction | WorkbenchAuthoringV5NextAction; [key: string]: unknown };
+    if (["bootstrap", "start", "claim", "status", "receipt"].includes(command)) {
       const requestId = requiredOption(args, "--request", json);
       if (isCliResult(requestId)) return requestId;
-      dto = compactStartDto(await client.guidedStart(requestId));
+      if (command === "bootstrap") dto = await client.authoringV5Bootstrap(requestId) as typeof dto;
+      else if (command === "status") dto = await client.authoringV5Status(requestId) as typeof dto;
+      else if (command === "receipt") {
+        const receipt = await client.authoringV5Receipt(requestId);
+        return json ? jsonResult(receipt) : textResult(`${JSON.stringify(receipt, null, 2)}\n`);
+      } else if (command === "claim" || requestId.startsWith("authoring-v5-request:")) {
+        dto = await client.authoringV5Start(requestId) as typeof dto;
+      } else {
+        dto = compactStartDto(await client.guidedStart(requestId));
+      }
     } else {
-      const assignmentId = requiredOption(args, "--assignment", json);
-      if (isCliResult(assignmentId)) return assignmentId;
+      const packId = optionalOption(args, "--pack", json);
+      if (packId && isCliResult(packId)) return packId;
+      const assignmentId = optionalOption(args, "--assignment", json);
+      if (assignmentId && isCliResult(assignmentId)) return assignmentId;
+      if (Boolean(packId) === Boolean(assignmentId)) {
+        return errorResult("missing_argument", "Provide exactly one of --pack or --assignment", json);
+      }
+      const targetId = packId || assignmentId!;
       if (command === "inspect") {
         const sessionId = optionalOption(args, "--session", json);
         if (sessionId && isCliResult(sessionId)) return sessionId;
         const cursor = optionalOption(args, "--cursor", json);
         if (cursor && isCliResult(cursor)) return cursor;
-        dto = compactInspectDto(await client.guidedInspect(assignmentId, {
-          ...(cursor ? { cursor } : {}),
-          ...(sessionId ? { sessionId } : {})
-        }));
+        const inspectionOptions = { ...(cursor ? { cursor } : {}), ...(sessionId ? { sessionId } : {}) };
+        dto = packId
+          ? await client.authoringV5Inspect(packId, inspectionOptions) as typeof dto
+          : compactInspectDto(await client.guidedInspect(assignmentId!, inspectionOptions));
       } else if (command === "review") {
-        dto = compactReviewDto(await client.guidedReview(assignmentId));
+        if (packId) return errorResult("authoring_contract_retired", "V5 save returns per-session findings; there is no review command", json);
+        dto = compactReviewDto(await client.guidedReview(assignmentId!));
       } else if (command === "scaffold") {
         const file = requiredOption(args, "--file", json);
         if (isCliResult(file)) return file;
-        const scaffold = await client.guidedScaffold(assignmentId);
-        await writeFile(file, `${JSON.stringify(scaffold.draft, null, 2)}\n`, { flag: "wx", mode: 0o600 });
-        dto = {
-          assignmentId: scaffold.assignmentId,
-          draftSummary: {
-            artifactCount: scaffold.draft.artifacts.length,
-            opportunityDispositionCount: scaffold.draft.opportunityDispositions.length,
-            sessionEnrichmentCount: scaffold.draft.sessionEnrichments.length
-          },
-          file,
-          nextAction: {
-            ...scaffold.nextAction,
-            command: replaceFileArgument(scaffold.nextAction.command, file)
-          }
-        };
+        if (packId) {
+          const scaffold = await client.authoringV5Scaffold(packId);
+          await writeFile(file, `${JSON.stringify(scaffold.draft, null, 2)}\n`, { flag: "wx", mode: 0o600 });
+          dto = {
+            packId: scaffold.packId,
+            draftSummary: { sessionCount: scaffold.draft.sessions.length },
+            file,
+            nextAction: { ...scaffold.nextAction, command: replaceFileArgument(scaffold.nextAction.command, file) }
+          };
+        } else {
+          const scaffold = await client.guidedScaffold(assignmentId!);
+          await writeFile(file, `${JSON.stringify(scaffold.draft, null, 2)}\n`, { flag: "wx", mode: 0o600 });
+          dto = {
+            assignmentId: scaffold.assignmentId,
+            draftSummary: {
+              artifactCount: scaffold.draft.artifacts.length,
+              opportunityDispositionCount: scaffold.draft.opportunityDispositions.length,
+              sessionEnrichmentCount: scaffold.draft.sessionEnrichments.length
+            },
+            file,
+            nextAction: { ...scaffold.nextAction, command: replaceFileArgument(scaffold.nextAction.command, file) }
+          };
+        }
       } else if (command === "save") {
         const file = requiredOption(args, "--file", json);
         if (isCliResult(file)) return file;
         try {
-          const saved = await client.guidedSave(
-            assignmentId,
-            parseGuidedAuthoringBundleV4(JSON.parse(await readFile(file, "utf8")) as unknown)
-          );
-          const { draft: _localFileAlreadyContainsDraft, ...saveSummary } = saved;
-          dto = saveSummary;
+          const parsed = JSON.parse(await readFile(file, "utf8")) as unknown;
+          if (packId) {
+            dto = await client.authoringV5Save(packId, parseWorkbenchAuthoringV5Draft(parsed)) as typeof dto;
+          } else {
+            const saved = await client.guidedSave(assignmentId!, parseGuidedAuthoringBundleV4(parsed));
+            const { draft: _localFileAlreadyContainsDraft, ...saveSummary } = saved;
+            dto = saveSummary;
+          }
         } catch (error) {
           if (error instanceof SyntaxError) return errorResult("invalid_json", `Invalid JSON in ${file}`, json);
           if (error instanceof Error && (
@@ -111,12 +140,12 @@ export async function runGuidedAuthoringCli(
                 }],
                 nextAction: unsupportedVersion
                   ? {
-                      command: `${authoringCommand} workbench author scaffold --assignment ${shellQuote(assignmentId)} --file ${shellQuote(`${file}.scaffold.json`)} --json`,
+                      command: `${authoringCommand} workbench author scaffold --assignment ${shellQuote(targetId)} --file ${shellQuote(`${file}.scaffold.json`)} --json`,
                       kind: "scaffold",
                       reason: "Regenerate the daemon-owned V4 draft scaffold, then edit only its authored content and evidence support."
                     }
                   : {
-                      command: `${authoringCommand} workbench author save --assignment ${shellQuote(assignmentId)} --file ${shellQuote(file)} --json`,
+                      command: `${authoringCommand} workbench author save --assignment ${shellQuote(targetId)} --file ${shellQuote(file)} --json`,
                       kind: "revise",
                       reason: `Edit the invalid field at ${path} in the existing V4 draft, then re-save the same file.`
                     },
@@ -127,7 +156,9 @@ export async function runGuidedAuthoringCli(
           throw error;
         }
       } else {
-        dto = await client.guidedFinish(assignmentId);
+        dto = packId
+          ? await client.authoringV5Finish(packId) as typeof dto
+          : await client.guidedFinish(assignmentId!);
       }
     }
     return renderGuidedDto(dto, json);
@@ -190,20 +221,31 @@ export function guidedAuthoringHelp(): string {
   return [
     "Usage: mastheadctl workbench author <command> [options]",
     "",
-    "Guided authoring:",
+    "Workbench authoring V5:",
+    "  mastheadctl workbench author bootstrap --request <request-id> [--json]",
     "  mastheadctl workbench author start --request <request-id> [--json]",
-    "  mastheadctl workbench author inspect --assignment <assignment-id> [--session <session-id>] [--cursor <cursor>] [--json]",
-    "  mastheadctl workbench author scaffold --assignment <assignment-id> --file <draft.json> [--json]",
-    "  mastheadctl workbench author save --assignment <assignment-id> --file <draft.json> [--json]",
-    "  mastheadctl workbench author review --assignment <assignment-id> [--json]",
-    "  mastheadctl workbench author finish --assignment <assignment-id> [--json]",
+    "  mastheadctl workbench author claim --request <request-id> [--json]",
+    "  mastheadctl workbench author inspect --pack <pack-id> [--session <session-id>] [--cursor <cursor>] [--json]",
+    "  mastheadctl workbench author scaffold --pack <pack-id> --file <draft.json> [--json]",
+    "  mastheadctl workbench author save --pack <pack-id> --file <draft.json> [--json]",
+    "  mastheadctl workbench author finish --pack <pack-id> [--json]",
+    "  mastheadctl workbench author status --request <request-id> [--json]",
+    "  mastheadctl workbench author receipt --request <request-id> [--json]",
     "",
     "Run one returned nextAction at a time. Masthead owns assignment membership and evidence coverage."
   ].join("\n") + "\n";
 }
 
+function parseWorkbenchAuthoringV5Draft(value: unknown): WorkbenchAuthoringV5Draft {
+  if (!value || typeof value !== "object" || Array.isArray(value) ||
+      (value as Record<string, unknown>).bundleVersion !== "workbench-authoring-v5") {
+    throw new Error("invalid_workbench_authoring_v5_bundle");
+  }
+  return value as WorkbenchAuthoringV5Draft;
+}
+
 function renderGuidedDto(
-  dto: { nextAction: GuidedAuthoringNextAction; [key: string]: unknown },
+  dto: { nextAction: GuidedAuthoringNextAction | WorkbenchAuthoringV5NextAction; [key: string]: unknown },
   json: boolean
 ): CliResult {
   const action = dto.nextAction;

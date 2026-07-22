@@ -6,6 +6,10 @@ import type {
   WorkbenchClaimSupport
 } from "./workbenchAuthoring.ts";
 import { isAbsoluteAuthoringCommand } from "./workbenchAuthoring.ts";
+import {
+  isWorkbenchAuthoringV5CapabilitiesDto,
+  type WorkbenchAuthoringV5CapabilitiesDto
+} from "./workbenchAuthoringV5.ts";
 export type { GuidedAuthoringExpectedIdentity } from "./instanceIdentity.ts";
 
 export const GUIDED_AUTHORING_POLICY_VERSION = "guided-authoring-v1" as const;
@@ -90,7 +94,7 @@ export type GuidedAuthoringBundleV4 = {
   artifacts: GuidedArtifactDraft[];
 };
 
-export type GuidedAuthoringCapabilitiesDto = {
+export type GuidedAuthoringCapabilitiesV4Dto = {
   capability: "artifact_authoring";
   protocol: "masthead.workbench.authoring/v1";
   bundleVersion: "workbench-authoring-v4";
@@ -106,10 +110,16 @@ export type GuidedAuthoringCapabilitiesDto = {
   operations: ["start", "inspect", "scaffold", "save", "review", "finish"];
 };
 
+export type GuidedAuthoringCapabilitiesDto = GuidedAuthoringCapabilitiesV4Dto | WorkbenchAuthoringV5CapabilitiesDto;
+
 export function isGuidedAuthoringCapabilitiesDto(
   value: unknown,
   options: { expectedCommand?: string } = {}
 ): value is GuidedAuthoringCapabilitiesDto {
+  if (isWorkbenchAuthoringV5CapabilitiesDto(value)) {
+    return isAbsoluteAuthoringCommand(value.command) &&
+      (!options.expectedCommand || value.command === options.expectedCommand);
+  }
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const capabilities = value as Record<string, unknown>;
   const command = typeof capabilities.command === "string" ? capabilities.command.trim() : "";

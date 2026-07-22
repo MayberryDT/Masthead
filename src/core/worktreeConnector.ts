@@ -102,6 +102,8 @@ export function isAllowedReadOnlyBridgeRequest(method: string | undefined, pathn
   return (
     /^\/workbench\/authoring\/requests\/[^/]+$/.test(pathname) ||
     /^\/workbench\/authoring\/assignments\/[^/]+\/(?:review|scaffold)$/.test(pathname) ||
+    /^\/workbench\/authoring\/v5\/requests\/[^/]+(?:\/(?:bootstrap|receipt))?$/.test(pathname) ||
+    /^\/workbench\/authoring\/v5\/packs\/[^/]+\/scaffold$/.test(pathname) ||
     /^\/workbench\/authoring\/runs\/[^/]+(?:\/(?:context|evidence))?$/.test(pathname) ||
     /^\/settings\/hooks\/[^/]+$/.test(pathname) ||
     /^\/logbook\/artifacts\/[^/]+$/.test(pathname) ||

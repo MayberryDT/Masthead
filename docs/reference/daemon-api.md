@@ -37,12 +37,19 @@ Clients should reject a daemon that does not identify `product: "masthead"` with
 - `GET /workbench/not-added?includeDetails=true&limit=...` explicitly inspects Not Added to Logbook sessions.
 - `GET /workbench/missing-sessions?limit=...` remains a compatibility read endpoint backed by the Workbench pipeline queue.
 
-### Current V4 authoring runtime
+### Authoring runtime
 
 - `GET /workbench/authoring/capabilities` returns the stable daemon transport protocol
   `masthead.workbench.authoring/v1`, instance-bound CLI command, database/build/manifest identity,
-  `workbench-authoring-v4`, policy `guided-authoring-v1`, assignment limits, and guided operations.
+  the live `workbench-authoring-v5` bundle, fixed pack bounds, and V5 operations.
   Bridge-safe read.
+- `GET /workbench/authoring/v5/requests/:requestId/bootstrap` returns the thick skill contract,
+  pack policy, reject/flag policy, stable instance identity, request state, and one next action.
+  Request status at `GET /workbench/authoring/v5/requests/:requestId`, immutable completion receipts
+  at `/receipt`, and blank evidence-catalog scaffolds at
+  `GET /workbench/authoring/v5/packs/:packId/scaffold` are bridge-safe reads.
+- `GET /workbench/authoring/v5/packs/:packId/inspect` returns canonical evidence and records coverage,
+  so it is primary-only and never forwarded by the read-only worktree bridge.
 - `GET /workbench/authoring/runs/:runId` returns one historical V3 run, selected sessions and claims,
   evidence revision state, findings, accepted bundle, and completion report. Historical V1 and V2
   runs are audit-only. Bridge-safe read.
@@ -107,7 +114,20 @@ Write endpoints are local daemon operations. They are not exposed through MCP.
 - `POST /workbench/claims/:claimId/release` releases an active claim. Optional body: `{ "reason"?: string }` (default `released`). Returns `{ ok: true, claim }` or `404` when the claim is missing. Primary-only; not bridge-safe.
 - `POST /workbench/sessions/:sessionId/quality` marks capture quality. Body is either `{ "status": "passed" | "failed", "reason"?: string, "actorId"?: string }` or `{ "mode": "precheck", "actorId"?: string }`. Precheck runs capture quality heuristics then marks pass/fail. Actor defaults to user `workbench_ui`. Failing quality on an already published session returns `409` with `cannot_fail_quality_on_published_session`. Primary-only; not bridge-safe.
 
-### Current V4 authoring runtime
+### Authoring mutations
+
+- `POST /workbench/authoring/v5/requests` creates one durable V5 request and fixed packs of 5–12
+  sessions without opportunity-join packing. The thin handoff contains only the request ID and the
+  instance-bound `mastheadctl workbench author bootstrap --request <id> --json` command.
+- `POST /workbench/authoring/v5/requests/:requestId/start` starts or crash-resumes the current pack.
+  `POST /workbench/authoring/v5/packs/:packId/draft` saves per-session
+  `publishable | soft_flag | hard_reject` outcomes without freezing the request, and
+  `POST /workbench/authoring/v5/packs/:packId/finish` atomically publishes passers, records rejects,
+  releases the next pack, and returns idempotent pack/request receipts. All are primary-only.
+- The V5 CLI loop is `bootstrap` → `start`/`claim` → `inspect` → `scaffold --file` → `save --file` →
+  `finish`, with `status` and `receipt` reads by request ID.
+
+### V4 compatibility mutations
 
 - `POST /workbench/authoring/suggestions` returns advisory suggestions for 1–12 selected sessions and
   is allowed through the read-only bridge.

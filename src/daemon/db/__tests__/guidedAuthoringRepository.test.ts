@@ -54,8 +54,8 @@ describe("guided authoring repository", () => {
     migrateDatabase(db);
 
     expect(db.prepare("SELECT version, name FROM schema_migrations ORDER BY version DESC LIMIT 1").get()).toEqual({
-      name: "035_artifact_skill_search",
-      version: 35
+      name: "036_workbench_authoring_v5",
+      version: 36
     });
     expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });

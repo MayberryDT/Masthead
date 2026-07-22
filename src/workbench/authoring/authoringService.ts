@@ -273,6 +273,32 @@ export function stageGuidedCanonicalDossiersInTransaction(
   );
 }
 
+/** Stages canonical dossiers for a V5 pack after its service has verified durable membership. */
+export function stageWorkbenchAuthoringV5CanonicalDossiersInTransaction(
+  db: MastheadDatabase,
+  input: {
+    actorId: string;
+    evidenceRevision: string;
+    sessionIds: string[];
+  }
+): SessionArtifactRecord[] {
+  const actor = { id: input.actorId, kind: "agent" } as const;
+  for (const sessionId of input.sessionIds) {
+    markWorkbenchArtifactAppliedInTransaction(db, { actor, artifactKind: "session_dossier", sessionId });
+    markWorkbenchPublishedInTransaction(db, {
+      actor,
+      publishedVia: "workbench_authoring_v5_dossier_staging",
+      sessionId
+    });
+  }
+  return input.sessionIds.map((sessionId) =>
+    applyCanonicalDossierSnapshotInTransaction(db, sessionId, input.actorId, {
+      contract: "workbench-authoring-v5",
+      evidenceRevision: input.evidenceRevision
+    })
+  );
+}
+
 /** Stages validated optional artifacts and their Workbench satisfaction state. */
 export function stageGuidedOptionalArtifactsInTransaction(
   db: MastheadDatabase,
@@ -1611,7 +1637,7 @@ function applyCanonicalDossierSnapshotInTransaction(
   sessionId: string,
   actorId: string,
   options: {
-    contract: "workbench-authoring-v3" | "workbench-authoring-v4";
+    contract: "workbench-authoring-v3" | "workbench-authoring-v4" | "workbench-authoring-v5";
     evidenceRevision?: string;
   } = { contract: "workbench-authoring-v3" }
 ): SessionArtifactRecord {
@@ -1620,7 +1646,7 @@ function applyCanonicalDossierSnapshotInTransaction(
   const snapshot = buildPublishedEnrichedDossierSnapshot(canonical);
   const capsule = canonicalDossierCapsule(snapshot);
   const snapshotFingerprint = dossierSnapshotFingerprint(snapshot);
-  const contentFingerprint = options.contract === "workbench-authoring-v4"
+  const contentFingerprint = options.contract === "workbench-authoring-v4" || options.contract === "workbench-authoring-v5"
     ? fingerprintWorkbenchOutput({
         contract: options.contract,
         evidenceRevision: options.evidenceRevision,
@@ -1634,6 +1660,8 @@ function applyCanonicalDossierSnapshotInTransaction(
     contentFingerprint,
     createdBy: options.contract === "workbench-authoring-v4"
       ? `guided_authoring:${actorId}`
+      : options.contract === "workbench-authoring-v5"
+        ? `workbench_authoring_v5:${actorId}`
       : `workbench_authoring_v3:${actorId}`,
     evidenceRefs: dossierEvidenceRefs(snapshot),
     highlight: capsule.highlight,

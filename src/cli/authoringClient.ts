@@ -14,6 +14,14 @@ import {
   type GuidedInspectionDto
 } from "../shared/guidedAuthoring.ts";
 import type { SessionDossierDto } from "../shared/sessionDossier.ts";
+import type {
+  WorkbenchAuthoringV5Draft,
+  WorkbenchAuthoringV5NextAction,
+  WorkbenchAuthoringV5PackReceipt,
+  WorkbenchAuthoringV5RequestDto,
+  WorkbenchAuthoringV5RequestReceipt,
+  WorkbenchAuthoringV5SessionOutcome
+} from "../shared/workbenchAuthoringV5.ts";
 import {
   assertGuidedAuthoringExpectedIdentity,
   GuidedAuthoringIdentityError,
@@ -140,6 +148,74 @@ export class MastheadAuthoringClient {
     );
   }
 
+  async authoringV5Bootstrap(requestId: string): Promise<V5CommandDto> {
+    const binding = await this.currentBinding();
+    return this.requestAt(binding.baseUrl, "GET", `/workbench/authoring/v5/requests/${encodeURIComponent(requestId)}/bootstrap`);
+  }
+
+  async authoringV5Start(requestId: string): Promise<V5CommandDto> {
+    const binding = await this.verifiedGuidedMutationBinding();
+    return this.requestAt(
+      binding.baseUrl,
+      "POST",
+      `/workbench/authoring/v5/requests/${encodeURIComponent(requestId)}/start`,
+      { expectedIdentity: binding.expected }
+    );
+  }
+
+  async authoringV5Inspect(
+    packId: string,
+    options: { cursor?: string; sessionId?: string } = {}
+  ): Promise<V5CommandDto> {
+    const binding = await this.verifiedGuidedMutationBinding();
+    const query = new URLSearchParams();
+    if (options.sessionId) query.set("sessionId", options.sessionId);
+    if (options.cursor) query.set("cursor", options.cursor);
+    const suffix = query.size > 0 ? `?${query.toString()}` : "";
+    return this.requestAt(
+      binding.baseUrl,
+      "GET",
+      `/workbench/authoring/v5/packs/${encodeURIComponent(packId)}/inspect${suffix}`,
+      undefined,
+      identityHeaders(binding.expected)
+    );
+  }
+
+  async authoringV5Scaffold(packId: string): Promise<{ draft: WorkbenchAuthoringV5Draft; nextAction: WorkbenchAuthoringV5NextAction; packId: string }> {
+    const binding = await this.currentBinding();
+    return this.requestAt(binding.baseUrl, "GET", `/workbench/authoring/v5/packs/${encodeURIComponent(packId)}/scaffold`);
+  }
+
+  async authoringV5Save(packId: string, draft: WorkbenchAuthoringV5Draft): Promise<V5CommandDto & { outcomes: WorkbenchAuthoringV5SessionOutcome[] }> {
+    const binding = await this.verifiedGuidedMutationBinding();
+    return this.requestAt(
+      binding.baseUrl,
+      "POST",
+      `/workbench/authoring/v5/packs/${encodeURIComponent(packId)}/draft`,
+      { draft, expectedIdentity: binding.expected }
+    );
+  }
+
+  async authoringV5Finish(packId: string): Promise<V5CommandDto & { receipt: WorkbenchAuthoringV5PackReceipt; requestReceipt?: WorkbenchAuthoringV5RequestReceipt }> {
+    const binding = await this.verifiedGuidedMutationBinding();
+    return this.requestAt(
+      binding.baseUrl,
+      "POST",
+      `/workbench/authoring/v5/packs/${encodeURIComponent(packId)}/finish`,
+      { expectedIdentity: binding.expected }
+    );
+  }
+
+  async authoringV5Status(requestId: string): Promise<V5CommandDto & { request: WorkbenchAuthoringV5RequestDto; receipt?: WorkbenchAuthoringV5RequestReceipt }> {
+    const binding = await this.currentBinding();
+    return this.requestAt(binding.baseUrl, "GET", `/workbench/authoring/v5/requests/${encodeURIComponent(requestId)}`);
+  }
+
+  async authoringV5Receipt(requestId: string): Promise<{ requestId: string; status: WorkbenchAuthoringV5RequestDto["status"]; receipt?: WorkbenchAuthoringV5RequestReceipt }> {
+    const binding = await this.currentBinding();
+    return this.requestAt(binding.baseUrl, "GET", `/workbench/authoring/v5/requests/${encodeURIComponent(requestId)}/receipt`);
+  }
+
   status(runId: string): Promise<{ ok: true; run: WorkbenchAuthoringRunDto; evidenceStatus: "current" | "changed" }> {
     return this.request("GET", `/workbench/authoring/runs/${encodeURIComponent(runId)}`);
   }
@@ -261,6 +337,11 @@ export type GuidedAuthoringCommandDto = {
 export type GuidedFinishCommandDto = {
   receipt: GuidedAuthoringReceiptDto;
   nextAction: GuidedAuthoringNextAction & { kind: "claim_next" | "complete" };
+};
+
+export type V5CommandDto = {
+  nextAction: WorkbenchAuthoringV5NextAction;
+  [key: string]: unknown;
 };
 
 function identityHeaders(identity: GuidedAuthoringExpectedIdentity): Record<string, string> {
