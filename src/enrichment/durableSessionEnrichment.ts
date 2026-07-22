@@ -89,6 +89,7 @@ export function validateSessionSummaryText(value: string | undefined): TextValid
 
 export function fallbackDurableSessionEnrichment(facts: SessionFacts): DurableSessionEnrichment {
   return {
+    keywords: [],
     sessionDossier: {
       blockers: [],
       continuation: {

@@ -179,7 +179,10 @@ export function createEnrichmentCoordinator(
           sourceRefs: facts.evidence
         });
         writeEnrichment(db, {
-          content: { searchText: searchProjectionText(capsule) },
+          content: {
+            keywords: capsule.durableEnrichment?.keywords ?? [],
+            searchText: searchProjectionText(capsule)
+          },
           enrichmentKind: "search_projection",
           fingerprint,
           generatedAt,
@@ -225,6 +228,7 @@ export function createEnrichmentCoordinator(
       const capsule = applyTitleQuality(deterministicCapsuleFromFacts(facts), facts);
       const localProvider = { id: "deterministic", model: "local-rules" };
       const searchProjectionContent = {
+        keywords: capsule.durableEnrichment?.keywords ?? [],
         objective: capsule.objective,
         outcome: capsule.outcome,
         searchSummary: capsule.searchSummary,
@@ -434,6 +438,7 @@ function applyTitleQuality(capsule: SessionCapsule, facts: SessionFacts): Sessio
 
 function searchProjectionText(capsule: SessionCapsule): string {
   return [
+    ...(capsule.durableEnrichment?.keywords ?? []),
     capsule.sessionTitle?.text,
     capsule.sessionSummary?.text,
     capsule.sessionDossier?.purpose,

@@ -175,6 +175,11 @@ const migrations = [
     version: 34,
     name: "034_artifact_first_summary",
     path: resolve(currentDir, "migrations/034_artifact_first_summary.sql")
+  },
+  {
+    version: 35,
+    name: "035_artifact_skill_search",
+    path: resolve(currentDir, "migrations/035_artifact_skill_search.sql")
   }
 ];
 

@@ -1689,7 +1689,12 @@ function applyDurableSessionEnrichmentInTransaction(
   const contents = {
     live_summary: { text: canonicalEnrichment.sessionSummary.text },
     search_projection: {
-      searchText: `${canonicalEnrichment.sessionTitle.text}\n${canonicalEnrichment.sessionSummary.text}`,
+      keywords: canonicalEnrichment.keywords,
+      searchText: [
+        canonicalEnrichment.sessionTitle.text,
+        canonicalEnrichment.sessionSummary.text,
+        ...canonicalEnrichment.keywords
+      ].join("\n"),
       title: canonicalEnrichment.sessionTitle.text
     },
     session_capsule: capsule

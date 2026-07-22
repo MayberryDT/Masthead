@@ -64,6 +64,13 @@ describe("Workbench authoring V3 schema", () => {
       "invalid_authoring_bundle:sessionEnrichments[0].enrichment"
     );
   });
+
+  test("keeps legacy V3 bundles without keywords readable for audit", () => {
+    const bundle = validBundle() as unknown as Record<string, any>;
+    delete bundle.sessionEnrichments[0].enrichment.keywords;
+
+    expect(parseAuthoringBundleV3(bundle)).toEqual(bundle);
+  });
 });
 
 function validBundle(): WorkbenchAuthoringBundleV3 {
@@ -81,6 +88,7 @@ function validBundle(): WorkbenchAuthoringBundleV3 {
 
 function durableEnrichment(title: string): DurableSessionEnrichment {
   return {
+    keywords: ["selection-scoped authoring"],
     sessionDossier: {
       blockers: [],
       continuation: { constraints: [], openQuestions: [] },

@@ -53,6 +53,7 @@ function validCliV3Bundle(runId: string, evidenceRevision: string, sessionId: st
     runId,
     sessionEnrichments: [{
       enrichment: {
+        keywords: ["canonical dossier", "atomic publication"],
         sessionDossier: {
           blockers: [],
           continuation: { constraints: [], openQuestions: [] },
@@ -382,6 +383,7 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
           path: "/sessionSummary/text", supportKind: "outcome"
         }],
         enrichment: {
+          keywords: ["guided authoring", "instance-bound workflow", "focused verification"],
           version: "session-capsule-v4",
           sessionTitle: { text: "Guided authoring", basis: "dominant_work", confidence: "high", evidenceRefs: [] },
           sessionSummary: { text: "Implemented guided authoring.", state: "completed", confidence: "high", evidenceRefs: [] },
@@ -599,6 +601,7 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
       sessionEnrichments: [{
         sessionId: "session:a",
         enrichment: {
+          keywords: [],
           version: "session-capsule-v4",
           sessionTitle: { text: "REPLACE", basis: "dominant_work", confidence: "low", evidenceRefs: [] },
           sessionSummary: { text: "REPLACE", state: "unknown", confidence: "low", evidenceRefs: [] },

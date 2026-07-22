@@ -271,6 +271,105 @@ describe("session artifact repository", () => {
     ).toEqual([artifact.artifactId]);
   });
 
+  test("finds dossier keywords and ranks skill fields ahead of a newer body-only match", async () => {
+    const db = await testDb();
+    const query = "quartzharbor";
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:skill-match",
+      title: "Skill match"
+    });
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:body-match",
+      title: "Body match"
+    });
+
+    const skillSnapshot = buildPublishedDossierSnapshot(
+      getSessionDossier(db, "session:skill-match")!,
+      "2026-07-20T12:00:00.000Z"
+    );
+    skillSnapshot.durableEnrichment = Object.assign(
+      {
+        sessionDossier: {
+          blockers: [],
+          continuation: { constraints: [], openQuestions: [] },
+          decisions: [],
+          evidenceRefs: [],
+          keyWork: ["Stored agent-authored retrieval terms."],
+          verification: {
+            commands: [],
+            evidenceRefs: [],
+            failures: [],
+            status: "passed" as const,
+            summary: "Focused tests passed."
+          },
+          warnings: []
+        },
+        sessionSummary: {
+          confidence: "high" as const,
+          evidenceRefs: [],
+          state: "completed" as const,
+          text: "Stored agent-authored retrieval terms on the durable dossier."
+        },
+        sessionTitle: {
+          basis: "dominant_work" as const,
+          confidence: "high" as const,
+          evidenceRefs: [],
+          text: "Store durable retrieval terms"
+        },
+        version: "session-capsule-v4" as const
+      },
+      { keywords: [query, "skill-primary search", "dossier retrieval"] }
+    );
+    const bodySnapshot = buildPublishedDossierSnapshot(
+      getSessionDossier(db, "session:body-match")!,
+      "2026-07-21T12:00:00.000Z"
+    );
+    bodySnapshot.narrative.objective = `Investigate the ${query} body-only reference.`;
+
+    const skillArtifact = applySessionArtifact(db, {
+      artifactKind: "session_dossier",
+      content: skillSnapshot,
+      contentFingerprint: dossierSnapshotFingerprint(skillSnapshot),
+      createdBy: "guided_authoring:test",
+      evidenceRefs: [],
+      schemaVersion: skillSnapshot.snapshotVersion,
+      sessionId: skillSnapshot.identity.sessionId,
+      summary: skillSnapshot.durableEnrichment.sessionSummary.text,
+      title: skillSnapshot.durableEnrichment.sessionTitle.text,
+      validation: { canonicalSnapshot: true }
+    });
+    const bodyArtifact = applySessionArtifact(db, {
+      artifactKind: "session_dossier",
+      content: bodySnapshot,
+      contentFingerprint: dossierSnapshotFingerprint(bodySnapshot),
+      createdBy: "guided_authoring:test",
+      evidenceRefs: [],
+      schemaVersion: bodySnapshot.snapshotVersion,
+      sessionId: bodySnapshot.identity.sessionId,
+      summary: "Body-only reference",
+      title: "Investigate body reference",
+      validation: { canonicalSnapshot: true }
+    });
+    publishSessionArtifact(db, skillArtifact.artifactId);
+    publishSessionArtifact(db, bodyArtifact.artifactId);
+    setPublishedAt(db, skillArtifact.artifactId, "2026-07-20T12:00:00.000Z");
+    setPublishedAt(db, bodyArtifact.artifactId, "2026-07-21T12:00:00.000Z");
+
+    expect(
+      db.prepare("SELECT keywords FROM session_artifact_search WHERE artifact_id = ?")
+        .get(skillArtifact.artifactId)
+    ).toEqual({ keywords: `${query} skill-primary search dossier retrieval` });
+    expect(searchPublishedArtifactCapsules(db, { q: query }).artifacts.map(({ artifactId }) => artifactId))
+      .toEqual([skillArtifact.artifactId, bodyArtifact.artifactId]);
+    db.close();
+  });
+
   test.each([
     ["title", "Canonical OAuth repair"],
     ["narrative", "callback state mismatch"],
@@ -326,6 +425,7 @@ describe("session artifact repository", () => {
       }
     ];
     snapshot.durableEnrichment = {
+      keywords: ["pinequartz", "amberlattice"],
       sessionDossier: {
         blockers: ["blockerthistle must be resolved before release."],
         continuation: {

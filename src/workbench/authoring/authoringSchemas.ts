@@ -27,6 +27,7 @@ const durableSessionEnrichment = {
   additionalProperties: false,
   properties: {
     generatedAt: stringField,
+    keywords: stringArray,
     model: stringField,
     promptVersion: stringField,
     sessionDossier: {
@@ -100,6 +101,11 @@ const durableSessionEnrichment = {
   },
   required: ["version", "sessionTitle", "sessionSummary", "sessionDossier"],
   type: "object"
+};
+
+const guidedDurableSessionEnrichment = {
+  ...durableSessionEnrichment,
+  required: ["version", "keywords", "sessionTitle", "sessionSummary", "sessionDossier"]
 };
 
 const claimEvidence = {
@@ -387,7 +393,7 @@ export function getGuidedAuthoringBundleV4Schema(): WorkbenchJsonSchema {
           additionalProperties: false,
           properties: {
             claimSupport: guidedClaimSupport,
-            enrichment: durableSessionEnrichment,
+            enrichment: guidedDurableSessionEnrichment,
             sessionId: stringField
           },
           required: ["sessionId", "enrichment", "claimSupport"],

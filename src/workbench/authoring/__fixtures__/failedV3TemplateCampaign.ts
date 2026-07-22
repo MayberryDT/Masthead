@@ -65,6 +65,7 @@ function deterministicTemplateEnrichment(session: FailedV3TemplateSession, inclu
   const last = session.evidence.at(-1) ?? first;
   const evidenceRefs = [first, last].filter((item): item is NonNullable<typeof item> => Boolean(item)).map(toEvidenceRef);
   return {
+    keywords: [],
     version: "session-capsule-v4",
     source: "deterministic",
     promptVersion: "v3-template-campaign",

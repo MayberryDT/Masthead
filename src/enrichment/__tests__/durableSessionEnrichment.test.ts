@@ -19,6 +19,7 @@ describe("durable session enrichment", () => {
       text: "Durable Logbook title structure"
     };
     const durable: DurableSessionEnrichment = {
+      keywords: ["durable enrichment"],
       sessionDossier: {
         blockers: [],
         continuation: {
@@ -99,6 +100,7 @@ describe("durable session enrichment", () => {
     });
     expect(fallback.sessionSummary.state).toBe("unknown");
     expect(fallback.sessionDossier.warnings).toContain("Durable enrichment used a low-confidence fallback.");
+    expect(fallback.keywords).toEqual([]);
   });
 
   test("merges provider durable fields with exact evidence ID mapping", () => {

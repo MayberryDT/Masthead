@@ -358,6 +358,7 @@ export function buildGuidedDraftScaffold(
       return {
         sessionId,
         enrichment: {
+          keywords: [],
           version: "session-capsule-v4" as const,
           source: "remote_model" as const,
           promptVersion: GUIDED_AUTHORING_POLICY_VERSION,

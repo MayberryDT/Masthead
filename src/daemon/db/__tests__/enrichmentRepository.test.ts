@@ -6,6 +6,7 @@ import type { GuidedEnrichmentProvenance } from "../../../shared/guidedAuthoring
 import {
   listGuidedEnrichmentProvenance,
   listGuidedEnrichmentProvenanceByEnrichment,
+  readSessionEnrichment,
   recordGuidedEnrichmentProvenanceInTransaction,
   upsertSessionEnrichment
 } from "../enrichmentRepository.ts";
@@ -20,6 +21,113 @@ afterEach(async () => {
 });
 
 describe("enrichment repository", () => {
+  test("round-trips agent-authored capsule keywords without synthesizing extras", async () => {
+    const db = await guidedDb(["session:1"]);
+    const keywords = ["skill-primary search", "artifact retrieval", "capsule schema"];
+    const enrichmentId = upsertSessionEnrichment(db, {
+      content: {
+        candidateDecisions: [],
+        durableEnrichment: {
+          keywords,
+          sessionDossier: {
+            blockers: [],
+            continuation: { constraints: [], openQuestions: [] },
+            decisions: [],
+            evidenceRefs: [],
+            keyWork: ["Added keyword retrieval."],
+            verification: {
+              commands: [],
+              evidenceRefs: [],
+              failures: [],
+              status: "passed",
+              summary: "Focused tests passed."
+            },
+            warnings: []
+          },
+          sessionSummary: {
+            confidence: "high",
+            evidenceRefs: [],
+            state: "completed",
+            text: "Added skill-primary artifact retrieval."
+          },
+          sessionTitle: {
+            basis: "dominant_work",
+            confidence: "high",
+            evidenceRefs: [],
+            text: "Add skill-primary artifact retrieval"
+          },
+          version: "session-capsule-v4"
+        },
+        searchPhrases: [],
+        technologies: [],
+        title: "Add skill-primary artifact retrieval",
+        topics: [],
+        unresolved: []
+      },
+      contentFingerprint: "fingerprint:keywords",
+      enrichmentKind: "session_capsule",
+      promptVersion: "session-capsule-v4",
+      sessionId: "session:1",
+      sourceRefs: [],
+      status: "current"
+    });
+
+    expect(readSessionEnrichment(db, enrichmentId)?.content).toMatchObject({
+      durableEnrichment: { keywords }
+    });
+
+    const legacyId = upsertSessionEnrichment(db, {
+      content: {
+        candidateDecisions: [],
+        durableEnrichment: {
+          sessionDossier: {
+            blockers: [],
+            continuation: { constraints: [], openQuestions: [] },
+            decisions: [],
+            evidenceRefs: [],
+            keyWork: [],
+            verification: {
+              commands: [],
+              evidenceRefs: [],
+              failures: [],
+              status: "missing",
+              summary: "Verification not run."
+            },
+            warnings: []
+          },
+          sessionSummary: {
+            confidence: "low",
+            evidenceRefs: [],
+            state: "unknown",
+            text: "Legacy durable enrichment without keyword metadata."
+          },
+          sessionTitle: {
+            basis: "fallback",
+            confidence: "low",
+            evidenceRefs: [],
+            text: "Legacy durable enrichment record"
+          },
+          version: "session-capsule-v4"
+        } as never,
+        searchPhrases: [],
+        technologies: [],
+        title: "Legacy durable enrichment record",
+        topics: [],
+        unresolved: []
+      },
+      contentFingerprint: "fingerprint:legacy-keywords",
+      enrichmentKind: "session_capsule",
+      promptVersion: "session-capsule-v4",
+      sessionId: "session:1",
+      sourceRefs: [],
+      status: "stale"
+    });
+    expect(readSessionEnrichment(db, legacyId)?.content).toMatchObject({
+      durableEnrichment: { keywords: [] }
+    });
+    db.close();
+  });
+
   test("upserts versioned session capsules by content fingerprint", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-enrichment-"));
     tempDirs.push(tempDir);

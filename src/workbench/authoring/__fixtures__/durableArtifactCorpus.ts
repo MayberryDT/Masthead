@@ -580,6 +580,7 @@ function guidedEnrichment(input: {
     ? guidedEvidenceRef(input.verification.evidenceRef)
     : undefined;
   return {
+    keywords: [input.title, input.purpose],
     version: "session-capsule-v4",
     sessionTitle: { text: input.title, basis: "dominant_work", confidence: "high", evidenceRefs: [ref] },
     sessionSummary: { text: input.summary, state: "partial", confidence: "high", evidenceRefs: [ref] },
@@ -1024,6 +1025,7 @@ function focusedSessionEnrichment(
   };
   return {
     enrichment: {
+      keywords: [session.title],
       sessionDossier: {
         blockers: [],
         continuation: { constraints: [], openQuestions: [] },

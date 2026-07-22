@@ -31,6 +31,16 @@ describe("guided authoring V4 schema", () => {
     });
   });
 
+  test("requires agent-authored keywords on durable guided enrichment", () => {
+    const bundle = validGuidedBundle() as unknown as Record<string, any>;
+    bundle.sessionEnrichments[0].enrichment.keywords = ["guided authoring", "durable dossier"];
+
+    expect(parseGuidedAuthoringBundleV4(bundle)).toEqual(bundle);
+
+    delete bundle.sessionEnrichments[0].enrichment.keywords;
+    expect(() => parseGuidedAuthoringBundleV4(bundle)).toThrow("invalid_guided_authoring_bundle");
+  });
+
   test("accepts an authored opportunity linked to exactly one artifact draft of the same kind", () => {
     const bundle = validGuidedBundle();
     bundle.artifacts = [validAdrDraft()];
@@ -259,6 +269,7 @@ function support(
 
 function durableEnrichment(): DurableSessionEnrichment {
   return {
+    keywords: ["guided authoring", "claim support", "durable artifacts"],
     sessionDossier: {
       blockers: [],
       continuation: { constraints: ["Keep legacy authoring records audit-only."], openQuestions: [] },

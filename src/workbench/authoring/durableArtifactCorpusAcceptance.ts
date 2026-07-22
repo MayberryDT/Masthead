@@ -997,6 +997,7 @@ function seedAcceptanceEnrichments(db: MastheadDatabase): void {
   for (const [sessionId, title] of sessions) {
     const durableEnrichment = {
       generatedAt: "2026-07-01T12:10:00.000Z",
+      keywords: [],
       sessionDossier: {
         blockers: [],
         continuation: { constraints: [], openQuestions: [] },

@@ -163,6 +163,7 @@ describe("enrichment view repository", () => {
     const view = currentSessionEnrichmentView(db, "session-summary");
 
     expect(view).toMatchObject({
+      keywords: ["summary projection", "logbook retrieval"],
       objective: "Refresh summaries locally",
       outcome: "Summary fields updated",
       searchSummary: "Summary projection search text",
@@ -256,6 +257,7 @@ function seedSearchProjection(db: MastheadDatabase, sessionId: string): void {
     "local-rules",
     "2026-06-24T12:10:00.000Z",
     JSON.stringify({
+      keywords: ["summary projection", "logbook retrieval"],
       objective: "Refresh summaries locally",
       outcome: "Summary fields updated",
       searchSummary: "Summary projection search text",

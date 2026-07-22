@@ -172,6 +172,11 @@ describe("focused agent-led authoring acceptance", () => {
       buildFocusedAgentLedBundle({ evidenceRevision, runId: "run:guided" }, [misleadingSuggestionSession], ["adr"]),
       "assignment:guided"
     );
+    bundle.sessionEnrichments[0]!.enrichment.keywords = [
+      "quartzharbor",
+      "guided dossier publication",
+      "MCP retrieval"
+    ];
     seedGuidedAssignment(db, { assignmentId: bundle.assignmentId, evidenceRevision, sessionIds: [sessionId] });
     seedConcurrentClaims(db, sessionId);
 
@@ -217,6 +222,24 @@ describe("focused agent-led authoring acceptance", () => {
     expect(result.publication.publishedArtifacts.every(({ artifactId }) =>
       getSessionArtifact(db, artifactId)?.publicationStatus === "published"
     )).toBe(true);
+    const dossierArtifactId = result.publication.publishedArtifacts.find(({ kind }) => kind === "session_dossier")!.artifactId;
+    expect(
+      JSON.parse((db.prepare(
+        `SELECT content_json AS contentJson
+         FROM session_enrichments
+         WHERE session_id = ? AND enrichment_kind = 'search_projection' AND status = 'current'`
+      ).get(sessionId) as { contentJson: string }).contentJson)
+    ).toMatchObject({ keywords: bundle.sessionEnrichments[0]!.enrichment.keywords });
+    expect(getSessionArtifact(db, dossierArtifactId)?.content).toMatchObject({
+      durableEnrichment: { keywords: bundle.sessionEnrichments[0]!.enrichment.keywords }
+    });
+    expect(searchLogbookArtifacts(db, { q: "quartzharbor" }).artifacts).toEqual([
+      expect.objectContaining({ artifactId: dossierArtifactId })
+    ]);
+    expect(callMcp(db, "search_artifacts", { query: "quartzharbor" })).toMatchObject({
+      artifacts: [expect.objectContaining({ artifactId: dossierArtifactId })],
+      total: 1
+    });
     expect(result.reset).toMatchObject({
       releasedClaimIds: ["claim:guided"],
       sessionIds: [sessionId],

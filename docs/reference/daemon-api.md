@@ -22,7 +22,7 @@ Clients should reject a daemon that does not identify `product: "masthead"` with
 - `GET /sources/connectors` returns the Sources V2 harness-connector snapshot: eight live targets with `presence` (`not_found` | `found`), `live` (`not_installed` | `needs_action` | `ready` | `error`), optional activation fields, config/endpoints, and a `summary` of ready / needsAction / notInstalled / notFound / error counts. Read-only and safe through a worktree bridge.
 - `GET /sources/scan/latest` returns the latest multi-adapter scan result, or runs a bounded scan if none is cached.
 - `GET /diagnostics/runtime` returns runtime diagnostics, import queue state, and a small active import page for Advanced diagnostics.
-- `GET /logbook/artifacts` searches **published Logbook artifacts** (primary Logbook path). Query `q` searches capsule fields plus the complete first-class artifact body. Other params include `kind` (`session_dossier` \| `runbook` \| `adr` \| `incident_timeline`), `project`, `dateFrom`, `dateTo`, `limit`, `offset`. Bridge-safe read.
+- `GET /logbook/artifacts` searches **published Logbook artifacts** (primary Logbook path). Query `q` ranks title, summary, and agent-authored dossier keywords ahead of matches found only in the complete first-class artifact body. Other params include `kind` (`session_dossier` \| `runbook` \| `adr` \| `incident_timeline`), `project`, `dateFrom`, `dateTo`, `limit`, `offset`. Bridge-safe read.
 - `GET /logbook/artifacts/:artifactId` returns one published artifact detail: body, provenance session ids, join rationale, confidence, evidence refs. Bridge-safe read.
 - `GET /logbook/search` is a compatibility alias for artifact capsule search. It returns the same `artifacts` shape as `/logbook/artifacts`, never session rows. New clients should use `/logbook/artifacts`.
 - `GET /sessions` searches canonical sessions (evidence / Workbench / compile — not the primary Logbook listing). Query params include `q`, `project`, `runtime`, `host`, `model`, `state`, date filters, and `limit`.
@@ -118,7 +118,10 @@ Write endpoints are local daemon operations. They are not exposed through MCP.
   returns `guided_canary_not_constructible` and persists nothing. Primary daemon only.
 - `POST /workbench/authoring/requests/:requestId/start` claims and starts the released assignment.
 - `POST /workbench/authoring/assignments/:assignmentId/draft` validates and saves one grounded
-  `workbench-authoring-v4` draft after complete evidence traversal. It creates no Logbook rows.
+  `workbench-authoring-v4` draft after complete evidence traversal. Every durable session enrichment
+  includes agent-authored `keywords: string[]`; the daemon scaffold leaves the array empty and never
+  derives keyword prose from session evidence. It creates no Logbook rows. Legacy stored capsules
+  without `keywords` remain readable as an empty keyword list.
 - `POST /workbench/authoring/requests/:requestId/canary-decision` records operator approval or rejection
   of the staged three-session canary.
 - `POST /workbench/authoring/assignments/:assignmentId/finish` atomically applies enrichment, rebuilds

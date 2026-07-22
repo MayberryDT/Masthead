@@ -54,6 +54,7 @@ export type SessionDossierEnrichment = {
 
 export type DurableSessionEnrichment = {
   version: SessionEnrichmentVersion;
+  keywords: string[];
   sessionTitle: SessionTitleEnrichment;
   sessionSummary: SessionSummaryEnrichment;
   sessionDossier: SessionDossierEnrichment;
@@ -62,3 +63,20 @@ export type DurableSessionEnrichment = {
   promptVersion?: string;
   model?: string;
 };
+
+export function readableSessionEnrichmentKeywords(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((keyword): keyword is string => typeof keyword === "string")
+    : [];
+}
+
+/** Keeps pre-keyword V4 capsules readable without inventing retrieval terms. */
+export function normalizeDurableSessionEnrichment(
+  enrichment: DurableSessionEnrichment
+): DurableSessionEnrichment {
+  const keywords = (enrichment as DurableSessionEnrichment & { keywords?: unknown }).keywords;
+  return {
+    ...enrichment,
+    keywords: readableSessionEnrichmentKeywords(keywords)
+  };
+}

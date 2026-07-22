@@ -4,12 +4,17 @@ import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import type { NormalizedEvent } from "../../core/types.ts";
 import { migrateDatabase } from "../../daemon/db/schema.ts";
+import { getSessionDossier } from "../../daemon/db/sessionDossierRepository.ts";
 import { logMcpQuery } from "../../daemon/db/mcpAuditRepository.ts";
 import { createSessionRepository } from "../../daemon/db/sessionRepository.ts";
 import { applySessionArtifact, publishSessionArtifact } from "../../daemon/db/sessionArtifactRepository.ts";
 import { publishSessionToLogbook, seedSession } from "../../daemon/db/__tests__/sessionTestHelpers.ts";
 import { indexCanonicalSessionSearch } from "../../daemon/db/searchRepository.ts";
 import { openMastheadDatabase } from "../../daemon/db/sqlite.ts";
+import {
+  buildPublishedDossierSnapshot,
+  dossierSnapshotFingerprint
+} from "../../workbench/authoring/dossierSnapshot.ts";
 import { toolDefinitions } from "../protocol.ts";
 import { HISTORICAL_UNTRUSTED_PREFIX } from "../redaction.ts";
 import {
@@ -227,6 +232,68 @@ describe("Masthead MCP tools", () => {
     expect(db.prepare("SELECT tool_name, result_count, status FROM mcp_query_log").all()).toEqual([
       { result_count: 1, status: "succeeded", tool_name: "search_artifacts" }
     ]);
+    db.close();
+  });
+
+  test("finds a published dossier by an agent-authored keyword", async () => {
+    const db = await openDb();
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:artifact-keyword",
+      title: "Artifact keyword MCP search"
+    });
+    const snapshot = buildPublishedDossierSnapshot(getSessionDossier(db, "session:artifact-keyword")!);
+    snapshot.durableEnrichment = {
+      keywords: ["quartzharbor", "skill-primary search", "MCP retrieval"],
+      sessionDossier: {
+        blockers: [],
+        continuation: { constraints: [], openQuestions: [] },
+        decisions: [],
+        evidenceRefs: [],
+        keyWork: ["Stored the agent-authored retrieval vocabulary."],
+        verification: {
+          commands: [],
+          evidenceRefs: [],
+          failures: [],
+          status: "passed",
+          summary: "Focused MCP retrieval passed."
+        },
+        warnings: []
+      },
+      sessionSummary: {
+        confidence: "high",
+        evidenceRefs: [],
+        state: "completed",
+        text: "Stored agent-authored keywords for MCP retrieval."
+      },
+      sessionTitle: {
+        basis: "dominant_work",
+        confidence: "high",
+        evidenceRefs: [],
+        text: "Store MCP retrieval keywords"
+      },
+      version: "session-capsule-v4"
+    };
+    const artifact = applySessionArtifact(db, {
+      artifactKind: "session_dossier",
+      content: snapshot,
+      contentFingerprint: dossierSnapshotFingerprint(snapshot),
+      createdBy: "guided_authoring:test",
+      evidenceRefs: [],
+      schemaVersion: snapshot.snapshotVersion,
+      sessionId: snapshot.identity.sessionId,
+      summary: snapshot.durableEnrichment.sessionSummary.text,
+      title: snapshot.durableEnrichment.sessionTitle.text,
+      validation: { canonicalSnapshot: true }
+    });
+    publishSessionArtifact(db, artifact.artifactId);
+
+    expect(searchArtifactsTool(db, { query: "quartzharbor" })).toMatchObject({
+      artifacts: [expect.objectContaining({ artifactId: artifact.artifactId })],
+      total: 1
+    });
     db.close();
   });
 

@@ -72,7 +72,7 @@ export type SessionEnrichmentRecord = {
   provider?: string;
   model?: string;
   generatedAt?: string;
-  content?: SessionCapsule | { text: string } | { searchText: string };
+  content?: SessionCapsule | { text: string } | { keywords?: string[]; searchText: string };
   sourceRefs: EvidenceRef[];
   failureCode?: string;
   failureMessage?: string;

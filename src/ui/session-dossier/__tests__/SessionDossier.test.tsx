@@ -110,6 +110,7 @@ describe("SessionDossier", () => {
   test("renders durable title, summary, purpose, outcome, verification, and continuation before diagnostics", () => {
     const currentDossier = dossier();
     currentDossier.durableEnrichment = {
+      keywords: ["canonical dossier", "durable memory"],
       sessionDossier: {
         blockers: [],
         continuation: {
@@ -189,6 +190,7 @@ describe("SessionDossier", () => {
   test("renders durable memory as paragraphs instead of summary fact cards", () => {
     const currentDossier = dossier();
     currentDossier.durableEnrichment = {
+      keywords: ["launch polish", "deployment record"],
       sessionDossier: {
         blockers: ["Missing saved live Google-auth state for PRD flow"],
         continuation: {
@@ -242,6 +244,7 @@ describe("SessionDossier", () => {
     currentDossier.narrative.finalAssistantMessage = "I found a precise root cause and fix: the app does not support hash routes, but it leaves #settings in the address bar.";
     currentDossier.reuse.copyableContext = ["# Masthead Session Context", "Canonical session: session:06850bab04dbc2101a3a380fd866b66d7", "Files:", "- src/app/App.tsx", "Tools:", "- shell: succeeded"].join("\n");
     currentDossier.durableEnrichment = {
+      keywords: ["settings route", "startup cleanup"],
       sessionDossier: {
         blockers: [],
         continuation: {

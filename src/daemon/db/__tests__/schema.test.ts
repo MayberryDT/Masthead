@@ -230,7 +230,7 @@ describe("daemon database schema", () => {
     migrateDatabase(db);
     migrateDatabase(db);
 
-    expect(CURRENT_SCHEMA_VERSION).toBe(34);
+    expect(CURRENT_SCHEMA_VERSION).toBe(35);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'virtual') ORDER BY name").all() as Array<{ name: string }>;
     expect(tables.map((row) => row.name)).toEqual(
@@ -341,7 +341,8 @@ describe("daemon database schema", () => {
       { version: 31, name: "031_guided_authoring" },
       { version: 32, name: "032_guided_enrichment_provenance" },
       { version: 33, name: "033_data_revisions" },
-      { version: 34, name: "034_artifact_first_summary" }
+      { version: 34, name: "034_artifact_first_summary" },
+      { version: 35, name: "035_artifact_skill_search" }
     ]);
     expect(
       (db.prepare("PRAGMA table_info(workbench_artifact_candidate_scans)").all() as Array<{ name: string }>).map(
@@ -619,7 +620,7 @@ describe("daemon database schema", () => {
       "2026-07-15T00:00:00.000Z"
     );
 
-    expect(CURRENT_SCHEMA_VERSION).toBe(34);
+    expect(CURRENT_SCHEMA_VERSION).toBe(35);
     expect(db.prepare("SELECT version, name FROM schema_migrations ORDER BY version DESC LIMIT 1").get()).toEqual({
       name: "024_artifact_candidate_detector_revision",
       version: 24
@@ -772,6 +773,64 @@ describe("daemon database schema", () => {
         )
         .all('"orphaned" "descriptor"')
     ).toEqual([{ artifactId: artifact.artifactId }]);
+    db.close();
+  });
+
+  test("migration 035 adds and backfills agent-authored dossier keywords", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-db-v34-artifact-keywords-"));
+    tempDirs.push(tempDir);
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+    migrateTestDatabaseThrough(db, 34);
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:keyword-backfill",
+      title: "Keyword backfill"
+    });
+    db.prepare(
+      `INSERT INTO session_artifacts (
+         artifact_id, session_id, artifact_kind, status, content_fingerprint, created_at, updated_at,
+         created_by, schema_version, title, summary, content_json, evidence_refs_json, validation_json,
+         publication_status, lineage_id, published_at
+       ) VALUES (?, ?, 'session_dossier', 'current', ?, ?, ?, ?, 'canonical-session-dossier-v1', ?, ?, ?, '[]', '{}',
+         'published', ?, ?)`
+    ).run(
+      "artifact:keyword-backfill",
+      "session:keyword-backfill",
+      "fingerprint:keyword-backfill",
+      "2026-07-20T12:00:00.000Z",
+      "2026-07-20T12:00:00.000Z",
+      "guided_authoring:test",
+      "Backfill durable keywords",
+      "Store retrieval terms",
+      JSON.stringify({
+        durableEnrichment: { keywords: ["quartzharbor", "skill-primary search"] },
+        snapshotVersion: "canonical-session-dossier-v1"
+      }),
+      "artifact:keyword-backfill",
+      "2026-07-20T12:00:00.000Z"
+    );
+    db.prepare(
+      `INSERT INTO session_artifact_search (artifact_id, title, summary, highlight, project, body)
+       VALUES (?, ?, ?, '', '', ?)`
+    ).run(
+      "artifact:keyword-backfill",
+      "Backfill durable keywords",
+      "Store retrieval terms",
+      "legacy body"
+    );
+
+    migrateDatabase(db);
+
+    expect(db.prepare("SELECT version, name FROM schema_migrations WHERE version = 35").get()).toEqual({
+      name: "035_artifact_skill_search",
+      version: 35
+    });
+    expect(
+      db.prepare("SELECT keywords FROM session_artifact_search WHERE artifact_id = ?")
+        .get("artifact:keyword-backfill")
+    ).toEqual({ keywords: "quartzharbor skill-primary search" });
     db.close();
   });
 

@@ -2169,6 +2169,7 @@ function validInput(): GuidedAuthoringValidationInput {
 
 function validEnrichment(): DurableSessionEnrichment {
   return {
+    keywords: ["guided authoring", "quality validation", "grounded enrichment"],
     version: "session-capsule-v4",
     sessionTitle: {
       text: "Build grounded guided quality validation",

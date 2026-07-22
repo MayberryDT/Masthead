@@ -209,6 +209,7 @@ describe("enrichment coordinator", () => {
         candidateDecisions: [],
         confidence: "high",
         durableEnrichment: {
+          keywords: [],
           sessionDossier: {
             blockers: [],
             continuation: {

@@ -1767,6 +1767,7 @@ function publicationBundle(assignment: GuidedAuthoringAssignmentDto): GuidedAuth
     sessionEnrichments: assignment.sessionIds.map((sessionId) => ({
       claimSupport: [],
       enrichment: {
+        keywords: ["OAuth callback", "authentication repair", "local verification"],
         sessionDossier: {
           blockers: [],
           continuation: { constraints: ["Keep the callback contract stable."], openQuestions: [] },

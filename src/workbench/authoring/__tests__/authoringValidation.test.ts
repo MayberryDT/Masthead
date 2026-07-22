@@ -974,6 +974,7 @@ function durableEnrichment(sessionId: string): DurableSessionEnrichment {
   const message = evidenceRef(messageRef(sessionId), "event");
   const verification = evidenceRef(toolRef(sessionId), "command");
   return {
+    keywords: ["authoring validation"],
     sessionDossier: {
       blockers: [],
       continuation: { constraints: [], openQuestions: [] },

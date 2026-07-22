@@ -20,6 +20,7 @@ export type SessionEnrichmentView = {
   verificationSummary?: string;
   topics: string[];
   technologies: string[];
+  keywords: string[];
   unresolved: string[];
   searchText?: string;
   provider?: string;
@@ -65,6 +66,7 @@ type EnrichmentRow = {
 };
 
 type SearchProjectionContent = {
+  keywords?: string[];
   searchText?: string;
   title?: string;
   titleSource?: string;
@@ -235,6 +237,7 @@ function rowsToView(sessionId: string, rows: EnrichmentRow[]): SessionEnrichment
     titleSource: searchProjection?.titleSource ?? capsule?.titleSource,
     subject: capsule?.subject?.label,
     technologies: searchProjection?.technologies ?? capsule?.technologies ?? [],
+    keywords: searchProjection?.keywords ?? capsule?.durableEnrichment?.keywords ?? [],
     topics: searchProjection?.topics ?? capsule?.topics ?? [],
     verificationSummary: capsule?.verificationSummary,
     unresolved: capsule?.unresolved?.map((claim) => claim.text).filter(Boolean) ?? []

@@ -244,6 +244,7 @@ function fixtureSessionDossier(): SessionDossierDto {
       warnings: []
     },
     durableEnrichment: {
+      keywords: ["canonical snapshot", "dossier recovery"],
       sessionDossier: {
         blockers: [],
         continuation: { constraints: [], openQuestions: [] },

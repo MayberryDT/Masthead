@@ -1,4 +1,5 @@
-import type { SessionEnrichmentRecord } from "../../enrichment/types.ts";
+import type { SessionCapsule, SessionEnrichmentRecord } from "../../enrichment/types.ts";
+import { normalizeDurableSessionEnrichment } from "../../shared/sessionEnrichment.ts";
 import type { GuidedEnrichmentProvenance } from "../../shared/guidedAuthoring.ts";
 import { stableRecordId } from "../identity.ts";
 import type { MastheadDatabase } from "./sqlite.ts";
@@ -279,8 +280,15 @@ function guidedEnrichmentProvenanceRowToRecord(
 }
 
 function rowToRecord(row: SessionEnrichmentRow): SessionEnrichmentRecord {
+  const content = parseJson<SessionEnrichmentRecord["content"]>(row.contentJson);
+  if (row.enrichmentKind === "session_capsule") {
+    const capsule = content as SessionCapsule | undefined;
+    if (capsule?.durableEnrichment) {
+      capsule.durableEnrichment = normalizeDurableSessionEnrichment(capsule.durableEnrichment);
+    }
+  }
   return {
-    content: parseJson(row.contentJson),
+    content,
     contentFingerprint: row.contentFingerprint,
     enrichmentId: row.enrichmentId,
     enrichmentKind: row.enrichmentKind,

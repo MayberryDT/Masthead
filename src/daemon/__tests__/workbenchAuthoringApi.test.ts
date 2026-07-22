@@ -481,6 +481,7 @@ function validGuidedDraft(input: {
         supportKind: "reuse" as const
       }],
       enrichment: {
+        keywords: ["guided authoring", "canonical evidence", "draft preparation"],
         sessionDossier: {
           blockers: [],
           continuation: { constraints: [], openQuestions: [] },

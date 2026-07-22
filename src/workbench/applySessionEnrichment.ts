@@ -103,6 +103,7 @@ function capsuleFromOutput(output: SessionEnrichmentOutput, generatedAt: string)
     confidence: output.confidence,
     durableEnrichment: {
       generatedAt,
+      keywords: [],
       model: "external_agent",
       promptVersion: SESSION_CAPSULE_PROMPT_VERSION,
       sessionDossier: {
