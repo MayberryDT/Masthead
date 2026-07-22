@@ -13,6 +13,7 @@ import {
 export type { GuidedAuthoringExpectedIdentity } from "./instanceIdentity.ts";
 
 export const GUIDED_AUTHORING_POLICY_VERSION = "guided-authoring-v1" as const;
+export type GuidedAuthoringContractVersion = "workbench-authoring-v4" | "workbench-authoring-v5";
 export const GUIDED_AUTHORING_OPERATIONS = ["start", "inspect", "scaffold", "save", "review", "finish"] as const;
 export const GUIDED_AUTHORING_IDENTITY_HEADERS = {
   baseUrl: "x-masthead-authoring-base-url",
@@ -196,6 +197,7 @@ function isCanonicalAbsoluteAuthoringPath(value: string): boolean {
 export type GuidedAuthoringRequestDto = {
   requestId: string;
   actorId: string;
+  contractVersion: GuidedAuthoringContractVersion;
   policyVersion: "guided-authoring-v1";
   status: GuidedAuthoringRequestStatus;
   baseUrl: string;
@@ -207,7 +209,7 @@ export type GuidedAuthoringRequestDto = {
   completedSessionCount: number;
   assignmentCount: number;
   currentAssignmentId?: string;
-  canaryAssignmentId: string;
+  canaryAssignmentId?: string;
   canaryApprovedAt?: string;
   canaryApprovedBy?: string;
   createdAt: string;

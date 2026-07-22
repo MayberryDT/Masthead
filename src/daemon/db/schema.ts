@@ -185,6 +185,11 @@ const migrations = [
     version: 36,
     name: "036_workbench_authoring_v5",
     path: resolve(currentDir, "migrations/036_workbench_authoring_v5.sql")
+  },
+  {
+    version: 37,
+    name: "037_guided_authoring_v5_contract",
+    path: resolve(currentDir, "migrations/037_guided_authoring_v5_contract.sql")
   }
 ];
 

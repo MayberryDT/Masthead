@@ -358,6 +358,7 @@ const guidedBadRequestCodes = new Set([
 ]);
 
 const guidedConflictCodes = new Set([
+  "authoring_contract_retired",
   "authoring_session_not_compile_ready",
   "authoring_session_not_on_publish_path",
   "missing_canonical_evidence"

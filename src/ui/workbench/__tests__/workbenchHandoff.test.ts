@@ -111,14 +111,14 @@ function createdRequest(): {
     nextAction: {
       command: "/opt/masthead/bin/mastheadctl workbench author start --request guided-request:one --json",
       kind: "claim_next",
-      reason: "The canary assignment is ready to start."
+      reason: "The first assignment pack is ready to start."
     },
     request: {
       actorId: "workbench",
       assignmentCount: 1,
       baseUrl: "http://127.0.0.1:17373",
       buildSha: "build:test",
-      canaryAssignmentId: "guided-assignment:canary",
+      contractVersion: "workbench-authoring-v5",
       completedSessionCount: 0,
       createdAt: "2026-07-20T00:00:00.000Z",
       creationInstanceId: "instance:test",
@@ -127,7 +127,7 @@ function createdRequest(): {
       policyVersion: "guided-authoring-v1",
       requestId: "guided-request:one",
       sessionCount: 2,
-      status: "open",
+      status: "active",
       updatedAt: "2026-07-20T00:00:00.000Z"
     }
   };

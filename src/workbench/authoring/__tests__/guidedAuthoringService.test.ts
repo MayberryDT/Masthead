@@ -7,6 +7,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import type { WorkbenchArtifactSuggestionDto } from "../../../shared/workbenchAuthoring.ts";
 import type { GuidedAuthoringAssignmentDto, GuidedAuthoringBundleV4 } from "../../../shared/guidedAuthoring.ts";
 import {
+  createGuidedAuthoringRequest,
   getGuidedAssignment,
   getGuidedAssignmentReceipt,
   getGuidedAssignments,
@@ -185,6 +186,89 @@ describe("guided authoring assignment policy", () => {
   });
 });
 
+describe("V5 campaign retirement boundary", () => {
+  test("creates a strong four-session selection as V5 without constructing a canary", async () => {
+    const db = await serviceDb(4);
+    const strong = suggestion(selectionIds(4), "adr", "strong-four");
+
+    const created = createGuidedRequest(db, requestInput(selectionIds(4), [strong]));
+    const assignments = getGuidedAssignments(db, created.request.requestId);
+
+    expect(created.request).toMatchObject({
+      assignmentCount: 1,
+      contractVersion: "workbench-authoring-v5",
+      sessionCount: 4
+    });
+    expect(created.request).not.toHaveProperty("canaryAssignmentId");
+    expect(assignments).toEqual([
+      expect.objectContaining({ canary: false, sessionIds: selectionIds(4) })
+    ]);
+    expect(created.nextAction).toMatchObject({
+      kind: "claim_next",
+      reason: "The first assignment pack is ready to start."
+    });
+    db.close();
+  });
+
+  test("keeps a V4 request readable while retiring every live mutation before writes", async () => {
+    const db = await serviceDb(1);
+    const request = createGuidedAuthoringRequest(db, {
+      actorId: "codex",
+      assignments: [{
+        assignmentId: "assignment:retired-v4:0",
+        canary: true,
+        evidenceRevision: "evidence:retired-v4:0",
+        opportunityIds: [],
+        ordinal: 0,
+        sessionIds: ["session:0"]
+      }],
+      contractVersion: "workbench-authoring-v4",
+      identity: {
+        baseUrl: "http://127.0.0.1:17373",
+        buildSha: "build:test",
+        creationInstanceId: "instance:test",
+        databaseId: "database:test",
+        instanceManifest: "/tmp/masthead-instance.json"
+      },
+      opportunities: [],
+      policyVersion: "guided-authoring-v1",
+      requestId: "request:retired-v4",
+      sessions: [{ ordinal: 0, sessionId: "session:0" }]
+    });
+    const before = totalChanges(db);
+    const assignment = getGuidedAssignment(db, "assignment:retired-v4:0")!;
+    const identity = testIdentity();
+
+    expect(request).toMatchObject({
+      canaryAssignmentId: "assignment:retired-v4:0",
+      contractVersion: "workbench-authoring-v4"
+    });
+    const mutations = [
+      () => startGuidedAssignment(db, { command: "masthead", requestId: request.requestId }),
+      () => inspectGuidedAssignment(db, { assignmentId: assignment.assignmentId, command: "masthead" }),
+      () => saveGuidedDraft(db, saveInput(assignment, bundleFor(assignment))),
+      () => approveGuidedCanary(db, {
+        assignmentId: assignment.assignmentId,
+        command: "masthead",
+        currentIdentity: identity,
+        draftRevision: 1,
+        evidenceRevision: assignment.evidenceRevision,
+        expectedIdentity: identity,
+        notes: "Retired V4 review must not write.",
+        requestId: request.requestId,
+        reviewedBy: "operator:test"
+      }),
+      () => finishGuidedAssignment(db, finishInput(assignment.assignmentId))
+    ];
+    for (const mutate of mutations) {
+      expect(mutate).toThrow("authoring_contract_retired");
+      expect(totalChanges(db)).toBe(before);
+    }
+    expect(getGuidedAuthoringRequest(db, request.requestId)).toEqual(request);
+    db.close();
+  });
+});
+
 describe("guided authoring service", () => {
   test("preflights caller order from exactly one strict evidence snapshot", async () => {
     const db = await serviceDb(3);
@@ -234,9 +318,9 @@ describe("guided authoring service", () => {
     expect(created.nextAction).toEqual({
       kind: "claim_next",
       command: `masthead workbench author start --request ${created.request.requestId} --json`,
-      reason: "The canary assignment is ready to start."
+      reason: "The first assignment pack is ready to start."
     });
-    expect(assignments[0]?.sessionIds).toEqual(["session:0", "session:1", "session:2"]);
+    expect(assignments[0]?.sessionIds).toEqual(selectionIds(12));
     expect(assignments.every(({ sessionIds }) => sessionIds.length <= 12)).toBe(true);
     const captured = snapshot.mock.results[0]!.value as AuthoringEvidenceSnapshot;
     for (const assignment of assignments) {
@@ -544,21 +628,17 @@ describe("guided authoring service", () => {
     db.close();
   });
 
-  test("repeated start returns the persisted canary, finish, and completed actions", async () => {
+  test("repeated start returns the persisted ready pack, finish, and completed actions", async () => {
     const db = await serviceDb(1);
     vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
     vi.spyOn(guidedQuality, "validateGuidedAuthoringDraft").mockReturnValue({ accepted: true, findings: [] });
     const created = createGuidedRequest(db, requestInput(["session:0"]));
     const assignment = getGuidedAssignment(db, created.request.currentAssignmentId!)!;
     inspectAllAssignmentEvidence(db, assignment);
-    const staged = saveGuidedDraft(db, saveInput(assignment, publicationBundle(assignment)));
+    const ready = saveGuidedDraft(db, saveInput(assignment, publicationBundle(assignment)));
 
     expect(startGuidedAssignment(db, { command: "masthead", requestId: created.request.requestId }).nextAction)
-      .toEqual(staged.nextAction);
-
-    const approved = approveGuidedCanary(db, decisionInput(staged));
-    expect(startGuidedAssignment(db, { command: "masthead", requestId: created.request.requestId }).nextAction)
-      .toEqual(approved.nextAction);
+      .toEqual(ready.nextAction);
 
     finishGuidedAssignment(db, finishInput(assignment.assignmentId));
     expect(startGuidedAssignment(db, { command: "masthead", requestId: created.request.requestId }).nextAction)
@@ -588,16 +668,15 @@ describe("guided authoring service", () => {
     db.close();
   });
 
-  test("repeated start returns finish for a non-canary ready assignment", async () => {
-    const db = await serviceDb(4);
+  test("repeated start returns finish for the next ready assignment", async () => {
+    const db = await serviceDb(13);
     vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
     vi.spyOn(guidedQuality, "validateGuidedAuthoringDraft").mockReturnValue({ accepted: true, findings: [] });
-    const created = createGuidedRequest(db, requestInput(selectionIds(4)));
-    const canary = getGuidedAssignment(db, created.request.currentAssignmentId!)!;
-    inspectAllAssignmentEvidence(db, canary);
-    const staged = saveGuidedDraft(db, saveInput(canary, publicationBundle(canary)));
-    approveGuidedCanary(db, decisionInput(staged));
-    finishGuidedAssignment(db, finishInput(canary.assignmentId));
+    const created = createGuidedRequest(db, requestInput(selectionIds(13)));
+    const first = getGuidedAssignment(db, created.request.currentAssignmentId!)!;
+    inspectAllAssignmentEvidence(db, first);
+    saveGuidedDraft(db, saveInput(first, publicationBundle(first)));
+    finishGuidedAssignment(db, finishInput(first.assignmentId));
     const nonCanary = startGuidedAssignment(db, { command: "masthead", requestId: created.request.requestId }).assignment;
     inspectAllAssignmentEvidence(db, nonCanary);
     const ready = saveGuidedDraft(db, saveInput(nonCanary, publicationBundle(nonCanary)));
@@ -609,7 +688,7 @@ describe("guided authoring service", () => {
   });
 
   test("builds validation input from the trusted persisted assignment while preserving bundle mismatches", async () => {
-    const db = await serviceDb(16);
+    const db = await serviceDb(25);
     const firstOpportunity = suggestion(["session:0"], "adr", "first-persisted", ["message:session:0:seed-user"]);
     const secondOpportunity = suggestion(["session:1"], "runbook", "second-persisted", ["message:session:1:seed-user"]);
     const created = createGuidedRequest(db, requestInput(selectionIds(16), [secondOpportunity, firstOpportunity]));
@@ -660,9 +739,9 @@ describe("guided authoring service", () => {
   });
 
   test("selects only each other assignment's exact accepted draft revision", async () => {
-    const db = await serviceDb(16);
+    const db = await serviceDb(25);
     vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
-    const created = createGuidedRequest(db, requestInput(selectionIds(16)));
+    const created = createGuidedRequest(db, requestInput(selectionIds(25)));
     const [current, acceptedOther, rejectedOther] = getGuidedAssignments(db, created.request.requestId);
     insertDraftReview(db, current!, 1, true);
     insertDraftReview(db, acceptedOther!, 1, true);
@@ -1110,7 +1189,7 @@ describe("guided authoring service", () => {
     db.close();
   });
 
-  test("stages an accepted canary without publishing", async () => {
+  test("readies an accepted V5 pack without staging operator approval or publishing", async () => {
     const db = await serviceDb(1);
     vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
     vi.spyOn(guidedQuality, "validateGuidedAuthoringDraft").mockReturnValue({ accepted: true, findings: [] });
@@ -1120,58 +1199,26 @@ describe("guided authoring service", () => {
 
     const review = saveGuidedDraft(db, saveInput(assignment, bundleFor(assignment)));
 
-    expect(review.status).toBe("staged_canary");
-    expect(review.nextAction.kind).toBe("await_operator");
+    expect(review.status).toBe("ready_to_finish");
+    expect(review.nextAction.kind).toBe("finish");
     expect(tableCount(db, "session_artifacts")).toBe(0);
-    expect(getGuidedAuthoringRequest(db, assignment.requestId)?.status).toBe("awaiting_canary_approval");
+    expect(getGuidedAuthoringRequest(db, assignment.requestId)?.status).toBe("active");
     db.close();
   });
 
-  test("approves and rejects only the exact current canary revision", async () => {
+  test.each([approveGuidedCanary, rejectGuidedCanary])("refuses V5 operator canary decisions without writes", async (decide) => {
     const db = await serviceDb(1);
     vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
     vi.spyOn(guidedQuality, "validateGuidedAuthoringDraft").mockReturnValue({ accepted: true, findings: [] });
     const created = createGuidedRequest(db, requestInput(["session:0"]));
     const assignment = getGuidedAssignment(db, created.request.currentAssignmentId!)!;
     inspectGuidedAssignment(db, { assignmentId: assignment.assignmentId, command: "masthead", limit: 100 });
-    const staged = saveGuidedDraft(db, saveInput(assignment, bundleFor(assignment)));
-    const beforeApproval = approvalIsolationState(db);
+    const ready = saveGuidedDraft(db, saveInput(assignment, bundleFor(assignment)));
+    const before = totalChanges(db);
 
-    const approved = approveGuidedCanary(db, decisionInput(staged));
-    expect(approved.nextAction.kind).toBe("finish");
-    expect(approvalIsolationState(db)).toEqual(beforeApproval);
-
-    expect(() => rejectGuidedCanary(db, {
-      ...decisionInput(staged),
-      notes: "A conflicting later decision."
-    })).toThrow("guided_canary_decision_conflict");
-    db.close();
-  });
-
-  test("rejects a canary into revision work without publishing", async () => {
-    const db = await serviceDb(1);
-    vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
-    vi.spyOn(guidedQuality, "validateGuidedAuthoringDraft").mockReturnValue({ accepted: true, findings: [] });
-    const created = createGuidedRequest(db, requestInput(["session:0"]));
-    const assignment = getGuidedAssignment(db, created.request.currentAssignmentId!)!;
-    inspectGuidedAssignment(db, { assignmentId: assignment.assignmentId, command: "masthead", limit: 100 });
-    const staged = saveGuidedDraft(db, saveInput(assignment, bundleFor(assignment)));
-
-    const rejected = rejectGuidedCanary(db, {
-      ...decisionInput(staged),
-      notes: "The canary needs a more specific reusable outcome."
-    });
-
-    expect(rejected).toMatchObject({
-      status: "needs_revision",
-      nextAction: {
-        command: `masthead workbench author save --assignment ${assignment.assignmentId} --file ${guidedDraftFilePath(assignment.assignmentId)} --json`,
-        kind: "revise",
-        reason: "The saved draft has blocking structured findings to resolve."
-      }
-    });
-    expect(getGuidedAuthoringRequest(db, assignment.requestId)?.status).toBe("open");
-    expect(tableCount(db, "session_artifacts")).toBe(0);
+    expect(() => decide(db, decisionInput(ready))).toThrow("authoring_contract_retired");
+    expect(totalChanges(db)).toBe(before);
+    expect(getGuidedAssignment(db, assignment.assignmentId)?.status).toBe("ready_to_finish");
     db.close();
   });
 
@@ -1248,7 +1295,7 @@ describe("guided authoring service", () => {
   });
 
   test.each(["save", "approve", "reject", "finish"] as const)(
-    "%s rejects a rotated current instance before its first write",
+    "%s fails closed before its first write",
     async (operation) => {
       const db = await serviceDb(1);
       vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
@@ -1264,7 +1311,11 @@ describe("guided authoring service", () => {
         reject: () => rejectGuidedCanary(db, { ...common, assignmentId: assignment.assignmentId, draftRevision: 1, evidenceRevision: assignment.evidenceRevision, notes: "notes", requestId: assignment.requestId, reviewedBy: "operator" }),
         finish: () => finishGuidedAssignment(db, { ...common, assignmentId: assignment.assignmentId })
       }[operation];
-      expect(invoke).toThrow("instance_identity_mismatch");
+      expect(invoke).toThrow(
+        operation === "approve" || operation === "reject"
+          ? "authoring_contract_retired"
+          : "instance_identity_mismatch"
+      );
       expect(totalChanges(db)).toBe(before);
       db.close();
     }
@@ -1305,7 +1356,7 @@ describe("guided authoring service", () => {
     "opportunity",
     "accepted_revision"
   ] as const)("serializes save validation and persistence against a %s writer", async (kind) => {
-    const fixture = await serviceDbWithPath(kind === "accepted_revision" ? 4 : 1);
+    const fixture = await serviceDbWithPath(kind === "accepted_revision" ? 13 : 1);
     vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([
       suggestion(["session:0"], "adr", "wal-opportunity", ["message:session:0:message"])
     ]);
@@ -1315,7 +1366,7 @@ describe("guided authoring service", () => {
     });
     const created = createGuidedRequest(
       fixture.db,
-      requestInput(kind === "accepted_revision" ? selectionIds(4) : ["session:0"])
+      requestInput(kind === "accepted_revision" ? selectionIds(13) : ["session:0"])
     );
     let assignment = getGuidedAssignment(fixture.db, created.request.currentAssignmentId!)!;
     let acceptedAssignmentId: string | undefined;
@@ -1324,8 +1375,7 @@ describe("guided authoring service", () => {
       acceptedAssignmentId = assignment.assignmentId;
       inspectAllAssignmentEvidence(fixture.db, assignment);
       validation.mockReturnValue({ accepted: true, findings: [] });
-      const staged = saveGuidedDraft(fixture.db, saveInput(assignment, publicationBundle(assignment)));
-      approveGuidedCanary(fixture.db, decisionInput(staged));
+      saveGuidedDraft(fixture.db, saveInput(assignment, publicationBundle(assignment)));
       finishGuidedAssignment(fixture.db, finishInput(assignment.assignmentId));
       assignment = getGuidedAssignment(fixture.db, getGuidedAuthoringRequest(fixture.db, assignment.requestId)!.currentAssignmentId!)!;
       validation.mockImplementation((input) => {
@@ -1432,11 +1482,11 @@ describe("guided authoring service", () => {
     db.close();
   });
 
-  test("requires canary finish from staged_canary with its exact current approval", async () => {
+  test("does not allow a V5 pack to finish from the retired staged-canary state", async () => {
     const db = await serviceDb(1);
     vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
     const assignment = seedReadyPublicationAssignment(db);
-    db.prepare("UPDATE guided_authoring_assignments SET status = 'ready_to_finish' WHERE assignment_id = ?")
+    db.prepare("UPDATE guided_authoring_assignments SET status = 'staged_canary' WHERE assignment_id = ?")
       .run(assignment.assignmentId);
 
     expect(() => finishGuidedAssignment(db, finishInput(assignment.assignmentId)))
@@ -1459,7 +1509,7 @@ describe("guided authoring service", () => {
     }
     expect(getGuidedAssignment(db, assignment.assignmentId)).toMatchObject({
       acceptedDraftRevision: 1,
-      status: "staged_canary"
+      status: "ready_to_finish"
     });
     db.close();
   });
@@ -1487,33 +1537,30 @@ describe("guided authoring service", () => {
     db.close();
   });
 
-  test("finishing a canary releases ordinal one for claim_next and a non-canary finishes from ready_to_finish", async () => {
-    const db = await serviceDb(4);
+  test("finishing a V5 pack releases ordinal one and the next pack finishes directly", async () => {
+    const db = await serviceDb(13);
     vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([]);
     vi.spyOn(guidedQuality, "validateGuidedAuthoringDraft").mockReturnValue({ accepted: true, findings: [] });
-    const created = createGuidedRequest(db, requestInput(selectionIds(4)));
-    const canary = getGuidedAssignment(db, created.request.currentAssignmentId!)!;
-    inspectAllAssignmentEvidence(db, canary);
-    const staged = saveGuidedDraft(db, saveInput(canary, publicationBundle(canary)));
-    approveGuidedCanary(db, decisionInput(staged));
+    const created = createGuidedRequest(db, requestInput(selectionIds(13)));
+    const firstPack = getGuidedAssignment(db, created.request.currentAssignmentId!)!;
+    inspectAllAssignmentEvidence(db, firstPack);
+    saveGuidedDraft(db, saveInput(firstPack, publicationBundle(firstPack)));
 
-    const canaryFinished = finishGuidedAssignment(db, finishInput(canary.assignmentId));
-    expect(canaryFinished.nextAction).toEqual({
-      command: `masthead workbench author start --request ${canary.requestId} --json`,
+    const firstFinished = finishGuidedAssignment(db, finishInput(firstPack.assignmentId));
+    expect(firstFinished.nextAction).toEqual({
+      command: `masthead workbench author start --request ${firstPack.requestId} --json`,
       kind: "claim_next",
       reason: "The next guided assignment is ready to start."
     });
     expect(db.prepare(
       `SELECT session_id AS sessionId, state FROM guided_authoring_request_sessions
        WHERE request_id = ? ORDER BY ordinal`
-    ).all(canary.requestId)).toEqual([
-      { sessionId: "session:0", state: "completed" },
-      { sessionId: "session:1", state: "completed" },
-      { sessionId: "session:2", state: "completed" },
-      { sessionId: "session:3", state: "assigned" }
-    ]);
+    ).all(firstPack.requestId)).toEqual(selectionIds(13).map((sessionId, index) => ({
+      sessionId,
+      state: index < 12 ? "completed" : "assigned"
+    })));
 
-    const started = startGuidedAssignment(db, { command: "masthead", requestId: canary.requestId });
+    const started = startGuidedAssignment(db, { command: "masthead", requestId: firstPack.requestId });
     expect(started.assignment).toMatchObject({ canary: false, ordinal: 1, status: "investigating" });
     inspectGuidedAssignment(db, { assignmentId: started.assignment.assignmentId, command: "masthead", limit: 100 });
     const ready = saveGuidedDraft(db, saveInput(started.assignment, publicationBundle(started.assignment)));
@@ -1752,8 +1799,7 @@ function seedReadyPublicationAssignment(db: MastheadDatabase): GuidedAuthoringAs
   const assignment = getGuidedAssignment(db, created.request.currentAssignmentId!)!;
   inspectGuidedAssignment(db, { assignmentId: assignment.assignmentId, command: "masthead", limit: 100 });
   vi.spyOn(guidedQuality, "validateGuidedAuthoringDraft").mockReturnValue({ accepted: true, findings: [] });
-  const staged = saveGuidedDraft(db, saveInput(assignment, publicationBundle(assignment)));
-  approveGuidedCanary(db, decisionInput(staged));
+  saveGuidedDraft(db, saveInput(assignment, publicationBundle(assignment)));
   return getGuidedAssignment(db, assignment.assignmentId)!;
 }
 

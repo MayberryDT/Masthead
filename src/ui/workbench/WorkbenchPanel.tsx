@@ -1,5 +1,4 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { AuthoringCanaryReview } from "../../app/workbench/AuthoringCanaryReview";
 import type { WorkbenchActionKind, UseWorkbenchControllerResult } from "../../app/workbench/useWorkbenchController";
 import { AppButton } from "../primitives/AppButton";
 import { useNewItemIds } from "../motion/useNewItemIds";
@@ -23,9 +22,6 @@ type WorkbenchPanelProps = Partial<
     | "notAddedOpen"
     | "notAddedSessions"
     | "notAddedSummary"
-    | "pendingCanaryReviews"
-    | "approveCanary"
-    | "rejectCanary"
     | "page"
     | "pageSize"
     | "runAction"
@@ -97,7 +93,6 @@ export function WorkbenchPanel({
   activity = EMPTY_ACTIVITY,
   agentPromptExcludedCount = 0,
   agentPromptSessionCount = 0,
-  approveCanary,
   canRun = defaultCanRun,
   clearActionFeedback,
   copyAgentPrompt,
@@ -107,7 +102,6 @@ export function WorkbenchPanel({
   notAddedOpen = false,
   notAddedSessions = EMPTY_NOT_ADDED,
   notAddedSummary,
-  pendingCanaryReviews = [],
   onClearSelection,
   onRetry,
   onSelectAll,
@@ -116,7 +110,6 @@ export function WorkbenchPanel({
   page = 0,
   pageSize = 100,
   runAction,
-  rejectCanary,
   selectedSessionIds = EMPTY_SELECTION,
   sessions = EMPTY_SESSIONS,
   setNotAddedOpen,
@@ -600,17 +593,8 @@ export function WorkbenchPanel({
           <div className="workbench-rail-block workbench-activity-block">
             <p className="mono-label">Workbench Activity</p>
             <div className="workbench-activity-scroll">
-              {pendingCanaryReviews.map((review) => (
-                <AuthoringCanaryReview
-                  key={review.assignmentId}
-                  busy={actionBusy}
-                  review={review}
-                  onApprove={(item, reviewedBy) => approveCanary?.(item, reviewedBy)}
-                  onReject={(item, notes, reviewedBy) => rejectCanary?.(item, notes, reviewedBy)}
-                />
-              ))}
               {activity.length === 0 ? (
-                pendingCanaryReviews.length === 0 ? <p className="workbench-muted">No activity yet</p> : null
+                <p className="workbench-muted">No activity yet</p>
               ) : (
                 <ol className="workbench-activity-list">
                   {activity.map((item) => (

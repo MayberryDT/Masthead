@@ -491,6 +491,7 @@ function seedGuidedAssignment(
 ): void {
   createGuidedAuthoringRequest(db, {
     actorId: "guided-agent",
+    contractVersion: "workbench-authoring-v4",
     assignments: [{
       assignmentId: input.assignmentId,
       canary: true,

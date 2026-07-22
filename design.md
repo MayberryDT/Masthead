@@ -209,10 +209,9 @@ x-motion:
   easing: "cubic-bezier(0.22, 1, 0.36, 1)"
 ---
 
-> **Authoring runtime boundary:** Visual and interaction descriptions for guided V4 requests,
-> assignments, canary review, and instance-bound handoff are the accepted design target and remain
-> pending implementation. The installed V3 compatibility runtime is being replaced and must not be
-> used for a new bulk or production enrichment campaign.
+> **Authoring runtime boundary:** New guided requests use V5 assignments without canary review or
+> operator approval. V1–V4 authoring state remains read-only audit history and cannot resume into the
+> current product path.
 
 # Masthead Design
 
@@ -300,12 +299,12 @@ recur across views, but each surface may use the structure that fits its job:
 - Now: live cards.
 - Workbench: dense publish-path table + Activity console rail + metal ops toolbar.
   Human ops cover transcript check/import, quality review, claim/release, publish,
-  Not Added inspection, session selection, guided authoring request creation, and staged canary
-  review. **Copy Agent Prompt** first persists the compile-ready selection and campaign policy, then
+  Not Added inspection, session selection, and guided authoring request creation. **Copy Agent Prompt**
+  first persists the compile-ready selection and campaign policy, then
   copies only the opaque request ID and one instance-bound start command. Review-needed sessions
   remain selected for human operations, are disclosed, and never enter the request. The Activity
-  rail shows the current assignment, next action, editorial findings, and operator approval without
-  becoming a command cookbook.
+  rail observes the current assignment, next action, editorial findings, and publication events
+  without becoming a command cookbook or approval console.
 - Logbook: dense table plus inspector.
 - Sources: harness connector rows plus enablement detail (Discover → Enable → Activate → Test).
 - Settings: one centered compact steel card with direct controls for everyday preferences and one
@@ -386,12 +385,11 @@ published, confidence, and which sessions provenance it. Body detail and multi-s
 belong in the inspector, not free-floating table paragraphs.
 
 `session_dossier` has one visual and semantic contract: the original canonical dossier structure.
-Under `workbench-authoring-v4`, the agent traverses complete canonical evidence and writes grounded
+Under `workbench-authoring-v5`, the agent traverses complete canonical evidence and writes grounded
 durable enrichment for each assignment session, then the daemon rebuilds that canonical
 presentation. The agent may also author zero or more claim-supported runbooks, ADRs, or incident
-timelines. The first accepted assignment is a three-session canary capped at three sessions and
-remains staged for operator approval. Publication atomically admits one accepted assignment into
-Logbook; nothing enters Logbook until its enrichment and editorial review are accepted.
+timelines. Publication atomically admits one accepted assignment into Logbook without operator
+approval; nothing enters Logbook until its enrichment and editorial review are accepted.
 
 ### Guided authoring vocabulary
 
@@ -401,15 +399,11 @@ Assignment = one daemon-grouped authoring unit containing at most 12 sessions.
 
 Knowledge opportunity = nonbinding evidence that may support a runbook, ADR, or incident timeline.
 
-Opportunity disposition = authored, dismissed, merged, or changed kind, with evidence-backed rationale.
+Opportunity disposition = historical V4 resolution state; V5 opportunities are nonbinding.
 
-Canary = the first staged assignment of at most 3 sessions, reviewed by an operator before publication.
+Canary = historical V4 approval state; V5 has no canary.
 
 Next action = the single command Masthead requires from the agent at the current assignment state.
-
-The canary planner never breaks a strong opportunity merely to fill three slots. It chooses a
-complete strong group of at most three sessions or diverse dossier-only sessions; when neither is
-possible, request creation fails with `guided_canary_not_constructible` and leaves no durable request.
 
 ### Sources
 

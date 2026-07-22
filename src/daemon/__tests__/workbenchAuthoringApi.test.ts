@@ -9,6 +9,7 @@ import { identityFromManifest } from "../../shared/instanceIdentity.ts";
 import type { SessionTranscriptItem } from "../../shared/sessionTranscript.ts";
 import type { DaemonConfig } from "../config.ts";
 import { markSessionCompileReady, seedSession } from "../db/__tests__/sessionTestHelpers.ts";
+import { createGuidedAuthoringRequest } from "../db/guidedAuthoringRepository.ts";
 import { getOrCreateDatabaseIdentity } from "../db/schema.ts";
 import type { MastheadDatabase } from "../db/sqlite.ts";
 import { createMastheadDaemon, type MastheadDaemon } from "../server.ts";
@@ -90,7 +91,7 @@ describe("Workbench authoring HTTP API", () => {
       .toBe(scaffolded.body.draft.artifacts[0].draftId);
   });
 
-  test("advertises V5 while preserving the V4 compatibility flow", async () => {
+  test("creates a V5 request and publishes an accepted pack without canary approval", async () => {
     const { baseUrl, daemon } = await startTestDaemon();
     seedAuthoringSession(daemon, "session:guided");
 
@@ -116,9 +117,14 @@ describe("Workbench authoring HTTP API", () => {
       sessionIds: ["session:guided"]
     }, 201);
     expect(created.body).toMatchObject({
-      nextAction: { kind: "claim_next" },
-      request: { creationInstanceId: expectedIdentity.instanceId, sessionCount: 1 }
+      nextAction: { kind: "claim_next", reason: "The first assignment pack is ready to start." },
+      request: {
+        contractVersion: "workbench-authoring-v5",
+        creationInstanceId: expectedIdentity.instanceId,
+        sessionCount: 1
+      }
     });
+    expect(created.body.request).not.toHaveProperty("canaryAssignmentId");
     const requestId = created.body.request.requestId as string;
     expect((await getJson(baseUrl, `/workbench/authoring/requests/${encodeURIComponent(requestId)}`)).body)
       .toMatchObject({ requestId, creationInstanceId: expectedIdentity.instanceId });
@@ -128,7 +134,7 @@ describe("Workbench authoring HTTP API", () => {
       `/workbench/authoring/requests/${encodeURIComponent(requestId)}/start`,
       { expectedIdentity }
     );
-    expect(started.body).toMatchObject({ nextAction: { kind: "inspect" } });
+    expect(started.body).toMatchObject({ assignment: { canary: false }, nextAction: { kind: "inspect" } });
     const assignmentId = started.body.assignment.assignmentId as string;
     const inspected = await getJson(
       baseUrl,
@@ -162,16 +168,16 @@ describe("Workbench authoring HTTP API", () => {
       baseUrl,
       `/workbench/authoring/assignments/${encodeURIComponent(assignmentId)}/draft`,
       { draft, expectedIdentity }
-    )).body).toMatchObject({ assignmentId, nextAction: { kind: "await_operator" }, status: "staged_canary" });
+    )).body).toMatchObject({ assignmentId, nextAction: { kind: "finish" }, status: "ready_to_finish" });
     expect((await getJson(
       baseUrl,
       `/workbench/authoring/assignments/${encodeURIComponent(assignmentId)}/review`
-    )).body).toMatchObject({ assignmentId, draftRevision: 1, nextAction: { kind: "await_operator" } });
+    )).body).toMatchObject({ assignmentId, draftRevision: 1, nextAction: { kind: "finish" } });
     expect((await postJson(
       baseUrl,
       `/workbench/authoring/requests/${encodeURIComponent(requestId)}/start`,
       { expectedIdentity }
-    )).body).toMatchObject({ assignment: { assignmentId }, nextAction: { kind: "await_operator" } });
+    )).body).toMatchObject({ assignment: { assignmentId }, nextAction: { kind: "finish" } });
     expect((await getJson(
       baseUrl,
       `/workbench/authoring/assignments/${encodeURIComponent(assignmentId)}/inspect`,
@@ -179,7 +185,7 @@ describe("Workbench authoring HTTP API", () => {
       authoringHeaders(expectedIdentity)
     )).body).toMatchObject({ error: { code: "guided_assignment_not_inspectable" }, ok: false });
     expect((await getJson(baseUrl, "/workbench/authoring/canaries/pending")).body)
-      .toEqual([expect.objectContaining({ assignmentId, draftRevision: 1 })]);
+      .toEqual([]);
 
     expect((await postJson(
       baseUrl,
@@ -192,14 +198,9 @@ describe("Workbench authoring HTTP API", () => {
         expectedIdentity,
         notes: "Grounded canary review.",
         reviewedBy: "operator:test"
-      }
-    )).body).toMatchObject({ assignmentId, nextAction: { kind: "finish" } });
-    expect((await postJson(
-      baseUrl,
-      `/workbench/authoring/requests/${encodeURIComponent(requestId)}/start`,
-      { expectedIdentity }
-    )).body).toMatchObject({ assignment: { assignmentId }, nextAction: { kind: "finish" } });
-    expect((await getJson(baseUrl, "/workbench/authoring/canaries/pending")).body).toEqual([]);
+      },
+      409
+    )).body).toMatchObject({ error: { code: "authoring_contract_retired" }, ok: false });
     expect((await postJson(
       baseUrl,
       `/workbench/authoring/assignments/${encodeURIComponent(assignmentId)}/finish`,
@@ -213,6 +214,101 @@ describe("Workbench authoring HTTP API", () => {
       `/workbench/authoring/requests/${encodeURIComponent(requestId)}/start`,
       { expectedIdentity }
     )).body).toMatchObject({ assignment: { assignmentId }, nextAction: { kind: "complete" } });
+  });
+
+  test("keeps V4 guided requests readable while every guided mutation fails closed", async () => {
+    const { daemon, tempDir } = await createTestDaemon();
+    seedAuthoringSession(daemon, "session:retired-v4");
+    const identity = identityFromManifest(daemon.instanceIdentity(), join(tempDir, "masthead-instance.json"));
+    const request = createGuidedAuthoringRequest(daemon.database, {
+      actorId: "codex",
+      assignments: [{
+        assignmentId: "assignment:retired-v4:0",
+        canary: true,
+        evidenceRevision: "evidence:retired-v4:0",
+        opportunityIds: [],
+        ordinal: 0,
+        sessionIds: ["session:retired-v4"]
+      }],
+      contractVersion: "workbench-authoring-v4",
+      identity: {
+        baseUrl: identity.baseUrl,
+        buildSha: identity.buildSha,
+        creationInstanceId: identity.instanceId,
+        databaseId: identity.databaseId,
+        instanceManifest: identity.instanceManifest
+      },
+      opportunities: [],
+      policyVersion: "guided-authoring-v1",
+      requestId: "request:retired-v4",
+      sessions: [{ ordinal: 0, sessionId: "session:retired-v4" }]
+    });
+    const context = {
+      authoringCommand: join(tempDir, "bin", "mastheadctl"),
+      db: daemon.database,
+      identity
+    };
+    const before = totalChanges(daemon.database);
+    const encodedRequest = encodeURIComponent(request.requestId);
+    const encodedAssignment = encodeURIComponent(request.currentAssignmentId!);
+
+    expect(await routeWorkbenchAuthoringRequest(context, {
+      method: "GET",
+      url: new URL(`http://127.0.0.1/workbench/authoring/requests/${encodedRequest}`)
+    })).toMatchObject({
+      body: { canaryAssignmentId: "assignment:retired-v4:0", contractVersion: "workbench-authoring-v4" },
+      status: 200
+    });
+
+    const scaffolded = await routeWorkbenchAuthoringRequest(context, {
+      method: "GET",
+      url: new URL(`http://127.0.0.1/workbench/authoring/assignments/${encodedAssignment}/scaffold`)
+    });
+    expect(scaffolded).toMatchObject({ status: 200 });
+    const draft = (scaffolded?.body as { draft: GuidedAuthoringBundleV4 }).draft;
+    const mutations = [
+      () => routeWorkbenchAuthoringRequest(context, {
+        body: { expectedIdentity: identity },
+        method: "POST",
+        url: new URL(`http://127.0.0.1/workbench/authoring/requests/${encodedRequest}/start`)
+      }),
+      () => routeWorkbenchAuthoringRequest(context, {
+        headers: authoringHeaders(identity),
+        method: "GET",
+        url: new URL(`http://127.0.0.1/workbench/authoring/assignments/${encodedAssignment}/inspect`)
+      }),
+      () => routeWorkbenchAuthoringRequest(context, {
+        body: { draft, expectedIdentity: identity },
+        method: "POST",
+        url: new URL(`http://127.0.0.1/workbench/authoring/assignments/${encodedAssignment}/draft`)
+      }),
+      () => routeWorkbenchAuthoringRequest(context, {
+        body: {
+          assignmentId: request.currentAssignmentId,
+          decision: "approved",
+          draftRevision: 1,
+          evidenceRevision: draft.evidenceRevision,
+          expectedIdentity: identity,
+          notes: "Retired V4 review must not write.",
+          reviewedBy: "operator:test"
+        },
+        method: "POST",
+        url: new URL(`http://127.0.0.1/workbench/authoring/requests/${encodedRequest}/canary-decision`)
+      }),
+      () => routeWorkbenchAuthoringRequest(context, {
+        body: { expectedIdentity: identity },
+        method: "POST",
+        url: new URL(`http://127.0.0.1/workbench/authoring/assignments/${encodedAssignment}/finish`)
+      })
+    ];
+    for (const mutate of mutations) {
+      const result = await mutate();
+      expect(result).toMatchObject({
+        body: { error: { code: "authoring_contract_retired" }, ok: false },
+        status: 409
+      });
+      expect(totalChanges(daemon.database)).toBe(before);
+    }
   });
 
   test("retires every legacy mutation before writes while retaining audit reads", async () => {
@@ -349,7 +445,7 @@ describe("Workbench authoring HTTP API", () => {
         },
         db: { prepare() { throw new Error("secret database invariant detail"); } } as unknown as MastheadDatabase
       },
-      { method: "GET", url: new URL("http://127.0.0.1/workbench/authoring/canaries/pending") }
+      { method: "GET", url: new URL("http://127.0.0.1/workbench/authoring/requests/request%3Ainternal-error") }
     );
     expect(unexpected).toEqual({
       body: { error: { code: "authoring_internal_error", message: "Workbench authoring request failed" }, ok: false },
@@ -359,7 +455,7 @@ describe("Workbench authoring HTTP API", () => {
   });
 });
 
-async function startTestDaemon(): Promise<{ baseUrl: string; daemon: MastheadDaemon }> {
+async function createTestDaemon(): Promise<{ daemon: MastheadDaemon; tempDir: string }> {
   const tempDir = await mkdtemp(join(tmpdir(), "masthead-authoring-api-"));
   tempDirs.push(tempDir);
   const daemon = await createMastheadDaemon({
@@ -376,6 +472,11 @@ async function startTestDaemon(): Promise<{ baseUrl: string; daemon: MastheadDae
     storePath: join(tempDir, "events.ndjson")
   } satisfies DaemonConfig);
   daemons.push(daemon);
+  return { daemon, tempDir };
+}
+
+async function startTestDaemon(): Promise<{ baseUrl: string; daemon: MastheadDaemon }> {
+  const { daemon } = await createTestDaemon();
   const baseUrl = await new Promise<string>((resolve) => {
     daemon.server.listen(0, "127.0.0.1", () => {
       resolve(`http://127.0.0.1:${(daemon.server.address() as AddressInfo).port}`);

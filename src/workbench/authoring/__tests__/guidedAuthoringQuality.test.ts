@@ -78,11 +78,6 @@ export const GUIDED_FINDING_IDENTITY_CASES = [
     expected: [{ code: "duplicate_session_template", message: "Session enrichment duplicates a prior request session template.", severity: "error", path: "/sessionEnrichments/1/enrichment", sessionId: "session:b" }]
   },
   {
-    name: "missing opportunity",
-    input: () => { const input = opportunityInput(); return input; },
-    expected: [{ code: "missing_opportunity_disposition", message: "Persisted opportunity is missing its disposition.", severity: "error", path: "/opportunityDispositions/0", opportunityId: "opportunity:a" }]
-  },
-  {
     name: "opportunity evidence",
     input: () => {
       const input = validAdrInput();
@@ -310,7 +305,7 @@ describe("validateGuidedAuthoringDraft", () => {
     ]);
   });
 
-  test("requires every persisted opportunity to have a disposition", () => {
+  test("does not block a valid dossier when a high-signal opportunity has no disposition", () => {
     const input = validInput();
     input.assignment.opportunityIds = ["opportunity:a"];
     input.opportunities = [{
@@ -321,13 +316,7 @@ describe("validateGuidedAuthoringDraft", () => {
       evidenceRefs: ["evidence:a"],
       provenanceSessionIds: ["session:a"]
     }];
-    expect(validateGuidedAuthoringDraft(input).findings).toEqual([{
-      code: "missing_opportunity_disposition",
-      message: "Persisted opportunity is missing its disposition.",
-      severity: "error",
-      path: "/opportunityDispositions/0",
-      opportunityId: "opportunity:a"
-    }]);
+    expect(validateGuidedAuthoringDraft(input)).toEqual({ accepted: true, findings: [] });
   });
 
   test("rejects an empty opportunity evidence list with exact identity", () => {
@@ -1668,8 +1657,7 @@ describe("validateGuidedAuthoringDraft", () => {
       { code: "guided_evidence_revision_mismatch", message: "Bundle evidence revision does not match the assignment evidence revision.", severity: "error", path: "/evidenceRevision" },
       { code: "incomplete_evidence_inspection", message: "Assignment session evidence inspection is incomplete or stale.", severity: "error", path: "/sessionEnrichments/0", sessionId: "session:a" },
       { code: "unexpected_session_enrichment", message: "Submitted session enrichment is outside the assignment.", severity: "error", path: "/sessionEnrichments/1", sessionId: "session:unexpected" },
-      { code: "unexpected_artifact_draft", message: "Submitted artifact draft is not linked by exactly one opportunity disposition.", severity: "error", path: "/artifacts/0", sessionId: "session:a", artifactDraftId: "draft:unlinked", artifactKind: "adr" },
-      { code: "missing_opportunity_disposition", message: "Persisted opportunity is missing its disposition.", severity: "error", path: "/opportunityDispositions/0", opportunityId: "opportunity:missing" }
+      { code: "unexpected_artifact_draft", message: "Submitted artifact draft is not linked by exactly one opportunity disposition.", severity: "error", path: "/artifacts/0", sessionId: "session:a", artifactDraftId: "draft:unlinked", artifactKind: "adr" }
     ]);
   });
 

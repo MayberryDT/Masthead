@@ -54,8 +54,8 @@ describe("guided authoring repository", () => {
     migrateDatabase(db);
 
     expect(db.prepare("SELECT version, name FROM schema_migrations ORDER BY version DESC LIMIT 1").get()).toEqual({
-      name: "036_workbench_authoring_v5",
-      version: 36
+      name: "037_guided_authoring_v5_contract",
+      version: 37
     });
     expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });
@@ -87,6 +87,7 @@ describe("guided authoring repository", () => {
     expect(getGuidedAuthoringRequestForAssignment(db, "assignment:one:0")).toEqual({
       baseUrl: "http://127.0.0.1:17373",
       buildSha: "build:test",
+      contractVersion: "workbench-authoring-v4",
       creationInstanceId: "instance:creation-only",
       databaseId: "database:test",
       instanceManifest: "manifest:test"
@@ -755,6 +756,7 @@ function requestInput(sessionCount: number, suffix = "one"): CreateGuidedAuthori
   const split = Math.min(3, sessionCount);
   return {
     actorId: "codex",
+    contractVersion: "workbench-authoring-v4",
     assignments: [
       {
         assignmentId: `assignment:${suffix}:0`,

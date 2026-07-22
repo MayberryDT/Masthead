@@ -13,8 +13,6 @@ import {
   listGuidedEvidenceAccess,
   listGuidedOperatorReviews,
   listGuidedOpportunities,
-  listPendingGuidedCanaryAssignments,
-  recordCanaryDecisionInTransaction,
   recordGuidedEvidenceAccessInTransaction,
   persistGuidedAssignmentReceiptInTransaction,
   storeGuidedDraftReviewInTransaction,
@@ -56,7 +54,7 @@ import * as evidenceCatalog from "./evidenceCatalog.ts";
 import {
   GUIDED_ARTIFACT_RUBRICS,
   GUIDED_EVIDENCE_QUESTIONS,
-  planGuidedAssignments
+  planGuidedAssignmentsV5
 } from "./guidedAuthoringPolicy.ts";
 import { assertGuidedSelectionCompileReady } from "./guidedAuthoringPreflight.ts";
 import type {
@@ -165,7 +163,7 @@ export function createGuidedRequest(
   assertGuidedAuthoringExpectedIdentity(input.currentIdentity, input.expectedIdentity);
   return withImmediateTransaction(db, () => {
     const preflight = assertGuidedSelectionCompileReady(db, input.sessionIds);
-    const plan = planGuidedAssignments(
+    const plan = planGuidedAssignmentsV5(
       preflight.sessions.map(({ evidence, ordinal, sessionId }) => ({
         ordinal,
         sessionId,
@@ -180,9 +178,10 @@ export function createGuidedRequest(
     const revisionInputById = new Map(preflight.revisionInputs.map((revisionInput) => [revisionInput.sessionId, revisionInput]));
     const request = createGuidedAuthoringRequestInTransaction(db, {
       actorId: input.actorId,
+      contractVersion: "workbench-authoring-v5",
       assignments: plan.groups.map((group, ordinal) => ({
         assignmentId: stableRecordId("guided-assignment", [requestId, group.groupKey]),
-        canary: ordinal === 0,
+        canary: false,
         evidenceRevision: evidenceCatalog.guidedAuthoringEvidenceRevisionFromInputs(
           group.sessionIds.map((sessionId) => revisionInputById.get(sessionId)!)
         ),
@@ -211,7 +210,7 @@ export function createGuidedRequest(
       nextAction: {
         command: `${input.command} workbench author start --request ${request.requestId} --json`,
         kind: "claim_next",
-        reason: "The canary assignment is ready to start."
+        reason: "The first assignment pack is ready to start."
       },
       request
     };
@@ -249,6 +248,7 @@ export function startGuidedAssignment(
 ): StartGuidedAssignmentResult {
   const request = getGuidedAuthoringRequest(db, input.requestId);
   if (!request) throw new Error("guided_request_not_found");
+  assertCurrentGuidedAuthoringContract(request.contractVersion);
   assertMutationIdentity(request, input);
   const assignmentId = request.currentAssignmentId ?? (
     request.status === "completed"
@@ -763,60 +763,24 @@ export function approveGuidedCanary(
   db: MastheadDatabase,
   input: GuidedCanaryDecisionInput
 ): GuidedAuthoringReviewDto {
-  return decideGuidedCanary(db, input, "approved");
+  return retireGuidedCanaryMutation(db, input.requestId);
 }
 
 export function rejectGuidedCanary(
   db: MastheadDatabase,
   input: GuidedCanaryDecisionInput
 ): GuidedAuthoringReviewDto {
-  return decideGuidedCanary(db, input, "rejected");
+  return retireGuidedCanaryMutation(db, input.requestId);
 }
 
-function decideGuidedCanary(
+function retireGuidedCanaryMutation(
   db: MastheadDatabase,
-  input: GuidedCanaryDecisionInput,
-  decision: "approved" | "rejected"
+  requestId: string
 ): GuidedAuthoringReviewDto {
   assertPublicGuidedMutationIsTopLevel(db);
-  const request = getGuidedAuthoringRequest(db, input.requestId);
+  const request = getGuidedAuthoringRequest(db, requestId);
   if (!request) throw new Error("guided_request_not_found");
-  assertMutationIdentity(request, input);
-  if (
-    !Number.isSafeInteger(input.draftRevision) || input.draftRevision < 1 ||
-    input.evidenceRevision.trim().length === 0 || input.evidenceRevision !== input.evidenceRevision.trim() ||
-    input.notes.trim().length === 0 || input.reviewedBy.trim().length === 0
-  ) throw new Error("invalid_canary_decision");
-
-  const result = withImmediateTransaction(db, (): GuidedMutationResult<GuidedAuthoringReviewDto> => {
-    const assignment = requireAssignment(db, input.assignmentId);
-    if (assignment.requestId !== input.requestId) throw new Error("guided_canary_not_ready");
-    assertAssignmentMutationIdentityStillBound(db, assignment, input);
-    const revisionChange = synchronizeMutableAssignmentRevision(db, assignment);
-    if (revisionChange) {
-      bumpDataRevisionInTransaction(db, "workbench");
-      return revisionChange;
-    }
-    if (
-      assignment.status !== "staged_canary" ||
-      assignment.evidenceRevision !== input.evidenceRevision ||
-      assignment.acceptedDraftRevision !== input.draftRevision
-    ) throw new Error("guided_canary_not_ready");
-    recordCanaryDecisionInTransaction(db, {
-      assignmentId: input.assignmentId,
-      decision,
-      draftRevision: input.draftRevision,
-      notes: input.notes,
-      requestId: input.requestId,
-      reviewedBy: input.reviewedBy
-    });
-    bumpDataRevisionInTransaction(db, "workbench");
-    return {
-      changedRevision: false,
-      value: reviewGuidedAssignment(db, { assignmentId: input.assignmentId, command: input.command })
-    };
-  });
-  return unwrapGuidedMutationResult(result);
+  throw new Error("authoring_contract_retired");
 }
 
 export function finishGuidedAssignment(
@@ -991,7 +955,12 @@ function requireStableRequestForAssignment(
 ): GuidedAuthoringStableRequestBinding {
   const request = getGuidedAuthoringRequestForAssignment(db, assignmentId);
   if (!request) throw new Error("guided_assignment_not_found");
+  assertCurrentGuidedAuthoringContract(request.contractVersion);
   return request;
+}
+
+function assertCurrentGuidedAuthoringContract(contractVersion: string): void {
+  if (contractVersion !== "workbench-authoring-v5") throw new Error("authoring_contract_retired");
 }
 
 function assertMutationIdentity(
@@ -1009,6 +978,7 @@ function assertAssignmentRequestStillBound(
 ): GuidedAuthoringRequestDto {
   const request = getGuidedAuthoringRequest(db, assignment.requestId);
   if (!request) throw new Error("guided_request_not_found");
+  assertCurrentGuidedAuthoringContract(request.contractVersion);
   assertStableGuidedRequestBinding(request, currentIdentity);
   return request;
 }
@@ -1172,12 +1142,10 @@ export function reviewGuidedAssignment(
 }
 
 export function listPendingGuidedCanaries(
-  db: MastheadDatabase,
-  input: { command: string }
+  _db: MastheadDatabase,
+  _input: { command: string }
 ): GuidedAuthoringReviewDto[] {
-  return listPendingGuidedCanaryAssignments(db).map((assignment) => (
-    reviewGuidedAssignment(db, { assignmentId: assignment.assignmentId, command: input.command })
-  ));
+  return [];
 }
 
 type GuidedCoverageState = {
