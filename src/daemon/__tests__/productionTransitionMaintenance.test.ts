@@ -275,6 +275,21 @@ describe("offline production transition maintenance", () => {
     await expect(readFile(productionTransitionJournalPath(databasePath), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  test("accepts the documented historical version 12 alias during production activation", async () => {
+    const { databasePath, newBundle, oldBundle } = await fixture();
+    const database = new DatabaseSync(databasePath);
+    database.prepare("UPDATE schema_migrations SET name = ? WHERE version = 12")
+      .run("012_session_enrichment_chunks");
+    database.close();
+
+    await expect(prepareProductionTransition({
+      databasePath,
+      newBundle,
+      nonce: "12121212-1212-4212-8212-121212121212",
+      oldBundle
+    })).resolves.toMatchObject({ state: "ready_to_activate", targetSchemaVersion: CURRENT_SCHEMA_VERSION });
+  });
+
   test("rejects forged stage state and a mismatched restore receipt without mutating the database", async () => {
     const { databasePath, newBundle, oldBundle, root } = await fixture();
     await writeFile(join(root, ".masthead.sqlite.production-transition-stage-forged"), "forged");

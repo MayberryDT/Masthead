@@ -202,7 +202,7 @@ export function validateCurrentDatabaseSchema(db: MastheadDatabase): void {
   }>;
   if (
     applied.length !== migrations.length ||
-    applied.some((row, index) => row.version !== migrations[index]?.version || row.name !== migrations[index]?.name)
+    applied.some((row, index) => !migrationLedgerRowMatches(row, migrations[index]))
   ) {
     throw new Error("Database schema migration ledger does not exactly match the current target schema.");
   }
@@ -329,11 +329,26 @@ export function applyPendingMigrationsInTransaction(db: MastheadDatabase): void 
 function assertMigrationLedgerMatches(appliedRows: Array<{ name: string; version: number }>): void {
   const knownByVersion = new Map(migrations.map((migration) => [migration.version, migration.name]));
   for (const row of appliedRows) {
-    const historicalVersion12Alias = row.version === 12 && row.name === "012_session_enrichment_chunks";
-    if (knownByVersion.get(row.version) !== row.name && !historicalVersion12Alias) {
-      throw new Error(`schema_migration_ledger_mismatch:${row.version}:${row.name}`);
+    const expectedName = knownByVersion.get(row.version);
+    if (!migrationNameMatches(row.version, row.name, expectedName)) {
+      throw new Error(
+        `schema_migration_ledger_mismatch:${row.version}:${row.name}: ` +
+        "Database schema migration ledger does not exactly match the current target schema."
+      );
     }
   }
+}
+
+function migrationLedgerRowMatches(
+  row: { name: string; version: number },
+  migration: { name: string; version: number } | undefined
+): boolean {
+  return migration !== undefined && row.version === migration.version &&
+    migrationNameMatches(row.version, row.name, migration.name);
+}
+
+function migrationNameMatches(version: number, name: string, expectedName: string | undefined): boolean {
+  return name === expectedName || (version === 12 && name === "012_session_enrichment_chunks");
 }
 
 export function hasPendingMigrations(db: MastheadDatabase): boolean {
