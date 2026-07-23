@@ -17,6 +17,13 @@ symlinked, replaced, or identity-drifting sentinel is preserved and startup fail
 
 The normal install can also be driven as three explicit filesystem phases. `stage --bundle <path>` writes a durable receipt without changing the active surface; after the old daemon is proved stopped, `activate --receipt <path>` switches the attested files with rollback on any failure; after the new daemon has published a fresh matching instance manifest, `finalize --receipt <path>` removes the receipt, staged files, and every obsolete production install artifact. Finalize fails closed before that startup proof exists, so it cannot delete the rollback bundle immediately after activation.
 
+Headless activation proof must be supervised by `scripts/masthead-private-display.js`. It creates a
+unique cookie-gated Xvfb display and private runtime, removes every real X11, Wayland, authority, and
+desktop-session route from lifecycle children, and enables Electron's no-window main-process daemon
+boot. The supervisor owns the complete start, health, finalize, verification, and stop interval; it
+proves Electron, daemon, and Xvfb processes absent before removing the private display state. There
+is no fallback to a visible Electron launch when this isolation proof fails.
+
 - the candidate bundle and release identity verify completely;
 - the current legacy path is a real, non-symlink, versioned direct child of the production root;
 - production health is absent and the exact production process set is empty;

@@ -5,6 +5,7 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { app, BrowserWindow, ipcMain, Menu, net, Notification, protocol, shell } from "electron";
 import { collectGpuDiagnostics } from "./gpuDiagnostics";
+import { headlessDesktopPlan } from "./headless";
 import { installMastheadCliLauncher, resolveMastheadCliLaunchTarget } from "./cliLauncher";
 import { resolveMastheadAppIconPath } from "./icon";
 import { ELECTRON_CHANNELS, isAllowedIpcSender, registerMastheadIpc } from "./ipc";
@@ -44,9 +45,10 @@ protocol.registerSchemesAsPrivileged([
   }
 ]);
 
-configureElectronRuntime(app);
+configureElectronRuntime(app, process.platform, process.env);
 
 const ownedDaemonChildren = new Set<ChildProcess>();
+const desktopPlan = headlessDesktopPlan(process.env);
 let mainWindow: BrowserWindow | undefined;
 let tray: unknown;
 let keepRunningInTray = true;
@@ -62,34 +64,42 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on("second-instance", () => {
-    showMainWindow();
+    if (desktopPlan.createWindow) showMainWindow();
   });
 
   app.whenReady().then(async () => {
     Menu.setApplicationMenu(null);
     registerRendererProtocol();
     await configureCliLauncher();
-    registerDesktopIpc();
+    if (desktopPlan.registerDesktopIpc) registerDesktopIpc();
     const appIconPath = mastheadAppIconPath();
-    mainWindow = await createMainWindow(appIconPath);
-    tray = await createMastheadTray(
-      appIconPath,
-      {
-        onOpenDataDirectory: () => {
-          void openDataDirectory(electronDataDirectory());
+    if (desktopPlan.startConnectorInMain) await startHeadlessConnector();
+    if (desktopPlan.createWindow) mainWindow = await createMainWindow(appIconPath);
+    if (desktopPlan.createTray) {
+      tray = await createMastheadTray(
+        appIconPath,
+        {
+          onOpenDataDirectory: () => {
+            void openDataDirectory(electronDataDirectory());
+          },
+          onQuit: () => app.quit(),
+          onShow: showMainWindow
         },
-        onQuit: () => app.quit(),
-        onShow: showMainWindow
-      },
-      { tooltip: trayTooltipLabel(isElectronDevMode()) }
-    );
-    void tray;
+        { tooltip: trayTooltipLabel(isElectronDevMode()) }
+      );
+      void tray;
+    }
     if (process.env.MASTHEAD_ELECTRON_SMOKE === "1") {
+      if (!mainWindow) throw new Error("Electron renderer smoke is unavailable in headless production mode.");
       void runSmokeAndQuit(mainWindow);
     }
+  }).catch((error) => {
+    console.error(`Masthead Electron startup failed: ${error instanceof Error ? error.message : String(error)}`);
+    app.exit(1);
   });
 
   app.on("activate", () => {
+    if (!desktopPlan.createWindow) return;
     if (BrowserWindow.getAllWindows().length === 0) {
       void createMainWindow().then((window) => {
         mainWindow = window;
@@ -105,8 +115,17 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.on("window-all-closed", () => {
-    if (process.platform !== "darwin") app.quit();
+    if (desktopPlan.createWindow && process.platform !== "darwin") app.quit();
   });
+}
+
+async function startHeadlessConnector(): Promise<void> {
+  await startLiveConnector(
+    connectorTargetInput(),
+    rendererTrustedOrigins({ allowDevServer: false }),
+    ownedDaemonChildren,
+    { prepareAuthoringLauncher: () => configureCliLauncher(true) }
+  );
 }
 
 async function configureCliLauncher(required = false): Promise<void> {
@@ -141,6 +160,16 @@ function configuredDaemonBaseUrl(): string {
     userDataDir: app.getPath("userData")
   });
   return connectorBaseUrl(target.port);
+}
+
+function connectorTargetInput() {
+  return {
+    currentDir: process.cwd(),
+    defaultDataDir: isElectronDevMode() ? electronDevDataDirectory() : undefined,
+    env: electronDaemonEnv(),
+    resourcesPath: process.resourcesPath,
+    userDataDir: app.getPath("userData")
+  };
 }
 
 function mastheadAppIconPath(): string {
@@ -344,13 +373,7 @@ function registerRendererProtocol(): void {
 }
 
 function registerDesktopIpc(): void {
-  const targetInput = () => ({
-    currentDir: process.cwd(),
-    defaultDataDir: isElectronDevMode() ? electronDevDataDirectory() : undefined,
-    env: electronDaemonEnv(),
-    resourcesPath: process.resourcesPath,
-    userDataDir: app.getPath("userData")
-  });
+  const targetInput = connectorTargetInput;
 
   ipcMain.on(ELECTRON_CHANNELS.rendererConfig, (event) => {
     if (!isAllowedIpcSender(event.senderFrame?.url, { allowDevRenderer: isElectronDevMode() })) {

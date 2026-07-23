@@ -39,6 +39,7 @@
     "typecheck": "tsc --noEmit",
     "test": "npm run build:daemon && NODE_OPTIONS=--max-old-space-size=4096 vitest",
     "rehearse:production-activation": "node scripts/masthead-production-activation-rehearsal.js",
+    "test:headless-isolation": "MASTHEAD_HEADLESS_XVFB_TEST=1 vitest --run src/electron/__tests__/headlessIsolation.test.ts",
     "check:product-contract": "node scripts/masthead-product-contract.js",
     "check:surface-contract": "node scripts/masthead-surface-contract.js",
     "check:endpoint-matrix": "npm run build:daemon && node scripts/masthead-endpoint-matrix-smoke.js",

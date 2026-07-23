@@ -16,12 +16,17 @@ def main():
     request = json.loads(sys.stdin.readline())
     secret = request["secret"]
     argv = request["argv"]
+    environment = request["environment"]
     if not isinstance(secret, str) or len(secret) < 32:
         raise ValueError("invalid wait-attestation secret")
     if not isinstance(argv, list) or not argv or not all(isinstance(value, str) for value in argv):
         raise ValueError("invalid fixture argv")
+    if not isinstance(environment, dict) or not all(
+        isinstance(key, str) and isinstance(value, str) for key, value in environment.items()
+    ):
+        raise ValueError("invalid fixture environment")
     try:
-        child = subprocess.Popen(argv, stdin=subprocess.DEVNULL, close_fds=True)
+        child = subprocess.Popen(argv, stdin=subprocess.DEVNULL, close_fds=True, env=environment)
     except OSError as error:
         sys.stderr.write(f"{type(error).__name__}: {error}\n")
         returncode = 1

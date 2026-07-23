@@ -71,6 +71,7 @@ async function fixture({ includeIcon = true, iconContents = VALID_PNG } = {}) {
   await writeFile(join(target, "masthead"), "binary", { mode: 0o755 });
   await writeFile(join(daemonRoot, "node"), "node", { mode: 0o755 });
   await writeFile(join(daemonRoot, "scripts", "masthead-production.js"), "script");
+  await writeFile(join(daemonRoot, "scripts", "masthead-private-display.js"), "private display");
   await writeFile(join(daemonRoot, "scripts", "masthead-production-cold-activation.js"), "cold activation");
   await writeFile(join(daemonRoot, "scripts", "packaged-bundle-manifest.js"), "verifier");
   await writeFile(join(daemonRoot, "scripts", "masthead-hook.js"), "hook");
@@ -4420,6 +4421,83 @@ describe("production lifecycle launcher", () => {
       }),
       executable: join(target, "masthead")
     });
+  });
+
+  test("headless start uses only the explicitly proved private display environment", async () => {
+    const { config, root, target } = await fixture();
+    const authPath = join(root, "private-display", "Xauthority");
+    const runtimeDir = join(root, "private-display", "runtime");
+    const privateEnvironment = {
+      ...process.env,
+      DBUS_SESSION_BUS_ADDRESS: undefined,
+      DISPLAY: ":1947",
+      ELECTRON_OZONE_PLATFORM_HINT: "x11",
+      GDK_BACKEND: "x11",
+      MASTHEAD_HEADLESS: "1",
+      MASTHEAD_PRIVATE_DISPLAY: ":1947",
+      MASTHEAD_PRIVATE_DISPLAY_AUTHORITY: authPath,
+      MASTHEAD_PRIVATE_DISPLAY_RUNTIME: runtimeDir,
+      MASTHEAD_PRIVATE_DISPLAY_TOKEN: "a".repeat(64),
+      QT_QPA_PLATFORM: "xcb",
+      SESSION_MANAGER: undefined,
+      WAYLAND_DISPLAY: undefined,
+      XAUTHORITY: authPath,
+      XDG_RUNTIME_DIR: runtimeDir,
+      XDG_SESSION_TYPE: "x11"
+    };
+    const electron = processRecord({
+      argv: [join(target, "masthead"), `--user-data-dir=${config.dataDirectory}`],
+      environ: { MASTHEAD_DATA_DIR: config.dataDirectory, MASTHEAD_DB_PATH: config.databasePath },
+      exe: join(target, "masthead")
+    });
+    const daemon = processRecord({
+      argv: [join(target, "resources", "daemon", "node"), join(target, "resources", "daemon", "dist", "src", "daemon", "main.js")],
+      environ: { MASTHEAD_DATA_DIR: config.dataDirectory, MASTHEAD_DB_PATH: config.databasePath },
+      exe: join(target, "resources", "daemon", "node"), pid: 43, starttime: "daemon"
+    });
+    let scans = 0;
+    let launch: any;
+
+    await startProduction({ ...config, gitSha: "a".repeat(40), version: "0.1.0" }, {
+      acquireLease: async () => ({ release: async () => undefined }),
+      captureSpawned: async () => electron,
+      currentTarget: async () => target,
+      fetchHealth: async () => undefined,
+      ownershipProbe: async () => undefined,
+      portBindable: async () => true,
+      readProcesses: async () => (++scans === 1 ? [] : [electron, daemon]),
+      spawnElectron: async (input: unknown) => { launch = input; return 42; },
+      waitForHealth: async () => ({
+        buildSha: "a".repeat(40), buildVersion: "0.1.0",
+        data: { dataDirectory: config.dataDirectory, databasePath: config.databasePath },
+        ok: true, product: "masthead", runtime: { port: config.port, writable: true }
+      })
+    }, privateEnvironment);
+
+    expect(launch.env).toMatchObject({
+      DISPLAY: ":1947",
+      MASTHEAD_HEADLESS: "1",
+      MASTHEAD_PRIVATE_DISPLAY: ":1947",
+      XAUTHORITY: authPath,
+      XDG_RUNTIME_DIR: runtimeDir
+    });
+    expect(launch.env.WAYLAND_DISPLAY).toBeUndefined();
+    expect(launch.env.DBUS_SESSION_BUS_ADDRESS).toBeUndefined();
+  });
+
+  test("headless start refuses before Electron spawn when private display proof is incomplete", async () => {
+    const { config, target } = await fixture();
+    let spawned = false;
+    await expect(startProduction({ ...config, gitSha: "a".repeat(40), version: "0.1.0" }, {
+      acquireLease: async () => ({ release: async () => undefined }),
+      currentTarget: async () => target,
+      fetchHealth: async () => undefined,
+      ownershipProbe: async () => undefined,
+      portBindable: async () => true,
+      readProcesses: async () => [],
+      spawnElectron: async () => { spawned = true; return 42; }
+    }, { ...process.env, DISPLAY: ":0", MASTHEAD_HEADLESS: "1" })).rejects.toThrow("private display");
+    expect(spawned).toBe(false);
   });
 
   test("start reaches Electron when the first-run database does not exist", async () => {

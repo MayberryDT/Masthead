@@ -26,6 +26,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { verifyPackagedBundleManifest } from "./packaged-bundle-manifest.js";
+import { assertPrivateDisplayEnvironment } from "./masthead-private-display.js";
 import { runColdProductionActivation } from "./masthead-production-cold-activation.js";
 
 const DEFAULT_PORT = 17383;
@@ -1612,7 +1613,7 @@ function normalizeProcExecutable(path) {
   return normalized.endsWith(deletedSuffix) ? path : normalized;
 }
 
-export async function startProduction(configInput, dependencyOverrides = {}) {
+export async function startProduction(configInput, dependencyOverrides = {}, environment = process.env) {
   const config = await completeConfig(configInput);
   await verifyPinnedBundle(config.target, config.bundleDigest);
   const dependencies = { ...defaultDependencies(config), ...dependencyOverrides };
@@ -1661,10 +1662,11 @@ export async function startProduction(configInput, dependencyOverrides = {}) {
     if (health) throw new Error(`Refusing to start because port ${config.port} serves a process that is not the pinned production target.`);
     if (!(await dependencies.portBindable())) throw new Error(`Refusing to start because port ${config.port} is occupied by an unrelated listener.`);
     await dependencies.ownershipProbe();
+    const launchEnvironment = productionElectronEnvironment(environment);
     const launch = {
       args: [`--user-data-dir=${config.dataDirectory}`],
       env: {
-        ...process.env,
+        ...launchEnvironment,
         MASTHEAD_BUILD_SHA: config.gitSha,
         MASTHEAD_BUILD_VERSION: config.version,
         MASTHEAD_BUNDLE_DIGEST: config.bundleDigest,
@@ -1699,6 +1701,15 @@ export async function startProduction(configInput, dependencyOverrides = {}) {
   } finally {
     await lease.release();
   }
+}
+
+export function productionElectronEnvironment(environment = process.env) {
+  if (environment.MASTHEAD_HEADLESS === "1") return assertPrivateDisplayEnvironment(environment);
+  if (
+    environment.MASTHEAD_PRIVATE_DISPLAY || environment.MASTHEAD_PRIVATE_DISPLAY_AUTHORITY ||
+    environment.MASTHEAD_PRIVATE_DISPLAY_RUNTIME || environment.MASTHEAD_PRIVATE_DISPLAY_TOKEN
+  ) throw new Error("Production launch has a partial private display environment without headless authority.");
+  return environment;
 }
 
 export async function stopProduction(configInput, dependencyOverrides = {}) {
@@ -1782,7 +1793,7 @@ export async function runCli(argv = process.argv.slice(2), environment = process
     }, dependencyOverrides);
   }
   const config = await configFromEnvironment(environment);
-  if (command === "start") return startProduction(config, dependencyOverrides);
+  if (command === "start") return startProduction(config, dependencyOverrides, environment);
   if (command === "stop") return stopProduction(config, dependencyOverrides);
   if (command === "status") return statusProduction(config, dependencyOverrides);
   throw new Error(`Unknown production lifecycle command: ${command}. Expected stage, activate, finalize, install, start, stop, or status.`);

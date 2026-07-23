@@ -65,6 +65,10 @@ or release instructions.
       live, symlinked, replaced, or identity-drifting sentinels are preserved and startup fails closed.
 - [ ] Launcher/lifecycle regressions, production activation rehearsal, and packaged Electron smoke
       pass against isolated paths before the live install.
+- [ ] Production activation rehearsal runs only inside a cookie-gated private Xvfb display with a
+      private runtime directory. Electron and daemon children inherit no real display, Wayland,
+      authority, or desktop-session bus route; Electron creates no window or tray; all child and
+      Xvfb identities are stopped and proved absent before the private display root is removed.
 - [ ] Production installation uses the verified stage → offline proof → activate → start/health proof
       → finalize process in `docs/reference/production-cold-activation.md`.
 - [ ] Finalization leaves exactly one versioned production bundle, `current` points to it, no staged

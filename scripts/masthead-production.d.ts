@@ -128,7 +128,12 @@ export function coldActivateProduction(input: {
   port?: number;
   productionRoot?: string;
 }, dependencies?: Record<string, unknown>): Promise<Record<string, unknown>>;
-export function startProduction(config: ProductionConfig, dependencies?: Record<string, unknown>): Promise<Record<string, unknown>>;
+export function startProduction(
+  config: ProductionConfig,
+  dependencies?: Record<string, unknown>,
+  environment?: NodeJS.ProcessEnv
+): Promise<Record<string, unknown>>;
+export function productionElectronEnvironment(environment?: NodeJS.ProcessEnv): NodeJS.ProcessEnv;
 export function stopProduction(config: ProductionConfig, dependencies?: Record<string, unknown>): Promise<{
   stopped: boolean;
   stoppedPids: number[];
