@@ -12,7 +12,7 @@ import { buildPackagedCliInvocation } from "./packaged-cli-command.js";
 
 const REQUIRED_HOOK_EVENTS = ["SessionStart", "PermissionRequest", "PostToolUse", "Stop"];
 const MASTHEAD_HOOK_MARKER = "masthead-hook.js";
-const AUTHORING_OPERATIONS = ["start", "inspect", "scaffold", "save", "review", "finish"];
+const AUTHORING_OPERATIONS = ["bootstrap", "start", "claim", "inspect", "scaffold", "save", "finish", "status", "receipt"];
 const REQUIRED_CAPABILITIES = [
   "live_projection",
   "canonical_sessions",
@@ -227,10 +227,10 @@ export function inspectAuthoringCapabilities(value, expectedIdentity) {
 
   if (capabilities.capability !== "artifact_authoring") problems.push("artifact_authoring capability is missing");
   if (capabilities.protocol !== "masthead.workbench.authoring/v1") problems.push("authoring protocol is incompatible");
-  if (capabilities.bundleVersion !== "workbench-authoring-v4") problems.push("authoring bundle version is incompatible");
-  if (capabilities.policyVersion !== "guided-authoring-v1") problems.push("guided authoring policy is incompatible");
-  if (capabilities.maxSessionsPerAssignment !== 12) problems.push("guided assignment session limit is incompatible");
-  if (capabilities.canarySessions !== 3) problems.push("guided canary session limit is incompatible");
+  if (capabilities.bundleVersion !== "workbench-authoring-v5") problems.push("authoring bundle version is incompatible");
+  if (capabilities.policyVersion !== "workbench-authoring-v5") problems.push("authoring policy is incompatible");
+  if (capabilities.minimumSessionsPerPack !== 5) problems.push("minimum pack size is incompatible");
+  if (capabilities.maximumSessionsPerPack !== 12) problems.push("maximum pack size is incompatible");
   if (!command) problems.push("authoring command is missing");
   else if (!isCanonicalAbsoluteAuthoringPath(command)) problems.push("authoring command is invalid");
   if (!isCanonicalGuidedAuthoringBaseUrl(capabilities.baseUrl)) problems.push("baseUrl identity is invalid");
@@ -382,7 +382,7 @@ async function checkAuthoring() {
       label: "artifact authoring",
       status: ok ? "ok" : "fail",
       message: ok
-        ? `Installed guided authoring CLI is ready for ${expectedDatabaseId}; start, inspect, save, review, and finish are available.`
+        ? `Installed V5 authoring CLI is ready for ${expectedDatabaseId}; bootstrap, start, inspect, scaffold, save, finish, status, and receipt are available.`
         : "Daemon authoring capabilities, installed command, or CLI database identity are invalid.",
       details: {
         capability: capabilities.capability,

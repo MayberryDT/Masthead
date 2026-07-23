@@ -85,7 +85,7 @@ export async function withExclusiveDatabaseMaintenance<T>(
   const writerLease = await acquireDatabaseWriterLock(databasePath);
   let legacyGuard: Awaited<ReturnType<typeof acquireLegacyDataDirectoryGuard>> | undefined;
   try {
-    legacyGuard = await acquireLegacyDataDirectoryGuard(dataDirectory);
+    legacyGuard = await acquireLegacyDataDirectoryGuard(dataDirectory, writerLease);
     // Repeat the runtime proof after both daemon-equivalent guards are held.
     // A malformed or stale manifest is still ownership ambiguity, so
     // maintenance never reclaims or ignores it automatically.

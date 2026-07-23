@@ -4,6 +4,17 @@
 
 Use the normal verified install path whenever the current bundle has a valid release manifest and pinned launcher digest. The cold path requires all of the following before it changes the database or `current` symlink:
 
+Normal Electron startup and the production lifecycle share a five-minute health deadline. Opening or
+migrating the real large database is allowed to use that budget; Electron must not terminate its
+exact child after the former eight-second wait.
+
+Normal writable startup may clear only a proven-stale canonical V4 compatibility sentinel. The
+database-writer and runtime SQLite leases must already be exclusive; the sentinel must be a regular,
+single-link, current-user file with safe mode and bounded size, valid protocol/token/timestamp, and a
+dead PID. Cleanup binds the bytes to an open no-follow file descriptor, atomically quarantines the
+pathname, rechecks inode and PID, and preserves that quarantined inode under its unique name. A malformed, live,
+symlinked, replaced, or identity-drifting sentinel is preserved and startup fails closed.
+
 The normal install can also be driven as three explicit filesystem phases. `stage --bundle <path>` writes a durable receipt without changing the active surface; after the old daemon is proved stopped, `activate --receipt <path>` switches the attested files with rollback on any failure; after the new daemon has published a fresh matching instance manifest, `finalize --receipt <path>` removes the receipt, staged files, and every obsolete production install artifact. Finalize fails closed before that startup proof exists, so it cannot delete the rollback bundle immediately after activation.
 
 - the candidate bundle and release identity verify completely;
@@ -28,7 +39,7 @@ Before offline maintenance begins, Masthead atomically installs a disabled launc
 
 Offline prepare and restore each have a twelve-hour hard deadline, separate from the five-minute startup-health deadline. The bound covers multiple full-size database passes: snapshot backup, full integrity verification, SHA-256 hashing, migration and validation, plus a possible receipt-bound restore. On timeout Masthead sends `SIGTERM` only after revalidating the exact child PID/start identity; it never sends `SIGKILL`.
 
-The cold lifecycle parent captures the maintenance child's exact compatibility sentinel while that child is still alive. After the exact child exit is proven, it may remove only that captured stale sentinel: canonical database and runtime SQLite leases must both be held, the child PID must be absent, production must be offline, and the no-follow regular single-link sentinel must still match its exact path, device, inode, owner, size, mode, bytes, protocol, PID and token. At the deletion boundary it atomically renames the pathname to a unique same-directory quarantine, revalidates the moved inode through a no-follow file descriptor and deletes only that quarantined inode. A mismatched replacement is restored or preserved without overwriting a newer canonical sentinel. It then verifies canonical absence, repeats the runtime-offline proof, releases the leases and runs the normal full ownership probe. Any missing proof, busy lease, live/reused PID or sentinel replacement leaves production disabled and preserves the replacement.
+The cold lifecycle parent captures the maintenance child's exact compatibility sentinel while that child is still alive. After the exact child exit is proven, it may clear only that captured stale sentinel from the canonical pathname: canonical database and runtime SQLite leases must both be held, the child PID must be absent, production must be offline, and the no-follow regular single-link sentinel must still match its exact path, device, inode, owner, size, mode, bytes, protocol, PID and token. At the cleanup boundary it atomically renames the pathname to a unique same-directory quarantine, revalidates the moved inode through a no-follow file descriptor, and preserves that inode for explicit offline cleanup. A mismatched replacement is restored or preserved without overwriting a newer canonical sentinel. It then verifies canonical absence, repeats the runtime-offline proof, releases the leases and runs the normal full ownership probe. Any missing proof, busy lease, live/reused PID or sentinel replacement leaves production disabled and preserves the replacement.
 
 The disabled launcher rejects every mutating command and launch attempt with exit code 78. Its read-only `status` command remains available and reports whether the cold transition journal is pending without executing either bundle.
 

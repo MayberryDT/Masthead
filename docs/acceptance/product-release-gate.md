@@ -1,233 +1,124 @@
 # Masthead Product Release Gate
 
-> **V4 release status:** The V4 implementation is present, while the checked V1–V3 items below remain
-> historical evidence only. They do not authorize production recovery or satisfy the guided-authoring
-> release gate. Every V4 item remains unchecked until new evidence is recorded against the exact
-> release candidate.
+This is the current release checklist for `workbench-authoring-v5`. Earlier V1–V4 acceptance and
+canary worksheets are historical evidence only; they do not authorize new authoring, production
+recovery, or dogfood rollout.
 
-## Guided authoring V4 gates
+## Release identity
 
-Task 14 fixture status: the hard-metric corpus and isolated-harness cleanup/refusal suites pass locally. The public-interface dogfood, separate fresh-agent report, signed human review, and production canary remain release blockers until their commands complete against the final build. The prior production-copy recovery rehearsal was superseded by Tyler's explicit full reset on 2026-07-20; no legacy corpus or rollback snapshot remains.
+- [ ] `package.json` is the version source of truth and `npm run version:sync` passes.
+- [ ] The packaged daemon, Electron shell, installed `mastheadctl`, instance manifest, health
+      response, Doctor, and `workbench capabilities --json` report one build SHA, database ID,
+      manifest path, base URL, instance ID, and `workbench-authoring-v5` contract.
+- [ ] The capability operations are exactly `bootstrap`, `start`, `claim`, `inspect`, `scaffold`,
+      `save`, `finish`, `status`, and `receipt`; pack bounds are 5–12.
+- [ ] **Copy Agent Prompt** creates one V5 request from the compile-ready selection, discloses
+      excluded review-needed rows, and copies only its request ID plus instance-bound start command.
 
-- [ ] Capabilities advertise `workbench-authoring-v4`, one next action, and an instance-bound launcher;
-      V1, V2, and V3 remain audit-only and mutation attempts return `authoring_contract_retired`.
-- [ ] Copy Agent Prompt persists one guided authoring request and copies only its opaque request ID
-      and instance-bound start command, with no session list or multi-step recipe.
-- [ ] The daemon groups assignments of at most 12 sessions using strong opportunity joins first and
-      dossier-only groups second.
-- [ ] The three-session canary uses a complete strong group of at most three or diverse dossier-only
-      sessions; an impossible canary returns `guided_canary_not_constructible` and persists nothing.
-- [ ] Every assignment traverses all canonical evidence pages before draft review, and every
-      substantive dossier or optional-artifact claim has typed verbatim support.
-- [ ] High-signal opportunities require an evidence-backed disposition, while unsupported optional
-      kinds create neither artifacts nor blanket not-applicable output.
-- [ ] Rich synthetic evidence produces and persists at least one runbook, one ADR, and one incident
-      timeline; opportunity and optional-artifact coverage have nonzero denominators, so an all-dossier
-      packet or universal dismissal cannot pass vacuously.
-- [ ] Artifact-only consumer tasks semantically recover a runbook procedure and check, an ADR rationale
-      and rejected alternative, and an ordered incident sequence using only published artifact
-      search/detail; fixture-title echoes and generic verification words fail a negative control.
-- [ ] The failed bulk-template corpus is rejected for incomplete inspection, protocol leakage,
-      negligible enrichment, unsupported completion, duplicate templates, and copied dismissals.
-- [ ] The first accepted assignment remains staged until operator approval, then finish publishes one
-      assignment atomically and releases the next.
-- [ ] Development and production launcher manifests cannot collide, and every authoring mutation
-      verifies daemon URL, database ID, build SHA, manifest path, and instance identity.
-- [ ] Workbench and Logbook refresh after external authoring writes without requiring an app restart.
-- [ ] Isolated fixture, latency, packaged smoke, responsive inspection, and human-reviewed production
-      canary evidence are complete under the separate production authorization boundary.
+## Frozen authoring boundary
 
-### Task 14 command evidence
+- [ ] Agent owns title, description, keywords, purpose, outcome, key work, honest verification, and
+      optional-artifact judgment; Masthead emits identity, evidence catalogs, blank fields, validation,
+      Activity, atomic publication, and receipts, but no enrichment prose.
+- [ ] Full selection is the job. The daemon fixes pack membership and the agent continues until the
+      immutable request receipt exists; resume only recovers a crash under the same request ID.
+- [ ] Save classifies each session independently as `publishable`, `soft_flag`, or `hard_reject`.
+      Hard rejects skip publication and continue; soft flags may publish with Activity warnings.
+- [ ] Knowledge opportunities are nonbinding. Every pack records grounded yes/no optional
+      consideration, yes may include a draft, and no never blocks dossier publication.
+- [ ] Accepted enrichment is applied before the daemon rebuilds `canonical-session-dossier-v1`;
+      agents cannot submit a dossier body.
+- [ ] Logbook and MCP rank agent-authored title, description, and keywords ahead of the complete
+      immutable body. MCP remains read-only and artifact-primary.
 
-- `npx vitest run src/workbench/authoring/__tests__/durableArtifactCorpus.test.ts src/workbench/authoring/__tests__/guidedAgentCanaryHarness.test.ts` must pass the hard metrics, minimal launch package, production refusal, non-production port, and startup/agent/gate cleanup cases.
-- `npm run dogfood:durable-artifacts` must pass through the isolated daemon’s public V4 HTTP surface and emit `durable-artifact-gate-v2` with every hard metric satisfied.
-- `npm run canary:guided-agent -- --agent-command <absolute-wrapper> --report <new-absolute-report.json>` must run the fresh model once, write the unsigned `guided-agent-canary-v1` report with mode `0600`, and fail only the `human_review_not_signed` gate when its trusted machine evidence passes. That trusted evidence must include persisted runbook, ADR, and incident-timeline outputs from rich synthetic evidence, nonzero opportunity and optional-artifact denominators, and semantic artifact-only consumer tasks that cannot pass by repeating fixture-title words plus generic verification language. A human reviews the persisted artifact packet, copies its exact review challenge into a signed receipt, then runs `npm run canary:guided-agent -- --verify-review --report <absolute-report.json> --human-review-file <absolute-review.json>`. Verification never reruns the model and accepts only a post-run receipt bound to the request ID, sorted artifact IDs, and trusted report hash. The wrapper receives only the launch package; the model never receives the report or review file.
-- The root-authorized read-only rehearsal must create the real incident contract from the complete copied population, audit the copy, recover and restore the copy, flush a redacted acceptance record, and remove all rehearsal state. Until that happens, `docs/acceptance/guided-authoring-v3-incident-contract.json` must not be created from fixture or guessed values.
+## Kill list
 
-## Preserved historical V3 release record
+The release fails if any live V5 path contains or requires:
 
-## Fresh launch
-- [ ] No daemon running: Masthead starts compatible daemon.
-- [ ] Legacy daemon running: Masthead isolates it and starts current daemon.
-- [ ] Compatible wrong-data daemon running: Masthead rejects it.
-- [x] Read-only bridge mode is visibly read-only. Evidence: `npm run verify` includes `smoke:compatibility`, which forwarded read-only GET/POST endpoints and blocked mutation endpoints without reaching upstream on 2026-07-06.
+- operator canary or approval;
+- required knowledge-opportunity dispositions;
+- a campaign-wide `needs_revision` halt;
+- Masthead-written enrichment prose or keyword invention;
+- mandatory runbook, ADR, or incident-timeline output per session;
+- supervisor, worker, or nested-author product architecture.
 
-## Sources
-- [ ] Focused supported adapters visible: Cursor, Claude Code, OpenCode, Grok, Hermes, Pi, and OMP.
-- [ ] Missing focused source roots explained.
-- [ ] Detected focused source roots show source locations.
-- [x] Metadata import populates sessions. Evidence: `npm run verify` import smoke passed on 2026-06-26.
-- [x] Transcript import populates messages/tools. Evidence: `npm run verify` import and MCP smokes passed on 2026-06-26.
+Historical V4 tables, DTOs, reviews, and copy may retain those words only when clearly labeled as
+audit history. They must never be advertised by current health, capabilities, CLI help, Workbench,
+or release instructions.
 
-## Multi-adapter Sources
-- [x] Sources shows the focused support set: Cursor, Claude Code, OpenCode, Grok, Hermes, Pi, and OMP. Evidence: support set narrowed in runtime catalog, registry, source-status filtering, and live connector settings on 2026-07-06.
-- [x] Scan this computer checks known local locations only. Evidence: `sourceScanService.test.ts` verifies arbitrary home files are ignored on 2026-06-27.
-- [x] Connect selected queues metadata import jobs. Evidence: `sourceConnectService.test.ts` verifies per-source metadata jobs on 2026-06-27.
-- [x] Transcript import requires exact source-scoped approval and Workbench intent. Evidence: Workbench API/CLI tests cover unrelated approved source rejection; import worker tests cover exact-source policy enforcement.
-- [x] Imported sessions enter canonical storage and Workbench; only their published artifacts appear in Logbook search. Evidence: focused import tests plus artifact-only Logbook contract tests.
-- [x] Unrecognized schemas produce diagnostics and do not create fake transcripts. Evidence: focused import tests cover unrecognized source diagnostics with zero sessions.
-- [x] Fresh recent imports exclude old units without cursors; changed old units require an existing
-  cursor and are reported as incremental refreshes; caps remain explicit deferrals. Evidence:
-  `importManifestService.test.ts` and the isolated import-trust replay passed on 2026-07-15.
-- [x] Transcript-unit ownership preserves canonical identity and structured evidence. Evidence: the
-  sanitized replay produced exactly one Grok conversation (zero `rs_*` pseudo-sessions) and one
-  Hermes session with one structured tool call and one structured tool result.
-- [x] Import repair stays distinct from Not Added. Evidence: the isolated replay reported two
-  package-path sessions, zero repair-required sessions, zero import failures classified as Not
-  Added, and no Not Added reasons; focused partial/unrecognized import tests cover the failure path.
-- [x] Harness catalog exposes only active focused harnesses. Evidence: `RUNTIME_KINDS` and `HARNESS_CATALOG` are the seven-runtime support contract.
-- [ ] Advanced diagnostics reviewed in rendered Sources UI.
-- [ ] `sources-pipeline` doctor check reviewed against current local data.
-- [ ] No whole-home scan guarantee reviewed in docs and UI copy.
+## Legacy retirement and audit
 
-## Logbook
-- [x] Logbook lists published artifacts only; no session row appears as an entry. Evidence: artifact-first repository/API/UI tests and the authoring dogfoods load only receipt artifact ids.
-- [x] Search covers complete first-class artifact bodies. Evidence: migration 021/repository regressions plus both authoring dogfoods find runbooks by body-only sentinel phrases.
-- [x] Inspector renders the exact `canonical-session-dossier-v1` body through the original dossier presentation and renders every optional-artifact first-class body field, including typed V2 `claimSupport` paths, support kinds, verbatim excerpts, and evidence refs. Malformed canonical and unknown future schemas are explicit. Evidence: focused artifact body and `LogbookInspector` tests plus responsive read-only fixture inspection.
-- [x] Logbook table does not own Workbench selection or bulk enrichment. Evidence: App no longer wires Logbook session selection, bulk enrich, or selected detail modal; focused UI tests passed on 2026-07-08.
-- [x] Restart preserves one current artifact per lineage. Evidence: `dogfood-workbench-ops.js` observes two lineages and exactly one current published artifact in each before and after daemon restart.
+- [ ] New request creation writes only `workbench-authoring-v5` rows.
+- [ ] V1–V4 start, progress-recording inspect, submit/save, canary decision, and finish routes return
+      HTTP 409 `authoring_contract_retired` before claims, enrichment, artifacts, or Activity writes.
+- [ ] Historical run/request status, evidence, context, assignment review, operator review, and
+      receipts remain readable with their original contract labels.
+- [ ] Open V4 campaigns remain read-only or are abandoned; no row is relabeled or resumed as V5.
 
-## Session dossier
-- [x] Board detail loads canonical dossier when available. Evidence: Board cards carry canonical IDs and `npm run doctor:json` loaded a real canonical dossier on 2026-06-26.
-- [x] Logbook canonical dossier artifacts use the original dossier body component. Evidence: `LogbookInspector` routes the exact canonical schema through `SessionDossierContent`; focused UI tests cover all original sections.
-- [x] Dossier publication is daemon-owned and immutable. V3 finish applies current durable enrichment before the daemon rebuilds the canonical `SessionDossierDto` snapshot; no standalone dossier publication route accepts raw sessions or authored dossier bodies.
-- [x] Dossier shows files, tools, verification, excerpts, timeline, provenance, token usage, and MCP reuse status. Evidence: `SessionDossier.test.tsx` and `sessionDossierRepository.test.ts` passed on 2026-06-26.
-- [x] Dossier has live-only fallback. Evidence: `SessionDossier.test.tsx` covers live-only fallback on 2026-06-26.
-- [x] Unsupported source-opening actions are hidden. Evidence: `SessionDossier.test.tsx` verifies source-opening actions are omitted on 2026-06-26.
+## Production lifecycle
 
-## Enrichment and Board headlines
-- [x] Board headline frames refresh through the remote provider when enabled/configured. Evidence: `boardHeadlineEnricher.test.ts` and `openaiBoardHeadlineFrame.test.ts` verify pending, success, invalid-output, and refresh behavior.
-- [x] Remote enrichment failures do not silently fall back to deterministic success. Evidence: `openAIProvider.test.ts` and `enrichmentCoordinator.test.ts` verify structured failure results and failed rows on 2026-06-29.
-- [x] Failed enrichment is visible in diagnostics and dossier provenance. Evidence: daemon queue records `enrichment_failed`; `sessionDossierRepository.test.ts` verifies latest failed attempt fields on 2026-06-29.
-- [x] Audit export is available for shareable traces. Evidence: `enrichmentAudit.test.ts` and `node scripts/masthead-export-enrichment-audit.js --help` passed on 2026-06-29.
+- [ ] Electron allows the same five-minute startup-health budget as the production lifecycle, so a
+      real large database is not killed after eight seconds while opening or migrating.
+- [ ] Automatic compatibility-sentinel cleanup accepts only an exact canonical V4 sentinel owned by
+      the current user, with safe mode/link/type/size, valid token and timestamp, a dead PID, exclusive
+      SQLite leases, fd-bound inode proof, atomic quarantine preservation, and a final dead-PID check. Malformed,
+      live, symlinked, replaced, or identity-drifting sentinels are preserved and startup fails closed.
+- [ ] Launcher/lifecycle regressions, production activation rehearsal, and packaged Electron smoke
+      pass against isolated paths before the live install.
+- [ ] Production installation uses the verified stage → offline proof → activate → start/health proof
+      → finalize process in `docs/reference/production-cold-activation.md`.
+- [ ] Finalization leaves exactly one versioned production bundle, `current` points to it, no staged
+      receipt/journal/helper remains, and the database directory contains one active database plus at
+      most one sibling backup.
 
-## Session transcript detail
-- [x] Board detail shows a transcript section. Evidence: `SessionDetailModal` passes transcript props into shared `SessionDossier`; focused UI/type checks passed on 2026-06-27.
-- [x] A published dossier is self-contained and does not fetch a live transcript to reconstruct its body. Evidence: Logbook reads the persisted canonical artifact body; raw transcript tools remain separate evidence APIs.
-- [x] Hook-only sessions show a coverage warning. Evidence: `SessionDossier.test.tsx` covers hook-only coverage warning and sparse transcript copy on 2026-06-27.
-- [x] Repeated low-value hook events are collapsed. Evidence: `SessionDossier.test.tsx` covers grouped low-value transcript rows on 2026-06-27.
-- [x] Detail view does not show raw JSON in primary content. Evidence: transcript DTO exposes text, labels, status, and source refs separately; UI renders text rows, not raw JSON.
-- [x] Sparse sessions route user to Workbench for transcript work. Evidence: Dossier coverage warnings use the Workbench target; focused Dossier tests passed on 2026-07-08.
+## Automated release candidate gates
 
-## Agent Access
-- [x] MCP config uses active database. Evidence: `npm run verify` MCP smoke passed on 2026-06-26.
-- [x] Invalid config cannot be copied. Evidence: `npm run verify` MCP tests passed on 2026-06-26.
-- [x] Test connection passes. Evidence: focused MCP launch tests and `npm run verify` passed on 2026-06-26.
-- [x] Query appears in audit. Evidence: `npm run verify` MCP smoke passed on 2026-06-26.
-- [x] MCP stays read-only. Evidence: `src/mcp/__tests__/tools.test.ts` asserts no registered tool name exposes apply, write, import, delete, settings, provider, enrich, or mutation operations.
-- [x] Doctor verifies the authoring command and boundary. Evidence: `artifact-authoring` check requires health capability, exact operation definitions, executable absolute or PATH-resolved command, installed CLI/daemon database identity equality, while the MCP check rejects non-read-only tools.
+- [ ] Focused Electron launcher, production lifecycle, Doctor/health, V5 API/service/CLI, handoff,
+      retirement, and search tests pass.
+- [ ] Full serial Vitest suite passes with zero failures.
+- [ ] `npm run typecheck` passes.
+- [ ] `npm run build` and `npm run build:desktop` pass.
+- [ ] `npm run check:product-contract`, `npm run check:surface-contract`,
+      `npm run check:endpoint-matrix`, and `npm run verify:no-citations` pass.
+- [ ] `npm run smoke` and the packaged Electron smoke pass.
+- [ ] An independent standards review and frozen-spec review of the full V5 branch have no unresolved
+      release-blocking findings.
 
-## Workbench
-- [ ] A raw or merely deterministic session cannot create a Logbook dossier.
-- [ ] Agent enrichment is applied before the canonical dossier snapshot is rendered.
-- [ ] Copy Agent Prompt is the only primary authoring control in Workbench.
-- [ ] Optional artifact kinds are agent-selected; detector suggestions are nonbinding.
-- [x] Development and packaged `mastheadctl` launchers are installed beside the app and report the active daemon database identity. Evidence: launcher/daemon/packaged CLI tests, Doctor, and packaged Electron smoke.
-- [x] Normal authoring CLI operations are thin daemon HTTP calls; no authoring command opens SQLite. Evidence: `authoringClient`/CLI tests and long-session dogfood with explicit `MASTHEAD_DAEMON_URL`.
-- [x] V3 capabilities, selection-scoped open, status, evidence, context, submit, and finish have focused service/API/CLI tests. Open rejects a different database, ineligible or oversized selections, missing canonical evidence, and claim conflicts before output writes.
-- [x] Workbench app surface is a dense operations table plus Activity rail, not command-first. Evidence: Workbench UI/controller/handoff tests cover pipeline sessions, selected-session handoff, Activity, Not Added summary, loading/error/empty states, and absence of user-facing CLI command copy.
-- [x] Workbench human ops toolbar covers check transcript, import, quality precheck/pass/fail, claim/release, publish, and agent handoff without command-first CLI recipes. Evidence: `docs/acceptance/workbench-ops-complete-evidence.md` (Task 10 focused suites + dogfood path; panel/controller tests).
-- [x] Activity rail is a high-contrast console with readable event rows (ok/bad tones, gutter, type, summary). Evidence: `docs/acceptance/workbench-ops-complete-evidence.md` and style commit `02a3d49`; `WorkbenchPanel` Activity tests.
-- [x] Workbench can list publish-path sessions through read-only daemon APIs. Evidence: `/workbench/sessions`, `/workbench/activity`, and Not Added read API daemon/client/bridge tests cover pipeline queue semantics.
-- [x] User handoff stays disposable, plain-language, and selection-scoped while the CLI command comes from daemon capabilities. Evidence: handoff tests cover selected sessions, visible readiness and provenance context, no durable assignment, and no authored dossier prose.
-- [x] Deterministic artifact suggestions are advisory only. Evidence: the labeled corpus exercises runbook, ADR, and incident-timeline signals; V3 submission may ignore every suggestion or author other grounded optional kinds selected by the agent.
-- [x] One V3 run owns 1–12 explicitly selected sessions. Evidence: API/service/CLI tests reject duplicate or oversized selections, mismatched database identity, stale evidence, and claim conflicts.
-- [x] Submit stores validated per-session enrichment, optional-artifact drafts, findings, and run state without output rows. Evidence: service/API tests observe zero artifacts before finish and reject missing enrichment, unsupported claims, protocol leakage, weak joins, and substantive duplicates.
-- [x] Every substantive optional-artifact claim has typed support and a normalized verbatim excerpt of at least 20 characters in canonical evidence. Evidence: semantic quality and persisted-acceptance tests cover the exact field/support-kind matrix.
-- [x] V3 finish is atomic and idempotent across durable enrichment, rebuilt canonical dossiers, zero or more agent-selected optional artifacts, current-only search, pipeline state, claims, Activity, and receipt. Evidence: fault injection rolls back at every mutation boundary and retry returns the same V3 receipt.
-- [x] Absence of useful optional work creates no optional artifact and no per-session N/A obligation. Evidence: V3 authoring and product-contract tests accept zero optional artifacts and reject blanket optional-kind resolution semantics.
-- [x] Every receipt artifact is published and reusable through Logbook and artifact-primary MCP. Evidence: the durable fixture completes five `search_artifacts` → `get_artifact` reuse tasks without raw session tools.
-- [x] Local artifacts are visible in session detail. Evidence: dossier UI and repository tests cover current `session_artifacts`.
-- [x] Native remote enrichment is not required for launch. Evidence: Dossier no longer renders a native enrich button; Workbench hands the user’s existing agent to the daemon-owned local authoring module.
-- [x] Logbook correction tools are future scope and MCP remains read-only. Evidence: no authoring/improve/rewrite/remove MCP tools; Doctor and MCP catalog tests enforce read-only permissions.
+## Manual production smoke on the real large database
 
-## Settings
-- [x] Settings loads real state. Evidence: `npm run doctor:json` settings contract passed on 2026-06-26.
-- [x] Hook test round-trips. Evidence: settings API tests passed through `npm run verify` on 2026-06-26.
-- [x] Live connector settings cover Cursor, Claude Code, OpenCode, Grok Build, Hermes, Pi, and OMP. Evidence: focused settings API tests and `npm run smoke:live` expected after the focused-support cut.
-- [x] Live connector install preserves unrelated user hooks and repairs stale Masthead hook commands. Evidence: focused settings API tests cover managed marker repair.
-- [ ] Multi-runtime live smoke creates separate canonical sessions for all seven focused runtimes.
-- [ ] Open folder works in Electron.
-- [x] Delete preview includes database ID. Evidence: Settings UI renders target database and stale-ID preview guard passed on 2026-06-26.
+- [ ] Normal installed launch reaches healthy app and daemon without an eight-second self-kill.
+- [ ] Health, manifest, process identity, installed CLI, and capabilities agree on the current build,
+      database, base URL, instance path, and `workbench-authoring-v5`.
+- [ ] Doctor passes the live authoring identity and operation contract.
+- [ ] Workbench renders sessions from the real database without `No live connection`.
+- [ ] **Copy Agent Prompt** creates a V5 request and produces the thin request-ID/start-command packet.
+      Stop before claiming or enriching its first pack; S6 does not start S7 selection work.
+- [ ] Logbook is not wiped or rebuilt without explicit user confirmation.
 
-## Data ownership
-- [x] SQLite is the canonical product store. Evidence: `npm run verify` and SQLite maintenance tests passed on 2026-06-26.
-- [x] Legacy NDJSON is migration/compatibility only and receives no new product writes. Evidence: canonical ownership tests passed through `npm run verify` on 2026-06-26.
+## Dogfood gates (S7 only)
 
-## Import trust and repair readiness
+These gates validate the release after S6 installation. They are not canaries or approval checkpoints;
+each run is an autonomous proof that the selected request completes without operator intervention.
 
-- [x] `scripts/replay-import-trust-corpus.js` requires a sanitized corpus and a new database path
-  under literal physical `/tmp`, independent of `TMPDIR`, `TMP`, or `TEMP`; it rejects outside-`/tmp`,
-  existing, parent/leaf symlink escapes (including dangling leaf symlinks), and
-  `masthead-production*` database paths.
-- [x] The 2026-07-15 sanitized replay reported `productionAccessed: false`, Grok/Hermes session
-  counts `1/1`, zero out-of-range sessions, zero rejected records, zero repair-required sessions,
-  zero anomalies, and Workbench package path `2`. The integrated `transcript_recent` ledger admitted
-  the two current semantic units, deferred one old semantic Hermes unit as `outside_recent_range`,
-  and created no canonical session for that old unit. The script serialized the canonical repair
-  preview for both replay jobs, including its real hash, viable source/job plans, actions, and
-  preservation fields.
-- [x] Evaluation-copy **repair safety** was rehearsed only on a disposable copy. A plain copy of the
-  active WAL database failed integrity and was abandoned. A new SQLite-consistent read-only backup
-  under `/tmp` passed integrity before and after migration. A time-boxed selected-job provenance
-  closure added no further owning import jobs. Both sources were viable. Preview hash
-  `2dc291775060045443edcafd96325ae50c9d1dc66fe486541b84ea04ada3cdc2` preserved all 1,550 affected
-  sessions: 1,484 had shared ownership and 66 were blocked in indivisible jobs. It exposed zero
-  published artifacts as deletable. Apply with that exact hash was an honest no-op: zero removals,
-  resets, reopened suppressions, cursor resets, or reimports, with all 1,550 sessions preserved.
-- [ ] Evaluation-copy **cleanup acceptance (Task 11 Steps 4–5)** is not satisfied. The canonical
-  safety plan found zero eligible job plans, removals, reparses, or reimports, so the disposable copy
-  did not reach the requested cleaned state. This remains a non-blocking limitation for the isolated
-  replay code change; it must not be represented as successful cleanup.
-- [x] No active evaluation/production database was passed to repair code; no production build was
-  packaged, installed, or restarted. Clean replacement evidence comes from the sanitized replay;
-  ambiguous legacy ownership remains preserved rather than silently deleted.
+### 10 sessions
 
-## Durable artifact recovery readiness (Gate C)
+- [ ] All 10 attempted, at least 8 published, and any rejects appear in Activity without stopping the
+      request.
+- [ ] Every published dossier has a specific title, description, and at least three keywords.
+- [ ] MCP keyword search finds at least three distinct published sessions.
+- [ ] One paste starts the agent and no operator relay is required before the completion receipt.
 
-- [x] Fixture machine gate uses production candidate, validation, publication, Logbook, and MCP paths without opening production data. Run `npm run dogfood:durable-artifacts`.
-- [x] Mandatory fixture thresholds are exact: `dossierFidelity`, `claimSupportCoverage`, `persistedArtifactEquality`, labeled candidate recall/precision, Logbook recall@5, MCP recall@5, and artifact-only reuse pass rate all equal `1.0`; claim-support integrity failures, protocol leaks, duplicate substantive fingerprints, unexpected kinds, missing kinds, and raw session tools used by reuse tasks all equal `0`; candidate provenance never exceeds 12; the 100-session discovery page completes within 2,000 ms.
-- [x] The fixture kind mix is exactly three runbooks, two ADRs, and two incident timelines; the publication slice includes one optional artifact of each kind plus daemon-built canonical dossiers.
-- [x] Recovery audit is read-only and fail-closed on the exact known population: 1,283 V1 dossiers, zero optional artifacts, 66 completed V1 runs, exact membership/template/windows/actor/schema, and one SHA-256 audit hash.
-- [x] Recovery prepare requires an explicit database path and exclusive daemon-equivalent writer ownership, makes a SQLite-consistent backup including WAL state, verifies identity and integrity, refuses audit drift, and retains exactly one backup.
-- [x] Recovery invalidation requires the exact audit hash and `--confirm`, is one transaction, removes only matched artifact/search/provenance rows, resets affected sessions and optional statuses, releases matched claims, records Activity, and preserves V1 runs/receipts.
-- [x] Historical V2 candidate/control inspection is retained as release evidence only. Current V3 Workbench exposes Copy Agent Prompt as its primary authoring control and has no independent canonical-dossier publication control.
-- [x] Gate C code readiness is signed from the exact app candidate plus proportionate verification of later surgical deltas. Evidence: app commit `95b23fc1` passed Workbench focused suites 88/88, durable-artifact dogfood with `machineGatePassed: true` and `productionAccessed: false`, full verification at 274 files/2,138 tests, build, schema-24 endpoint matrix, all smokes, and responsive inspection. The later Logbook-only `claimSupport` renderer follow-up passed its 14-test inspector suite, no-citation/product/surface contracts, typecheck, production build, read-only responsive live-fixture inspection, and independent focused review; it is not part of the running `95b23fc1` evaluation package.
+### 50 sessions
 
-The former V2 candidate canary and candidate-driven rehearsal are historical,
-audit-only evidence. They are not executable production instructions.
+- [ ] All 50 attempted and at least 45 published, with the same dossier and keyword-retrieval bar.
+- [ ] Every pack records at least one grounded optional consideration, yes or no with reason.
+- [ ] Wall-clock time and final receipt counts are recorded; there is no hard SLA yet.
 
-Fixture machine PASS does not authorize production. A separately authorized
-25-session V3 canary must sample five sessions from each evidence band (sparse,
-ordinary, tool-heavy, failure/fix, decision-heavy) and divide them into bounded
-selection runs of 1–12 sessions. For every run, the agent enriches each selected
-session, treats detector suggestions as advisory, chooses zero or more useful
-optional artifacts, and completes the atomic V3 finish. Reviewers visually
-compare every rebuilt canonical dossier and score every authored optional
-artifact for findability, grounding, reusability, specificity, and readability.
-Passing requires 100% review, median overall score at least 4.0, and no artifact
-below 3.0. Record authorization, identity, backup, V3 canary, review, rollback,
-and rollout evidence in the
-[production canary worksheet](durable-artifact-production-canary.md); empty
-fields never imply a pass.
+### Full selection
 
-Stop and restore the single backup if any dossier section differs materially from
-the original; any selected session lacks current agent enrichment; V3 finish is
-not atomic or idempotent; unsupported authoring-protocol language appears; a
-claim excerpt does not exactly match canonical evidence; unrelated provenance
-shares a substantive fingerprint; any artifact scores below 3/5; or median
-usefulness is below 4/5. Only after human approval may rollout continue in waves
-of 25 sessions, using bounded V3 selection runs with a 20% stratified review
-sample and automatic pause on any stop condition.
+- [ ] One durable request covers the complete intended selection and runs until its immutable receipt
+      exists; completed packs remain published across any crash/resume.
+- [ ] The receipt reports attempted, published, soft-flagged, rejected, optional published, and
+      considered-no totals, and those totals reconcile with Workbench Activity and Logbook.
 
-## Verification
-- [x] `npm run verify` passes on app commit `95b23fc1`. Evidence: 274 test files / 2,138 tests, production build, schema-24 endpoint matrix, and live/compatibility/import/MCP smokes passed. The operator explicitly prohibited another long suite for the later surgical Logbook-only follow-up; its focused delta checks are recorded above.
-- [x] cargo tests pass. Evidence: 23 Rust tests passed on 2026-06-26.
-- [x] npm run doctor passes. Evidence: isolated current-branch daemon doctor passed on 2026-06-26.
-- [x] Durable artifact fixture dogfood passes the machine gate. Evidence: on 2026-07-13, `npm run dogfood:durable-artifacts` reported the exact 3/2/2 candidate mix, all required fidelity/support/retrieval/reuse rates at `1.0`, zero integrity failures/leaks/duplicates/kind errors/raw-session reuse, and a 323.37 ms 100-session discovery page; `productionAccessed` was false. Human review remains deliberately incomplete in fixture output.
-- [x] Current authoring capabilities identify `workbench-authoring-v3`, selected-session canonical evidence, nonbinding suggestions, and the operations `suggestions`, `open`, `status`, `evidence`, `context`, `submit`, `finish`; the transport protocol identifier remains `masthead.workbench.authoring/v1`.
-- [x] Current contract gates pass. Evidence: `verify:no-citations`, `check:product-contract`, `check:surface-contract`, `check:endpoint-matrix`, and `typecheck` passed on the app release candidate. Endpoint smoke probed schema 24 and exercised the read-only bridge allowlist and mutation blocklist.
-- [x] Release-candidate hermetic Vitest suite passes. Evidence: the full gate passed 274 files / 2,138 tests on app commit `95b23fc1`; the later renderer delta passed its focused suite.
-- [x] Current production build passes. Evidence: `npm run build` completed Vite and daemon builds after the Logbook renderer follow-up on 2026-07-14.
-- [x] Development and packaged Electron smokes pass for app commit `95b23fc1`. Evidence: Electron 42.5.0 launched the isolated database and the packaged CLI reached the packaged daemon; the later source-only renderer follow-up was not repackaged.
-- [ ] GitHub Actions run passes for the final commit.
+The 10/50/full sequence proves increasing scale, but the full selection remains the product job.

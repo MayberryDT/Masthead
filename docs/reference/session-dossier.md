@@ -36,13 +36,12 @@ original dossier. It preserves identity, coverage, narrative, files, tools,
 verification, attention, excerpts, timeline, durable enrichment and state, reuse,
 and usage. Only the live DTO's recursive `artifacts` listing is excluded.
 
-The current V4 publication path uses guided assignment finish. Assignment finish requires
-complete canonical evidence traversal and typed, verbatim claim support for every substantive
-enrichment claim. It applies that enrichment, rebuilds the canonical snapshot from current data,
-publish and index it atomically, and record exactly one provenance session. Agents never author or
-replace dossier presentation; optional-artifact drafts cannot contain a dossier. A dossier in the
-three-session canary remains staged until operator approval. V1, V2, and V3
-publication records remain audit-only and legacy mutations return `authoring_contract_retired`.
+The current V5 publication path finishes fixed packs without a canary or operator approval. The
+agent traverses canonical evidence and authors grounded durable enrichment; save classifies each
+session independently, then finish applies passers, rebuilds the canonical snapshot, publishes and
+indexes it atomically, and records exactly one provenance session. Agents never author or replace
+dossier presentation, and optional-artifact drafts cannot contain a dossier. V1–V4 publication
+records remain audit-only and legacy mutations return `authoring_contract_retired`.
 
 Logbook recognizes the exact `canonical-session-dossier-v1` schema and renders it
 through `SessionDossierContent`, the body component used by the original dossier

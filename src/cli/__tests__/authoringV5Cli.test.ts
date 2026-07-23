@@ -12,6 +12,21 @@ afterEach(async () => {
 });
 
 describe("mastheadctl workbench-authoring-v5", () => {
+  test.each([
+    ["review", ["review", "--assignment", "assignment:legacy"]],
+    ["assignment inspect", ["inspect", "--assignment", "assignment:legacy"]],
+    ["legacy request start", ["start", "--request", "request:legacy"]]
+  ])("retires the %s mutation before network access", async (_label, args) => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await runMastheadCli(["workbench", "author", ...args, "--json"]);
+
+    expect(result.exitCode).toBe(1);
+    expect(JSON.parse(result.stderr)).toMatchObject({ error: { code: "authoring_contract_retired" } });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   test("routes bootstrap, claim, inspect, scaffold, save, finish, status, and receipt", async () => {
     const instanceDir = await mkdtemp(join(tmpdir(), "masthead-authoring-v5-cli-"));
     tempDirs.push(instanceDir);

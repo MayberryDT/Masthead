@@ -74,7 +74,7 @@ export function classifyWorkbenchAuthoringV5Session(
       message: "Purpose clearly describes different work from the user's request in canonical evidence."
     });
   }
-  const ungrounded = ungroundedCoreFields(session.fields.evidenceRefs);
+  const ungrounded = ungroundedCoreFields(session);
   if (ungrounded.length > 0) {
     findings.push({
       code: "missing_core_field_grounding",
@@ -136,10 +136,14 @@ function domainsForText(value: string): Set<keyof typeof PURPOSE_DOMAINS> {
 }
 
 function ungroundedCoreFields(
-  refs: WorkbenchAuthoringV5Draft["sessions"][number]["fields"]["evidenceRefs"]
+  session: WorkbenchAuthoringV5Draft["sessions"][number]
 ): string[] {
+  const refs = session.fields.evidenceRefs;
   return (Object.entries(refs) as Array<[keyof typeof refs, string[]]>)
-    .filter(([, evidenceRefs]) => evidenceRefs.length === 0)
+    .filter(([field, evidenceRefs]) => evidenceRefs.length === 0 &&
+      !(field === "keyWork" && session.fields.keyWork.length === 0) &&
+      !(field === "verification" && !session.fields.verification.summary.trim() &&
+        (session.fields.verification.status === "missing" || session.fields.verification.status === "unknown")))
     .map(([field]) => field);
 }
 

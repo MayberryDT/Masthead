@@ -13,6 +13,7 @@ const forbiddenOnlyPatterns = [
 
 const failures = [];
 const contents = [];
+let packageJson;
 
 for (const file of sourceFiles) {
   try {
@@ -29,6 +30,22 @@ for (const file of sourceFiles) {
 const combined = contents.map((entry) => entry.text).join("\n");
 for (const term of requiredTerms) {
   if (!combined.includes(term)) failures.push(`Missing required product term: ${term}`);
+}
+
+try {
+  packageJson = JSON.parse(await readFile("package.json", "utf8"));
+  for (const retiredScript of ["dogfood:durable-artifacts", "canary:guided-agent"]) {
+    if (packageJson?.scripts?.[retiredScript]) {
+      failures.push(`package.json still exposes retired V4 mutation harness: ${retiredScript}`);
+    }
+  }
+} catch (error) {
+  failures.push(`package.json could not be checked: ${error instanceof Error ? error.message : String(error)}`);
+}
+
+const readme = contents.find(({ file }) => file === "README.md")?.text ?? "";
+for (const retiredCommand of ["npm run dogfood:durable-artifacts", "npm run canary:guided-agent"]) {
+  if (readme.includes(retiredCommand)) failures.push(`README.md advertises retired V4 mutation command: ${retiredCommand}`);
 }
 
 if (failures.length > 0) {

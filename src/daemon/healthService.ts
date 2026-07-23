@@ -60,6 +60,7 @@ export function buildMastheadHealth(
       instanceDir: runtime.instanceDir,
       instanceManifest: runtime.instanceManifest,
       authoringCommand: runtime.authoringCommand,
+      authoringContractVersion: "workbench-authoring-v5",
       startedAt: runtime.startedAt,
       mode: "primary",
       writable: true,

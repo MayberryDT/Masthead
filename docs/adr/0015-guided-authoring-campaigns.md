@@ -2,12 +2,10 @@
 
 ## Status
 
-Accepted.
+Superseded by [ADR 0016](0016-agent-led-v5-pack-authoring.md).
 
-Implementation status: implemented. The runtime advertises `workbench-authoring-v4`; the guided
-service, API, instance-bound CLI, Workbench canary review, and legacy mutation retirement are present.
-Production release acceptance remains separately gated by the final dogfood, signed human review,
-and production canary evidence in `docs/acceptance/product-release-gate.md`.
+V4 request, assignment, canary, disposition, review, and receipt rows remain readable audit history.
+Their mutation routes are retired; they are not a continuation point for V5.
 
 ## Context
 
@@ -31,7 +29,7 @@ coverage and review state across restarts, and give the operator a bounded canar
 7. Finish publishes one accepted assignment atomically and releases the next assignment. V1, V2, and V3 remain audit-only.
 8. Authoring launchers are instance-bound and every mutation verifies daemon URL, database ID, build SHA, and manifest identity.
 
-The current bundle contract is `workbench-authoring-v4`. Legacy V1, V2, and V3 records and receipts
+The V4 bundle contract was `workbench-authoring-v4`. Legacy V1, V2, and V3 records and receipts
 remain readable as immutable audit history. Their mutation routes fail with
 `authoring_contract_retired` before claims, drafts, enrichment, or artifacts are written.
 

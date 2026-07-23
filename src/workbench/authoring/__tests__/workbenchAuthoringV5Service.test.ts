@@ -6,6 +6,8 @@ import { markSessionCompileReady, seedSession } from "../../../daemon/db/__tests
 import { migrateDatabase } from "../../../daemon/db/schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../../../daemon/db/sqlite.ts";
 import { getLogbookArtifactDetail } from "../../../daemon/db/logbookArtifactRepository.ts";
+import { readCurrentSessionEnrichment } from "../../../daemon/db/enrichmentRepository.ts";
+import type { DurableSessionEnrichment } from "../../../shared/sessionEnrichment.ts";
 import type { WorkbenchAuthoringV5Draft } from "../../../shared/workbenchAuthoringV5.ts";
 import {
   bootstrapWorkbenchAuthoringV5Request,
@@ -401,6 +403,116 @@ describe("workbench-authoring-v5 loop", () => {
       packId: started.pack.packId
     });
     expect(finished.receipt.counts).toMatchObject({ published: 2, rejected: 0, softFlagged: 1 });
+    db.close();
+  });
+
+  test("soft-flags empty key work without turning the missing key-work references into a hard reject", async () => {
+    const db = await testDatabase();
+    const sessionIds = ["session:v5:empty-key-work:1", "session:v5:empty-key-work:2"];
+    for (const sessionId of sessionIds) seedCompileReadySession(db, sessionId);
+    const created = createWorkbenchAuthoringV5Request(db, {
+      actorId: "agent:test", command, currentIdentity: identity, expectedIdentity: identity, sessionIds
+    });
+    const started = startWorkbenchAuthoringV5Pack(db, {
+      command, currentIdentity: identity, expectedIdentity: identity, requestId: created.request.requestId
+    });
+    if (!("pack" in started)) throw new Error("expected_active_pack");
+    await inspectWholePack(db, started.pack.packId);
+    const authored = authorDraft(buildWorkbenchAuthoringV5Scaffold(db, { command, packId: started.pack.packId }).draft);
+    authored.sessions[0]!.fields.keyWork = [];
+    authored.sessions[0]!.fields.evidenceRefs.keyWork = [];
+
+    const saved = saveWorkbenchAuthoringV5Draft(db, {
+      command, currentIdentity: identity, draft: authored, expectedIdentity: identity, packId: started.pack.packId
+    });
+    expect(saved.outcomes[0]).toEqual({
+      disposition: "soft_flag",
+      findings: [{ code: "thin_key_work", message: expect.any(String) }],
+      sessionId: sessionIds[0]
+    });
+    expect(finishWorkbenchAuthoringV5Pack(db, {
+      command, currentIdentity: identity, expectedIdentity: identity, packId: started.pack.packId
+    }).receipt.counts).toMatchObject({ published: 2, rejected: 0, softFlagged: 1 });
+    db.close();
+  });
+
+  test("soft-flags an honest unknown verification boundary without requiring a nonexistent claim reference", async () => {
+    const db = await testDatabase();
+    const sessionIds = ["session:v5:empty-verification:1", "session:v5:empty-verification:2"];
+    for (const sessionId of sessionIds) seedCompileReadySession(db, sessionId);
+    const created = createWorkbenchAuthoringV5Request(db, {
+      actorId: "agent:test", command, currentIdentity: identity, expectedIdentity: identity, sessionIds
+    });
+    const started = startWorkbenchAuthoringV5Pack(db, {
+      command, currentIdentity: identity, expectedIdentity: identity, requestId: created.request.requestId
+    });
+    if (!("pack" in started)) throw new Error("expected_active_pack");
+    await inspectWholePack(db, started.pack.packId);
+    const authored = authorDraft(buildWorkbenchAuthoringV5Scaffold(db, { command, packId: started.pack.packId }).draft);
+    authored.sessions[0]!.fields.verification = { status: "unknown", summary: "" };
+    authored.sessions[0]!.fields.evidenceRefs.verification = [];
+
+    const saved = saveWorkbenchAuthoringV5Draft(db, {
+      command, currentIdentity: identity, draft: authored, expectedIdentity: identity, packId: started.pack.packId
+    });
+    expect(saved.outcomes[0]).toEqual({
+      disposition: "soft_flag",
+      findings: [{ code: "weak_verification", message: expect.any(String) }],
+      sessionId: sessionIds[0]
+    });
+    expect(finishWorkbenchAuthoringV5Pack(db, {
+      command, currentIdentity: identity, expectedIdentity: identity, packId: started.pack.packId
+    }).receipt.counts).toMatchObject({ published: 2, rejected: 0, softFlagged: 1 });
+    db.close();
+  });
+
+  test("rejects agent-modified evidence catalog content even when evidence IDs are unchanged", async () => {
+    const db = await testDatabase();
+    const sessionIds = ["session:v5:catalog-integrity:1", "session:v5:catalog-integrity:2"];
+    for (const sessionId of sessionIds) seedCompileReadySession(db, sessionId);
+    const created = createWorkbenchAuthoringV5Request(db, {
+      actorId: "agent:test", command, currentIdentity: identity, expectedIdentity: identity, sessionIds
+    });
+    const started = startWorkbenchAuthoringV5Pack(db, {
+      command, currentIdentity: identity, expectedIdentity: identity, requestId: created.request.requestId
+    });
+    if (!("pack" in started)) throw new Error("expected_active_pack");
+    await inspectWholePack(db, started.pack.packId);
+    const authored = authorDraft(buildWorkbenchAuthoringV5Scaffold(db, { command, packId: started.pack.packId }).draft);
+    authored.sessions[0]!.evidenceCatalog[0]!.text = "Agent-supplied replacement evidence text.";
+
+    expect(() => saveWorkbenchAuthoringV5Draft(db, {
+      command, currentIdentity: identity, draft: authored, expectedIdentity: identity, packId: started.pack.packId
+    })).toThrow("invalid_workbench_authoring_v5_evidence_catalog");
+    db.close();
+  });
+
+  test("preserves canonical failed work state instead of inventing completion", async () => {
+    const db = await testDatabase();
+    const sessionIds = ["session:v5:state:1", "session:v5:state:2"];
+    for (const sessionId of sessionIds) seedCompileReadySession(db, sessionId);
+    db.prepare("UPDATE sessions SET lifecycle = 'ended', outcome_label = 'failed' WHERE session_id = ?").run(sessionIds[0]);
+    const created = createWorkbenchAuthoringV5Request(db, {
+      actorId: "agent:test", command, currentIdentity: identity, expectedIdentity: identity, sessionIds
+    });
+    const started = startWorkbenchAuthoringV5Pack(db, {
+      command, currentIdentity: identity, expectedIdentity: identity, requestId: created.request.requestId
+    });
+    if (!("pack" in started)) throw new Error("expected_active_pack");
+    await inspectWholePack(db, started.pack.packId);
+    const authored = authorDraft(buildWorkbenchAuthoringV5Scaffold(db, { command, packId: started.pack.packId }).draft);
+    saveWorkbenchAuthoringV5Draft(db, {
+      command, currentIdentity: identity, draft: authored, expectedIdentity: identity, packId: started.pack.packId
+    });
+    finishWorkbenchAuthoringV5Pack(db, {
+      command, currentIdentity: identity, expectedIdentity: identity, packId: started.pack.packId
+    });
+
+    const capsule = readCurrentSessionEnrichment(db, sessionIds[0]!, "session_capsule")?.content as {
+      durableEnrichment: DurableSessionEnrichment;
+    };
+    const enrichment = capsule.durableEnrichment;
+    expect(enrichment.sessionSummary.state).toBe("failed");
     db.close();
   });
 

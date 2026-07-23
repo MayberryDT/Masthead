@@ -3292,7 +3292,6 @@ export async function clearExactMaintenanceSentinel(config, childIdentity, evide
   });
   const assertFullyOffline = adapters.assertFullyOffline || (() => assertColdProductionOffline(config));
   const statProcess = adapters.statProcess || ((pid) => stat(join("/proc", String(pid))));
-  const remove = adapters.remove || ((path) => rm(path));
   const leases = await acquireLeases();
   try {
     await assertMaintenancePidAbsent(childIdentity.pid, statProcess);
@@ -3304,7 +3303,7 @@ export async function clearExactMaintenanceSentinel(config, childIdentity, evide
       if (!sameMaintenanceSentinelEvidence(current, evidence)) {
         throw new Error("Maintenance sentinel identity changed after exact child exit; cleanup refused.");
       }
-      await quarantineAndRemoveExactMaintenanceSentinel(expectedPath, evidence, { ...adapters, remove });
+      await quarantineAndPreserveExactMaintenanceSentinel(expectedPath, evidence, adapters);
       const afterRemoval = await readMaintenanceSentinelSnapshot(expectedPath, adapters);
       if (afterRemoval.exists) {
         throw new Error("Maintenance sentinel replacement appeared during exact cleanup.");
@@ -3335,7 +3334,8 @@ async function readMaintenanceSentinelSnapshot(path, adapters = {}) {
   }
   if (
     !before.isFile() || before.isSymbolicLink() || String(before.nlink) !== "1" ||
-    String(before.uid) !== String(currentUid)
+    String(before.uid) !== String(currentUid) || Number(before.size) < 2 || Number(before.size) > 4_096 ||
+    (Number(before.mode) & 0o022) !== 0
   ) {
     throw new Error("Maintenance compatibility sentinel path identity is unsafe.");
   }
@@ -3371,10 +3371,16 @@ async function readMaintenanceSentinelSnapshot(path, adapters = {}) {
     throw new Error("Maintenance compatibility sentinel content is invalid.");
   }
   if (
-    !Number.isSafeInteger(parsed?.pid) || parsed.pid <= 0 ||
+    !parsed || typeof parsed !== "object" || Array.isArray(parsed) ||
+    Object.keys(parsed).sort().join("\0") !== ["createdAt", "pid", "protocol", "token"].join("\0") ||
+    !Number.isSafeInteger(parsed.pid) || parsed.pid <= 0 ||
     parsed.protocol !== "canonical-data-directory-lock-v4" ||
     !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(parsed.token || "") ||
-    typeof parsed.createdAt !== "string" || Number.isNaN(Date.parse(parsed.createdAt))
+    typeof parsed.createdAt !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(parsed.createdAt) ||
+    Number.isNaN(Date.parse(parsed.createdAt)) ||
+    new Date(parsed.createdAt).toISOString() !== parsed.createdAt ||
+    Date.parse(parsed.createdAt) > Date.now()
   ) {
     throw new Error("Maintenance compatibility sentinel ownership content is invalid.");
   }
@@ -3400,10 +3406,9 @@ async function assertMaintenancePidAbsent(pid, statProcess) {
   throw new Error("Timed-out maintenance PID is present; stale sentinel cleanup refused.");
 }
 
-async function quarantineAndRemoveExactMaintenanceSentinel(path, evidence, adapters = {}) {
+async function quarantineAndPreserveExactMaintenanceSentinel(path, evidence, adapters = {}) {
   const renameAdapter = adapters.rename || rename;
   const linkAdapter = adapters.link || link;
-  const remove = adapters.remove || ((value) => rm(value));
   const quarantinePath = join(dirname(path), `.database.lock.maintenance-cleanup-${randomUUID()}`);
   try {
     await lstat(quarantinePath);
@@ -3419,12 +3424,10 @@ async function quarantineAndRemoveExactMaintenanceSentinel(path, evidence, adapt
   }
   const moved = await readMaintenanceSentinelSnapshot(quarantinePath, adapters);
   if (moved.exists && sameMaintenanceSentinelEvidence(moved, evidence, true)) {
-    await remove(quarantinePath);
     return;
   }
   try {
     await linkAdapter(quarantinePath, path);
-    await remove(quarantinePath);
   } catch (error) {
     if (errnoIs(error, "EEXIST")) {
       throw new Error(

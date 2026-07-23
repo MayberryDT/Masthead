@@ -294,7 +294,7 @@ export function saveWorkbenchAuthoringV5Draft(
     const pack = requireWorkbenchAuthoringV5Pack(db, input.packId);
     if (pack.status !== "active" && pack.status !== "saved") throw new Error("authoring_v5_pack_not_saveable");
     assertCurrentEvidenceRevision(db, pack);
-    const draft = parseWorkbenchAuthoringV5Draft(input.draft, pack);
+    const draft = parseWorkbenchAuthoringV5Draft(db, input.draft, pack);
     const outcomes = draft.sessions.map((session) => classifySessionDraft(db, session));
     const saved = saveWorkbenchAuthoringV5PackDraft(db, { draft, outcomes, packId: pack.packId });
     bumpDataRevisionInTransaction(db, "workbench");
@@ -328,7 +328,7 @@ export function finishWorkbenchAuthoringV5Pack(
     for (const session of publishable) {
       applyGuidedSessionEnrichmentInTransaction(db, {
         actorId: request.actorId,
-        enrichment: durableEnrichment(session.fields, session.evidenceCatalog),
+        enrichment: durableEnrichment(db, session.sessionId, session.fields, session.evidenceCatalog),
         sessionId: session.sessionId
       });
     }
@@ -475,6 +475,7 @@ function blankFields(): WorkbenchAuthoringV5Fields {
 }
 
 function parseWorkbenchAuthoringV5Draft(
+  db: MastheadDatabase,
   value: WorkbenchAuthoringV5Draft,
   pack: ReturnType<typeof requireWorkbenchAuthoringV5Pack>
 ): WorkbenchAuthoringV5Draft {
@@ -488,6 +489,11 @@ function parseWorkbenchAuthoringV5Draft(
     throw new Error("invalid_workbench_authoring_v5_membership");
   }
   for (const session of value.sessions) {
+    const canonicalCatalog = [...iterateSessionTranscriptItems(db, { order: "asc", sessionId: session.sessionId })]
+      .map(catalogItem);
+    if (!sameEvidenceCatalog(session.evidenceCatalog, canonicalCatalog)) {
+      throw new Error("invalid_workbench_authoring_v5_evidence_catalog");
+    }
     const fields = session.fields;
     const refs = fields.evidenceRefs;
     if (
@@ -533,6 +539,18 @@ function parseWorkbenchAuthoringV5Draft(
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function sameEvidenceCatalog(
+  submitted: WorkbenchAuthoringV5EvidenceCatalogItem[],
+  canonical: WorkbenchAuthoringV5EvidenceCatalogItem[]
+): boolean {
+  return submitted.length === canonical.length && submitted.every((item, index) => {
+    const expected = canonical[index];
+    return Boolean(expected) && item.id === expected.id && item.itemId === expected.itemId &&
+      item.kind === expected.kind && item.observedAt === expected.observedAt &&
+      item.role === expected.role && item.text === expected.text && item.source === expected.source;
+  });
 }
 
 function isOptionalConsideration(value: unknown): value is WorkbenchAuthoringV5OptionalConsideration {
@@ -694,6 +712,8 @@ function recordFinishActivity(
 }
 
 function durableEnrichment(
+  db: MastheadDatabase,
+  sessionId: string,
   fields: WorkbenchAuthoringV5Fields,
   catalog: WorkbenchAuthoringV5EvidenceCatalogItem[]
 ): DurableSessionEnrichment {
@@ -707,7 +727,12 @@ function durableEnrichment(
     source: "remote_model",
     promptVersion: WORKBENCH_AUTHORING_V5_VERSION,
     sessionTitle: { text: fields.title, basis: "dominant_work", confidence: "medium", evidenceRefs: refs(fields.evidenceRefs.title) },
-    sessionSummary: { text: fields.description, state: "completed", confidence: "medium", evidenceRefs: refs(fields.evidenceRefs.description) },
+    sessionSummary: {
+      text: fields.description,
+      state: canonicalSessionSummaryState(db, sessionId),
+      confidence: "medium",
+      evidenceRefs: refs(fields.evidenceRefs.description)
+    },
     sessionDossier: {
       purpose: fields.purpose,
       outcome: fields.outcome,
@@ -727,6 +752,22 @@ function durableEnrichment(
     },
     keywords: [...fields.keywords]
   } as DurableSessionEnrichment;
+}
+
+function canonicalSessionSummaryState(
+  db: MastheadDatabase,
+  sessionId: string
+): DurableSessionEnrichment["sessionSummary"]["state"] {
+  const row = db.prepare(
+    "SELECT lifecycle, outcome_label AS outcomeLabel FROM sessions WHERE session_id = ?"
+  ).get(sessionId) as { lifecycle: string; outcomeLabel: string | null } | undefined;
+  const outcome = row?.outcomeLabel?.trim().toLowerCase();
+  if (outcome === "completed" || outcome === "succeeded" || outcome === "success") return "completed";
+  if (outcome === "failed" || outcome === "error") return "failed";
+  if (outcome === "blocked") return "blocked";
+  if (outcome === "partial") return "partial";
+  if (outcome === "paused") return "paused";
+  return "unknown";
 }
 
 function evidenceKind(kind: WorkbenchAuthoringV5EvidenceCatalogItem["kind"]): EvidenceRef["kind"] {

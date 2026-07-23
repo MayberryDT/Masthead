@@ -3,9 +3,9 @@ import { describe, expect, test } from "vitest";
 import { inspectAuthoringCapabilities, inspectInstanceManifestIdentity, resolveAuthoringCommand } from "../../../scripts/masthead-doctor.js";
 
 describe("Doctor authoring checks", () => {
-  test("requires the exact guided V4 authoring contract and current instance identity", () => {
+  test("requires the exact guided V5 authoring contract and current instance identity", () => {
     const valid = {
-      bundleVersion: "workbench-authoring-v4",
+      bundleVersion: "workbench-authoring-v5",
       capability: "artifact_authoring",
       command: "/opt/masthead/bin/mastheadctl",
       baseUrl: "http://127.0.0.1:17373",
@@ -13,10 +13,10 @@ describe("Doctor authoring checks", () => {
       databaseId: "database-1",
       instanceManifest: "/state/masthead/masthead-instance.json",
       instanceId: "instance-1",
-      maxSessionsPerAssignment: 12,
-      canarySessions: 3,
-      operations: ["start", "inspect", "scaffold", "save", "review", "finish"],
-      policyVersion: "guided-authoring-v1",
+      minimumSessionsPerPack: 5,
+      maximumSessionsPerPack: 12,
+      operations: ["bootstrap", "start", "claim", "inspect", "scaffold", "save", "finish", "status", "receipt"],
+      policyVersion: "workbench-authoring-v5",
       protocol: "masthead.workbench.authoring/v1"
     };
 
@@ -39,19 +39,19 @@ describe("Doctor authoring checks", () => {
         instanceManifest: valid.instanceManifest,
         instanceId: valid.instanceId
       },
-      operations: ["start", "inspect", "scaffold", "save", "review", "finish"],
+      operations: ["bootstrap", "start", "claim", "inspect", "scaffold", "save", "finish", "status", "receipt"],
       problems: []
     });
 
     const invalidCases = [
       [{ ...valid, capability: "legacy_authoring" }, "artifact_authoring capability is missing"],
       [{ ...valid, protocol: "masthead.workbench.authoring/v2" }, "authoring protocol is incompatible"],
-      [{ ...valid, bundleVersion: "workbench-authoring-v3" }, "authoring bundle version is incompatible"],
-      [{ ...valid, policyVersion: "guided-authoring-v2" }, "guided authoring policy is incompatible"],
-      [{ ...valid, maxSessionsPerAssignment: 11 }, "guided assignment session limit is incompatible"],
-      [{ ...valid, canarySessions: 2 }, "guided canary session limit is incompatible"],
-      [{ ...valid, operations: ["inspect", "start", "scaffold", "save", "review", "finish"] }, "authoring operations are incomplete"],
-      [{ ...valid, operations: ["start", "inspect", "save", "review", "finish"] }, "authoring operations are incomplete"],
+      [{ ...valid, bundleVersion: "workbench-authoring-v4" }, "authoring bundle version is incompatible"],
+      [{ ...valid, policyVersion: "guided-authoring-v1" }, "authoring policy is incompatible"],
+      [{ ...valid, minimumSessionsPerPack: 4 }, "minimum pack size is incompatible"],
+      [{ ...valid, maximumSessionsPerPack: 11 }, "maximum pack size is incompatible"],
+      [{ ...valid, operations: ["start", "bootstrap", "claim", "inspect", "scaffold", "save", "finish", "status", "receipt"] }, "authoring operations are incomplete"],
+      [{ ...valid, operations: ["bootstrap", "start", "inspect", "scaffold", "save", "finish", "status", "receipt"] }, "authoring operations are incomplete"],
       [{ ...valid, operations: [...valid.operations, "open"] }, "authoring operations are incomplete"],
       [{ ...valid, command: "" }, "authoring command is missing"],
       [{ ...valid, command: "/opt/other/bin/mastheadctl" }, "authoring command identity mismatch"],

@@ -114,11 +114,14 @@ export function workbenchHelp(): string {
     "Usage: mastheadctl workbench <command> [options]",
     "",
     "Guided artifact authoring:",
+    "  mastheadctl workbench author bootstrap --request <request-id> --json",
     "  mastheadctl workbench author start --request <request-id> --json",
-    "  mastheadctl workbench author inspect --assignment <assignment-id> --json",
-    "  mastheadctl workbench author save --assignment <assignment-id> --file <draft.json> --json",
-    "  mastheadctl workbench author review --assignment <assignment-id> --json",
-    "  mastheadctl workbench author finish --assignment <assignment-id> --json",
+    "  mastheadctl workbench author inspect --pack <pack-id> --json",
+    "  mastheadctl workbench author scaffold --pack <pack-id> --file <draft.json> --json",
+    "  mastheadctl workbench author save --pack <pack-id> --file <draft.json> --json",
+    "  mastheadctl workbench author finish --pack <pack-id> --json",
+    "  mastheadctl workbench author status --request <request-id> --json",
+    "  mastheadctl workbench author receipt --request <request-id> --json",
     "  mastheadctl workbench capabilities --json",
     "",
     "Audit-only legacy reads:",
@@ -137,7 +140,7 @@ export function workbenchHelp(): string {
     "  mastheadctl workbench restore-v3-template-recovery --db <path> --prepared-receipt <path> --confirm --json",
     "  mastheadctl workbench wipe-published --db <path> --confirm --json",
     "",
-    "The daemon owns assignment membership, evidence, validation, claims, publication, and identity checks."
+    "The daemon owns pack membership, evidence, validation, publication, receipts, and identity checks."
   ].join("\n") + "\n";
 }
 

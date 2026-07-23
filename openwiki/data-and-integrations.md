@@ -46,9 +46,9 @@ Important contracts:
 
 ### V5 authoring boundary
 
-New durable requests record `workbench-authoring-v5` and contain no canary assignment. Request and
-assignment reads expose the campaign, complete evidence coverage, review state, and one required
-next action. Normal publication has no operator approval mutation.
+New durable requests record `workbench-authoring-v5` and contain fixed packs rather than canary
+assignments. V5 request, pack, evidence-coverage, status, and receipt reads expose one required next
+action. Normal publication has no operator approval mutation.
 
 V1–V4 status, reviews, and receipts remain available for audit. Legacy start, progress-recording
 inspect, save, canary decision, and finish mutations return `authoring_contract_retired` before

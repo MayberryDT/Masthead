@@ -10,7 +10,10 @@ http://127.0.0.1:17373
 
 ## Compatibility
 
-- `GET /health` returns product identity, API version, schema version, build info, capabilities, runtime identity, writable/read-only state, data directory, database path, database ID, migration state, live counts, and compatibility URLs.
+- `GET /health` returns product identity, API version, schema version, build info, capabilities,
+  runtime identity, `authoringContractVersion: "workbench-authoring-v5"` on the writable daemon,
+  writable/read-only state, data directory, database path, database ID, migration state, live counts,
+  and compatibility URLs.
 
 Clients should reject a daemon that does not identify `product: "masthead"` with a supported API version and required capabilities.
 

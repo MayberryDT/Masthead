@@ -2285,31 +2285,19 @@ describe("production lifecycle launcher", () => {
     }, null, 2)}\n`;
     await mkdir(runtimeDirectory, { recursive: true });
     await writeFile(databasePath, "database", "utf8");
-    await writeFile(lockPath, body, "utf8");
+    await writeFile(lockPath, body, { encoding: "utf8", mode: 0o600 });
     const evidence = await captureMaintenanceSentinel({ dataDirectory }, identity);
     const calls: string[] = [];
     await clearExactMaintenanceSentinel({ dataDirectory, databasePath }, identity, evidence, {
       assertFullyOffline: async () => { calls.push("fully-offline"); },
       assertRuntimeOffline: async () => { calls.push("runtime-offline"); },
       statProcess: async () => { throw Object.assign(new Error("child absent"), { code: "ENOENT" }); },
-      remove: async (path: string) => {
-        for (const leasePath of [
-          `${databasePath}.lease.sqlite`,
-          join(runtimeDirectory, "database.lease.sqlite")
-        ]) {
-          const contender = new DatabaseSync(leasePath);
-          try {
-            expect(() => contender.exec("PRAGMA busy_timeout = 0; BEGIN EXCLUSIVE;")).toThrow(/locked|busy/iu);
-          } finally {
-            contender.close();
-          }
-        }
-        calls.push("leases-held");
-        await rm(path);
-      }
     });
     await expect(lstat(lockPath)).rejects.toMatchObject({ code: "ENOENT" });
-    expect(calls).toEqual(["runtime-offline", "leases-held", "runtime-offline", "fully-offline"]);
+    expect(calls).toEqual(["runtime-offline", "runtime-offline", "fully-offline"]);
+    const quarantines = (await readdir(runtimeDirectory)).filter((name) => name.includes("maintenance-cleanup"));
+    expect(quarantines).toHaveLength(1);
+    await expect(readFile(join(runtimeDirectory, quarantines[0]!), "utf8")).resolves.toBe(body);
   });
 
   test("refuses stale-sentinel cleanup after replacement, content drift, live PID reuse, or offline failure", async () => {
@@ -2342,16 +2330,16 @@ describe("production lifecycle launcher", () => {
       statProcess: async () => { throw Object.assign(new Error("child absent"), { code: "ENOENT" }); }
     };
 
-    await writeFile(lockPath, exact, "utf8");
+    await writeFile(lockPath, exact, { encoding: "utf8", mode: 0o600 });
     const replacedEvidence = await captureMaintenanceSentinel({ dataDirectory }, identity);
-    await writeFile(replacementPath, replacement, "utf8");
+    await writeFile(replacementPath, replacement, { encoding: "utf8", mode: 0o600 });
     await rename(replacementPath, lockPath);
     await expect(clearExactMaintenanceSentinel(
       { dataDirectory, databasePath }, identity, replacedEvidence, adapters
     )).rejects.toThrow("sentinel identity changed");
     await expect(readFile(lockPath, "utf8")).resolves.toBe(replacement);
 
-    await writeFile(lockPath, exact, "utf8");
+    await writeFile(lockPath, exact, { encoding: "utf8", mode: 0o600 });
     const driftEvidence = await captureMaintenanceSentinel({ dataDirectory }, identity);
     const sameInodeTokenDrift = exact.replace(
       "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
@@ -2363,7 +2351,7 @@ describe("production lifecycle launcher", () => {
     )).rejects.toThrow("sentinel identity changed");
     await expect(readFile(lockPath, "utf8")).resolves.toBe(sameInodeTokenDrift);
 
-    await writeFile(lockPath, exact, "utf8");
+    await writeFile(lockPath, exact, { encoding: "utf8", mode: 0o600 });
     const liveEvidence = await captureMaintenanceSentinel({ dataDirectory }, identity);
     await expect(clearExactMaintenanceSentinel(
       { dataDirectory, databasePath }, identity, liveEvidence,
@@ -2397,9 +2385,9 @@ describe("production lifecycle launcher", () => {
     const replacement = sentinel(9999, "ffffffff-ffff-4fff-8fff-ffffffffffff");
     await mkdir(runtimeDirectory, { recursive: true });
     await writeFile(databasePath, "database", "utf8");
-    await writeFile(lockPath, exact, "utf8");
+    await writeFile(lockPath, exact, { encoding: "utf8", mode: 0o600 });
     const evidence = await captureMaintenanceSentinel({ dataDirectory }, identity);
-    await writeFile(replacementPath, replacement, "utf8");
+    await writeFile(replacementPath, replacement, { encoding: "utf8", mode: 0o600 });
     await expect(clearExactMaintenanceSentinel({ dataDirectory, databasePath }, identity, evidence, {
       acquireLeases: async () => ({ release: async () => undefined }),
       assertFullyOffline: async () => undefined,
@@ -2411,11 +2399,14 @@ describe("production lifecycle launcher", () => {
       statProcess: async () => { throw Object.assign(new Error("child absent"), { code: "ENOENT" }); }
     })).rejects.toThrow("atomic quarantine");
     await expect(readFile(lockPath, "utf8")).resolves.toBe(replacement);
-    expect((await readdir(runtimeDirectory)).filter((name) => name.includes("maintenance-cleanup"))).toEqual([]);
+    const firstQuarantines = (await readdir(runtimeDirectory)).filter((name) => name.includes("maintenance-cleanup"));
+    expect(firstQuarantines).toHaveLength(1);
+    await expect(readFile(join(runtimeDirectory, firstQuarantines[0]!), "utf8")).resolves.toBe(replacement);
 
-    await writeFile(lockPath, exact, "utf8");
+    await rm(lockPath);
+    await writeFile(lockPath, exact, { encoding: "utf8", mode: 0o600 });
     const secondEvidence = await captureMaintenanceSentinel({ dataDirectory }, identity);
-    await writeFile(replacementPath, replacement, "utf8");
+    await writeFile(replacementPath, replacement, { encoding: "utf8", mode: 0o600 });
     const newer = sentinel(10_000, "11111111-1111-4111-8111-111111111111");
     await expect(clearExactMaintenanceSentinel({ dataDirectory, databasePath }, identity, secondEvidence, {
       acquireLeases: async () => ({ release: async () => undefined }),
@@ -2424,14 +2415,16 @@ describe("production lifecycle launcher", () => {
       rename: async (source: string, destination: string) => {
         await rename(replacementPath, source);
         await rename(source, destination);
-        await writeFile(source, newer, "utf8");
+        await writeFile(source, newer, { encoding: "utf8", mode: 0o600 });
       },
       statProcess: async () => { throw Object.assign(new Error("child absent"), { code: "ENOENT" }); }
     })).rejects.toThrow("replacement was preserved");
     await expect(readFile(lockPath, "utf8")).resolves.toBe(newer);
     const quarantines = (await readdir(runtimeDirectory)).filter((name) => name.includes("maintenance-cleanup"));
-    expect(quarantines).toHaveLength(1);
-    await expect(readFile(join(runtimeDirectory, quarantines[0]), "utf8")).resolves.toBe(replacement);
+    expect(quarantines).toHaveLength(2);
+    for (const quarantine of quarantines) {
+      await expect(readFile(join(runtimeDirectory, quarantine), "utf8")).resolves.toBe(replacement);
+    }
   });
 
   test("binds sentinel bytes to an O_NOFOLLOW file descriptor", async () => {
@@ -2450,7 +2443,7 @@ describe("production lifecycle launcher", () => {
       token: "22222222-2222-4222-8222-222222222222"
     });
     await mkdir(runtimeDirectory, { recursive: true });
-    await writeFile(lockPath, body, "utf8");
+    await writeFile(lockPath, body, { encoding: "utf8", mode: 0o600 });
     await writeFile(targetPath, body, "utf8");
     await expect(captureMaintenanceSentinel({ dataDirectory }, identity, {
       open: async (path: string, flags: number) => {

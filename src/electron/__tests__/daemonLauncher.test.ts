@@ -6,6 +6,7 @@ import { join } from "node:path";
 import currentHealth from "../../../fixtures/protocol/current-health.json";
 import { spawn, type ChildProcess } from "node:child_process";
 import {
+  DAEMON_STARTUP_HEALTH_TIMEOUT_MS,
   buildDaemonEnv,
   cliEntryForTarget,
   connectorBaseUrl,
@@ -20,6 +21,10 @@ afterEach(() => {
 });
 
 describe("Electron daemon launcher policy", () => {
+  test("aligns Electron startup health with the five-minute production lifecycle budget", () => {
+    expect(DAEMON_STARTUP_HEALTH_TIMEOUT_MS).toBe(300_000);
+  });
+
   test("derives the packaged CLI entry with Windows path semantics", () => {
     expect(cliEntryForTarget({ entryPath: "C:\\Masthead\\dist\\src\\daemon\\main.js" }, "win32"))
       .toBe("C:\\Masthead\\dist\\src\\cli\\mastheadctl.js");
@@ -223,9 +228,17 @@ describe("Electron daemon launcher policy", () => {
       bundleVersion: "workbench-authoring-v3",
       operations: ["suggestions", "open", "status", "evidence", "context", "submit", "finish"]
     }],
-    ["reordered V4 contract", {
+    ["legacy V4 contract", {
       ...authoringCapabilities("/tmp/masthead/bin/mastheadctl"),
-      operations: ["inspect", "start", "scaffold", "save", "review", "finish"]
+      bundleVersion: "workbench-authoring-v4",
+      policyVersion: "guided-authoring-v1",
+      maxSessionsPerAssignment: 12,
+      canarySessions: 3,
+      operations: ["start", "inspect", "scaffold", "save", "review", "finish"]
+    }],
+    ["reordered V5 contract", {
+      ...authoringCapabilities("/tmp/masthead/bin/mastheadctl"),
+      operations: ["start", "bootstrap", "claim", "inspect", "scaffold", "save", "finish", "status", "receipt"]
     }]
   ])("refuses a same-database collector with %s without starting a duplicate", async (_label, capabilities) => {
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
@@ -492,7 +505,7 @@ function compatibleHealth(dataDirectory: string, databasePath = `${dataDirectory
 
 function authoringCapabilities(command: string) {
   return {
-    bundleVersion: "workbench-authoring-v4",
+    bundleVersion: "workbench-authoring-v5",
     capability: "artifact_authoring",
     command,
     baseUrl: "http://127.0.0.1:17373",
@@ -500,10 +513,10 @@ function authoringCapabilities(command: string) {
     databaseId: "database:test",
     instanceId: "instance:test",
     instanceManifest: "/tmp/masthead/masthead-instance.json",
-    policyVersion: "guided-authoring-v1",
-    maxSessionsPerAssignment: 12,
-    canarySessions: 3,
-    operations: ["start", "inspect", "scaffold", "save", "review", "finish"],
+    policyVersion: "workbench-authoring-v5",
+    minimumSessionsPerPack: 5,
+    maximumSessionsPerPack: 12,
+    operations: ["bootstrap", "start", "claim", "inspect", "scaffold", "save", "finish", "status", "receipt"],
     protocol: "masthead.workbench.authoring/v1",
   };
 }

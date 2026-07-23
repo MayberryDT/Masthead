@@ -1,5 +1,10 @@
 # Durable artifact acceptance gate
 
+> **Superseded V4 audit record.** The commands documented below are deliberately no longer exposed
+> by `package.json` and must not be used for release acceptance. The live V5 gate is
+> [`product-release-gate.md`](product-release-gate.md); this file preserves the historical V4
+> thresholds and operator-canary design only so old receipts remain interpretable.
+
 This gate proves that guided V4 Workbench authoring produces grounded, findable, reusable knowledge from deterministic fixture sessions. It never opens, reads, copies, or writes the production Masthead database or production instance manifest.
 
 Run:

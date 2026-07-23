@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { lstat, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, link, lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
@@ -13,7 +13,7 @@ import {
 } from "../daemonOwnership.ts";
 
 const tempDirs: string[] = [];
-const locks: DatabaseWriterLock[] = [];
+const locks: Array<{ release: () => Promise<void> }> = [];
 
 afterEach(async () => {
   await Promise.all(locks.splice(0).map((lock) => lock.release().catch(() => undefined)));
@@ -112,6 +112,78 @@ describe("database writer lock", () => {
     locks.push(repaired);
   });
 
+  test("clears a proven-stale canonical V4 sentinel before acquiring ownership", async () => {
+    const dataDirectory = await createTempDir("masthead-proven-stale-data-sentinel-");
+    const lockPath = join(dataDirectory, "runtime", "database.lock");
+    await mkdir(join(dataDirectory, "runtime"), { recursive: true });
+    await writeFile(lockPath, JSON.stringify({
+      createdAt: "2026-01-01T00:00:00.000Z",
+      pid: 2_147_483_647,
+      protocol: "canonical-data-directory-lock-v4",
+      token: "11111111-1111-4111-8111-111111111111"
+    }, null, 2), { encoding: "utf8", mode: 0o600 });
+
+    await expect(acquireLegacyDataDirectoryGuard(dataDirectory)).rejects.toThrow("will not remove it automatically");
+    const writerLease = await acquireDatabaseWriterLock(join(dataDirectory, "masthead.sqlite"));
+    locks.push(writerLease);
+    const recovered = await acquireLegacyDataDirectoryGuard(dataDirectory, writerLease);
+    locks.push(recovered);
+
+    const current = JSON.parse(await readFile(lockPath, "utf8")) as { pid: number; protocol: string; token: string };
+    expect(current).toMatchObject({ pid: process.pid, protocol: "canonical-data-directory-lock-v4" });
+    expect(current.token).not.toBe("11111111-1111-4111-8111-111111111111");
+    const quarantined = (await readdir(join(dataDirectory, "runtime")))
+      .filter((name) => name.startsWith("database.lock.stale-"));
+    expect(quarantined).toHaveLength(1);
+    await expect(readFile(join(dataDirectory, "runtime", quarantined[0]!), "utf8"))
+      .resolves.toContain("11111111-1111-4111-8111-111111111111");
+  });
+
+  test.each([
+    ["extra property", { extra: true }],
+    ["future timestamp", { createdAt: "2999-01-01T00:00:00.000Z" }]
+  ])("preserves a stale sentinel with a noncanonical %s", async (_label, override) => {
+    const dataDirectory = await createTempDir("masthead-noncanonical-data-sentinel-");
+    const lockPath = join(dataDirectory, "runtime", "database.lock");
+    await mkdir(join(dataDirectory, "runtime"), { recursive: true });
+    await writeFile(lockPath, JSON.stringify({
+      createdAt: "2026-01-01T00:00:00.000Z",
+      pid: 2_147_483_647,
+      protocol: "canonical-data-directory-lock-v4",
+      token: "33333333-3333-4333-8333-333333333333",
+      ...override
+    }), { encoding: "utf8", mode: 0o600 });
+    const writerLease = await acquireDatabaseWriterLock(join(dataDirectory, "masthead.sqlite"));
+    locks.push(writerLease);
+
+    await expect(acquireLegacyDataDirectoryGuard(dataDirectory, writerLease)).rejects.toThrow("will not remove it automatically");
+    await expect(readFile(lockPath, "utf8")).resolves.toContain("33333333-3333-4333-8333-333333333333");
+  });
+
+  test("preserves a stale sentinel with unsafe permissions or multiple links", async () => {
+    const dataDirectory = await createTempDir("masthead-unsafe-data-sentinel-");
+    const runtimeDirectory = join(dataDirectory, "runtime");
+    const lockPath = join(runtimeDirectory, "database.lock");
+    const linkedPath = join(runtimeDirectory, "database-linked.lock");
+    await mkdir(runtimeDirectory, { recursive: true });
+    const sentinel = JSON.stringify({
+      createdAt: "2026-01-01T00:00:00.000Z",
+      pid: 2_147_483_647,
+      protocol: "canonical-data-directory-lock-v4",
+      token: "44444444-4444-4444-8444-444444444444"
+    });
+    await writeFile(lockPath, sentinel, { encoding: "utf8", mode: 0o600 });
+    const writerLease = await acquireDatabaseWriterLock(join(dataDirectory, "masthead.sqlite"));
+    locks.push(writerLease);
+
+    await chmod(lockPath, 0o622);
+    await expect(acquireLegacyDataDirectoryGuard(dataDirectory, writerLease)).rejects.toThrow("will not remove it automatically");
+    await chmod(lockPath, 0o600);
+    await link(lockPath, linkedPath);
+    await expect(acquireLegacyDataDirectoryGuard(dataDirectory, writerLease)).rejects.toThrow("will not remove it automatically");
+    await expect(readFile(linkedPath, "utf8")).resolves.toBe(sentinel);
+  });
+
   test("does not delete a live replacement compatibility sentinel", async () => {
     const dataDirectory = await createTempDir("masthead-live-data-sentinel-");
     const lockPath = join(dataDirectory, "runtime", "database.lock");
@@ -128,6 +200,25 @@ describe("database writer lock", () => {
 
     await expect(acquireLegacyDataDirectoryGuard(dataDirectory)).rejects.toThrow("already owns canonical data directory");
     await expect(readFile(lockPath, "utf8")).resolves.toBe(liveSentinel);
+  });
+
+  test.skipIf(process.platform === "win32")("preserves a symlinked stale compatibility sentinel", async () => {
+    const dataDirectory = await createTempDir("masthead-symlinked-data-sentinel-");
+    const runtimeDirectory = join(dataDirectory, "runtime");
+    const sentinelTarget = join(runtimeDirectory, "sentinel-target.json");
+    const lockPath = join(runtimeDirectory, "database.lock");
+    await mkdir(runtimeDirectory, { recursive: true });
+    await writeFile(sentinelTarget, JSON.stringify({
+      createdAt: "2026-01-01T00:00:00.000Z",
+      pid: 2_147_483_647,
+      protocol: "canonical-data-directory-lock-v4",
+      token: "22222222-2222-4222-8222-222222222222"
+    }), "utf8");
+    await symlink("sentinel-target.json", lockPath, "file");
+
+    await expect(acquireLegacyDataDirectoryGuard(dataDirectory)).rejects.toThrow("will not remove it automatically");
+    expect((await lstat(lockPath)).isSymbolicLink()).toBe(true);
+    await expect(readFile(sentinelTarget, "utf8")).resolves.toContain("22222222-2222-4222-8222-222222222222");
   });
 
   test("a crashed process automatically releases its SQLite lease", async () => {

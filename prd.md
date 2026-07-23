@@ -2,11 +2,10 @@
 
 > **Supersession (2026-07):** Logbook’s primary searchable unit is a **published artifact**, not a
 > session row. Workbench still owns the raw→ready session pipeline. The daemon publishes the original
-> canonical dossier as an immutable snapshot. **ADR 0015** makes authoring a durable guided campaign:
-> the daemon groups bounded assignments, requires complete grounded evidence work, and stages the
-> first assignment for operator review. This V4 contract is the accepted target and remains pending
-> implementation; the installed V3 compatibility runtime is being replaced and must not be used for
-> a new bulk or production enrichment campaign. ADR 0011 and `CONTEXT.md` define the artifact-first
+> canonical dossier as an immutable snapshot. **ADR 0016** makes V5 authoring a durable guided request:
+> the daemon fixes packs, returns evidence catalogs and blank skill fields, and publishes passing
+> sessions without a canary or operator approval. V1–V4 remain readable audit history and cannot run
+> or resume mutations. ADR 0011 and `CONTEXT.md` define the artifact-first
 > boundary. Sections below
 > that say “Logbook of past sessions” or “show imported sessions in Logbook” are historical scope
 > language—do not reintroduce session-library Logbook UX. Prefer OpenWiki + ADR 0011 for current
@@ -54,8 +53,8 @@ The first useful vertical slice should prove one complete Codex loop:
 2. Import canonical session metadata and transcript records.
 3. Show imported sessions in Workbench, create one durable guided authoring request, and copy its
    instance-bound start command.
-4. Follow daemon-grouped assignments through complete evidence traversal and editorial review,
-   approve the staged canary, and atomically publish rebuilt dossiers plus useful optional artifacts.
+4. Follow daemon-grouped packs through evidence inspection, agent-authored enrichment, and
+   flag-and-continue validation, then atomically publish rebuilt dossiers plus useful optional artifacts.
 5. Retrieve the published artifacts through read-only MCP with source evidence.
 6. Continue syncing new Codex activity into Now and Workbench without duplicating canonical sessions.
 
@@ -108,19 +107,17 @@ The first build is done when Masthead can be dogfooded against real local Codex 
 - **Evidence before claims:** Masthead may summarize agent work, but it must show the evidence
   behind attention, conflict, retrieval, and outcome judgments.
 - **Enriched dossier:** The original canonical dossier structure remains the only dossier
-  presentation. Under `workbench-authoring-v4`, the agent writes grounded durable enrichment for
-  every assignment session and the daemon rebuilds the dossier from canonical data.
+  presentation. Under `workbench-authoring-v5`, the agent writes grounded durable enrichment for
+  every pack session and the daemon rebuilds the dossier from canonical data.
 - **Agent-led optional artifacts:** The agent may create zero or more runbooks, ADRs, and incident
-  timelines from selected evidence. Knowledge opportunities are nonbinding, but high-signal
-  opportunities require an evidence-backed disposition and cannot be silently ignored.
-- **Guided campaign:** Copy Agent Prompt creates a durable request before copying only its opaque ID
-  and one instance-bound start command. The daemon, not the agent, groups assignments and returns one
-  required next action at each state.
-- **Canary admission:** The first accepted assignment is a three-session canary capped at three
-  sessions and remains staged until operator approval. Masthead never splits a strong opportunity to
-  fill the canary; request creation fails with `guided_canary_not_constructible` and persists nothing
-  when no complete strong group of at most three or diverse dossier-only set exists.
-- **Atomic publication:** Publication admits one accepted assignment into Logbook atomically, and
+  timelines from selected evidence. Knowledge opportunities are nonbinding; grounded yes/no
+  consideration never requires a disposition or artifact.
+- **Guided request:** Copy Agent Prompt creates a durable request before copying only its opaque ID
+  and one instance-bound start command. The daemon, not the agent, fixes packs and returns one
+  required next action at each state until the full-selection receipt exists.
+- **No approval state:** V5 has no canary, operator approval, required opportunity disposition, or
+  campaign-wide `needs_revision` state. Per-session rejects and warnings never stop the request.
+- **Atomic publication:** Publication admits one accepted pack into Logbook atomically, and
   nothing enters Logbook until enrichment and editorial review are accepted.
 - **Durable reuse:** Every optional-artifact claim has daemon-verified typed support and a verbatim
   canonical excerpt. Published bodies must contain enough core knowledge for Logbook and read-only MCP
@@ -134,15 +131,17 @@ The first build is done when Masthead can be dogfooded against real local Codex 
 
 Guided authoring request = the durable Workbench selection and campaign policy.
 
-Assignment = one daemon-grouped authoring unit containing at most 12 sessions.
+Pack = one fixed V5 authoring unit containing 5–12 sessions, except the final remainder.
+
+Assignment = historical V4 campaign unit retained for audit.
 
 Knowledge opportunity = nonbinding evidence that may support a runbook, ADR, or incident timeline.
 
-Opportunity disposition = authored, dismissed, merged, or changed kind, with evidence-backed rationale.
+Opportunity disposition = historical V4 resolution state; V5 opportunities are nonbinding.
 
-Canary = the first staged assignment of at most 3 sessions, reviewed by an operator before publication.
+Canary = historical V4 approval state; V5 has no canary.
 
-Next action = the single command Masthead requires from the agent at the current assignment state.
+Next action = the single command Masthead requires from the agent at the current pack state.
 
 ## User Stories
 

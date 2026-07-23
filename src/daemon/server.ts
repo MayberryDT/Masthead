@@ -221,7 +221,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   const disabledHookTranscriptCatchupDiagnostics = new Set<string>();
 
   try {
-    legacyDataDirectoryGuard = await acquireLegacyDataDirectoryGuard(writableDataDirectory);
+    legacyDataDirectoryGuard = await acquireLegacyDataDirectoryGuard(writableDataDirectory, writerLock);
     // Legacy compatibility store. Do not add new product writes here.
     // Canonical session data must be written to SQLite/raw_events/session graph.
     const store = await createFileBackedStore(config.storePath);

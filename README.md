@@ -14,17 +14,15 @@ not the product category.
 Start with agents: `openwiki/quickstart.md`, `CONTEXT.md`, and
 `docs/adr/0011-artifact-first-logbook.md`.
 
-## Current runtime during the V4 cutover
+## Current runtime
 
 - Canonical local SQLite ownership for Masthead-owned sessions, published
   artifacts + provenance, source/connector state, import jobs, settings, and MCP
-  audit rows (schema 24; full-body artifact search arrived in schema 21).
+  audit rows (schema 37; full-body artifact search arrived in schema 21).
 - Multi-adapter / multi-harness live connect (Sources V2) and conservative
   history adapters where coverage exists.
-- Workbench package path: transcript checks/import, quality, claims, Activity, selection-scoped V3
-  authoring, durable enrichment, daemon-rebuilt dossiers, optional-artifact judgment, and atomic
-  publication. This is the installed runtime being replaced, not the desired authoring contract;
-  do not use it for a new bulk or production enrichment campaign during the V4 cutover.
+- Workbench package path: transcript checks/import, quality, Activity, V5 guided authoring, durable
+  enrichment, daemon-rebuilt dossiers, optional-artifact judgment, and atomic pack publication.
 - Logbook artifact book: `GET /logbook/artifacts` + body/provenance inspector;
   full-body search plus kind · project · date filters; no bulk enrich /
   checkboxes / summary strip.
@@ -35,13 +33,11 @@ Start with agents: `openwiki/quickstart.md`, `CONTEXT.md`, and
   checkout you intend to run — path is hardwired into the desktop entry).
 - Product, surface, endpoint-matrix, doctor, smoke, build, and test gates.
 
-## Accepted V4 target — implementation in progress
+## V5 authoring boundary
 
-ADR 0015 defines durable guided authoring requests, daemon-grouped assignments, complete evidence
-traversal, progressive editorial review, the staged operator-approved canary, instance-bound
-launchers, and assignment-atomic finish. The detailed contract below guides implementation, but the
-current daemon and CLI do not advertise or execute V4 until their later implementation tasks land.
-At cutover, V1–V3 reads remain audit-only and all legacy mutations fail with
+ADR 0016 defines the implemented `workbench-authoring-v5` request and fixed-pack loop. The coding
+agent owns enrichment meaning; Masthead owns identity, evidence catalogs, validation, atomic
+publication, Activity, and receipts. V1–V4 reads remain audit-only and all legacy mutations fail with
 `authoring_contract_retired`.
 
 ## Experimental
@@ -49,9 +45,8 @@ At cutover, V1–V3 reads remain audit-only and all legacy mutations fail with
 - Deeper schema coverage for additional source adapters beyond the initial
   bounded scanners.
 - Transcript import breadth and exclusion policy tuning.
-- Legacy/dev native remote enrichment hooks. The accepted guided-authoring target uses a durable
-  Workbench request plus a thin instance-bound CLI to the daemon-owned V4 module; that target remains
-  pending implementation, and no native remote model key will be required.
+- Legacy/dev native remote enrichment hooks. Current guided authoring uses the user's existing coding
+  agent through a thin instance-bound CLI and requires no native remote model key.
 - Longer packaged desktop release-smoke automation.
 
 ## Install
@@ -84,57 +79,49 @@ MASTHEAD_CONNECTOR_MODE=bridge MASTHEAD_UPSTREAM_URL=http://127.0.0.1:17373 npm 
 MASTHEAD_BRIDGE_PORT=17374 npm run dev
 ```
 
-## Accepted V4 Artifact Authoring Contract
+## V5 Artifact Authoring Contract
 
-This is the accepted target flow and remains pending until the guided service, API, CLI, launcher,
-Workbench review, and cutover tasks land. The current runtime is described above.
+The user flow is:
 
-After cutover, the user flow is:
+**Select sessions → Copy Agent Prompt → paste the request ID and instance-bound start command into one
+coding agent → that agent finishes every fixed pack → inspect and reuse published artifacts in
+Logbook and MCP.**
 
-**Select sessions → create a guided request → copy its instance-bound start command → agent follows
-the next action → operator approves the canary → Masthead publishes accepted assignments →
-inspect/reuse in Logbook and MCP.**
+Under `workbench-authoring-v5`, Workbench persists the full compile-ready selection and discloses
+review-needed rows left out. The copied handoff contains no session list or multi-step recipe. The
+daemon groups fixed packs of 5–12 sessions, except the final remainder, and returns one next action at
+every state. Resume uses the same request only to recover a crash; the complete selection remains the
+job.
 
-Under `workbench-authoring-v4`, a Workbench selection creates one durable guided authoring request.
-The copied handoff contains only its opaque request ID and one instance-bound start command, with no
-session list or multi-step recipe. The daemon groups assignments of at most 12 sessions and guides the
-agent through complete canonical evidence traversal, grounded enrichment, optional-artifact judgment,
-and editorial review by returning one required next action at every state.
+The scaffold contains identity, canonical evidence catalogs, and blank skill fields. The agent writes
+title, description, keywords, purpose, outcome, key work, honest verification, and optional-artifact
+judgment. Masthead never writes enrichment prose. Save returns per-session publishable, soft-flag, or
+hard-reject results, and finish publishes passers atomically without a canary, operator approval,
+required opportunity disposition, or request-wide revision halt.
 
-The daemon rebuilds the original canonical dossier structure from current enriched session data;
-agents do not replace its presentation. Every substantive dossier and optional-artifact claim
-supplies typed verbatim claim support from canonical evidence. Knowledge opportunities are
-nonbinding, but high-signal opportunities require an evidence-backed disposition. Unsupported
-completion, protocol narration, negligible enrichment, weak joins, and materially duplicated
-templates are rejected.
-
-The first accepted assignment is a three-session canary capped at three sessions and remains staged
-until operator approval. Masthead never splits a strong opportunity to manufacture that canary: it
-uses a complete strong group of at most three or diverse dossier-only sessions, otherwise request
-creation returns `guided_canary_not_constructible` and persists nothing. Finish atomically publishes
-one accepted assignment and releases the next.
-
-After cutover, the instance-bound CLI is thin agent-facing transport to the daemon-owned V4 authoring
-boundary and does not open SQLite for normal authoring. V1, V2, and V3 remain audit-only; their status
-and receipts stay readable, while legacy mutations fail with `authoring_contract_retired`. Every V4
-mutation verifies the daemon URL, database ID, build SHA, and manifest identity. See
-[ADR 0015](docs/adr/0015-guided-authoring-campaigns.md),
+The instance-bound CLI is thin HTTP transport and does not open SQLite for normal authoring. V1–V4
+status, evidence, reviews, and receipts remain readable, while legacy mutations fail with
+`authoring_contract_retired`. Every V5 mutation verifies daemon URL, database ID, build SHA, manifest
+path, and instance identity. See
+[ADR 0016](docs/adr/0016-agent-led-v5-pack-authoring.md),
 [ADR 0012](docs/adr/0012-daemon-owned-artifact-authoring.md), and the
 [daemon API reference](docs/reference/daemon-api.md).
 
-### V4 vocabulary
+### V5 vocabulary
 
 Guided authoring request = the durable Workbench selection and campaign policy.
 
-Assignment = one daemon-grouped authoring unit containing at most 12 sessions.
+Pack = one fixed V5 authoring unit containing 5–12 sessions, except the final remainder.
+
+Assignment = a historical V4 campaign unit retained for audit.
 
 Knowledge opportunity = nonbinding evidence that may support a runbook, ADR, or incident timeline.
 
-Opportunity disposition = authored, dismissed, merged, or changed kind, with evidence-backed rationale.
+Opportunity disposition = historical V4 audit state; V5 opportunities are nonbinding.
 
-Canary = the first staged assignment of at most 3 sessions, reviewed by an operator before publication.
+Canary = historical V4 approval state; V5 has no canary.
 
-Next action = the single command Masthead requires from the agent at the current assignment state.
+Next action = the single command Masthead requires from the agent at the current pack state.
 
 ### Failed V1 generation recovery
 
@@ -155,10 +142,10 @@ dossiers, zero optional artifacts, and 66 completed V1 runs. Prepare acquires th
 daemon-equivalent writer locks, creates a SQLite-consistent backup, verifies its
 database identity and integrity, and retains exactly one backup. Invalidate removes
 only the hash-matched artifacts, search rows, and provenance, resets affected
-sessions for current enrichment and V4 guided-authoring eligibility, releases
+sessions for current enrichment and V5 guided-authoring eligibility, releases
 matching claims, and preserves V1 runs and receipts as audit history. Never run
 production invalidation before the fixture gate, temporary-copy rehearsal, and
-separately authorized human-reviewed V4 canary pass.
+separately authorized production release process.
 
 Restore is offline and fail-closed. It accepts only the exact sibling
 `masthead.sqlite.backup-current`, requires daemon-equivalent exclusive ownership,
@@ -174,7 +161,7 @@ Fast product checks:
 npm run check:product-contract
 npm run verify:no-citations
 npm run doctor
-npm run dogfood:durable-artifacts
+npm run check:endpoint-matrix
 ```
 
 Full local gate:
@@ -193,10 +180,9 @@ Logbook state, read-only MCP status/tools, and local data summary. `npm run
 verify` runs the product and surface contracts, typecheck, Vitest, build,
 endpoint matrix, and smoke suite.
 
-`npm run dogfood:durable-artifacts` and the V3 acceptance worksheet are preserved audit evidence.
-V4 release acceptance must prove guided evidence traversal, grounded dossier deltas,
-opportunity dispositions, the staged operator-approved canary, instance identity, atomic publication,
-and Logbook/MCP retrieval on an isolated corpus without touching production data.
+Earlier V1–V4 worksheets remain historical audit evidence, but their mutation harnesses are retired and
+aren't release commands. Current release acceptance is `docs/acceptance/product-release-gate.md`: it proves V5 identity,
+flag-and-continue quality, atomic publication, and the 10/50/full-selection autonomy gates.
 
 ## Data Path
 

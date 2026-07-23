@@ -104,548 +104,7 @@ afterAll(async () => {
 });
 
 describe("mastheadctl daemon-owned Workbench authoring", () => {
-  test("runs the nested guided workflow with exact JSON DTOs and identity-bound mutations", async () => {
-    const instanceDir = await mkdtemp(join(tmpdir(), "masthead-guided-cli-"));
-    tempDirs.push(instanceDir);
-    const instanceManifest = join(instanceDir, "masthead-instance.json");
-    const expectedIdentity = {
-      baseUrl: "http://127.0.0.1:17373",
-      buildSha: "build:test",
-      databaseId: "database:test",
-      instanceId: "instance:current",
-      instanceManifest
-    };
-    await writeFile(instanceManifest, JSON.stringify({
-      schemaVersion: 1,
-      instanceId: expectedIdentity.instanceId,
-      baseUrl: expectedIdentity.baseUrl,
-      databaseId: expectedIdentity.databaseId,
-      buildSha: expectedIdentity.buildSha,
-      pid: 12345,
-      instanceDir,
-      updatedAt: new Date().toISOString()
-    }));
-    const nextAction = {
-      command: `${join(instanceDir, "bin", "mastheadctl")} workbench author inspect --assignment assignment:one --json`,
-      kind: "inspect",
-      reason: "Read the canonical evidence."
-    };
-    const responseDto = {
-      assignment: { assignmentId: "assignment:one", sessionIds: ["session:a"] },
-      authoringContract: {
-        bundleSchema: { description: "SCHEMA_SENTINEL".repeat(5_000) },
-        scaffoldCommand: "mastheadctl workbench author scaffold --assignment assignment:one --file draft.json --json",
-        rule: "Use the daemon scaffold and preserve exact evidence support."
-      },
-      editorialBrief: {
-        evidenceQuestions: ["What concrete work was performed?"],
-        objective: "Produce grounded reusable knowledge.",
-        opportunities: [{ opportunityId: "opportunity:a", suggestedKind: "adr" }],
-        rubrics: { adr: ["durable decision"] },
-        sessions: [{ dossierSentinel: "FULL_DOSSIER_SENTINEL".repeat(5_000) }]
-      },
-      nextAction
-    };
-    const requests: Array<{ body?: unknown; headers: Headers; method: string; pathname: string }> = [];
-    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      const url = new URL(String(input));
-      requests.push({
-        ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}),
-        headers: new Headers(init?.headers),
-        method: String(init?.method),
-        pathname: url.pathname
-      });
-      if (url.pathname === "/workbench/authoring/capabilities") {
-        return jsonResponse({
-          capability: "artifact_authoring",
-          protocol: "masthead.workbench.authoring/v1",
-          bundleVersion: "workbench-authoring-v4",
-          policyVersion: "guided-authoring-v1",
-          command: join(instanceDir, "bin", "mastheadctl"),
-          ...expectedIdentity,
-          maxSessionsPerAssignment: 12,
-          canarySessions: 3,
-          operations: ["start", "inspect", "scaffold", "save", "review", "finish"]
-        });
-      }
-      return jsonResponse(responseDto);
-    }));
-
-    const result = await runMastheadCli(
-      ["workbench", "author", "start", "--request", "request:one", "--json"],
-      { env: { MASTHEAD_INSTANCE_MANIFEST: instanceManifest } }
-    );
-
-    expect(JSON.parse(result.stdout)).toEqual({
-      assignment: responseDto.assignment,
-      authoringContract: {
-        scaffoldCommand: responseDto.authoringContract.scaffoldCommand,
-        rule: responseDto.authoringContract.rule
-      },
-      editorialBrief: {
-        evidenceQuestions: responseDto.editorialBrief.evidenceQuestions,
-        objective: responseDto.editorialBrief.objective,
-        opportunities: responseDto.editorialBrief.opportunities,
-        rubrics: responseDto.editorialBrief.rubrics
-      },
-      nextAction
-    });
-    expect(result.stdout).not.toContain("SCHEMA_SENTINEL");
-    expect(result.stdout).not.toContain("FULL_DOSSIER_SENTINEL");
-    expect(result.stdout.length).toBeLessThan(5_000);
-    expect(requests.map(({ method, pathname }) => `${method} ${pathname}`)).toEqual([
-      "GET /workbench/authoring/capabilities",
-      "POST /workbench/authoring/requests/request%3Aone/start"
-    ]);
-    expect(requests[1]?.body).toEqual({ expectedIdentity });
-    expect(Object.keys(responseDto).filter((key) => key === "nextAction")).toHaveLength(1);
-  });
-
-  test("sends all five canonical identity headers for progress-recording inspect", async () => {
-    const instanceDir = await mkdtemp(join(tmpdir(), "masthead-guided-inspect-"));
-    tempDirs.push(instanceDir);
-    const instanceManifest = join(instanceDir, "masthead-instance.json");
-    await writeFile(instanceManifest, JSON.stringify({
-      schemaVersion: 1,
-      instanceId: "instance:inspect",
-      baseUrl: "http://127.0.0.1:17373",
-      databaseId: "database:test",
-      buildSha: "build:test",
-      pid: 12345,
-      instanceDir,
-      updatedAt: new Date().toISOString()
-    }));
-    let inspectHeaders: Headers | undefined;
-    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      const url = new URL(String(input));
-      if (url.pathname === "/workbench/authoring/capabilities") {
-        return jsonResponse({
-          capability: "artifact_authoring",
-          protocol: "masthead.workbench.authoring/v1",
-          bundleVersion: "workbench-authoring-v4",
-          policyVersion: "guided-authoring-v1",
-          command: join(instanceDir, "bin", "mastheadctl"),
-          baseUrl: "http://127.0.0.1:17373",
-          databaseId: "database:test",
-          buildSha: "build:test",
-          instanceManifest,
-          instanceId: "instance:inspect",
-          maxSessionsPerAssignment: 12,
-          canarySessions: 3,
-          operations: ["start", "inspect", "scaffold", "save", "review", "finish"]
-        });
-      }
-      inspectHeaders = new Headers(init?.headers);
-      return jsonResponse({
-        assignmentId: "assignment:one",
-        nextAction: { kind: "save", reason: "Evidence is complete.", command: "mastheadctl workbench author save" }
-      });
-    }));
-
-    const result = await runMastheadCli(
-      ["workbench", "author", "inspect", "--assignment", "assignment:one", "--json"],
-      { env: { MASTHEAD_INSTANCE_MANIFEST: instanceManifest } }
-    );
-
-    expect(result.exitCode).toBe(0);
-    expect(Object.fromEntries([
-      "x-masthead-authoring-base-url",
-      "x-masthead-authoring-database-id",
-      "x-masthead-authoring-build-sha",
-      "x-masthead-authoring-instance-manifest",
-      "x-masthead-authoring-instance-id"
-    ].map((name) => [name, inspectHeaders?.get(name)]))).toEqual({
-      "x-masthead-authoring-base-url": "http://127.0.0.1:17373",
-      "x-masthead-authoring-database-id": "database:test",
-      "x-masthead-authoring-build-sha": "build:test",
-      "x-masthead-authoring-instance-manifest": instanceManifest,
-      "x-masthead-authoring-instance-id": "instance:inspect"
-    });
-  });
-
-  test("round-trips the paginated inspect next action with its session and cursor", async () => {
-    const instanceDir = await mkdtemp(join(tmpdir(), "masthead-guided-inspect-page-"));
-    tempDirs.push(instanceDir);
-    const instanceManifest = join(instanceDir, "masthead-instance.json");
-    await writeFile(instanceManifest, JSON.stringify({
-      schemaVersion: 1,
-      instanceId: "instance:inspect-page",
-      baseUrl: "http://127.0.0.1:17373",
-      databaseId: "database:test",
-      buildSha: "build:test",
-      pid: 12345,
-      instanceDir,
-      updatedAt: new Date().toISOString()
-    }));
-    const requestedUrls: URL[] = [];
-    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
-      const url = new URL(String(input));
-      requestedUrls.push(url);
-      if (url.pathname === "/workbench/authoring/capabilities") {
-        return jsonResponse({
-          capability: "artifact_authoring", protocol: "masthead.workbench.authoring/v1",
-          bundleVersion: "workbench-authoring-v4", policyVersion: "guided-authoring-v1",
-          command: join(instanceDir, "bin", "mastheadctl"), baseUrl: "http://127.0.0.1:17373",
-          databaseId: "database:test", buildSha: "build:test", instanceManifest,
-          instanceId: "instance:inspect-page", maxSessionsPerAssignment: 12, canarySessions: 3,
-          operations: ["start", "inspect", "scaffold", "save", "review", "finish"]
-        });
-      }
-      return jsonResponse({
-        assignmentId: "assignment:one",
-        authoringContract: {
-          bundleSchema: { description: "REPEATED_SCHEMA_SENTINEL".repeat(5_000) },
-          scaffoldCommand: "mastheadctl workbench author scaffold --assignment assignment:one --file draft.json --json",
-          rule: "Use the daemon scaffold."
-        },
-        evidence: { items: [{ itemId: "message:a", text: "Canonical evidence." }] },
-        nextAction: {
-          kind: "inspect",
-          reason: "Session session:a still has unread canonical evidence.",
-          command: `${join(instanceDir, "bin", "mastheadctl")} workbench author inspect --assignment assignment:one --session session:a --cursor 100 --json`
-        }
-      });
-    }));
-
-    const result = await runMastheadCli([
-      "workbench", "author", "inspect", "--assignment", "assignment:one",
-      "--session", "session:a", "--cursor", "100", "--json"
-    ], { env: { MASTHEAD_INSTANCE_MANIFEST: instanceManifest } });
-
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).not.toContain("REPEATED_SCHEMA_SENTINEL");
-    expect(result.stdout.length).toBeLessThan(5_000);
-    expect(JSON.parse(result.stdout).authoringContract).toEqual({
-      scaffoldCommand: "mastheadctl workbench author scaffold --assignment assignment:one --file draft.json --json",
-      rule: "Use the daemon scaffold."
-    });
-    expect(JSON.parse(result.stdout).evidence.items).toHaveLength(1);
-    expect(requestedUrls[1]?.pathname).toBe("/workbench/authoring/assignments/assignment%3Aone/inspect");
-    expect(requestedUrls[1]?.searchParams.get("sessionId")).toBe("session:a");
-    expect(requestedUrls[1]?.searchParams.get("cursor")).toBe("100");
-  });
-
-  test("prints only the returned next-action reason and command in human mode", async () => {
-    const instanceDir = await mkdtemp(join(tmpdir(), "masthead-guided-human-"));
-    tempDirs.push(instanceDir);
-    const instanceManifest = join(instanceDir, "masthead-instance.json");
-    await writeFile(instanceManifest, JSON.stringify({
-      schemaVersion: 1,
-      instanceId: "instance:human",
-      baseUrl: "http://127.0.0.1:17373",
-      databaseId: "database:test",
-      buildSha: "build:test",
-      pid: 12345,
-      instanceDir,
-      updatedAt: new Date().toISOString()
-    }));
-    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
-      const url = new URL(String(input));
-      if (url.pathname === "/workbench/authoring/capabilities") {
-        return jsonResponse({
-          capability: "artifact_authoring", protocol: "masthead.workbench.authoring/v1",
-          bundleVersion: "workbench-authoring-v4", policyVersion: "guided-authoring-v1",
-          command: join(instanceDir, "bin", "mastheadctl"), baseUrl: "http://127.0.0.1:17373",
-          databaseId: "database:test", buildSha: "build:test", instanceManifest,
-          instanceId: "instance:human", maxSessionsPerAssignment: 12, canarySessions: 3,
-          operations: ["start", "inspect", "scaffold", "save", "review", "finish"]
-        });
-      }
-      return jsonResponse({
-        assignmentId: "assignment:one",
-        nextAction: { kind: "inspect", reason: "Read every evidence page.", command: "mastheadctl workbench author inspect --assignment assignment:one --json" }
-      });
-    }));
-
-    const result = await runMastheadCli(
-      ["workbench", "author", "start", "--request", "request:one"],
-      { env: { MASTHEAD_INSTANCE_MANIFEST: instanceManifest } }
-    );
-    expect(result.stdout).toBe("Read every evidence page.\nmastheadctl workbench author inspect --assignment assignment:one --json\n");
-  });
-
-  test("loads a V4 save file and routes save, review, and finish by one assignment", async () => {
-    const instanceDir = await mkdtemp(join(tmpdir(), "masthead-guided-routes-"));
-    tempDirs.push(instanceDir);
-    const instanceManifest = join(instanceDir, "masthead-instance.json");
-    await writeFile(instanceManifest, JSON.stringify({
-      schemaVersion: 1, instanceId: "instance:routes", baseUrl: "http://127.0.0.1:17373",
-      databaseId: "database:test", buildSha: "build:test", pid: 12345, instanceDir,
-      updatedAt: new Date().toISOString()
-    }));
-    const bundle = {
-      artifacts: [], assignmentId: "assignment:one", bundleVersion: "workbench-authoring-v4",
-      evidenceRevision: "evidence:v4:one", opportunityDispositions: [],
-      sessionEnrichments: [{
-        sessionId: "session:a",
-        claimSupport: [{
-          evidenceRef: "message:a:1", excerpt: "The implementation produces reusable evidence-backed knowledge.",
-          path: "/sessionSummary/text", supportKind: "outcome"
-        }],
-        enrichment: {
-          keywords: ["guided authoring", "instance-bound workflow", "focused verification"],
-          version: "session-capsule-v4",
-          sessionTitle: { text: "Guided authoring", basis: "dominant_work", confidence: "high", evidenceRefs: [] },
-          sessionSummary: { text: "Implemented guided authoring.", state: "completed", confidence: "high", evidenceRefs: [] },
-          sessionDossier: {
-            purpose: "Implement guided authoring.", outcome: "Guided authoring is available.",
-            keyWork: ["Added an instance-bound command workflow."], decisions: [], blockers: [], warnings: [], evidenceRefs: [],
-            verification: { status: "passed", summary: "Focused tests passed.", commands: [], failures: [], evidenceRefs: [] },
-            continuation: { openQuestions: [], constraints: [] }
-          }
-        }
-      }]
-    };
-    const bundlePath = join(instanceDir, "draft.json");
-    await writeFile(bundlePath, JSON.stringify(bundle));
-    const saveResponse = {
-      assignmentId: "assignment:one",
-      requestId: "request:one",
-      status: "needs_revision",
-      evidenceRevision: "evidence:v4:one",
-      draftRevision: 2,
-      draft: bundle,
-      findings: [{
-        code: "missing_session_claim_support",
-        message: "Claim-bearing session field requires one valid change support.",
-        path: "/sessionEnrichments/0/enrichment/sessionDossier/keyWork/0",
-        severity: "error"
-      }],
-      editorialQuestions: ["What changed?"],
-      coverage: [{
-        sessionId: "session:a", evidenceRevision: "evidence:v4:one",
-        accessedItems: 3, totalItems: 3, complete: true
-      }],
-      operatorReviews: [],
-      nextAction: { kind: "revise", reason: "Resolve the structured finding.", command: "save" }
-    };
-    const calls: Array<{ body?: unknown; method: string; pathname: string }> = [];
-    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      const pathname = new URL(String(input)).pathname;
-      calls.push({
-        ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}),
-        method: String(init?.method), pathname
-      });
-      if (pathname === "/workbench/authoring/capabilities") {
-        return jsonResponse({
-          capability: "artifact_authoring", protocol: "masthead.workbench.authoring/v1",
-          bundleVersion: "workbench-authoring-v4", policyVersion: "guided-authoring-v1",
-          command: join(instanceDir, "bin", "mastheadctl"), baseUrl: "http://127.0.0.1:17373",
-          databaseId: "database:test", buildSha: "build:test", instanceManifest,
-          instanceId: "instance:routes", maxSessionsPerAssignment: 12, canarySessions: 3,
-          operations: ["start", "inspect", "scaffold", "save", "review", "finish"]
-        });
-      }
-      if (pathname.endsWith("/draft")) return jsonResponse(saveResponse);
-      if (pathname.endsWith("/review")) return jsonResponse({
-        ...saveResponse,
-        nextAction: { kind: "finish", reason: "Ready.", command: "finish" }
-      });
-      return jsonResponse({ assignmentId: "assignment:one", nextAction: { kind: "finish", reason: "Ready.", command: "finish" } });
-    }));
-    const env = { MASTHEAD_INSTANCE_MANIFEST: instanceManifest };
-
-    const results = [];
-    for (const args of [
-      ["workbench", "author", "save", "--assignment", "assignment:one", "--file", bundlePath, "--json"],
-      ["workbench", "author", "review", "--assignment", "assignment:one", "--json"],
-      ["workbench", "author", "finish", "--assignment", "assignment:one", "--json"]
-    ]) {
-      const result = await runMastheadCli(args, { env });
-      expect(result.exitCode).toBe(0);
-      results.push(result);
-    }
-
-    expect(JSON.parse(results[0]!.stdout)).toEqual({
-      assignmentId: saveResponse.assignmentId,
-      requestId: saveResponse.requestId,
-      status: saveResponse.status,
-      evidenceRevision: saveResponse.evidenceRevision,
-      draftRevision: saveResponse.draftRevision,
-      findings: saveResponse.findings,
-      editorialQuestions: saveResponse.editorialQuestions,
-      coverage: saveResponse.coverage,
-      operatorReviews: saveResponse.operatorReviews,
-      nextAction: saveResponse.nextAction
-    });
-    expect(JSON.parse(results[1]!.stdout)).not.toHaveProperty("draft");
-    expect(JSON.parse(results[1]!.stdout)).toMatchObject({
-      assignmentId: "assignment:one",
-      draftRevision: 2,
-      findings: saveResponse.findings,
-      nextAction: { kind: "finish" }
-    });
-
-    expect(calls.filter(({ pathname }) => pathname !== "/workbench/authoring/capabilities").map(({ method, pathname }) => `${method} ${pathname}`)).toEqual([
-      "POST /workbench/authoring/assignments/assignment%3Aone/draft",
-      "GET /workbench/authoring/assignments/assignment%3Aone/review",
-      "POST /workbench/authoring/assignments/assignment%3Aone/finish"
-    ]);
-    expect(calls.find(({ pathname }) => pathname.endsWith("/draft"))?.body).toMatchObject({ draft: bundle, expectedIdentity: { instanceId: "instance:routes" } });
-    expect(calls.find(({ pathname }) => pathname.endsWith("/finish"))?.body).toMatchObject({ expectedIdentity: { instanceId: "instance:routes" } });
-  });
-
-  test("returns a structured error for a schema-invalid V4 save file", async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), "masthead-guided-invalid-draft-"));
-    tempDirs.push(tempDir);
-    const bundlePath = join(tempDir, "draft.json");
-    await writeFile(bundlePath, JSON.stringify({
-      artifacts: [],
-      assignmentId: "assignment:one",
-      bundleVersion: "workbench-authoring-v4",
-      evidenceRevision: "evidence:v4:one",
-      opportunityDispositions: [],
-      sessionEnrichments: []
-    }));
-
-    const result = await runMastheadCli([
-      "workbench", "author", "save", "--assignment", "assignment:one", "--file", bundlePath, "--json"
-    ], { env: {} });
-
-    expect(result).toMatchObject({ exitCode: 1, stdout: "" });
-    expect(JSON.parse(result.stderr)).toEqual({
-      error: {
-        code: "invalid_guided_authoring_bundle",
-        message: `Invalid guided authoring V4 bundle at sessionEnrichments in ${bundlePath}`,
-        path: "sessionEnrichments",
-        findings: [{
-          code: "invalid_guided_authoring_bundle",
-          message: "The bundle does not match the V4 schema at sessionEnrichments.",
-          path: "sessionEnrichments",
-          severity: "error"
-        }],
-        nextAction: {
-          command: `mastheadctl workbench author save --assignment 'assignment:one' --file '${bundlePath}' --json`,
-          kind: "revise",
-          reason: "Edit the invalid field at sessionEnrichments in the existing V4 draft, then re-save the same file."
-        }
-      },
-      ok: false
-    });
-    expect(result.stderr).not.toContain(".scaffold.json");
-  });
-
-  test("regenerates a scaffold only when the local bundle version is unsupported", async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), "masthead-guided-unsupported-draft-"));
-    tempDirs.push(tempDir);
-    const bundlePath = join(tempDir, "draft.json");
-    await writeFile(bundlePath, JSON.stringify({
-      artifacts: [],
-      assignmentId: "assignment:one",
-      bundleVersion: "workbench-authoring-v3",
-      evidenceRevision: "evidence:v3:one",
-      opportunityDispositions: [],
-      sessionEnrichments: []
-    }));
-
-    const result = await runMastheadCli([
-      "workbench", "author", "save", "--assignment", "assignment:one", "--file", bundlePath, "--json"
-    ], { env: {} });
-
-    expect(result.exitCode).toBe(1);
-    expect(JSON.parse(result.stderr)).toMatchObject({
-      error: {
-        code: "invalid_guided_authoring_bundle",
-        path: "bundleVersion",
-        nextAction: {
-          command: `mastheadctl workbench author scaffold --assignment 'assignment:one' --file '${bundlePath}.scaffold.json' --json`,
-          kind: "scaffold",
-          reason: "Regenerate the daemon-owned V4 draft scaffold, then edit only its authored content and evidence support."
-        }
-      },
-      ok: false
-    });
-  });
-
-  test("writes a daemon-owned schema-valid V4 scaffold without repository knowledge", async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), "masthead-guided-scaffold-"));
-    tempDirs.push(tempDir);
-    const file = join(tempDir, "draft.json");
-    const draftId = "guided-artifact-draft:deterministic";
-    const draft = {
-      artifacts: [{
-        draftId,
-        kind: "adr",
-        output: {
-          affectedPaths: [],
-          alternatives: ["REPLACE_WITH_ALTERNATIVE_ACTUALLY_CONSIDERED"],
-          claimSupport: [{
-            evidenceRef: "evidence:opportunity",
-            excerpt: "REPLACE_WITH_EXACT_CANONICAL_EVIDENCE_EXCERPT",
-            path: "decision",
-            supportKind: "decision"
-          }],
-          confidence: "low",
-          consequences: ["REPLACE_WITH_CONSEQUENCE_AND_REVERSAL_CONDITION"],
-          context: "REPLACE_WITH_DECISION_CONTEXT",
-          decision: "REPLACE_WITH_DURABLE_DECISION",
-          evidenceRefs: ["evidence:opportunity"],
-          missingEvidence: ["REPLACE_WITH_ANY_MISSING_EVIDENCE_BOUNDARY"],
-          provenanceSessionIds: ["session:a"],
-          status: "REPLACE_WITH_DECISION_STATUS",
-          supersedes: [],
-          title: "REPLACE_WITH_SPECIFIC_ARTIFACT_TITLE"
-        },
-        provenanceSessionIds: ["session:a"],
-        seedSessionId: "session:a"
-      }],
-      assignmentId: "assignment:one", bundleVersion: "workbench-authoring-v4",
-      evidenceRevision: "evidence:one", opportunityDispositions: [{
-        artifactDraftId: draftId,
-        artifactKind: "adr",
-        disposition: "authored",
-        evidenceRefs: ["evidence:opportunity"],
-        opportunityId: "opportunity:one",
-        rationale: "REPLACE_WITH_EVIDENCE_BACKED_DISPOSITION_RATIONALE"
-      }],
-      sessionEnrichments: [{
-        sessionId: "session:a",
-        enrichment: {
-          keywords: [],
-          version: "session-capsule-v4",
-          sessionTitle: { text: "REPLACE", basis: "dominant_work", confidence: "low", evidenceRefs: [] },
-          sessionSummary: { text: "REPLACE", state: "unknown", confidence: "low", evidenceRefs: [] },
-          sessionDossier: {
-            purpose: "REPLACE", outcome: "REPLACE", keyWork: ["REPLACE"], decisions: [], blockers: [], warnings: [], evidenceRefs: [],
-            verification: { status: "unknown", summary: "REPLACE", commands: [], failures: [], evidenceRefs: [] },
-            continuation: { openQuestions: [], constraints: [] }
-          }
-        },
-        claimSupport: [{ path: "/sessionSummary/text", supportKind: "outcome", evidenceRef: "REPLACE_EVIDENCE_REF", excerpt: "REPLACE_EXACT_EXCERPT" }]
-      }]
-    };
-    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
-      expect(new URL(String(input)).pathname).toBe("/workbench/authoring/assignments/assignment%3Aone/scaffold");
-      return jsonResponse({
-        assignmentId: "assignment:one", bundleSchema: { title: "GuidedAuthoringBundleV4", type: "object" }, draft,
-        nextAction: { kind: "save", reason: "Author content and support, then save.", command: `mastheadctl workbench author save --assignment assignment:one --file ${file} --json` }
-      });
-    }));
-    const result = await runMastheadCli(["workbench", "author", "scaffold", "--assignment", "assignment:one", "--file", file, "--json"]);
-    expect(result.exitCode).toBe(0);
-    expect(JSON.parse(await readFile(file, "utf8"))).toEqual(draft);
-    expect(JSON.parse(await readFile(file, "utf8"))).toMatchObject({
-      artifacts: [{ draftId, kind: "adr" }],
-      opportunityDispositions: [{ artifactDraftId: draftId, artifactKind: "adr" }]
-    });
-    expect(JSON.parse(result.stdout)).toMatchObject({ assignmentId: "assignment:one", file, nextAction: { kind: "save" } });
-    expect(JSON.parse(result.stdout)).not.toHaveProperty("bundleSchema");
-    expect(JSON.parse(result.stdout)).not.toHaveProperty("draft");
-    expect(JSON.parse(result.stdout)).toMatchObject({
-      draftSummary: { artifactCount: 1, opportunityDispositionCount: 1, sessionEnrichmentCount: 1 }
-    });
-    expect(JSON.parse(result.stdout).nextAction.command).toBe(
-      `mastheadctl workbench author save --assignment assignment:one --file '${file}' --json`
-    );
-    expect((await stat(file)).mode & 0o777).toBe(0o600);
-
-    await expect(runMastheadCli([
-      "workbench", "author", "scaffold", "--assignment", "assignment:one", "--file", file, "--json"
-    ])).rejects.toMatchObject({ code: "EEXIST" });
-    expect(JSON.parse(await readFile(file, "utf8"))).toEqual(draft);
-  });
-
-  test("reloads the instance manifest before each guided mutation and accepts a safe daemon nonce change", async () => {
+  test("reloads the instance manifest before a V5 mutation", async () => {
     const instanceDir = await mkdtemp(join(tmpdir(), "masthead-cli-instance-"));
     tempDirs.push(instanceDir);
     const instanceManifest = join(instanceDir, "masthead-instance.json");
@@ -669,16 +128,16 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
         return jsonResponse({
           baseUrl: "http://127.0.0.1:17373",
           buildSha: "build:test",
-          bundleVersion: "workbench-authoring-v4",
+          bundleVersion: "workbench-authoring-v5",
           capability: "artifact_authoring",
           command: join(instanceDir, "bin", "mastheadctl"),
           databaseId: "database:test",
           instanceId,
           instanceManifest,
-          maxSessionsPerAssignment: 12,
-          canarySessions: 3,
-          policyVersion: "guided-authoring-v1",
-          operations: ["start", "inspect", "scaffold", "save", "review", "finish"],
+          minimumSessionsPerPack: 5,
+          maximumSessionsPerPack: 12,
+          policyVersion: "workbench-authoring-v5",
+          operations: ["bootstrap", "start", "claim", "inspect", "scaffold", "save", "finish", "status", "receipt"],
           protocol: "masthead.workbench.authoring/v1",
         });
       }
@@ -688,11 +147,11 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
     await client.capabilities();
     instanceId = "instance:new";
     await writeManifest();
-    await client.guidedStart("request:one");
+    await client.authoringV5Start("request:one");
     expect(calls).toEqual([
       "GET:/workbench/authoring/capabilities:instance:old",
       "GET:/workbench/authoring/capabilities:instance:new",
-      "POST:/workbench/authoring/requests/request%3Aone/start:instance:new"
+      "POST:/workbench/authoring/v5/requests/request%3Aone/start:instance:new"
     ]);
   });
 
@@ -714,7 +173,8 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
 
     const result = await runMastheadCli(["workbench", "--help"], { env: {} });
     for (const command of [
-      "author start", "author inspect", "author save", "author review", "author finish",
+      "author bootstrap", "author start", "author inspect", "author scaffold", "author save", "author finish",
+      "author status", "author receipt",
       "capabilities", "status", "context", "evidence",
       "audit-v1-generation", "prepare-v1-recovery", "invalidate-v1-generation", "restore-v1-recovery",
       "audit-v3-template-generation", "prepare-v3-template-recovery",
@@ -814,7 +274,7 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
 
   test("does not expose a session or multiple-ID guided authoring surface", async () => {
     const result = await runMastheadCli(
-      ["workbench", "author", "start", "--request", "request:one", "--request", "request:two", "--session", "session:a", "--json"],
+      ["workbench", "author", "start", "--request", "authoring-v5-request:one", "--request", "authoring-v5-request:two", "--session", "session:a", "--json"],
       { env: { MASTHEAD_DAEMON_URL: "http://127.0.0.1:1" } }
     );
     expect(result.exitCode).toBe(1);
@@ -838,7 +298,7 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
 
   test("rejects session arguments outside progress-recording inspect before network access", async () => {
     const result = await runMastheadCli(
-      ["workbench", "author", "start", "--request", "request:one", "--session", "session:a", "--json"],
+      ["workbench", "author", "start", "--request", "authoring-v5-request:one", "--session", "session:a", "--json"],
       { env: { MASTHEAD_DAEMON_URL: "http://127.0.0.1:1" } }
     );
     expect(JSON.parse(result.stderr)).toMatchObject({ error: { code: "invalid_argument" } });
@@ -846,12 +306,11 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
 
   test.each([
     { args: ["workbench", "author", "start", "--request", "--json"], option: "--request" },
-    { args: ["workbench", "author", "inspect", "--assignment", "--json"], option: "--assignment" },
-    { args: ["workbench", "author", "inspect", "--assignment", "assignment:one", "--session", "--json"], option: "--session" },
-    { args: ["workbench", "author", "inspect", "--assignment", "assignment:one", "--cursor", "--json"], option: "--cursor" },
-    { args: ["workbench", "author", "save", "--assignment", "assignment:one", "--file", "--json"], option: "--file" },
-    { args: ["workbench", "author", "review", "--assignment", "--json"], option: "--assignment" },
-    { args: ["workbench", "author", "finish", "--assignment", "--json"], option: "--assignment" },
+    { args: ["workbench", "author", "inspect", "--pack", "--json"], option: "--pack" },
+    { args: ["workbench", "author", "inspect", "--pack", "authoring-v5-pack:one", "--session", "--json"], option: "--session" },
+    { args: ["workbench", "author", "inspect", "--pack", "authoring-v5-pack:one", "--cursor", "--json"], option: "--cursor" },
+    { args: ["workbench", "author", "save", "--pack", "authoring-v5-pack:one", "--file", "--json"], option: "--file" },
+    { args: ["workbench", "author", "finish", "--pack", "--json"], option: "--pack" },
     { args: ["workbench", "status", "--run", "--json"], option: "--run" },
     { args: ["workbench", "evidence", "--run", "run", "--session", "--json"], option: "--session" },
     { args: ["workbench", "evidence", "--run", "run", "--session", "session:a", "--cursor", "--json"], option: "--cursor" },
@@ -876,18 +335,18 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
-          bundleVersion: "workbench-authoring-v4",
+          bundleVersion: "workbench-authoring-v5",
           capability: "artifact_authoring",
           command: "/tmp/masthead/bin/mastheadctl",
           baseUrl: "http://127.0.0.1:17373",
           buildSha: "development",
           databaseId: "database",
-          policyVersion: "guided-authoring-v1",
-          maxSessionsPerAssignment: 12,
-          canarySessions: 3,
+          policyVersion: "workbench-authoring-v5",
+          minimumSessionsPerPack: 5,
+          maximumSessionsPerPack: 12,
           instanceId: "instance:test",
           instanceManifest: "/tmp/masthead/masthead-instance.json",
-          operations: ["start", "inspect", "scaffold", "save", "review", "finish"],
+          operations: ["bootstrap", "start", "claim", "inspect", "scaffold", "save", "finish", "status", "receipt"],
           protocol: "masthead.workbench.authoring/v1",
         }),
         { headers: { "content-type": "application/json" }, status: 200 }
@@ -905,7 +364,7 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
     );
   });
 
-  test("catches unexpected failures at the executable boundary", async () => {
+  test("retires legacy assignment mutations at the executable boundary", async () => {
     const binPath = join(process.cwd(), "dist", "daemon", "src", "cli", "mastheadctl.js");
     let failure: { code: number; stderr: string; stdout: string } | undefined;
     try {
@@ -922,7 +381,7 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
     expect(failure?.stdout).toBe("");
     expect(JSON.parse(failure?.stderr ?? "")).toMatchObject({
       ok: false,
-      error: { code: "unhandled_cli_error" }
+      error: { code: "authoring_contract_retired" }
     });
   });
 

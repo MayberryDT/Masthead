@@ -62,7 +62,8 @@ These are the main existing docs this wiki synthesizes:
 - `docs/adr/0011-artifact-first-logbook.md` — Logbook is an artifact book.
 - `docs/adr/0013-canonical-dossier-and-candidate-authoring.md` — preserved original-rendering and evidence findings; its V2 authoring flow is superseded.
 - `docs/adr/0014-agent-led-enriched-artifact-authoring.md` — superseded V3 decision and immutable audit history.
-- `docs/adr/0015-guided-authoring-campaigns.md` — current implemented V4 guided-authoring contract.
+- `docs/adr/0015-guided-authoring-campaigns.md` — superseded V4 audit contract.
+- `docs/adr/0016-agent-led-v5-pack-authoring.md` — current V5 authoring decision.
 - `docs/adr/0009-logbook-only-shows-published-sessions.md` — Workbench pipeline ownership (Logbook unit refined by 0011).
 - `docs/architecture/data-paths.md` — runtime data directory and store ownership.
 - `docs/reference/daemon-api.md` — daemon HTTP API.

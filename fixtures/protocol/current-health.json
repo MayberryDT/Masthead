@@ -25,6 +25,7 @@
     "instanceDir": "/tmp/masthead-fixture",
     "instanceManifest": "/tmp/masthead-fixture/masthead-instance.json",
     "authoringCommand": "/tmp/masthead-fixture/bin/mastheadctl",
+    "authoringContractVersion": "workbench-authoring-v5",
     "startedAt": "2026-06-25T00:00:00.000Z",
     "mode": "primary",
     "writable": true,
