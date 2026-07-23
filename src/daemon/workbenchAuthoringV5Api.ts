@@ -12,6 +12,12 @@ import { normalizeMastheadBaseUrl } from "../shared/instanceIdentity.ts";
 import { isAbsoluteAuthoringCommand } from "../shared/workbenchAuthoring.ts";
 import type { MastheadDatabase } from "./db/sqlite.ts";
 import {
+  getWorkbenchAuthoringV5Pack,
+  getWorkbenchAuthoringV5Request,
+  listWorkbenchAuthoringV5Packs
+} from "./db/workbenchAuthoringV5Repository.ts";
+import { recordWorkbenchActivity } from "./db/workbenchPipelineRepository.ts";
+import {
   bootstrapWorkbenchAuthoringV5Request,
   buildWorkbenchAuthoringV5Scaffold,
   createWorkbenchAuthoringV5Request,
@@ -146,8 +152,90 @@ export function routeWorkbenchAuthoringV5Request(
       status: 200
     };
   } catch (error) {
+    recordWorkbenchAuthoringV5FailureActivity(context, request, error);
     return workbenchAuthoringV5ErrorResult(error);
   }
+}
+
+function recordWorkbenchAuthoringV5FailureActivity(
+  context: WorkbenchAuthoringV5HttpContext,
+  request: { method: string; url: URL; body?: unknown },
+  error: unknown
+): void {
+  try {
+    const target = workbenchAuthoringV5FailureTarget(context.db, request);
+    if (!target || target.sessionIds.length === 0) return;
+    const message = error instanceof Error ? error.message : String(error);
+    const code = message.split(":", 1)[0] || "authoring_v5_request_failed";
+    const identityError = /(?:^|_)identity_(?:mismatch|error|unavailable)$/.test(code);
+    if (!identityError && workbenchAuthoringV5ErrorResult(error).status !== 500) return;
+    const eventType = identityError ? code : "authoring_daemon_error";
+    for (const sessionId of [...new Set(target.sessionIds)]) {
+      const exists = context.db.prepare("SELECT 1 AS present FROM sessions WHERE session_id = ?").get(sessionId);
+      if (!exists) continue;
+      recordWorkbenchActivity(context.db, {
+        actor: { id: target.actorId, kind: "agent" },
+        details: {
+          code,
+          operation: `${request.method} ${request.url.pathname}`,
+          reason: message,
+          ...(target.packId ? { packId: target.packId } : {}),
+          ...(target.requestId ? { requestId: target.requestId } : {})
+        },
+        eventType,
+        ...(target.requestId ? { relatedRunId: target.requestId } : {}),
+        sessionId,
+        summary: identityError ? "V5 authoring identity error" : "V5 authoring daemon error"
+      });
+    }
+  } catch {
+    // Activity is supporting evidence; it must never replace the original API failure.
+  }
+}
+
+function workbenchAuthoringV5FailureTarget(
+  db: MastheadDatabase,
+  request: { method: string; url: URL; body?: unknown }
+): { actorId: string; packId?: string; requestId?: string; sessionIds: string[] } | undefined {
+  const pathname = request.url.pathname;
+  if (pathname === "/workbench/authoring/v5/requests") {
+    const body = request.body && typeof request.body === "object" && !Array.isArray(request.body)
+      ? request.body as Record<string, unknown>
+      : {};
+    return {
+      actorId: optionalString(body.actorId) ?? "workbench",
+      sessionIds: Array.isArray(body.sessionIds)
+        ? body.sessionIds.filter((value): value is string => typeof value === "string")
+        : []
+    };
+  }
+  const requestMatch = pathname.match(/^\/workbench\/authoring\/v5\/requests\/([^/]+)/u);
+  if (requestMatch?.[1]) {
+    const requestId = decodeSegment(requestMatch[1], "requestId");
+    const stored = getWorkbenchAuthoringV5Request(db, requestId);
+    if (!stored) return undefined;
+    const packs = listWorkbenchAuthoringV5Packs(db, requestId);
+    const currentPack = request.method === "POST" && pathname.endsWith("/start")
+      ? packs.find(({ status }) => status === "active") ?? packs.find(({ status }) => status === "available")
+      : undefined;
+    return {
+      actorId: stored.actorId,
+      requestId,
+      sessionIds: currentPack?.sessionIds ?? packs.flatMap(({ sessionIds }) => sessionIds)
+    };
+  }
+  const packMatch = pathname.match(/^\/workbench\/authoring\/v5\/packs\/([^/]+)/u);
+  if (!packMatch?.[1]) return undefined;
+  const packId = decodeSegment(packMatch[1], "packId");
+  const pack = getWorkbenchAuthoringV5Pack(db, packId);
+  if (!pack) return undefined;
+  const stored = getWorkbenchAuthoringV5Request(db, pack.requestId);
+  return stored ? {
+    actorId: stored.actorId,
+    packId,
+    requestId: stored.requestId,
+    sessionIds: pack.sessionIds
+  } : undefined;
 }
 
 export function isWorkbenchAuthoringV5Path(pathname: string): boolean {

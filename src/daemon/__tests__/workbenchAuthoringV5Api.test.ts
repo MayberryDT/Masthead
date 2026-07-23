@@ -70,4 +70,48 @@ describe("Workbench authoring V5 HTTP API", () => {
     });
     db.close();
   });
+
+  test("records later identity failures as canonical session-scoped Activity", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "masthead-authoring-v5-api-error-"));
+    tempDirs.push(directory);
+    const db = await openMastheadDatabase(join(directory, "masthead.sqlite"));
+    migrateDatabase(db);
+    const identity = {
+      baseUrl: "http://127.0.0.1:17373",
+      buildSha: "build:test",
+      databaseId: "database:test",
+      instanceId: "instance:test",
+      instanceManifest: join(directory, "masthead-instance.json")
+    };
+    const context = { authoringCommand: "/opt/masthead/bin/mastheadctl", db, identity };
+    const sessionIds = Array.from({ length: 20 }, (_, index) => `session:v5-api-error:${index}`);
+    sessionIds.forEach((sessionId) => {
+      seedSession(db, { lifecycle: "completed", model: "gpt-5.6-sol", project: "Masthead", sessionId, title: sessionId });
+      markSessionCompileReady(db, sessionId);
+    });
+    const created = routeWorkbenchAuthoringV5Request(context, {
+      body: { expectedIdentity: identity, sessionIds },
+      method: "POST",
+      url: new URL("http://127.0.0.1/workbench/authoring/v5/requests")
+    });
+    const requestId = (created?.body as any).request.requestId as string;
+    const mismatchedIdentity = { ...identity, databaseId: "database:other" };
+
+    const failed = routeWorkbenchAuthoringV5Request(context, {
+      body: { expectedIdentity: mismatchedIdentity },
+      method: "POST",
+      url: new URL(`http://127.0.0.1/workbench/authoring/v5/requests/${encodeURIComponent(requestId)}/start`)
+    });
+
+    expect(failed).toMatchObject({
+      body: { error: { code: "database_identity_mismatch" }, ok: false },
+      status: 409
+    });
+    const failedSessions = db.prepare(
+      `SELECT session_id AS sessionId FROM workbench_activity
+       WHERE related_run_id = ? AND event_type = ? ORDER BY session_id`
+    ).all(requestId, "database_identity_mismatch") as Array<{ sessionId: string }>;
+    expect(failedSessions.map(({ sessionId }) => sessionId)).toEqual(sessionIds.slice(0, 10).sort());
+    db.close();
+  });
 });

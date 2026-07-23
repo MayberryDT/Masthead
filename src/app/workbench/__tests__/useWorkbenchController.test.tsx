@@ -154,16 +154,11 @@ describe("useWorkbenchController", () => {
     })).rejects.toThrow("guided request unavailable");
     await waitFor(() => latest().actionError === "guided request unavailable");
     expect(latest().actionError).toBe("guided request unavailable");
-    expect(latest().activity[0]).toMatchObject({
-      actorKind: "system",
-      details: { reason: "guided request unavailable" },
-      eventType: "authoring_daemon_error",
-      summary: "V5 authoring request could not be created"
-    });
+    expect(latest().activity).toEqual([]);
     expect(createGuidedAuthoringRequest).toHaveBeenCalledTimes(2);
   });
 
-  test("shows instance identity failures in observe-only Workbench Activity", async () => {
+  test("keeps instance identity failures in transient action feedback without inventing Activity", async () => {
     mockWorkbenchResponse([session("session:a", "First session")]);
     vi.mocked(createGuidedAuthoringRequest).mockRejectedValue(new Error("database_identity_mismatch"));
 
@@ -174,15 +169,8 @@ describe("useWorkbenchController", () => {
     await expect(act(async () => {
       await latest().copyAgentPrompt();
     })).rejects.toThrow("database_identity_mismatch");
-    await waitFor(() => latest().activity.length === 1);
-
-    expect(latest().activity[0]).toMatchObject({
-      actorKind: "system",
-      details: { reason: "database_identity_mismatch" },
-      eventType: "database_identity_mismatch",
-      sessionId: "session:a",
-      summary: "V5 authoring request could not use this Masthead instance"
-    });
+    await waitFor(() => latest().actionError === "database_identity_mismatch");
+    expect(latest().activity).toEqual([]);
     expect(latest()).not.toHaveProperty("approveCanary");
     expect(latest()).not.toHaveProperty("rejectCanary");
   });

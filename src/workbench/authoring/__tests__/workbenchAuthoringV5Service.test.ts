@@ -86,7 +86,8 @@ describe("workbench-authoring-v5 loop", () => {
       optionalPolicy: {
         artifactDraft: "allowed_only_when_yes",
         decisions: ["yes", "no"],
-        requiredConsiderationsPerPack: 1
+        maximumConsiderationsPerPack: 3,
+        minimumConsiderationsPerPack: 1
       },
       packPolicy: { fullSelectionRequired: true, maximumSessions: 12, minimumSessions: 5 },
       rejectRules: { behavior: "flag_and_continue" },
@@ -403,6 +404,65 @@ describe("workbench-authoring-v5 loop", () => {
     db.close();
   });
 
+  test("hard-rejects nonspecific descriptions and fewer than three search keywords", async () => {
+    const db = await testDatabase();
+    const sessionIds = Array.from({ length: 9 }, (_, index) => `session:v5:release-bar:${index + 1}`);
+    for (const sessionId of sessionIds) seedCompileReadySession(db, sessionId);
+    db.prepare("UPDATE messages SET text_redacted = ? WHERE session_id = ?").run(
+      "Edit the release article for clarity and correct the prose.",
+      sessionIds[5]
+    );
+    db.prepare("UPDATE messages SET text_redacted = ? WHERE session_id = ?").run(
+      "Please improve the docs.",
+      sessionIds[8]
+    );
+    const created = createWorkbenchAuthoringV5Request(db, {
+      actorId: "agent:test",
+      command,
+      currentIdentity: identity,
+      expectedIdentity: identity,
+      sessionIds
+    });
+    const started = startWorkbenchAuthoringV5Pack(db, {
+      command,
+      currentIdentity: identity,
+      expectedIdentity: identity,
+      requestId: created.request.requestId
+    });
+    if (!("pack" in started)) throw new Error("expected_active_pack");
+    await inspectWholePack(db, started.pack.packId);
+    const authored = authorDraft(buildWorkbenchAuthoringV5Scaffold(db, {
+      command,
+      packId: started.pack.packId
+    }).draft);
+    authored.sessions[0]!.fields.description = "";
+    authored.sessions[1]!.fields.description = "Updated the code.";
+    authored.sessions[2]!.fields.description = "Made some changes.";
+    authored.sessions[3]!.fields.keywords = ["oauth"];
+    authored.sessions[4]!.fields.keywords = ["oauth", "callback"];
+    authored.sessions[8]!.fields.purpose = "Clarify installation instructions for new users.";
+
+    const saved = saveWorkbenchAuthoringV5Draft(db, {
+      command,
+      currentIdentity: identity,
+      draft: authored,
+      expectedIdentity: identity,
+      packId: started.pack.packId
+    });
+    expect(saved.outcomes).toMatchObject([
+      { disposition: "hard_reject", findings: [{ code: "empty_or_generic_description" }] },
+      { disposition: "hard_reject", findings: [{ code: "empty_or_generic_description" }] },
+      { disposition: "hard_reject", findings: [{ code: "empty_or_generic_description" }] },
+      { disposition: "hard_reject", findings: [{ code: "insufficient_keywords" }] },
+      { disposition: "hard_reject", findings: [{ code: "insufficient_keywords" }] },
+      { disposition: "hard_reject", findings: [{ code: "purpose_not_user_ask" }] },
+      { disposition: "publishable", findings: [] },
+      { disposition: "publishable", findings: [] },
+      { disposition: "publishable", findings: [] }
+    ]);
+    db.close();
+  });
+
   test("records a grounded optional considered-no without blocking dossier publication", async () => {
     const db = await testDatabase();
     const sessionIds = Array.from({ length: 5 }, (_, index) => `session:v5:consider-no:${index + 1}`);
@@ -474,7 +534,7 @@ describe("workbench-authoring-v5 loop", () => {
     db.close();
   });
 
-  test("publishes an optional artifact attached to a grounded considered-yes", async () => {
+  test("publishes mixed-kind optional artifacts attached to grounded considered-yes decisions", async () => {
     const db = await testDatabase();
     const sessionIds = Array.from({ length: 5 }, (_, index) => `session:v5:consider-yes:${index + 1}`);
     for (const sessionId of sessionIds) seedCompileReadySession(db, sessionId);
@@ -497,15 +557,27 @@ describe("workbench-authoring-v5 loop", () => {
       command,
       packId: started.pack.packId
     }).draft);
-    const seedSession = authored.sessions[0]!;
-    const evidenceRef = seedSession.evidenceCatalog[0]!.id;
-    authored.optionalConsiderations = [{
-      decision: "yes",
-      evidenceRef,
-      kind: "runbook",
-      reason: "The callback recovery steps form a reusable procedure with an explicit verification boundary."
-    }];
-    authored.optionalArtifacts = [optionalRunbook(seedSession.sessionId, evidenceRef)];
+    const firstSeed = authored.sessions[0]!;
+    const secondSeed = authored.sessions[1]!;
+    const evidenceRef = firstSeed.evidenceCatalog[0]!.id;
+    authored.optionalConsiderations = [
+      {
+        decision: "yes",
+        evidenceRef,
+        kind: "runbook",
+        reason: "The callback recovery steps form a reusable procedure with an explicit verification boundary."
+      },
+      {
+        decision: "yes",
+        evidenceRef: secondSeed.evidenceCatalog[0]!.id,
+        kind: "adr",
+        reason: "The evidence records a durable callback-state decision with alternatives and consequences."
+      }
+    ];
+    authored.optionalArtifacts = [
+      optionalRunbook(firstSeed.sessionId, evidenceRef),
+      optionalAdr(secondSeed.sessionId, secondSeed.evidenceCatalog[0]!.id)
+    ];
 
     const saved = saveWorkbenchAuthoringV5Draft(db, {
       command,
@@ -521,16 +593,19 @@ describe("workbench-authoring-v5 loop", () => {
       expectedIdentity: identity,
       packId: started.pack.packId
     });
-    expect(finished.receipt.counts).toMatchObject({ consideredNo: 0, optionalPublished: 1, published: 5 });
-    expect(finished.receipt.optionalArtifacts).toHaveLength(1);
-    expect(getLogbookArtifactDetail(db, finished.receipt.optionalArtifacts[0]!.artifactId)).toMatchObject({
-      capsule: { kind: "runbook" },
-      publicationStatus: "published"
-    });
+    expect(finished.receipt.counts).toMatchObject({ consideredNo: 0, optionalPublished: 2, published: 5 });
+    expect(finished.receipt.optionalArtifacts).toHaveLength(2);
+    expect(finished.receipt.optionalArtifacts.map(({ kind }) => kind).sort()).toEqual(["adr", "runbook"]);
+    for (const artifact of finished.receipt.optionalArtifacts) {
+      expect(getLogbookArtifactDetail(db, artifact.artifactId)).toMatchObject({
+        capsule: { kind: artifact.kind },
+        publicationStatus: "published"
+      });
+    }
     const optionalActivity = db.prepare(
       "SELECT COUNT(*) AS count FROM workbench_activity WHERE related_run_id = ? AND event_type = ?"
     ).get(created.request.requestId, "authoring_optional_artifact_published") as { count: number };
-    expect(optionalActivity.count).toBe(1);
+    expect(optionalActivity.count).toBe(2);
     db.close();
   });
 });
@@ -596,6 +671,30 @@ function optionalRunbook(
       rootCause: "The callback handler did not preserve the validated state transition.",
       title: "Repair and verify OAuth callback state handling",
       validationChecks: ["The callback regression test passes for valid signed state."]
+    },
+    provenanceSessionIds: [sessionId],
+    seedSessionId: sessionId
+  };
+}
+
+function optionalAdr(
+  sessionId: string,
+  evidenceRef: string
+): WorkbenchAuthoringV5Draft["optionalArtifacts"][number] {
+  return {
+    draftId: `optional-adr:${sessionId}`,
+    kind: "adr",
+    output: {
+      alternatives: ["Allow callback state to remain implicit."],
+      confidence: "medium",
+      consequences: ["Callback state transitions remain explicit and testable."],
+      context: "The callback flow needs a durable rule for preserving validated request state.",
+      decision: "Keep callback state bound to the signed request through token exchange.",
+      evidenceRefs: [evidenceRef],
+      missingEvidence: [],
+      provenanceSessionIds: [sessionId],
+      status: "accepted",
+      title: "Preserve signed callback state through token exchange"
     },
     provenanceSessionIds: [sessionId],
     seedSessionId: sessionId

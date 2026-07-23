@@ -11,13 +11,26 @@ const GENERIC_TITLES = new Set([
   "session", "session narrative", "session work", "untitled session", "work completed"
 ]);
 
+const GENERIC_DESCRIPTIONS = new Set([
+  "changes made", "implemented changes", "session completed", "task completed", "updated code", "work completed"
+]);
+
+const GENERIC_DESCRIPTION_TOKENS = new Set([
+  "change", "changed", "changes", "code", "complete", "completed", "did", "done", "implemented", "made",
+  "request", "requested", "session", "some", "task", "the", "update", "updated", "updates", "work"
+]);
+
 const PURPOSE_DOMAINS = {
   authentication: ["auth", "authentication", "callback", "login", "nonce", "oauth", "redirect", "session", "token"],
   billing: ["billing", "checkout", "invoice", "payment", "stripe", "subscription"],
   database: ["backup", "database", "migration", "postgres", "postgresql", "query", "recovery", "replication", "schema", "sql", "sqlite"],
   deployment: ["container", "deploy", "deployment", "docker", "kubernetes", "release", "rollout"],
+  documentation: ["article", "copy", "docs", "documentation", "guide", "prose", "readme", "writing"],
   interface: ["button", "component", "css", "interface", "layout", "react", "responsive", "ui"],
-  networking: ["certificate", "dns", "http", "network", "proxy", "tls"]
+  networking: ["certificate", "dns", "http", "network", "proxy", "tls"],
+  performance: ["benchmark", "latency", "memory", "performance", "profile", "slow", "throughput"],
+  sourceControl: ["branch", "commit", "git", "merge", "rebase", "repository", "worktree"],
+  testing: ["assertion", "coverage", "fixture", "spec", "test", "testing", "vitest"]
 } as const;
 
 export function classifyWorkbenchAuthoringV5Session(
@@ -30,6 +43,12 @@ export function classifyWorkbenchAuthoringV5Session(
       message: "Title must name the session's specific user work."
     });
   }
+  if (isEmptyOrGenericDescription(session.fields.description)) {
+    findings.push({
+      code: "empty_or_generic_description",
+      message: "Description must summarize the session's specific user work."
+    });
+  }
   const proseFields = [session.fields.title, session.fields.description, session.fields.purpose];
   if (proseFields.some(isProtocolOrCompactionBoilerplate)) {
     findings.push({
@@ -37,10 +56,16 @@ export function classifyWorkbenchAuthoringV5Session(
       message: "Summary and purpose must describe the user's work, not authoring protocol, compaction, or pack mechanics."
     });
   }
-  if (!session.fields.keywords.some((keyword) => keyword.trim())) {
+  const keywordCount = new Set(session.fields.keywords.map((keyword) => keyword.trim().toLowerCase()).filter(Boolean)).size;
+  if (keywordCount === 0) {
     findings.push({
       code: "empty_keywords",
-      message: "At least one specific search keyword is required."
+      message: "At least three specific search keywords are required."
+    });
+  } else if (keywordCount < 3) {
+    findings.push({
+      code: "insufficient_keywords",
+      message: "At least three distinct search keywords are required."
     });
   }
   if (purposeClearlyMissesUserAsk(session)) {
@@ -92,11 +117,12 @@ function isProtocolOrCompactionBoilerplate(value: string): boolean {
 }
 
 function purposeClearlyMissesUserAsk(session: WorkbenchAuthoringV5Draft["sessions"][number]): boolean {
-  const purposeDomains = domainsForText(session.fields.purpose);
-  const userAskDomains = domainsForText(session.evidenceCatalog
+  const userAsk = session.evidenceCatalog
     .filter(({ role }) => role === "user")
     .map(({ text }) => text)
-    .join(" "));
+    .join(" ");
+  const purposeDomains = domainsForText(session.fields.purpose);
+  const userAskDomains = domainsForText(userAsk);
   return purposeDomains.size > 0 && userAskDomains.size > 0 &&
     [...purposeDomains].every((domain) => !userAskDomains.has(domain));
 }
@@ -136,4 +162,12 @@ function isEmptyOrGenericTitle(value: string, sessionId: string): boolean {
   const normalized = value.replace(/\s+/g, " ").trim().toLowerCase().replace(/[.!?]+$/g, "");
   return !/[a-z0-9]/i.test(normalized) || normalized === sessionId.toLowerCase() || GENERIC_TITLES.has(normalized) ||
     /^(?:codex|claude|cursor|masthead)?\s*(?:work\s*)?session\s*\d*$/i.test(normalized);
+}
+
+function isEmptyOrGenericDescription(value: string): boolean {
+  const normalized = value.replace(/\s+/g, " ").trim().toLowerCase().replace(/[.!?]+$/g, "");
+  if (!/[a-z0-9]/i.test(normalized) || GENERIC_DESCRIPTIONS.has(normalized)) return true;
+  const specificTokens = (normalized.match(/[a-z0-9]+/g) ?? [])
+    .filter((token) => !GENERIC_DESCRIPTION_TOKENS.has(token) && !/^\d+$/.test(token));
+  return new Set(specificTokens).size < 2;
 }

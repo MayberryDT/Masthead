@@ -145,9 +145,10 @@ export function bootstrapWorkbenchAuthoringV5Request(
       fullSelectionRequired: true
     },
     optionalPolicy: {
-      requiredConsiderationsPerPack: 1 as const,
+      minimumConsiderationsPerPack: 1 as const,
+      maximumConsiderationsPerPack: 3 as const,
       decisions: ["yes", "no"] as const,
-      reason: "One grounded line; evidenceRef is optional.",
+      reason: "One grounded line per considered kind; evidenceRef is optional.",
       artifactDraft: "allowed_only_when_yes" as const,
       blocksDossierPublication: false as const
     },
@@ -504,23 +505,27 @@ function parseWorkbenchAuthoringV5Draft(
       throw new Error("invalid_workbench_authoring_v5_fields");
     }
   }
-  if (value.optionalConsiderations.length !== 1) {
+  if (value.optionalConsiderations.length < 1 || value.optionalConsiderations.length > 3) {
     throw new Error("invalid_workbench_authoring_v5_optional_consideration");
   }
-  const consideration = value.optionalConsiderations[0]!;
-  if (!isOptionalConsideration(consideration)) {
+  if (value.optionalConsiderations.some((consideration) => !isOptionalConsideration(consideration))) {
+    throw new Error("invalid_workbench_authoring_v5_optional_consideration");
+  }
+  const considerationByKind = new Map(value.optionalConsiderations.map((consideration) => [consideration.kind, consideration]));
+  if (considerationByKind.size !== value.optionalConsiderations.length) {
     throw new Error("invalid_workbench_authoring_v5_optional_consideration");
   }
   const canonicalIds = new Set(value.sessions.flatMap(({ evidenceCatalog }) => evidenceCatalog.map(({ id }) => id)));
-  if (consideration.evidenceRef && !canonicalIds.has(consideration.evidenceRef)) {
+  if (value.optionalConsiderations.some(({ evidenceRef }) => evidenceRef && !canonicalIds.has(evidenceRef))) {
     throw new Error("invalid_workbench_authoring_v5_optional_evidence_ref");
   }
-  if (consideration.decision === "no" && value.optionalArtifacts.length > 0) {
+  if (value.optionalArtifacts.some((artifact) => (
+    !isOptionalArtifactDraft(artifact, considerationByKind.get(artifact.kind), pack.sessionIds, value.sessions)
+  ))) {
     throw new Error("invalid_workbench_authoring_v5_optional_artifact");
   }
-  if (value.optionalArtifacts.length > 1 || value.optionalArtifacts.some((artifact) => (
-    !isOptionalArtifactDraft(artifact, consideration, pack.sessionIds, value.sessions)
-  ))) {
+  const draftIds = value.optionalArtifacts.map(({ draftId }) => draftId);
+  if (new Set(draftIds).size !== draftIds.length) {
     throw new Error("invalid_workbench_authoring_v5_optional_artifact");
   }
   return structuredClone(value);
@@ -546,11 +551,11 @@ function isOptionalConsideration(value: unknown): value is WorkbenchAuthoringV5O
 
 function isOptionalArtifactDraft(
   value: unknown,
-  consideration: WorkbenchAuthoringV5OptionalConsideration,
+  consideration: WorkbenchAuthoringV5OptionalConsideration | undefined,
   packSessionIds: string[],
   sessions: WorkbenchAuthoringV5Draft["sessions"]
 ): value is WorkbenchAuthoringV5Draft["optionalArtifacts"][number] {
-  if (!value || typeof value !== "object" || Array.isArray(value) || consideration.decision !== "yes") return false;
+  if (!value || typeof value !== "object" || Array.isArray(value) || consideration?.decision !== "yes") return false;
   const artifact = value as Record<string, unknown>;
   const provenanceSessionIds = isStringArray(artifact.provenanceSessionIds) ? artifact.provenanceSessionIds : undefined;
   if (

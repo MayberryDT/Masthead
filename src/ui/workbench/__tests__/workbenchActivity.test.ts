@@ -53,6 +53,13 @@ describe("workbenchActivityTone", () => {
     })).toBe("The daemon instance changed while the request was active.");
     expect(workbenchActivityReason({ details: {}, eventType: "authoring_session_published" })).toBeUndefined();
   });
+
+  test("does not translate unproduced authoring event aliases", () => {
+    expect(workbenchActivityLabel("optional_considered_no")).toBe("optional_considered_no");
+    expect(workbenchActivityLabel("authoring_optional_artifact_considered_no"))
+      .toBe("authoring_optional_artifact_considered_no");
+    expect(workbenchActivityLabel("daemon_error")).toBe("daemon_error");
+  });
 });
 
 describe("formatWorkbenchActivityTime", () => {
