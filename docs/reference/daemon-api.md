@@ -44,7 +44,10 @@ Clients should reject a daemon that does not identify `product: "masthead"` with
   the live `workbench-authoring-v5` bundle, fixed pack bounds, and V5 operations.
   Bridge-safe read.
 - `GET /workbench/authoring/v5/requests/:requestId/bootstrap` returns the thick skill contract,
-  pack policy, reject/flag policy, stable instance identity, request state, and one next action.
+  pack policy, reject/flag policy, optional-artifact consider policy, stable instance identity,
+  request state, and one next action. Every pack requires one grounded one-line
+  `optionalConsiderations` entry with `decision: "yes" | "no"`; `evidenceRef` is optional, a valid
+  `no` never blocks dossier publication, and an optional artifact draft is allowed only for `yes`.
   Request status at `GET /workbench/authoring/v5/requests/:requestId`, immutable completion receipts
   at `/receipt`, and blank evidence-catalog scaffolds at
   `GET /workbench/authoring/v5/packs/:packId/scaffold` are bridge-safe reads.
@@ -121,9 +124,15 @@ Write endpoints are local daemon operations. They are not exposed through MCP.
   instance-bound `mastheadctl workbench author bootstrap --request <id> --json` command.
 - `POST /workbench/authoring/v5/requests/:requestId/start` starts or crash-resumes the current pack.
   `POST /workbench/authoring/v5/packs/:packId/draft` saves per-session
-  `publishable | soft_flag | hard_reject` outcomes without freezing the request, and
-  `POST /workbench/authoring/v5/packs/:packId/finish` atomically publishes passers, records rejects,
-  releases the next pack, and returns idempotent pack/request receipts. All are primary-only.
+  `publishable | soft_flag | hard_reject` outcomes without freezing the request. Hard rejects cover
+  empty/generic titles, protocol/compaction/cron boilerplate, empty keywords, a clearly unrelated
+  purpose, missing core-field grounding, and unknown canonical refs. Weak verification wording and
+  thin key work are soft flags; honest unrun-verification boundaries remain publishable. Grounding
+  refs apply only to title, description, purpose, outcome, key work, and verification—not every
+  nested field. `POST /workbench/authoring/v5/packs/:packId/finish` atomically publishes passers,
+  records rejects, publishes any attached optional artifact, releases the next pack, and returns
+  idempotent pack/request receipts with dossier, reject, soft-flag, considered-no, and optional
+  publication counts. All are primary-only.
 - The V5 CLI loop is `bootstrap` → `start`/`claim` → `inspect` → `scaffold --file` → `save --file` →
   `finish`, with `status` and `receipt` reads by request ID.
 

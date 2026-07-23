@@ -1,5 +1,6 @@
 import type { GuidedAuthoringExpectedIdentity } from "./instanceIdentity.ts";
 import type { SessionTranscriptItem } from "./sessionTranscript.ts";
+import type { WorkbenchAutomaticArtifactKind } from "./workbenchAuthoring.ts";
 
 export const WORKBENCH_AUTHORING_V5_VERSION = "workbench-authoring-v5" as const;
 export const WORKBENCH_AUTHORING_V5_OPERATIONS = [
@@ -20,6 +21,18 @@ export type WorkbenchAuthoringV5CapabilitiesDto = GuidedAuthoringExpectedIdentit
 export type WorkbenchAuthoringV5RequestStatus = "open" | "active" | "completed" | "cancelled";
 export type WorkbenchAuthoringV5PackStatus = "pending" | "available" | "active" | "saved" | "completed";
 export type WorkbenchAuthoringV5Disposition = "publishable" | "soft_flag" | "hard_reject";
+export const WORKBENCH_AUTHORING_V5_HARD_REJECT_CODES = [
+  "empty_or_generic_title",
+  "protocol_or_compaction_boilerplate",
+  "empty_keywords",
+  "purpose_not_user_ask",
+  "missing_core_field_grounding",
+  "unknown_canonical_evidence_ref"
+] as const;
+export const WORKBENCH_AUTHORING_V5_SOFT_FLAG_CODES = ["weak_verification", "thin_key_work"] as const;
+export type WorkbenchAuthoringV5FindingCode =
+  | typeof WORKBENCH_AUTHORING_V5_HARD_REJECT_CODES[number]
+  | typeof WORKBENCH_AUTHORING_V5_SOFT_FLAG_CODES[number];
 export type WorkbenchAuthoringV5NextActionKind =
   | "start" | "inspect" | "scaffold" | "save" | "finish" | "claim_next" | "complete";
 
@@ -89,6 +102,21 @@ export type WorkbenchAuthoringV5Fields = {
   };
 };
 
+export type WorkbenchAuthoringV5OptionalConsideration = {
+  kind: WorkbenchAutomaticArtifactKind;
+  decision: "yes" | "no";
+  reason: string;
+  evidenceRef?: string;
+};
+
+export type WorkbenchAuthoringV5OptionalArtifactDraft = {
+  draftId: string;
+  kind: WorkbenchAutomaticArtifactKind;
+  seedSessionId: string;
+  provenanceSessionIds: string[];
+  output: Record<string, unknown>;
+};
+
 export type WorkbenchAuthoringV5Draft = {
   bundleVersion: typeof WORKBENCH_AUTHORING_V5_VERSION;
   packId: string;
@@ -98,14 +126,14 @@ export type WorkbenchAuthoringV5Draft = {
     fields: WorkbenchAuthoringV5Fields;
     evidenceCatalog: WorkbenchAuthoringV5EvidenceCatalogItem[];
   }>;
-  optionalConsiderations: [];
-  optionalArtifacts: [];
+  optionalConsiderations: WorkbenchAuthoringV5OptionalConsideration[];
+  optionalArtifacts: WorkbenchAuthoringV5OptionalArtifactDraft[];
 };
 
 export type WorkbenchAuthoringV5SessionOutcome = {
   sessionId: string;
   disposition: WorkbenchAuthoringV5Disposition;
-  findings: Array<{ code: string; message: string }>;
+  findings: Array<{ code: WorkbenchAuthoringV5FindingCode; message: string }>;
 };
 
 export type WorkbenchAuthoringV5PackReceipt = {
@@ -116,7 +144,21 @@ export type WorkbenchAuthoringV5PackReceipt = {
   evidenceRevision: string;
   outcomes: WorkbenchAuthoringV5SessionOutcome[];
   publishedArtifacts: Array<{ artifactId: string; kind: "session_dossier"; sessionIds: string[] }>;
-  counts: { attempted: number; published: number; softFlagged: number; rejected: number };
+  optionalArtifacts: Array<{
+    artifactId: string;
+    draftId: string;
+    kind: WorkbenchAutomaticArtifactKind;
+    sessionIds: string[];
+  }>;
+  optionalConsiderations: WorkbenchAuthoringV5OptionalConsideration[];
+  counts: {
+    attempted: number;
+    published: number;
+    softFlagged: number;
+    rejected: number;
+    optionalPublished: number;
+    consideredNo: number;
+  };
   completedAt: string;
 };
 

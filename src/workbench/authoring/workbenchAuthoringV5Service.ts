@@ -24,10 +24,13 @@ import type { EvidenceRef } from "../../core/types.ts";
 import type { DurableSessionEnrichment } from "../../shared/sessionEnrichment.ts";
 import {
   WORKBENCH_AUTHORING_V5_VERSION,
+  WORKBENCH_AUTHORING_V5_HARD_REJECT_CODES,
+  WORKBENCH_AUTHORING_V5_SOFT_FLAG_CODES,
   type WorkbenchAuthoringV5Draft,
   type WorkbenchAuthoringV5EvidenceCatalogItem,
   type WorkbenchAuthoringV5Fields,
   type WorkbenchAuthoringV5NextAction,
+  type WorkbenchAuthoringV5OptionalConsideration,
   type WorkbenchAuthoringV5PackReceipt,
   type WorkbenchAuthoringV5RequestReceipt,
   type WorkbenchAuthoringV5SessionOutcome
@@ -43,8 +46,10 @@ import * as workbenchAuthoringV5Quality from "./workbenchAuthoringV5Quality.ts";
 import {
   applyGuidedSessionEnrichmentInTransaction,
   publishStagedGuidedArtifactsInTransaction,
-  stageWorkbenchAuthoringV5CanonicalDossiersInTransaction
+  stageWorkbenchAuthoringV5CanonicalDossiersInTransaction,
+  stageWorkbenchAuthoringV5OptionalArtifactsInTransaction
 } from "./authoringService.ts";
+import { validateWorkbenchOutput } from "../validation.ts";
 
 const MINIMUM_PACK_SIZE = 5;
 const MAXIMUM_PACK_SIZE = 12;
@@ -139,10 +144,17 @@ export function bootstrapWorkbenchAuthoringV5Request(
       opportunityJoinRequired: false,
       fullSelectionRequired: true
     },
+    optionalPolicy: {
+      requiredConsiderationsPerPack: 1 as const,
+      decisions: ["yes", "no"] as const,
+      reason: "One grounded line; evidenceRef is optional.",
+      artifactDraft: "allowed_only_when_yes" as const,
+      blocksDossierPublication: false as const
+    },
     rejectRules: {
       behavior: "flag_and_continue" as const,
-      hardReject: ["empty_or_generic_title", "protocol_or_compaction_summary", "empty_keywords", "purpose_not_user_ask"],
-      softFlag: ["weak_verification", "thin_key_work"],
+      hardReject: WORKBENCH_AUTHORING_V5_HARD_REJECT_CODES,
+      softFlag: WORKBENCH_AUTHORING_V5_SOFT_FLAG_CODES,
       requestFreezeOnReject: false
     },
     request,
@@ -324,18 +336,27 @@ export function finishWorkbenchAuthoringV5Pack(
       evidenceRevision: pack.evidenceRevision,
       sessionIds: publishable.map(({ sessionId }) => sessionId)
     });
-    const published = publishStagedGuidedArtifactsInTransaction(db, { dossierArtifacts, optionalArtifacts: [] });
+    const optionalArtifacts = stageWorkbenchAuthoringV5OptionalArtifactsInTransaction(db, {
+      actorId: request.actorId,
+      artifacts: saved.draft.optionalArtifacts,
+      sessionIds: pack.sessionIds
+    });
+    const published = publishStagedGuidedArtifactsInTransaction(db, { dossierArtifacts, optionalArtifacts });
     const completedAt = new Date().toISOString();
     const packReceipt: WorkbenchAuthoringV5PackReceipt = {
       completedAt,
       counts: {
         attempted: saved.outcomes.length,
+        consideredNo: saved.draft.optionalConsiderations.filter(({ decision }) => decision === "no").length,
+        optionalPublished: optionalArtifacts.length,
         published: publishable.length,
         rejected: saved.outcomes.filter(({ disposition }) => disposition === "hard_reject").length,
         softFlagged: saved.outcomes.filter(({ disposition }) => disposition === "soft_flag").length
       },
       draftRevision: pack.currentDraftRevision,
       evidenceRevision: pack.evidenceRevision,
+      optionalArtifacts: published.publishedArtifacts.filter(({ kind }) => kind !== "session_dossier") as WorkbenchAuthoringV5PackReceipt["optionalArtifacts"],
+      optionalConsiderations: saved.draft.optionalConsiderations,
       outcomes: saved.outcomes,
       packId: pack.packId,
       publishedArtifacts: published.publishedArtifacts.filter(({ kind }) => kind === "session_dossier") as WorkbenchAuthoringV5PackReceipt["publishedArtifacts"],
@@ -348,7 +369,7 @@ export function finishWorkbenchAuthoringV5Pack(
     const hasLaterPack = listWorkbenchAuthoringV5Packs(db, pack.requestId)
       .some(({ ordinal, status }) => ordinal > pack.ordinal && status === "pending");
     const requestReceipt = hasLaterPack ? undefined : requestReceiptFrom([...completedReceipts, packReceipt], completedAt, pack.requestId);
-    recordFinishActivity(db, request.actorId, packReceipt, Boolean(requestReceipt));
+    recordFinishActivity(db, request.actorId, packReceipt, saved.draft, Boolean(requestReceipt));
     completeWorkbenchAuthoringV5PackRecord(db, { packReceipt, ...(requestReceipt ? { requestReceipt } : {}) });
     bumpDataRevisionInTransaction(db, "logbook");
     bumpDataRevisionInTransaction(db, "workbench");
@@ -457,7 +478,8 @@ function parseWorkbenchAuthoringV5Draft(
   pack: ReturnType<typeof requireWorkbenchAuthoringV5Pack>
 ): WorkbenchAuthoringV5Draft {
   if (!value || value.bundleVersion !== WORKBENCH_AUTHORING_V5_VERSION || value.packId !== pack.packId ||
-      value.evidenceRevision !== pack.evidenceRevision || !Array.isArray(value.sessions)) {
+      value.evidenceRevision !== pack.evidenceRevision || !Array.isArray(value.sessions) ||
+      !Array.isArray(value.optionalConsiderations) || !Array.isArray(value.optionalArtifacts)) {
     throw new Error("invalid_workbench_authoring_v5_bundle");
   }
   if (value.sessions.length !== pack.sessionIds.length ||
@@ -482,11 +504,81 @@ function parseWorkbenchAuthoringV5Draft(
       throw new Error("invalid_workbench_authoring_v5_fields");
     }
   }
+  if (value.optionalConsiderations.length !== 1) {
+    throw new Error("invalid_workbench_authoring_v5_optional_consideration");
+  }
+  const consideration = value.optionalConsiderations[0]!;
+  if (!isOptionalConsideration(consideration)) {
+    throw new Error("invalid_workbench_authoring_v5_optional_consideration");
+  }
+  const canonicalIds = new Set(value.sessions.flatMap(({ evidenceCatalog }) => evidenceCatalog.map(({ id }) => id)));
+  if (consideration.evidenceRef && !canonicalIds.has(consideration.evidenceRef)) {
+    throw new Error("invalid_workbench_authoring_v5_optional_evidence_ref");
+  }
+  if (consideration.decision === "no" && value.optionalArtifacts.length > 0) {
+    throw new Error("invalid_workbench_authoring_v5_optional_artifact");
+  }
+  if (value.optionalArtifacts.length > 1 || value.optionalArtifacts.some((artifact) => (
+    !isOptionalArtifactDraft(artifact, consideration, pack.sessionIds, value.sessions)
+  ))) {
+    throw new Error("invalid_workbench_authoring_v5_optional_artifact");
+  }
   return structuredClone(value);
 }
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function isOptionalConsideration(value: unknown): value is WorkbenchAuthoringV5OptionalConsideration {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const consideration = value as Record<string, unknown>;
+  const reason = typeof consideration.reason === "string" ? consideration.reason.trim() : "";
+  return (
+    ["runbook", "adr", "incident_timeline"].includes(String(consideration.kind)) &&
+    (consideration.decision === "yes" || consideration.decision === "no") &&
+    reason.length >= 20 && reason.length <= 240 && !/[\r\n]/.test(reason) &&
+    (consideration.evidenceRef === undefined || (
+      typeof consideration.evidenceRef === "string" && Boolean(consideration.evidenceRef.trim())
+    ))
+  );
+}
+
+function isOptionalArtifactDraft(
+  value: unknown,
+  consideration: WorkbenchAuthoringV5OptionalConsideration,
+  packSessionIds: string[],
+  sessions: WorkbenchAuthoringV5Draft["sessions"]
+): value is WorkbenchAuthoringV5Draft["optionalArtifacts"][number] {
+  if (!value || typeof value !== "object" || Array.isArray(value) || consideration.decision !== "yes") return false;
+  const artifact = value as Record<string, unknown>;
+  const provenanceSessionIds = isStringArray(artifact.provenanceSessionIds) ? artifact.provenanceSessionIds : undefined;
+  if (
+    typeof artifact.draftId !== "string" || !artifact.draftId.trim() ||
+    artifact.kind !== consideration.kind ||
+    typeof artifact.seedSessionId !== "string" ||
+    !packSessionIds.includes(artifact.seedSessionId) ||
+    !provenanceSessionIds || provenanceSessionIds.length === 0 ||
+    new Set(provenanceSessionIds).size !== provenanceSessionIds.length ||
+    !provenanceSessionIds.includes(artifact.seedSessionId) ||
+    provenanceSessionIds.some((sessionId) => !packSessionIds.includes(sessionId)) ||
+    !artifact.output || typeof artifact.output !== "object" || Array.isArray(artifact.output)
+  ) return false;
+  const output = artifact.output as Record<string, unknown>;
+  if (!validateWorkbenchOutput(artifact.kind as "runbook" | "adr" | "incident_timeline", output).ok) return false;
+  if (!sameStrings(output.provenanceSessionIds, provenanceSessionIds)) return false;
+  const refs = isStringArray(output.evidenceRefs) ? output.evidenceRefs : [];
+  const evidenceOwners = new Map(sessions.flatMap(({ evidenceCatalog, sessionId }) => (
+    evidenceCatalog.map(({ id }) => [id, sessionId] as const)
+  )));
+  return refs.length > 0 && refs.every((ref) => {
+    const owner = evidenceOwners.get(ref);
+    return owner !== undefined && provenanceSessionIds.includes(owner);
+  });
+}
+
+function sameStrings(value: unknown, expected: string[]): boolean {
+  return isStringArray(value) && value.length === expected.length && value.every((item, index) => item === expected[index]);
 }
 
 // Kept separate so S4 can replace classification without changing save/finish state transitions.
@@ -517,6 +609,7 @@ function recordFinishActivity(
   db: MastheadDatabase,
   actorId: string,
   receipt: WorkbenchAuthoringV5PackReceipt,
+  draft: WorkbenchAuthoringV5Draft,
   requestCompleted: boolean
 ): void {
   const actor = { id: actorId, kind: "agent" } as const;
@@ -569,6 +662,29 @@ function recordFinishActivity(
         summary: "V5 authoring request completed"
       });
     }
+  }
+  for (const consideration of receipt.optionalConsiderations.filter(({ decision }) => decision === "no")) {
+    const sessionId = draft.sessions.find(({ evidenceCatalog }) => (
+      consideration.evidenceRef && evidenceCatalog.some(({ id }) => id === consideration.evidenceRef)
+    ))?.sessionId ?? draft.sessions[0]!.sessionId;
+    recordWorkbenchActivity(db, {
+      actor,
+      details: { ...consideration, packId: receipt.packId, requestId: receipt.requestId },
+      eventType: "authoring_optional_considered_no",
+      relatedRunId: receipt.requestId,
+      sessionId,
+      summary: `V5 optional ${consideration.kind} considered and declined`
+    });
+  }
+  for (const artifact of receipt.optionalArtifacts) {
+    recordWorkbenchActivity(db, {
+      actor,
+      details: { ...artifact, packId: receipt.packId, requestId: receipt.requestId },
+      eventType: "authoring_optional_artifact_published",
+      relatedRunId: receipt.requestId,
+      sessionId: artifact.sessionIds[0] ?? draft.sessions[0]!.sessionId,
+      summary: `V5 optional ${artifact.kind} published`
+    });
   }
 }
 
@@ -623,8 +739,8 @@ function requestReceiptFrom(
     completedAt,
     counts: {
       attempted: receipts.reduce((sum, receipt) => sum + receipt.counts.attempted, 0),
-      consideredNo: 0,
-      optionalPublished: 0,
+      consideredNo: receipts.reduce((sum, receipt) => sum + receipt.counts.consideredNo, 0),
+      optionalPublished: receipts.reduce((sum, receipt) => sum + receipt.counts.optionalPublished, 0),
       published: receipts.reduce((sum, receipt) => sum + receipt.counts.published, 0),
       rejected: receipts.reduce((sum, receipt) => sum + receipt.counts.rejected, 0),
       softFlagged: receipts.reduce((sum, receipt) => sum + receipt.counts.softFlagged, 0)
