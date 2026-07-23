@@ -39,4 +39,6 @@ test("keeps the V5 clipboard handoff to the request id and instance-bound bootst
   expect(text).not.toContain("sessionIds");
   expect(text).not.toContain("guided authoring");
   expect(text).not.toContain("claimSupport");
+  expect(text.toLowerCase()).not.toMatch(/worker|nested agent|sub-agent|multi-agent/);
+  expect(text.split("\n")).toHaveLength(2);
 });

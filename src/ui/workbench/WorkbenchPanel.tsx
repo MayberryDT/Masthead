@@ -2,7 +2,12 @@ import { useEffect, useId, useRef, useState } from "react";
 import type { WorkbenchActionKind, UseWorkbenchControllerResult } from "../../app/workbench/useWorkbenchController";
 import { AppButton } from "../primitives/AppButton";
 import { useNewItemIds } from "../motion/useNewItemIds";
-import { formatWorkbenchActivityTime, workbenchActivityTone } from "./workbenchActivity";
+import {
+  formatWorkbenchActivityTime,
+  workbenchActivityLabel,
+  workbenchActivityReason,
+  workbenchActivityTone
+} from "./workbenchActivity";
 import { sanitizeWorkbenchVisibleText } from "./workbenchHandoff";
 
 type WorkbenchPanelProps = Partial<
@@ -597,26 +602,32 @@ export function WorkbenchPanel({
                 <p className="workbench-muted">No activity yet</p>
               ) : (
                 <ol className="workbench-activity-list">
-                  {activity.map((item) => (
-                    <li
-                      key={item.activityId}
-                      className={`workbench-activity-item is-${workbenchActivityTone(item.eventType)} ${newActivityIds.has(item.activityId) ? "is-new" : ""}`.trim()}
-                    >
-                      <span className="workbench-activity-gutter" aria-hidden="true" />
-                      <div className="workbench-activity-body">
-                        <div className="workbench-activity-meta">
-                          <time dateTime={item.eventAt}>{formatWorkbenchActivityTime(item.eventAt)}</time>
-                          <span className="workbench-activity-type">
-                            {sanitizeWorkbenchVisibleText(item.eventType)}
-                          </span>
-                          <span className="workbench-activity-actor">
-                            {sanitizeWorkbenchVisibleText(item.actorId ?? item.actorKind)}
-                          </span>
+                  {activity.map((item) => {
+                    const reason = workbenchActivityReason(item);
+                    return (
+                      <li
+                        key={item.activityId}
+                        className={`workbench-activity-item is-${workbenchActivityTone(item.eventType)} ${newActivityIds.has(item.activityId) ? "is-new" : ""}`.trim()}
+                      >
+                        <span className="workbench-activity-gutter" aria-hidden="true" />
+                        <div className="workbench-activity-body">
+                          <div className="workbench-activity-meta">
+                            <time dateTime={item.eventAt}>{formatWorkbenchActivityTime(item.eventAt)}</time>
+                            <span className="workbench-activity-type">
+                              {sanitizeWorkbenchVisibleText(workbenchActivityLabel(item.eventType))}
+                            </span>
+                            <span className="workbench-activity-actor">
+                              {sanitizeWorkbenchVisibleText(item.actorId ?? item.actorKind)}
+                            </span>
+                          </div>
+                          <p className="workbench-activity-summary">{sanitizeWorkbenchVisibleText(item.summary)}</p>
+                          {reason ? (
+                            <p className="workbench-activity-reason">{sanitizeWorkbenchVisibleText(reason)}</p>
+                          ) : null}
                         </div>
-                        <p className="workbench-activity-summary">{sanitizeWorkbenchVisibleText(item.summary)}</p>
-                      </div>
-                    </li>
-                  ))}
+                      </li>
+                    );
+                  })}
                 </ol>
               )}
             </div>

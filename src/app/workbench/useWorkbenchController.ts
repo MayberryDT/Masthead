@@ -105,6 +105,7 @@ export function useWorkbenchController({
   const [total, setTotal] = useState(0);
   const pageSize = WORKBENCH_PAGE_SIZE;
   const loadRequestId = useRef(0);
+  const localActivitySequenceRef = useRef(0);
   const copyRequestInFlightRef = useRef<Promise<string> | null>(null);
   const selectedSessionIdsRef = useRef(selectedSessionIds);
   selectedSessionIdsRef.current = selectedSessionIds;
@@ -233,7 +234,13 @@ export function useWorkbenchController({
         });
         return buildWorkbenchHandoff({ capabilities, request });
       } catch (copyError) {
-        setActionError(formatActionError(copyError));
+        const formattedError = formatActionError(copyError);
+        setActionError(formattedError);
+        localActivitySequenceRef.current += 1;
+        setActivity((current) => [
+          authoringFailureActivity(formattedError, sessionIds, localActivitySequenceRef.current),
+          ...current
+        ]);
         throw copyError;
       } finally {
         setActionBusy(false);
@@ -554,4 +561,31 @@ function formatActionError(error: unknown): string {
     return "Enroll is unavailable until the Masthead daemon is restarted with the latest build.";
   }
   return message;
+}
+
+function authoringFailureActivity(
+  reason: string,
+  sessionIds: string[],
+  sequence: number
+): WorkbenchActivityDto {
+  const identityEventType = authoringIdentityFailureEventType(reason);
+  const eventAt = new Date().toISOString();
+  return {
+    activityId: `activity:workbench-ui-authoring-error:${eventAt}:${sequence}`,
+    actorId: "masthead",
+    actorKind: "system",
+    details: { reason, selectedSessionCount: sessionIds.length },
+    eventAt,
+    eventType: identityEventType ?? "authoring_daemon_error",
+    sessionId: sessionIds[0] ?? "",
+    summary: identityEventType
+      ? "V5 authoring request could not use this Masthead instance"
+      : "V5 authoring request could not be created"
+  };
+}
+
+function authoringIdentityFailureEventType(reason: string): string | undefined {
+  return reason.match(
+    /\b(?:base_url|database|build|manifest|instance)_identity_mismatch\b|\bauthoring_identity_(?:mismatch|unavailable)\b/i
+  )?.[0]?.toLowerCase();
 }
