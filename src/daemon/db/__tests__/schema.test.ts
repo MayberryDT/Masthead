@@ -783,7 +783,7 @@ describe("daemon database schema", () => {
     db.close();
   });
 
-  test("migration 035 adds and backfills agent-authored dossier keywords", async () => {
+  test("migrations 035 through 037 preserve keyword search, V5 storage, and retired V4 audit identity", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-db-v34-artifact-keywords-"));
     tempDirs.push(tempDir);
     const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
@@ -833,6 +833,24 @@ describe("daemon database schema", () => {
     expect(db.prepare("SELECT version, name FROM schema_migrations WHERE version = 35").get()).toEqual({
       name: "035_artifact_skill_search",
       version: 35
+    });
+    expect(db.prepare("SELECT version, name FROM schema_migrations WHERE version >= 35 ORDER BY version").all())
+      .toEqual([
+        { name: "035_artifact_skill_search", version: 35 },
+        { name: "036_workbench_authoring_v5", version: 36 },
+        { name: "037_guided_authoring_v5_contract", version: 37 }
+      ]);
+    expect(db.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workbench_authoring_v5_requests'"
+    ).get()).toEqual({ name: "workbench_authoring_v5_requests" });
+    expect((db.prepare("PRAGMA table_info(guided_authoring_requests)").all() as Array<{
+      dflt_value: string | null;
+      name: string;
+      notnull: number;
+    }>).find(({ name }) => name === "contract_version")).toMatchObject({
+      dflt_value: "'workbench-authoring-v4'",
+      name: "contract_version",
+      notnull: 1
     });
     expect(
       db.prepare("SELECT keywords FROM session_artifact_search WHERE artifact_id = ?")

@@ -88,12 +88,12 @@ daemon-owned authoring module then enforces the same quality behavior:
 
 1. persist the compile-ready selection and campaign policy through **Copy Agent Prompt** while
    disclosing any review-needed sessions left out;
-2. group assignments of at most 12 sessions;
+2. create fixed packs of 5–12 sessions, except the final remainder;
 3. return one required next action and record traversal of every canonical evidence page;
 4. review grounded enrichment and any optional-artifact claims progressively; and
-5. make an accepted assignment ready for atomic publication before releasing the next.
+5. atomically publish accepted pack sessions before releasing the next pack.
 
-The immutable assignment receipt is the proof of success, and a finish retry returns the same
+The immutable pack receipt is the proof of success, and a finish retry returns the same
 receipt. V1–V4 remain audit-only; their mutation routes return `authoring_contract_retired`.
 
 ### Locked UI vocabulary
@@ -101,14 +101,16 @@ receipt. V1–V4 remain audit-only; their mutation routes return `authoring_cont
 - Columns include enrichment, dossier publication, and optional-artifact state.
 - Copy Agent Prompt persists the selection and copies one instance-bound start command, no session list or multi-step recipe.
 - The agent enriches assignment sessions and exercises optional-artifact judgment; opportunities are nonbinding.
-- Workbench Activity observes normal publication; it does not approve V5 assignments.
+- Workbench Activity observes normal publication; it does not approve V5 packs.
 - Apply ≠ publish.
 
 ### Guided authoring vocabulary
 
 Guided authoring request = the durable Workbench selection and campaign policy.
 
-Assignment = one daemon-grouped authoring unit containing at most 12 sessions.
+Pack = one fixed V5 authoring unit containing 5–12 sessions, except the final remainder.
+
+Assignment = historical V4 campaign unit retained for audit.
 
 Knowledge opportunity = nonbinding evidence that may support a runbook, ADR, or incident timeline.
 
@@ -116,7 +118,7 @@ Opportunity disposition = historical V4 resolution state; V5 opportunities are n
 
 Canary = historical V4 approval state; V5 has no canary.
 
-Next action = the single command Masthead requires from the agent at the current assignment state.
+Next action = the single command Masthead requires from the agent at the current pack state.
 
 ### Code map
 
@@ -127,7 +129,7 @@ Next action = the single command Masthead requires from the agent at the current
 | Controller | `src/app/workbench/useWorkbenchController.ts` |
 | Pipeline | `src/workbench/` |
 | Authoring module | `src/workbench/authoring/` |
-| Durable runs | `src/daemon/db/workbenchAuthoringRepository.ts` |
+| Durable V5 requests and packs | `src/daemon/db/workbenchAuthoringV5Repository.ts` |
 | HTTP | `src/daemon/workbenchAuthoringApi.ts` |
 | Thin CLI adapter | `src/cli/workbenchAuthoring.ts`, `src/cli/authoringClient.ts` |
 

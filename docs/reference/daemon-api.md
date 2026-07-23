@@ -57,12 +57,12 @@ Clients should reject a daemon that does not identify `product: "masthead"` with
   `GET /workbench/authoring/runs/:runId/evidence?sessionId=...` expose historical V3 canonical context,
   advisory suggestions, and cursor-paginated evidence. Bridge-safe audit reads.
 - `GET /workbench/authoring/requests/:requestId` returns one durable guided authoring request, its
-  assignments, campaign state, and single required next action. Bridge-safe read.
-- `GET /workbench/authoring/canaries/pending` returns staged V4 canary drafts awaiting operator review.
-  Bridge-safe read.
-- `GET /workbench/authoring/assignments/:assignmentId/inspect` returns the next canonical evidence
-  page and records returned refs as evidence-coverage progress. Primary-only
-  and never forwarded by the read-only worktree bridge.
+  assignments, historical campaign state, and last next action for V4 audit. Bridge-safe read.
+- `GET /workbench/authoring/canaries/pending` is a compatibility read that returns an empty list;
+  Workbench does not expose an operator canary queue.
+- `GET /workbench/authoring/assignments/:assignmentId/scaffold` and `/review` retain historical V4
+  audit detail. The progress-recording `/inspect` route is retired because it mutates evidence
+  coverage.
 - `GET /workbench/authoring/assignments/:assignmentId/review` returns structured editorial findings
   and the next required action. Bridge-safe read.
 - Legacy `GET /workbench/authoring/runs/:runId`, context, evidence, status, and completion-receipt reads
@@ -127,29 +127,13 @@ Write endpoints are local daemon operations. They are not exposed through MCP.
 - The V5 CLI loop is `bootstrap` → `start`/`claim` → `inspect` → `scaffold --file` → `save --file` →
   `finish`, with `status` and `receipt` reads by request ID.
 
-### V4 compatibility mutations
+### Retired authoring mutations
 
-- `POST /workbench/authoring/suggestions` returns advisory suggestions for 1–12 selected sessions and
-  is allowed through the read-only bridge.
-
-- `POST /workbench/authoring/requests` creates one durable V4 request from the Workbench selection and
-  campaign policy. The daemon plans assignments and a legal canary before committing anything. If it
-  cannot choose a complete strong group of at most three sessions or diverse dossier-only sessions,
-  returns `guided_canary_not_constructible` and persists nothing. Primary daemon only.
-- `POST /workbench/authoring/requests/:requestId/start` claims and starts the released assignment.
-- `POST /workbench/authoring/assignments/:assignmentId/draft` validates and saves one grounded
-  `workbench-authoring-v4` draft after complete evidence traversal. Every durable session enrichment
-  includes agent-authored `keywords: string[]`; the daemon scaffold leaves the array empty and never
-  derives keyword prose from session evidence. It creates no Logbook rows. Legacy stored capsules
-  without `keywords` remain readable as an empty keyword list.
-- `POST /workbench/authoring/requests/:requestId/canary-decision` records operator approval or rejection
-  of the staged three-session canary.
-- `POST /workbench/authoring/assignments/:assignmentId/finish` atomically applies enrichment, rebuilds
-  canonical dossiers, publishes accepted optional artifacts, records revisions and Activity, releases
-  claims, stores an idempotent receipt, and releases the next assignment. All V4 mutations verify
-  daemon URL, database ID, build SHA, canonical manifest path, and instance identity immediately before
-  calling the service. Primary-only and blocked by the read-only bridge.
-- Legacy V3 `POST /workbench/authoring/runs`, submit, and finish mutations are retired. They return
+- V4 `POST /workbench/authoring/requests`, start, progress-recording inspect, draft, canary decision,
+  and finish routes return HTTP 409 `authoring_contract_retired` before calling the historical V4
+  service or writing request state. V4 request, scaffold, review, operator-review, and receipt reads
+  remain audit-only.
+- Legacy suggestions and V1–V3 `POST /workbench/authoring/runs`, submit, and finish mutations are retired. They return
   HTTP 409 with `{ "code": "authoring_contract_retired" }` before
   opening claims or writing enrichment, drafts, artifacts, or receipts. V1 and V2 mutations remain
   retired on the same boundary.

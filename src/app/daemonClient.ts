@@ -26,13 +26,15 @@ import type {
   WorkbenchSessionsResponse
 } from "../shared/workbench";
 import {
-  isGuidedAuthoringCapabilitiesDto,
-  type GuidedAuthoringCapabilitiesDto,
   type GuidedAuthoringExpectedIdentity,
-  type GuidedAuthoringNextAction,
-  type GuidedAuthoringRequestDto,
   type GuidedAuthoringReviewDto
 } from "../shared/guidedAuthoring";
+import {
+  isWorkbenchAuthoringV5CapabilitiesDto,
+  type WorkbenchAuthoringV5CapabilitiesDto,
+  type WorkbenchAuthoringV5NextAction,
+  type WorkbenchAuthoringV5RequestDto
+} from "../shared/workbenchAuthoringV5";
 
 export type { SessionTranscriptCoverage, SessionTranscriptItem, SessionTranscriptResult };
 export type { SourcesAdvancedDto, SourcesOnboardingScanDto, SourcesSetupDto, SourcesSetupRunRequest };
@@ -1307,14 +1309,14 @@ export async function getWorkbenchSessions(
 export async function getWorkbenchAuthoringCapabilities(
   activeProjectionUrl: string,
   options: { signal?: AbortSignal } = {}
-): Promise<GuidedAuthoringCapabilitiesDto> {
-  const capabilities = await getJson<GuidedAuthoringCapabilitiesDto>(activeProjectionUrl, "/workbench/authoring/capabilities", {
+): Promise<WorkbenchAuthoringV5CapabilitiesDto> {
+  const capabilities = await getJson<WorkbenchAuthoringV5CapabilitiesDto>(activeProjectionUrl, "/workbench/authoring/capabilities", {
     label: "workbench authoring capabilities",
     signal: options.signal
   });
-  if (!isGuidedAuthoringCapabilitiesDto(capabilities)) {
+  if (!isWorkbenchAuthoringV5CapabilitiesDto(capabilities)) {
     throw new Error(
-      "Workbench authoring capabilities require the complete guided V4 contract and an absolute installed command"
+      "Workbench authoring capabilities require the complete V5 contract and an absolute installed command"
     );
   }
   return capabilities;
@@ -1328,8 +1330,9 @@ export type CreateGuidedAuthoringRequestInput = {
 };
 
 export type CreateGuidedAuthoringRequestResponse = {
-  request: GuidedAuthoringRequestDto;
-  nextAction: GuidedAuthoringNextAction & { kind: "claim_next" };
+  handoff: { requestId: string; startCommand: string };
+  request: WorkbenchAuthoringV5RequestDto;
+  nextAction: WorkbenchAuthoringV5NextAction;
 };
 
 export async function createGuidedAuthoringRequest(
@@ -1337,7 +1340,7 @@ export async function createGuidedAuthoringRequest(
   input: CreateGuidedAuthoringRequestInput,
   options: { signal?: AbortSignal } = {}
 ): Promise<CreateGuidedAuthoringRequestResponse> {
-  return postJson<CreateGuidedAuthoringRequestResponse>(activeProjectionUrl, "/workbench/authoring/requests", {
+  return postJson<CreateGuidedAuthoringRequestResponse>(activeProjectionUrl, "/workbench/authoring/v5/requests", {
     body: input,
     label: "create guided authoring request",
     signal: options.signal

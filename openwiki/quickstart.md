@@ -8,7 +8,7 @@ This wiki is the fastest map for both humans and coding agents. Start here, then
 
 ## Authoring runtime boundary
 
-New guided requests use the V5 authoring boundary: durable assignments publish without a canary or
+New guided requests use the V5 authoring boundary: durable packs publish without a canary or
 operator approval gate, and knowledge opportunities do not require dispositions. V1–V4 records
 remain readable for audit, but their mutation routes are retired. Open V4 campaigns must be
 abandoned or retained as read-only history; see
@@ -107,14 +107,16 @@ guided enrichment and publication; historical V1–V4 records are audit-only and
 - Keep the `src/core`/`src/daemon` boundary clear: core is transformation logic; daemon owns runtime state and persistence.
 - Logbook has **no** bulk enrich UI; bulk/session-library chrome is deleted. Workbench owns compile and publish.
 - An enriched dossier means the original canonical dossier structure rendered after current durable enrichment; agents never author its body.
-- New requests are `workbench-authoring-v5` and use daemon-grouped assignments without canary
+- New requests are `workbench-authoring-v5` and use daemon-grouped packs without canary
   staging. V4 requests and operator reviews remain audit-only.
 
 ## Guided authoring vocabulary
 
 Guided authoring request = the durable Workbench selection and campaign policy.
 
-Assignment = one daemon-grouped authoring unit containing at most 12 sessions.
+Pack = one fixed V5 authoring unit containing 5–12 sessions, except the final remainder.
+
+Assignment = historical V4 campaign unit retained for audit.
 
 Knowledge opportunity = nonbinding evidence that may support a runbook, ADR, or incident timeline.
 
@@ -122,6 +124,6 @@ Opportunity disposition = historical V4 resolution state; V5 opportunities are n
 
 Canary = historical V4 approval state; V5 has no canary.
 
-Next action = the single command Masthead requires from the agent at the current assignment state.
+Next action = the single command Masthead requires from the agent at the current pack state.
 
 - For new source or setup behavior, check both `src/daemon/sources/` and renderer Sources controllers; onboarding spans both layers.

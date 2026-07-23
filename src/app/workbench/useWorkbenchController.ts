@@ -20,7 +20,7 @@ import type {
   WorkbenchQueueSessionDto,
   WorkbenchSessionsResponse
 } from "../../shared/workbench";
-import type { GuidedAuthoringCapabilitiesDto } from "../../shared/guidedAuthoring";
+import type { WorkbenchAuthoringV5CapabilitiesDto } from "../../shared/workbenchAuthoringV5";
 import { guidedAuthoringIdentityFromCapabilities } from "../../shared/guidedAuthoring";
 import { buildWorkbenchHandoff } from "../../ui/workbench/workbenchHandoff";
 import { useMastheadDataRevisions } from "../useMastheadDataRevisions";
@@ -92,7 +92,7 @@ export function useWorkbenchController({
   const [activity, setActivity] = useState<WorkbenchActivityDto[]>([]);
   const [notAddedSummary, setNotAddedSummary] = useState<WorkbenchNotAddedSummaryDto>();
   const [notAddedSessions, setNotAddedSessions] = useState<WorkbenchNotAddedSessionDto[]>([]);
-  const [authoringCapabilities, setAuthoringCapabilities] = useState<GuidedAuthoringCapabilitiesDto>();
+  const [authoringCapabilities, setAuthoringCapabilities] = useState<WorkbenchAuthoringV5CapabilitiesDto>();
   const [notAddedOpen, setNotAddedOpenState] = useState(false);
   const [selectedSessionIds, setSelectedSessionIds] = useState(() => new Set<string>());
   const [selectedCompileReadySessionIds, setSelectedCompileReadySessionIds] = useState(() => new Set<string>());

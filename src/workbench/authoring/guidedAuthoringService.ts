@@ -959,8 +959,8 @@ function requireStableRequestForAssignment(
   return request;
 }
 
-function assertCurrentGuidedAuthoringContract(contractVersion: string): void {
-  if (contractVersion !== "workbench-authoring-v5") throw new Error("authoring_contract_retired");
+function assertCurrentGuidedAuthoringContract(_contractVersion: string): void {
+  if (_contractVersion !== "workbench-authoring-v5") throw new Error("authoring_contract_retired");
 }
 
 function assertMutationIdentity(

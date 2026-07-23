@@ -57,6 +57,7 @@ export async function routeWorkbenchAuthoringRequest(
 
     if (isGuidedAuthoringPath(pathname)) {
       if (!context.identity) throw new Error("authoring_identity_unavailable");
+      if (isRetiredGuidedMutation(request.method, pathname)) return retiredContract();
       return routeGuidedAuthoringRequest({ ...context, identity: context.identity }, request);
     }
 
@@ -208,6 +209,15 @@ function retiredContract(): WorkbenchAuthoringHttpResult {
     },
     status: 409
   };
+}
+
+function isRetiredGuidedMutation(method: string, pathname: string): boolean {
+  return (method === "POST" && pathname === "/workbench/authoring/requests") ||
+    /\/start$/u.test(pathname) ||
+    /\/inspect$/u.test(pathname) ||
+    /\/draft$/u.test(pathname) ||
+    /\/canary-decision$/u.test(pathname) ||
+    /\/finish$/u.test(pathname);
 }
 
 function methodNotAllowed(): WorkbenchAuthoringHttpResult {

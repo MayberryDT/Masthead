@@ -209,7 +209,7 @@ x-motion:
   easing: "cubic-bezier(0.22, 1, 0.36, 1)"
 ---
 
-> **Authoring runtime boundary:** New guided requests use V5 assignments without canary review or
+> **Authoring runtime boundary:** New guided requests use V5 packs without canary review or
 > operator approval. V1–V4 authoring state remains read-only audit history and cannot resume into the
 > current product path.
 
@@ -303,7 +303,7 @@ recur across views, but each surface may use the structure that fits its job:
   first persists the compile-ready selection and campaign policy, then
   copies only the opaque request ID and one instance-bound start command. Review-needed sessions
   remain selected for human operations, are disclosed, and never enter the request. The Activity
-  rail observes the current assignment, next action, editorial findings, and publication events
+  rail observes the current pack, next action, editorial findings, and publication events
   without becoming a command cookbook or approval console.
 - Logbook: dense table plus inspector.
 - Sources: harness connector rows plus enablement detail (Discover → Enable → Activate → Test).
@@ -388,14 +388,16 @@ belong in the inspector, not free-floating table paragraphs.
 Under `workbench-authoring-v5`, the agent traverses complete canonical evidence and writes grounded
 durable enrichment for each assignment session, then the daemon rebuilds that canonical
 presentation. The agent may also author zero or more claim-supported runbooks, ADRs, or incident
-timelines. Publication atomically admits one accepted assignment into Logbook without operator
+timelines. Publication atomically admits accepted pack sessions into Logbook without operator
 approval; nothing enters Logbook until its enrichment and editorial review are accepted.
 
 ### Guided authoring vocabulary
 
 Guided authoring request = the durable Workbench selection and campaign policy.
 
-Assignment = one daemon-grouped authoring unit containing at most 12 sessions.
+Pack = one fixed V5 authoring unit containing 5–12 sessions, except the final remainder.
+
+Assignment = historical V4 campaign unit retained for audit.
 
 Knowledge opportunity = nonbinding evidence that may support a runbook, ADR, or incident timeline.
 
@@ -403,7 +405,7 @@ Opportunity disposition = historical V4 resolution state; V5 opportunities are n
 
 Canary = historical V4 approval state; V5 has no canary.
 
-Next action = the single command Masthead requires from the agent at the current assignment state.
+Next action = the single command Masthead requires from the agent at the current pack state.
 
 ### Sources
 

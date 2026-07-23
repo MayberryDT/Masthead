@@ -4,10 +4,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { WorkbenchEnrollMissingResponse, WorkbenchQueueSessionDto } from "../../../shared/workbench";
-import type {
-  GuidedAuthoringCapabilitiesDto,
-  GuidedAuthoringReviewDto
-} from "../../../shared/guidedAuthoring";
+import type { GuidedAuthoringReviewDto } from "../../../shared/guidedAuthoring";
+import type { WorkbenchAuthoringV5CapabilitiesDto } from "../../../shared/workbenchAuthoringV5";
 import {
   useWorkbenchController,
   type UseWorkbenchControllerResult,
@@ -129,7 +127,7 @@ describe("useWorkbenchController", () => {
       sessionIds: ["session:a", "session:b"]
     });
     expect(prompt).toContain("request:one");
-    expect(prompt).toContain("workbench author start --request request:one --json");
+    expect(prompt).toContain("workbench author bootstrap --request 'request:one' --json");
     expect(prompt).not.toContain("session:a");
     expect(prompt).not.toContain("session:b");
     expect(prompt).not.toContain("partition");
@@ -670,7 +668,8 @@ describe("useWorkbenchController", () => {
     await act(async () => {
       firstPrompt = await latest().copyAgentPrompt();
     });
-    expect(firstPrompt).toContain("database:first");
+    expect(firstPrompt).toContain("request:first");
+    expect(firstPrompt).not.toContain("database:first");
 
     await rerenderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 2 });
     await waitFor(() => latest().loading === false && latest().canRun("copy_agent_prompt"));
@@ -679,8 +678,8 @@ describe("useWorkbenchController", () => {
       secondPrompt = await latest().copyAgentPrompt();
     });
 
-    expect(secondPrompt).toContain("database:second");
-    expect(secondPrompt).not.toContain("database:first");
+    expect(secondPrompt).toContain("request:second");
+    expect(secondPrompt).not.toContain("request:first");
     expect(vi.mocked(createGuidedAuthoringRequest).mock.calls.at(-1)?.[1]).toMatchObject({
       databaseId: "database:second",
       expectedIdentity: { databaseId: "database:second" }
@@ -1096,20 +1095,20 @@ function mockWorkbenchResponse(sessions: WorkbenchQueueSessionDto[]): void {
   vi.mocked(getWorkbenchImportHealthSummary).mockResolvedValue({ ok: true, importJobIds: [], reasons: [], repairRequired: 0 });
 }
 
-function authoringCapabilities(databaseId: string, command: string): GuidedAuthoringCapabilitiesDto {
+function authoringCapabilities(databaseId: string, command: string): WorkbenchAuthoringV5CapabilitiesDto {
   return {
-    bundleVersion: "workbench-authoring-v4",
+    bundleVersion: "workbench-authoring-v5",
     capability: "artifact_authoring",
     baseUrl: "http://127.0.0.1:17373",
     buildSha: "build:test",
-    canarySessions: 3,
     command,
     databaseId,
     instanceId: "instance:test",
     instanceManifest: "/tmp/masthead/masthead-instance.json",
-    maxSessionsPerAssignment: 12,
-    operations: ["start", "inspect", "scaffold", "save", "review", "finish"],
-    policyVersion: "guided-authoring-v1",
+    maximumSessionsPerPack: 12,
+    minimumSessionsPerPack: 5,
+    operations: ["bootstrap", "start", "claim", "inspect", "scaffold", "save", "finish", "status", "receipt"],
+    policyVersion: "workbench-authoring-v5",
     protocol: "masthead.workbench.authoring/v1",
   };
 }
@@ -1126,11 +1125,14 @@ function guidedIdentity() {
 
 function guidedRequestResult(requestId: string) {
   return {
+    handoff: {
+      requestId,
+      startCommand: `/home/test/.local/bin/mastheadctl workbench author bootstrap --request '${requestId}' --json`
+    },
     request: {
       requestId,
       actorId: "workbench",
       contractVersion: "workbench-authoring-v5" as const,
-      policyVersion: "guided-authoring-v1" as const,
       status: "active" as const,
       baseUrl: "http://127.0.0.1:17373",
       databaseId: "database:test",
@@ -1138,16 +1140,20 @@ function guidedRequestResult(requestId: string) {
       instanceManifest: "/tmp/masthead/masthead-instance.json",
       creationInstanceId: "instance:test",
       sessionCount: 2,
-      completedSessionCount: 0,
-      assignmentCount: 1,
-      currentAssignmentId: "assignment:one",
+      attemptedSessionCount: 0,
+      publishedSessionCount: 0,
+      softFlaggedSessionCount: 0,
+      rejectedSessionCount: 0,
+      packCount: 1,
+      packSizes: [2],
+      currentPackId: "authoring-v5-pack:one",
       createdAt: "2026-07-20T12:00:00.000Z",
       updatedAt: "2026-07-20T12:00:00.000Z"
     },
     nextAction: {
-      command: `/home/test/.local/bin/mastheadctl workbench author start --request ${requestId} --json`,
-      kind: "claim_next" as const,
-      reason: "The first assignment pack is ready to start."
+      command: `/home/test/.local/bin/mastheadctl workbench author start --request '${requestId}' --json`,
+      kind: "start" as const,
+      reason: "Start or resume the next fixed pack."
     }
   };
 }

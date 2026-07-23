@@ -34,186 +34,21 @@ afterEach(async () => {
 });
 
 describe("Workbench authoring HTTP API", () => {
-  test("returns a read-only opportunity-linked optional artifact scaffold", async () => {
+  test("retires legacy request creation without writing a duplicate V5 state machine", async () => {
     const { baseUrl, daemon } = await startTestDaemon();
-    seedAuthoringSession(daemon, "session:scaffold-opportunity");
-    const evidenceRef = "message:session:scaffold-opportunity:seed-user";
-    vi.spyOn(advisorySuggestions, "getArtifactSuggestions").mockReturnValue([{
-      advisory: true,
-      evidenceRefs: [evidenceRef],
-      kind: "adr",
-      provenanceSessionIds: ["session:scaffold-opportunity"],
-      signatureKey: "signature:scaffold-opportunity",
-      suggestionId: "suggestion:scaffold-opportunity",
-      summary: "A durable decision with alternatives and consequences."
-    }]);
+    seedAuthoringSession(daemon, "session:legacy-create-retired");
     const capabilities = await getJson(baseUrl, "/workbench/authoring/capabilities");
-    const expectedIdentity = authoringIdentity(capabilities.body);
-    const created = await postJson(baseUrl, "/workbench/authoring/requests", {
-      expectedIdentity,
-      sessionIds: ["session:scaffold-opportunity"]
-    }, 201);
-    const started = await postJson(
-      baseUrl,
-      `/workbench/authoring/requests/${encodeURIComponent(created.body.request.requestId as string)}/start`,
-      { expectedIdentity }
-    );
-    const assignmentId = started.body.assignment.assignmentId as string;
-    const changesBefore = totalChanges(daemon.database);
+    const before = totalChanges(daemon.database);
 
-    const scaffolded = await getJson(
-      baseUrl,
-      `/workbench/authoring/assignments/${encodeURIComponent(assignmentId)}/scaffold`
-    );
-
-    expect(totalChanges(daemon.database)).toBe(changesBefore);
-    expect(scaffolded.body.draft).toMatchObject({
-      artifacts: [{
-        draftId: expect.stringMatching(/^guided-artifact-draft:/),
-        kind: "adr",
-        provenanceSessionIds: ["session:scaffold-opportunity"],
-        seedSessionId: "session:scaffold-opportunity",
-        output: {
-          alternatives: ["REPLACE_WITH_ALTERNATIVE_ACTUALLY_CONSIDERED"],
-          claimSupport: expect.any(Array),
-          decision: "REPLACE_WITH_DURABLE_DECISION",
-          provenanceSessionIds: ["session:scaffold-opportunity"]
-        }
-      }],
-      opportunityDispositions: [{
-        artifactDraftId: expect.stringMatching(/^guided-artifact-draft:/),
-        artifactKind: "adr",
-        disposition: "authored",
-        evidenceRefs: [evidenceRef]
-      }]
-    });
-    expect(scaffolded.body.draft.opportunityDispositions[0].artifactDraftId)
-      .toBe(scaffolded.body.draft.artifacts[0].draftId);
-  });
-
-  test("creates a V5 request and publishes an accepted pack without canary approval", async () => {
-    const { baseUrl, daemon } = await startTestDaemon();
-    seedAuthoringSession(daemon, "session:guided");
-
-    const capabilities = await getJson(baseUrl, "/workbench/authoring/capabilities");
-    expect(capabilities.body).toEqual({
-      baseUrl,
-      buildSha: "development",
-      bundleVersion: "workbench-authoring-v5",
-      capability: "artifact_authoring",
-      command: expect.any(String),
-      databaseId: getOrCreateDatabaseIdentity(daemon.database),
-      instanceId: expect.any(String),
-      instanceManifest: expect.stringMatching(/masthead-instance\.json$/),
-      maximumSessionsPerPack: 12,
-      minimumSessionsPerPack: 5,
-      operations: ["bootstrap", "start", "claim", "inspect", "scaffold", "save", "finish", "status", "receipt"],
-      policyVersion: "workbench-authoring-v5",
-      protocol: "masthead.workbench.authoring/v1"
-    });
-    const expectedIdentity = authoringIdentity(capabilities.body);
-    const created = await postJson(baseUrl, "/workbench/authoring/requests", {
-      expectedIdentity,
-      sessionIds: ["session:guided"]
-    }, 201);
-    expect(created.body).toMatchObject({
-      nextAction: { kind: "claim_next", reason: "The first assignment pack is ready to start." },
-      request: {
-        contractVersion: "workbench-authoring-v5",
-        creationInstanceId: expectedIdentity.instanceId,
-        sessionCount: 1
-      }
-    });
-    expect(created.body.request).not.toHaveProperty("canaryAssignmentId");
-    const requestId = created.body.request.requestId as string;
-    expect((await getJson(baseUrl, `/workbench/authoring/requests/${encodeURIComponent(requestId)}`)).body)
-      .toMatchObject({ requestId, creationInstanceId: expectedIdentity.instanceId });
-
-    const started = await postJson(
-      baseUrl,
-      `/workbench/authoring/requests/${encodeURIComponent(requestId)}/start`,
-      { expectedIdentity }
-    );
-    expect(started.body).toMatchObject({ assignment: { canary: false }, nextAction: { kind: "inspect" } });
-    const assignmentId = started.body.assignment.assignmentId as string;
-    const inspected = await getJson(
-      baseUrl,
-      `/workbench/authoring/assignments/${encodeURIComponent(assignmentId)}/inspect`,
-      200,
-      authoringHeaders(expectedIdentity)
-    );
-    expect(inspected.body).toMatchObject({ assignmentId, progressRecorded: true, nextAction: expect.any(Object) });
-
-    const changesBeforeScaffold = totalChanges(daemon.database);
-    const scaffolded = await getJson(
-      baseUrl,
-      `/workbench/authoring/assignments/${encodeURIComponent(assignmentId)}/scaffold`
-    );
-    expect(scaffolded.body).toMatchObject({
-      assignmentId,
-      bundleSchema: { title: "GuidedAuthoringBundleV4" },
-      draft: { assignmentId, evidenceRevision: started.body.assignment.evidenceRevision, sessionEnrichments: [{ sessionId: "session:guided" }] },
-      nextAction: { kind: "save" }
-    });
-    expect(totalChanges(daemon.database)).toBe(changesBeforeScaffold);
-    const canonicalEvidence = (inspected.body.evidence.items as SessionTranscriptItem[])
-      .find(({ kind }) => kind === "message");
-    if (!canonicalEvidence) throw new Error("expected_seeded_message_evidence");
-    const draft = authorGuidedScaffold(
-      scaffolded.body.draft as GuidedAuthoringBundleV4,
-      canonicalEvidence
-    );
-    vi.spyOn(guidedQuality, "validateGuidedAuthoringDraft").mockReturnValue({ accepted: true, findings: [] });
-    expect((await postJson(
-      baseUrl,
-      `/workbench/authoring/assignments/${encodeURIComponent(assignmentId)}/draft`,
-      { draft, expectedIdentity }
-    )).body).toMatchObject({ assignmentId, nextAction: { kind: "finish" }, status: "ready_to_finish" });
-    expect((await getJson(
-      baseUrl,
-      `/workbench/authoring/assignments/${encodeURIComponent(assignmentId)}/review`
-    )).body).toMatchObject({ assignmentId, draftRevision: 1, nextAction: { kind: "finish" } });
-    expect((await postJson(
-      baseUrl,
-      `/workbench/authoring/requests/${encodeURIComponent(requestId)}/start`,
-      { expectedIdentity }
-    )).body).toMatchObject({ assignment: { assignmentId }, nextAction: { kind: "finish" } });
-    expect((await getJson(
-      baseUrl,
-      `/workbench/authoring/assignments/${encodeURIComponent(assignmentId)}/inspect`,
-      409,
-      authoringHeaders(expectedIdentity)
-    )).body).toMatchObject({ error: { code: "guided_assignment_not_inspectable" }, ok: false });
-    expect((await getJson(baseUrl, "/workbench/authoring/canaries/pending")).body)
-      .toEqual([]);
-
-    expect((await postJson(
-      baseUrl,
-      `/workbench/authoring/requests/${encodeURIComponent(requestId)}/canary-decision`,
-      {
-        assignmentId,
-        decision: "approved",
-        draftRevision: 1,
-        evidenceRevision: draft.evidenceRevision,
-        expectedIdentity,
-        notes: "Grounded canary review.",
-        reviewedBy: "operator:test"
-      },
-      409
-    )).body).toMatchObject({ error: { code: "authoring_contract_retired" }, ok: false });
-    expect((await postJson(
-      baseUrl,
-      `/workbench/authoring/assignments/${encodeURIComponent(assignmentId)}/finish`,
-      { expectedIdentity }
-    )).body).toMatchObject({
-      nextAction: { kind: "complete" },
-      receipt: { assignmentId, publicationInstanceId: expectedIdentity.instanceId, requestId }
-    });
-    expect((await postJson(
-      baseUrl,
-      `/workbench/authoring/requests/${encodeURIComponent(requestId)}/start`,
-      { expectedIdentity }
-    )).body).toMatchObject({ assignment: { assignmentId }, nextAction: { kind: "complete" } });
+    expect((await postJson(baseUrl, "/workbench/authoring/requests", {
+      expectedIdentity: authoringIdentity(capabilities.body),
+      sessionIds: ["session:legacy-create-retired"]
+    }, 409)).body).toMatchObject({ error: { code: "authoring_contract_retired" }, ok: false });
+    expect(totalChanges(daemon.database)).toBe(before);
+    expect(daemon.database.prepare("SELECT COUNT(*) AS count FROM guided_authoring_requests").get())
+      .toEqual({ count: 0 });
+    expect(daemon.database.prepare("SELECT COUNT(*) AS count FROM workbench_authoring_v5_requests").get())
+      .toEqual({ count: 0 });
   });
 
   test("keeps V4 guided requests readable while every guided mutation fails closed", async () => {
@@ -342,47 +177,6 @@ describe("Workbench authoring HTTP API", () => {
     )).body).toMatchObject({ sessionId: "session:audit" });
   });
 
-  test("rejects swapped identity with zero writes and preserves stable restart binding", async () => {
-    const { daemon } = await startTestDaemon();
-    seedAuthoringSession(daemon, "session:identity");
-    const manifestPath = join(tempDirs[0]!, "masthead-instance.json");
-    const original = identityFromManifest(daemon.instanceIdentity(), manifestPath);
-    const context = { authoringCommand: join(tempDirs[0]!, "bin", "mastheadctl"), db: daemon.database };
-    const before = totalChanges(daemon.database);
-    const rejected = await routeWorkbenchAuthoringRequest(
-      { ...context, identity: original },
-      {
-        body: { expectedIdentity: { ...original, instanceId: "instance:swapped" }, sessionIds: ["session:identity"] },
-        method: "POST",
-        url: new URL("http://127.0.0.1/workbench/authoring/requests")
-      }
-    );
-    expect(rejected).toMatchObject({ status: 409, body: { error: { code: "instance_identity_mismatch" } } });
-    expect(totalChanges(daemon.database)).toBe(before);
-
-    const created = await routeWorkbenchAuthoringRequest(
-      { ...context, identity: original },
-      {
-        body: { expectedIdentity: original, sessionIds: ["session:identity"] },
-        method: "POST",
-        url: new URL("http://127.0.0.1/workbench/authoring/requests")
-      }
-    );
-    const request = (created?.body as any).request;
-    const restarted = { ...original, instanceId: "instance:after-restart" };
-    expect(await routeWorkbenchAuthoringRequest(
-      { ...context, identity: restarted },
-      {
-        body: { expectedIdentity: restarted },
-        method: "POST",
-        url: new URL(`http://127.0.0.1/workbench/authoring/requests/${encodeURIComponent(request.requestId)}/start`)
-      }
-    )).toMatchObject({ status: 200, body: { nextAction: { kind: "inspect" } } });
-    expect((daemon.database.prepare(
-      "SELECT creation_instance_id AS creationInstanceId FROM guided_authoring_requests WHERE request_id = ?"
-    ).get(request.requestId) as { creationInstanceId: string }).creationInstanceId).toBe(original.instanceId);
-  });
-
   test("matches every guided route and applies method-aware body limits", () => {
     for (const pathname of [
       "/workbench/authoring/requests",
@@ -421,11 +215,11 @@ describe("Workbench authoring HTTP API", () => {
     expect((await postJson(baseUrl, "/workbench/authoring/requests", {
       expectedIdentity: identity,
       sessionIds: ["session:invalid", "session:invalid"]
-    }, 400)).body).toMatchObject({ error: { code: "authoring_session_id_duplicate" }, ok: false });
+    }, 409)).body).toMatchObject({ error: { code: "authoring_contract_retired" }, ok: false });
     expect((await postJson(baseUrl, "/workbench/authoring/requests", {
       expectedIdentity: { ...identity, instanceManifest: "relative/manifest.json" },
       sessionIds: ["session:invalid"]
-    }, 400)).body).toMatchObject({ error: { code: "invalid_request" }, ok: false });
+    }, 409)).body).toMatchObject({ error: { code: "authoring_contract_retired" }, ok: false });
     expect((await postRaw(
       baseUrl,
       "/workbench/authoring/assignments/missing/draft",

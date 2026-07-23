@@ -65,16 +65,15 @@ exercise repair against a disposable database copy before authorizing work on an
 
 Workbench enrichment and optional-artifact authoring stay behind daemon HTTP with receipts.
 `mastheadctl workbench author` uses an instance-bound launcher, and the daemon splits each request
-into assignments of at most 12 sessions. The agent traverses complete evidence, enriches every
-assignment session, and may submit zero or more grounded optional artifacts. There is **no
+into fixed packs of 5–12 sessions, except the final remainder. The agent traverses complete evidence,
+enriches every pack session, and may submit zero or more grounded optional artifacts. There is **no
 Logbook bulk-enrich UI or primary bulk-enrich product path**.
 
 The original dossier is different: the daemon snapshots `SessionDossierDto` as
 `canonical-session-dossier-v1`, and Logbook renders that immutable body through
 the original dossier presentation. An authoring agent has no dossier-body write
-path. Knowledge opportunities for `runbook`, `adr`, and `incident_timeline` are nonbinding. High-signal
-opportunities require an evidence-backed disposition; low-signal or unsupported kinds create no
-artifact and no blanket N/A prose.
+path. Knowledge opportunities for `runbook`, `adr`, and `incident_timeline` are nonbinding; the V5
+agent considers optional artifacts without any disposition blocking dossier publication.
 
 ## MCP
 
@@ -98,10 +97,10 @@ Session/transcript tools remain for compile-time evidence. Full list: `docs/refe
 
 `src/enrichment/enrichmentCoordinator.ts` turns session facts into durable derived records (capsules, live summaries, search projections). The pipeline is evidence-sensitive: it fingerprints facts and avoids rewriting a current result when the fingerprint and provider match.
 
-Published knowledge reaches Logbook through accepted V5 assignments. The daemon rebuilds canonical
+Published knowledge reaches Logbook through completed V5 packs. The daemon rebuilds canonical
 dossier snapshots from grounded enrichment and atomically publishes them with any supported runbook,
 ADR, or incident timeline. Enrichment or a saved draft alone does not put a row in Logbook. Accepted
-assignments become ready to finish directly, without canary staging or operator approval.
+packs finish directly, without canary staging or operator approval.
 
 ## Failed V1 recovery
 
