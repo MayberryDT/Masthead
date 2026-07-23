@@ -203,7 +203,7 @@ function retiredContract(): WorkbenchAuthoringHttpResult {
     body: {
       error: {
         code: "authoring_contract_retired",
-        message: "Legacy Workbench authoring mutations are retired; use guided authoring V4."
+        message: "Legacy Workbench authoring mutations are retired; use workbench-authoring-v5."
       },
       ok: false
     },

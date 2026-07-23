@@ -34,6 +34,23 @@ afterEach(async () => {
 });
 
 describe("workbench-authoring-v5 loop", () => {
+  test.each([1, 2, 3, 4])("accepts a %i-session final pack", async (sessionCount) => {
+    const db = await testDatabase();
+    const sessionIds = Array.from({ length: sessionCount }, (_, index) => `session:v5:small:${index + 1}`);
+    for (const sessionId of sessionIds) seedCompileReadySession(db, sessionId);
+
+    const created = createWorkbenchAuthoringV5Request(db, {
+      actorId: "agent:test",
+      command,
+      currentIdentity: identity,
+      expectedIdentity: identity,
+      sessionIds
+    });
+
+    expect(created.request.packSizes).toEqual([sessionCount]);
+    db.close();
+  });
+
   test("completes multiple fixed packs with mixed outcomes and idempotent receipts", async () => {
     const db = await testDatabase();
     const sessionIds = Array.from({ length: 13 }, (_, index) => `session:v5:${index + 1}`);

@@ -45,6 +45,18 @@ afterEach(async () => {
 });
 
 describe("guided authoring repository", () => {
+  test("rejects V5 creation in the retired guided-authoring tables", async () => {
+    const db = await testDb(1);
+    const input = requestInput(1);
+
+    expect(() => createGuidedAuthoringRequest(db, {
+      ...input,
+      contractVersion: "workbench-authoring-v5"
+    })).toThrow("authoring_contract_retired");
+    expect(db.prepare("SELECT COUNT(*) AS count FROM guided_authoring_requests").get()).toEqual({ count: 0 });
+    db.close();
+  });
+
   test("migrates a schema-30 database and leaves composite foreign keys valid", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-guided-schema-30-"));
     tempDirs.push(tempDir);

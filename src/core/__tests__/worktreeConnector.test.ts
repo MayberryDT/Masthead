@@ -162,6 +162,7 @@ describe("Masthead worktree connector planning", () => {
     "/workbench/authoring/canaries/pending",
     "/workbench/authoring/assignments/assignment%3Aone/review",
     "/workbench/authoring/assignments/assignment%3Aone/scaffold",
+    "/workbench/authoring/assignments/assignment%3Aone/receipt",
     "/workbench/authoring/v5/requests/authoring-v5-request%3Aone",
     "/workbench/authoring/v5/requests/authoring-v5-request%3Aone/bootstrap",
     "/workbench/authoring/v5/requests/authoring-v5-request%3Aone/receipt",

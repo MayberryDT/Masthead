@@ -273,9 +273,12 @@ const criticalTables = [
 
 export function migrateDatabase(db: MastheadDatabase): void {
   db.exec("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY NOT NULL, name TEXT NOT NULL, applied_at TEXT NOT NULL);");
-  const applied = new Set(
-    (db.prepare("SELECT version FROM schema_migrations").all() as Array<{ version: number }>).map((row) => row.version)
-  );
+  const appliedRows = db.prepare("SELECT version, name FROM schema_migrations ORDER BY version").all() as Array<{
+    name: string;
+    version: number;
+  }>;
+  assertMigrationLedgerMatches(appliedRows);
+  const applied = new Set(appliedRows.map((row) => row.version));
 
   for (const migration of migrations) {
     if (applied.has(migration.version)) continue;
@@ -310,12 +313,7 @@ export function applyPendingMigrationsInTransaction(db: MastheadDatabase): void 
     name: string;
     version: number;
   }>;
-  const knownByVersion = new Map(migrations.map((migration) => [migration.version, migration.name]));
-  for (const row of appliedRows) {
-    if (knownByVersion.get(row.version) !== row.name) {
-      throw new Error(`schema_migration_ledger_mismatch:${row.version}:${row.name}`);
-    }
-  }
+  assertMigrationLedgerMatches(appliedRows);
   const applied = new Set(appliedRows.map((row) => row.version));
   for (const migration of migrations) {
     if (applied.has(migration.version)) continue;
@@ -325,6 +323,16 @@ export function applyPendingMigrationsInTransaction(db: MastheadDatabase): void 
       migration.name,
       new Date().toISOString()
     );
+  }
+}
+
+function assertMigrationLedgerMatches(appliedRows: Array<{ name: string; version: number }>): void {
+  const knownByVersion = new Map(migrations.map((migration) => [migration.version, migration.name]));
+  for (const row of appliedRows) {
+    const historicalVersion12Alias = row.version === 12 && row.name === "012_session_enrichment_chunks";
+    if (knownByVersion.get(row.version) !== row.name && !historicalVersion12Alias) {
+      throw new Error(`schema_migration_ledger_mismatch:${row.version}:${row.name}`);
+    }
   }
 }
 

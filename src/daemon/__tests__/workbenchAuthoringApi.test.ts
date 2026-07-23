@@ -83,9 +83,18 @@ describe("Workbench authoring HTTP API", () => {
       db: daemon.database,
       identity
     };
-    const before = totalChanges(daemon.database);
     const encodedRequest = encodeURIComponent(request.requestId);
-    const encodedAssignment = encodeURIComponent(request.currentAssignmentId!);
+    const assignmentId = request.currentAssignmentId!;
+    const encodedAssignment = encodeURIComponent(assignmentId);
+    const receipt = {
+      assignmentId,
+      receiptVersion: "guided-authoring-receipt-v1",
+      requestId: request.requestId
+    };
+    daemon.database.prepare(
+      "UPDATE guided_authoring_assignments SET receipt_json = ? WHERE assignment_id = ?"
+    ).run(JSON.stringify(receipt), assignmentId);
+    const before = totalChanges(daemon.database);
 
     expect(await routeWorkbenchAuthoringRequest(context, {
       method: "GET",
@@ -100,6 +109,10 @@ describe("Workbench authoring HTTP API", () => {
       url: new URL(`http://127.0.0.1/workbench/authoring/assignments/${encodedAssignment}/scaffold`)
     });
     expect(scaffolded).toMatchObject({ status: 200 });
+    expect(await routeWorkbenchAuthoringRequest(context, {
+      method: "GET",
+      url: new URL(`http://127.0.0.1/workbench/authoring/assignments/${encodedAssignment}/receipt`)
+    })).toEqual({ body: receipt, status: 200 });
     const draft = (scaffolded?.body as { draft: GuidedAuthoringBundleV4 }).draft;
     const mutations = [
       () => routeWorkbenchAuthoringRequest(context, {
@@ -187,6 +200,7 @@ describe("Workbench authoring HTTP API", () => {
       "/workbench/authoring/assignments/assignment%3Aone/scaffold",
       "/workbench/authoring/assignments/assignment%3Aone/draft",
       "/workbench/authoring/assignments/assignment%3Aone/review",
+      "/workbench/authoring/assignments/assignment%3Aone/receipt",
       "/workbench/authoring/requests/request%3Aone/canary-decision",
       "/workbench/authoring/assignments/assignment%3Aone/finish",
       "/workbench/authoring/v5/requests",

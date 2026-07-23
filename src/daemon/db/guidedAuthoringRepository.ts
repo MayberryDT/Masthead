@@ -115,6 +115,7 @@ export function createGuidedAuthoringRequest(
   db: MastheadDatabase,
   input: CreateGuidedAuthoringRequestInput
 ): GuidedAuthoringRequestDto {
+  assertLegacyGuidedContract(input.contractVersion);
   validateRequestPlan(db, input);
   return withImmediateTransaction(db, () => createGuidedAuthoringRequestInTransaction(db, input));
 }
@@ -123,6 +124,7 @@ export function createGuidedAuthoringRequestInTransaction(
   db: MastheadDatabase,
   input: CreateGuidedAuthoringRequestInput
 ): GuidedAuthoringRequestDto {
+  assertLegacyGuidedContract(input.contractVersion);
   validateRequestPlan(db, input);
   const now = new Date().toISOString();
   db.prepare(
@@ -211,6 +213,10 @@ export function createGuidedAuthoringRequestInTransaction(
     });
   }
   return requireGuidedRequest(db, input.requestId);
+}
+
+function assertLegacyGuidedContract(contractVersion: GuidedAuthoringContractVersion): void {
+  if (contractVersion !== "workbench-authoring-v4") throw new Error("authoring_contract_retired");
 }
 
 export function getGuidedAuthoringRequest(

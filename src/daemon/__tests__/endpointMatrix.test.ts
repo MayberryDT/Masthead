@@ -41,6 +41,7 @@ describe("endpoint matrix probe pass policy", () => {
     expect(reads).toContain("GET /workbench/authoring/canaries/pending");
     expect(reads).toContain("GET /workbench/authoring/assignments/assignment%3Aone/review");
     expect(reads).toContain("GET /workbench/authoring/assignments/assignment%3Aone/scaffold");
+    expect(reads).toContain("GET /workbench/authoring/assignments/assignment%3Aone/receipt");
     expect(reads).toContain("GET /workbench/authoring/runs/run-1");
     expect(reads).toContain("GET /workbench/authoring/runs/run-1/evidence?sessionId=session-1");
     expect(reads).toContain("GET /workbench/authoring/runs/run-1/context");

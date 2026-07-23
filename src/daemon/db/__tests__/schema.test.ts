@@ -25,6 +25,23 @@ afterEach(async () => {
 });
 
 describe("daemon database schema", () => {
+  test("fails closed when an applied migration version has a different name", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-db-conflicting-ledger-"));
+    tempDirs.push(tempDir);
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+    migrateTestDatabaseThrough(db, 34);
+    db.prepare("INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)")
+      .run(35, "035_competing_branch_migration", "2026-07-23T00:00:00.000Z");
+
+    expect(() => migrateDatabase(db)).toThrow(
+      "schema_migration_ledger_mismatch:35:035_competing_branch_migration"
+    );
+    expect(db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 35 });
+    expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workbench_authoring_v5_requests'").get())
+      .toBeUndefined();
+    db.close();
+  });
+
   test("applies pending migrations inside the caller transaction and rolls them back together", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-db-transactional-migrations-"));
     tempDirs.push(tempDir);

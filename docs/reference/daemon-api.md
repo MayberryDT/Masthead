@@ -60,9 +60,9 @@ Clients should reject a daemon that does not identify `product: "masthead"` with
   assignments, historical campaign state, and last next action for V4 audit. Bridge-safe read.
 - `GET /workbench/authoring/canaries/pending` is a compatibility read that returns an empty list;
   Workbench does not expose an operator canary queue.
-- `GET /workbench/authoring/assignments/:assignmentId/scaffold` and `/review` retain historical V4
-  audit detail. The progress-recording `/inspect` route is retired because it mutates evidence
-  coverage.
+- `GET /workbench/authoring/assignments/:assignmentId/scaffold`, `/review`, and `/receipt` retain
+  historical V4 audit detail. The progress-recording `/inspect` route is retired because it mutates
+  evidence coverage.
 - `GET /workbench/authoring/assignments/:assignmentId/review` returns structured editorial findings
   and the next required action. Bridge-safe read.
 - Legacy `GET /workbench/authoring/runs/:runId`, context, evidence, status, and completion-receipt reads

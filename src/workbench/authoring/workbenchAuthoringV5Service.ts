@@ -385,14 +385,16 @@ function fixedPacks(sessionIds: string[]): string[][] {
     packs.push(sessionIds.slice(offset, offset + size));
     offset += size;
   }
-  if (packs.some((pack) => pack.length < MINIMUM_PACK_SIZE || pack.length > MAXIMUM_PACK_SIZE)) {
+  if (packs.some((pack) => (
+    pack.length > MAXIMUM_PACK_SIZE || (sessionIds.length > MAXIMUM_PACK_SIZE && pack.length < MINIMUM_PACK_SIZE)
+  ))) {
     throw new Error("authoring_v5_pack_size_invalid");
   }
   return packs;
 }
 
 function assertRequestMembership(sessionIds: string[]): void {
-  if (sessionIds.length < MINIMUM_PACK_SIZE) throw new Error("authoring_v5_selection_too_small");
+  if (sessionIds.length === 0) throw new Error("authoring_v5_selection_empty");
   if (sessionIds.some((sessionId) => !sessionId.trim() || sessionId !== sessionId.trim())) {
     throw new Error("authoring_session_id_blank");
   }
