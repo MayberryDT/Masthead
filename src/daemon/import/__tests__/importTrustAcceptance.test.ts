@@ -1,5 +1,4 @@
 import { mkdtemp, rm, symlink } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
@@ -17,7 +16,7 @@ afterEach(async () => {
 
 describe("isolated import trust corpus replay", () => {
   test("proves canonical runtime identity, strict scope, structured tools, and honest Workbench disposition", async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), "masthead-import-trust-"));
+    const tempDir = await mkdtemp(join("/tmp", "masthead-import-trust-"));
     tempDirs.push(tempDir);
 
     const report = await replayImportTrustCorpus({
@@ -96,7 +95,7 @@ describe("isolated import trust corpus replay", () => {
   });
 
   test("requires an existing sanitized corpus root", async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), "masthead-import-trust-"));
+    const tempDir = await mkdtemp(join("/tmp", "masthead-import-trust-"));
     tempDirs.push(tempDir);
 
     await expect(replayImportTrustCorpus({
@@ -106,7 +105,7 @@ describe("isolated import trust corpus replay", () => {
   });
 
   test("rejects a database path whose temporary parent symlinks outside /tmp", async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), "masthead-import-trust-"));
+    const tempDir = await mkdtemp(join("/tmp", "masthead-import-trust-"));
     tempDirs.push(tempDir);
     const escape = join(tempDir, "escape");
     await symlink(process.cwd(), escape, "dir");
@@ -128,7 +127,7 @@ describe("isolated import trust corpus replay", () => {
   });
 
   test("rejects a dangling symlink at the database leaf", async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), "masthead-import-trust-"));
+    const tempDir = await mkdtemp(join("/tmp", "masthead-import-trust-"));
     tempDirs.push(tempDir);
     const databasePath = join(tempDir, "acceptance.sqlite");
     await symlink(join(tempDir, "missing.sqlite"), databasePath, "file");
