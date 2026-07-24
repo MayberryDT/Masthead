@@ -170,7 +170,7 @@ describe("offline production transition maintenance", () => {
     expect((await readdir(root)).filter((name) => name.includes("transition-stage"))).toEqual([]);
     await expect(readFile(abandonedStage)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(readFile(abandonedRecoveryStage)).rejects.toMatchObject({ code: "ENOENT" });
-    expect(fullIntegrityChecks).toEqual([receipt.snapshot.stagePath]);
+    expect(fullIntegrityChecks).toEqual([]);
   });
 
   test("resumes an interrupted prepared migration without duplicating its backup and removes abandoned large stages", async () => {
@@ -246,6 +246,31 @@ describe("offline production transition maintenance", () => {
     if (["backup_verified", "migration_stage_complete", "post_migration_verified", "ready_to_activate"].includes(phase)) {
       expect(resumedBoundaries).not.toContain("backup_copy_started");
     }
+  });
+
+  test("resumes backup_copied without entering an unbounded full-database verification pass", async () => {
+    const { databasePath, newBundle, oldBundle } = await fixture(37);
+    const input = {
+      databasePath,
+      newBundle,
+      nonce: "17171717-1717-4717-8717-171717171717",
+      oldBundle
+    };
+    const initialPageIntegrityChecks: string[] = [];
+    await expect(prepareProductionTransition(input, {
+      onPageIntegrityCheck: (kind, path) => initialPageIntegrityChecks.push(`${kind}:${path}`),
+      simulateProcessDeathAfterPhase: "backup_copied"
+    })).rejects.toMatchObject({ code: "simulated_production_transition_process_death" });
+    expect(initialPageIntegrityChecks).toEqual([]);
+
+    await expect(prepareProductionTransition(input, {
+      onPageIntegrityCheck: (kind) => {
+        throw new Error(`unexpected_${kind}_scan_after_backup_copied`);
+      }
+    })).resolves.toMatchObject({
+      preparePhase: "ready_to_activate",
+      state: "ready_to_activate"
+    });
   });
 
   test("adopts one complete legacy recovery stage without another database copy", async () => {

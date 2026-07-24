@@ -106,6 +106,7 @@ export type ProductionTransitionBoundary =
 
 export type ProductionTransitionOptions = {
   onBoundary?: (boundary: ProductionTransitionBoundary, database?: DatabaseSync) => void;
+  onPageIntegrityCheck?: (kind: "full" | "quick", databasePath: string) => void;
   onFullIntegrityCheck?: (databasePath: string) => void;
   simulateProcessDeathAfterPhase?: ProductionTransitionPreparePhase;
 };
@@ -144,7 +145,10 @@ export async function prepareProductionTransition(
       await cleanupAbandonedMigrationStagesInsideOwnership(input.databasePath, receipt.snapshot.stagePath);
     } else {
       await assertCleanTransitionBoundary(input.databasePath);
-      const activeBefore = verifyDatabase(input.databasePath);
+      const activeBefore = verifyDatabase(input.databasePath, {
+        pageIntegrity: "none",
+        onPageIntegrityCheck: options.onPageIntegrityCheck
+      });
       options.onBoundary?.("source_verified");
       const adoptedStagePath = await findAdoptableRecoveryStage(input.databasePath, activeBefore);
       await cleanupAbandonedMigrationStagesInsideOwnership(input.databasePath, adoptedStagePath);
@@ -192,7 +196,10 @@ export async function prepareProductionTransition(
     }
     try {
       if (normalizedPreparePhase(receipt) === "backup_verified") {
-        const active = verifyDatabase(input.databasePath);
+        const active = verifyDatabase(input.databasePath, {
+          pageIntegrity: "none",
+          onPageIntegrityCheck: options.onPageIntegrityCheck
+        });
         if (!matchesSourceDatabase(active, receipt) && !matchesTargetDatabase(active, receipt)) {
           throw new Error("transition_resume_database_mismatch");
         }
@@ -208,7 +215,11 @@ export async function prepareProductionTransition(
         await checkpointPreparePhase(receipt, "migration_stage_complete", options);
       }
       if (normalizedPreparePhase(receipt) === "migration_stage_complete") {
-        const migrated = verifyDatabase(input.databasePath, { foreignKeys: true });
+        const migrated = verifyDatabase(input.databasePath, {
+          foreignKeys: true,
+          pageIntegrity: "none",
+          onPageIntegrityCheck: options.onPageIntegrityCheck
+        });
         if (migrated.databaseId !== receipt.databaseId) throw new Error("transition_migrated_identity_mismatch");
         if (migrated.schemaVersion !== CURRENT_SCHEMA_VERSION) throw new Error("transition_target_schema_mismatch");
         validatePreparedDatabase(input.databasePath);
@@ -227,7 +238,7 @@ export async function prepareProductionTransition(
     } catch (error) {
       if (isSimulatedProcessDeath(error)) throw error;
       try {
-        await restoreSnapshotInsideOwnership(receipt, ownership, options, "database");
+        await restoreSnapshotInsideOwnership(receipt, ownership, options, "full");
         await rm(productionTransitionJournalPath(input.databasePath), { force: true });
       } catch (restoreError) {
         receipt.state = "restore_failed";
@@ -386,8 +397,10 @@ async function ensureVerifiedSnapshot(
   }
   let snapshotLocation = await locateReceiptSnapshot(receipt);
   if (phase === "backup_copied") {
-    options.onFullIntegrityCheck?.(snapshotLocation);
-    const verified = verifyDatabase(snapshotLocation, { fullIntegrity: true });
+    const verified = verifyDatabase(snapshotLocation, {
+      pageIntegrity: "none",
+      onPageIntegrityCheck: options.onPageIntegrityCheck
+    });
     if (!matchesSourceDatabase(verified, receipt)) throw new Error("transition_snapshot_database_mismatch");
     receipt.snapshot.sha256 = await hashFile(snapshotLocation);
     options.onBoundary?.("snapshot_hashed");
@@ -447,7 +460,7 @@ function assertSamePromotedFile(before: DurableFileIdentity, after: DurableFileI
 async function assertPreparedReceiptUnchanged(receipt: ProductionTransitionReceipt): Promise<void> {
   await locateReceiptSnapshot(receipt);
   if (!receipt.preparedDatabaseIdentity) {
-    const active = verifyDatabase(receipt.databasePath);
+    const active = verifyDatabase(receipt.databasePath, { pageIntegrity: "none" });
     if (!matchesTargetDatabase(active, receipt)) throw new Error("transition_ready_database_mismatch");
     receipt.preparedDatabaseIdentity = await captureDurableFileIdentity(
       receipt.databasePath,
@@ -515,7 +528,7 @@ async function findAdoptableRecoveryStage(
     const info = await lstat(path);
     if (!info.isFile() || info.isSymbolicLink()) throw new Error("transition_recovery_stage_path_invalid");
     try {
-      if (matchesSourceDatabase(verifyDatabase(path), {
+      if (matchesSourceDatabase(verifyDatabase(path, { pageIntegrity: "none" }), {
         databaseId: source.databaseId,
         sourceMigrationLedger: source.migrationLedger,
         sourceSchemaFingerprint: source.schemaFingerprint,
@@ -537,7 +550,7 @@ async function findAdoptableCurrentBackup(
   try {
     const info = await lstat(path);
     if (!info.isFile() || info.isSymbolicLink()) throw new Error("transition_backup_path_invalid");
-    return matchesSourceDatabase(verifyDatabase(path), {
+    return matchesSourceDatabase(verifyDatabase(path, { pageIntegrity: "none" }), {
       databaseId: source.databaseId,
       sourceMigrationLedger: source.migrationLedger,
       sourceSchemaFingerprint: source.schemaFingerprint,
@@ -704,7 +717,11 @@ async function verifySnapshot(
   if (verification === "receipt") return;
   const requireFullIntegrity = verification === "full";
   if (requireFullIntegrity) options.onFullIntegrityCheck?.(receipt.snapshot.path);
-  const verified = verifyDatabase(receipt.snapshot.path, { foreignKeys: true, fullIntegrity: requireFullIntegrity });
+  const verified = verifyDatabase(receipt.snapshot.path, {
+    foreignKeys: true,
+    pageIntegrity: requireFullIntegrity ? "full" : "quick",
+    onPageIntegrityCheck: options.onPageIntegrityCheck
+  });
   if (!matchesSourceDatabase(verified, receipt)) {
     throw new Error("transition_snapshot_database_mismatch");
   }
@@ -719,16 +736,24 @@ type VerifiedDatabase = {
 
 function verifyDatabase(
   path: string,
-  options: { foreignKeys?: boolean; fullIntegrity?: boolean } = {}
+  options: {
+    foreignKeys?: boolean;
+    onPageIntegrityCheck?: ProductionTransitionOptions["onPageIntegrityCheck"];
+    pageIntegrity?: "full" | "none" | "quick";
+  } = {}
 ): VerifiedDatabase {
   const database = new DatabaseSync(path, { readOnly: true });
   try {
-    if (options.fullIntegrity) {
+    const pageIntegrity = options.pageIntegrity ?? "quick";
+    if (pageIntegrity === "full") {
+      options.onPageIntegrityCheck?.("full", path);
       const integrity = database.prepare("PRAGMA integrity_check").all() as Array<Record<string, unknown>>;
       const results = integrity.flatMap((row) => Object.values(row));
       if (results.length !== 1 || results[0] !== "ok") throw new Error("transition_database_integrity_failed");
+    } else if (pageIntegrity === "quick") {
+      options.onPageIntegrityCheck?.("quick", path);
+      quickCheckMastheadDatabase(database);
     }
-    quickCheckMastheadDatabase(database);
     if (options.foreignKeys) {
       const foreignKeyFailures = database.prepare("PRAGMA foreign_key_check").all();
       if (foreignKeyFailures.length > 0) {
