@@ -210,15 +210,27 @@ async function acquireCompatibilitySentinel(
   for (let attempt = 0; attempt < 100; attempt += 1) {
     const token = randomUUID();
     try {
-      const handle = await open(lockPath, "wx");
+      const handle = await open(lockPath, "wx", 0o600);
       try {
+        await handle.chmod(0o600);
+        const created = await handle.stat();
+        const currentUid = typeof process.getuid === "function" ? process.getuid() : created.uid;
+        if (
+          !created.isFile() || created.nlink !== 1 || created.uid !== currentUid ||
+          (created.mode & 0o777) !== 0o600
+        ) throw new Error("Compatibility sentinel creation did not establish exact private file ownership.");
         await handle.writeFile(JSON.stringify({
           createdAt: new Date().toISOString(),
           pid: process.pid,
           protocol: "canonical-data-directory-lock-v4",
           token
         }, null, 2), "utf8");
+        await handle.sync();
         const identity = await handle.stat();
+        if (
+          !sameFileIdentity(created, identity) || !identity.isFile() || identity.nlink !== 1 ||
+          identity.uid !== currentUid || (identity.mode & 0o777) !== 0o600
+        ) throw new Error("Compatibility sentinel identity changed during exact creation.");
         return {
           release: () => releaseCompatibilitySentinel(lockPath, token, identity.dev, identity.ino)
         };

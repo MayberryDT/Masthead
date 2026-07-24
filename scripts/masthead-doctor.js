@@ -302,7 +302,11 @@ export function inspectInstanceManifestIdentity(manifestValue, healthValue, expe
   if (!instanceDir || !isAbsolute(instanceDir) || resolve(instanceDir) !== instanceDir || instanceDir !== data.dataDirectory || instanceDir !== runtime.instanceDir) problems.push("manifest instance directory mismatch");
   if (!instanceManifest || !instanceDir || resolve(instanceDir, "masthead-instance.json") !== instanceManifest) problems.push("manifest path identity mismatch");
   if (!expectedCommand || runtime.authoringCommand !== expectedCommand) problems.push("authoring command identity mismatch");
-  if (runtime.baseUrl !== expectedBaseUrl || manifest.baseUrl !== expectedBaseUrl) problems.push("base URL identity mismatch");
+  const comparableExpectedBaseUrl = comparableRootBaseUrl(expectedBaseUrl);
+  if (
+    comparableRootBaseUrl(runtime.baseUrl) !== comparableExpectedBaseUrl ||
+    comparableRootBaseUrl(manifest.baseUrl) !== comparableExpectedBaseUrl
+  ) problems.push("base URL identity mismatch");
   for (const field of ["databaseId", "buildSha"]) {
     const healthValueForField = field === "databaseId" ? data.databaseId : healthRecord.buildSha;
     if (manifest[field] !== healthValueForField) problems.push(`${field} identity mismatch`);
@@ -579,18 +583,16 @@ async function checkImports() {
 
 async function checkSourcesPipeline() {
   try {
-    const [scanBody, adaptersBody, sourcesBody, importsBody, failedImportsBody, logbookBody, usageBody, settingsBody, runtimeDiagnosticsBody] =
-      await Promise.all([
-        getJson("/sources/scan/latest"),
-        getJson("/adapters"),
-        getJson("/sources"),
-        getJson("/imports?limit=50"),
-        getJson("/imports?limit=50&status=failed"),
-        getJson("/logbook/summary"),
-        getJson("/usage/summary?window=all"),
-        getJson("/settings"),
-        getJson("/diagnostics/runtime").catch((error) => ({ diagnosticsEndpointError: errorMessage(error) }))
-      ]);
+    const scanBody = await getJson("/sources/scan/latest");
+    const adaptersBody = await getJson("/adapters");
+    const sourcesBody = await getJson("/sources");
+    const importsBody = await getJson("/imports?limit=50");
+    const failedImportsBody = await getJson("/imports?limit=50&status=failed");
+    const logbookBody = await getJson("/logbook/summary");
+    const usageBody = await getJson("/usage/summary?window=all");
+    const settingsBody = await getJson("/settings");
+    const runtimeDiagnosticsBody = await getJson("/diagnostics/runtime")
+      .catch((error) => ({ diagnosticsEndpointError: errorMessage(error) }));
 
     const scan = isRecord(scanBody.scan) ? scanBody.scan : undefined;
     const adapters = Array.isArray(adaptersBody.adapters) ? adaptersBody.adapters.filter(isRecord) : [];
@@ -1119,9 +1121,33 @@ async function checkLiveState() {
 }
 
 async function getJson(path) {
-  const response = await fetch(new URL(path, baseUrl), { headers: { accept: "application/json" } });
-  if (!response.ok) throw new Error(`${path} returned ${response.status}`);
-  return response.json();
+  return getJsonWithRetry(path);
+}
+
+export async function getJsonWithRetry(path, options = {}) {
+  const attempts = Number.isSafeInteger(options.attempts) && options.attempts > 0 ? options.attempts : 2;
+  const fetchImpl = options.fetchImpl || fetch;
+  const requestBaseUrl = options.baseUrl || baseUrl;
+  const retryDelayMs = Number.isFinite(options.retryDelayMs) && options.retryDelayMs >= 0 ? options.retryDelayMs : 250;
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const response = await fetchImpl(new URL(path, requestBaseUrl), { headers: { accept: "application/json" } });
+      if (response.ok) return response.json();
+      const error = new Error(`${path} returned ${response.status}`);
+      if (!retryableReadStatus(response.status) || attempt === attempts) throw error;
+      lastError = error;
+    } catch (error) {
+      lastError = error;
+      if (attempt === attempts || / returned 4\d\d$/u.test(errorMessage(error))) throw error;
+    }
+    if (retryDelayMs > 0) await new Promise((resolvePromise) => setTimeout(resolvePromise, retryDelayMs));
+  }
+  throw lastError;
+}
+
+function retryableReadStatus(status) {
+  return status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
 function runJsonCommand(command, args) {
@@ -1293,6 +1319,16 @@ function normalizeBaseUrl(value) {
   url.search = "";
   url.hash = "";
   return url.toString();
+}
+
+function comparableRootBaseUrl(value) {
+  try {
+    const url = new URL(value);
+    if (url.pathname !== "/" || url.search || url.hash || url.username || url.password) return value;
+    return url.origin;
+  } catch {
+    return value;
+  }
 }
 
 function compareVersions(left, right) {

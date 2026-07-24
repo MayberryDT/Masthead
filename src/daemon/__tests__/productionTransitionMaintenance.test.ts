@@ -6,7 +6,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
 import { CURRENT_SCHEMA_VERSION, getOrCreateDatabaseIdentity, migrateDatabase } from "../db/schema.ts";
+import { initializeSessionTranscriptFingerprintIndex } from "../db/sessionTranscriptFingerprintIndex.ts";
 import {
+  preflightProductionTransition,
   prepareProductionTransition,
   productionTransitionJournalPath,
   restoreProductionTransition,
@@ -51,7 +53,94 @@ function bundle(target: string, character: string, version: string): ProductionB
   return { bundleDigest: character.repeat(64), gitSha: character.repeat(40), target, version };
 }
 
+function seedSessionWithoutFingerprint(databasePath: string, suffix: string): void {
+  const database = new DatabaseSync(databasePath);
+  const at = "2026-07-13T12:00:00.000Z";
+  database.prepare(
+    "INSERT OR IGNORE INTO hosts(host_id, hostname, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?)"
+  ).run("host:test", "test", at, at);
+  database.prepare(
+    "INSERT OR IGNORE INTO runtimes(runtime_id, runtime_kind, runtime_version, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?, ?)"
+  ).run("runtime:test", "codex", "test", at, at);
+  database.prepare(
+    `INSERT INTO sessions(
+      session_id, host_id, runtime_id, source_session_id, title, last_activity_at,
+      source_confidence, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(`session:${suffix}`, "host:test", "runtime:test", `source:${suffix}`, "Transition preflight", at, "authoritative", at, at);
+  database.prepare(
+    `INSERT INTO messages(
+      message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(`message:${suffix}`, `session:${suffix}`, "user", `message ${suffix}`, `hash:${suffix}`, at, "{}", "authoritative");
+  database.close();
+}
+
+function seedLargeFileEffectTranscript(databasePath: string, suffix: string, rows: number): void {
+  const database = new DatabaseSync(databasePath);
+  database.prepare(
+    `WITH RECURSIVE sequence(value) AS (
+      SELECT 1
+      UNION ALL
+      SELECT value + 1 FROM sequence WHERE value < ?
+    )
+    INSERT INTO file_effects(
+      file_effect_id, session_id, path, effect_kind, staged, additions, deletions, observed_at, source_ref_json
+    )
+    SELECT
+      ? || value, ?, '/tmp/large-' || value, 'modified', 0, value, 0,
+      '2026-07-13T12:00:00.000Z', '{}'
+    FROM sequence`
+  ).run(rows, `effect:${suffix}:`, `session:${suffix}`);
+  database.close();
+}
+
 describe("offline production transition maintenance", () => {
+  test("completes pre-listen startup indexes during prepare and receipt-bound preflight", async () => {
+    const { databasePath, newBundle, oldBundle } = await fixture(21);
+    const input = {
+      databasePath,
+      newBundle,
+      nonce: "10101010-1010-4010-8010-101010101010",
+      oldBundle
+    };
+    seedSessionWithoutFingerprint(databasePath, "before-prepare");
+    seedLargeFileEffectTranscript(databasePath, "before-prepare", 15_001);
+
+    await prepareProductionTransition(input);
+    const prepared = new DatabaseSync(databasePath, { readOnly: true });
+    expect(prepared.prepare(
+      "SELECT COUNT(*) AS count FROM file_effects WHERE session_id = ?"
+    ).get("session:before-prepare")).toEqual({ count: 15_001 });
+    expect(prepared.prepare(
+      "SELECT fingerprint FROM session_transcript_fingerprints WHERE session_id = ?"
+    ).get("session:before-prepare")).toEqual({ fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/u) });
+    const daemonBudgetStartedAt = Date.now();
+    expect(initializeSessionTranscriptFingerprintIndex(prepared)).toEqual({ batches: 0, fingerprintsPopulated: 0 });
+    expect(Date.now() - daemonBudgetStartedAt).toBeLessThan(5_000);
+    prepared.close();
+
+    seedSessionWithoutFingerprint(databasePath, "before-preflight");
+    await expect(preflightProductionTransition({
+      ...input,
+      newBundle: { ...newBundle, bundleDigest: "c".repeat(64) }
+    })).rejects.toThrow("transition_receipt_mismatch");
+    await expect(preflightProductionTransition(input)).resolves.toMatchObject({
+      databaseId: expect.any(String),
+      fingerprintsPopulated: 1,
+      state: "ready_to_activate"
+    });
+    await expect(preflightProductionTransition(input)).resolves.toMatchObject({
+      fingerprintsPopulated: 0,
+      state: "ready_to_activate"
+    });
+    const preflighted = new DatabaseSync(databasePath, { readOnly: true });
+    expect(preflighted.prepare(
+      "SELECT fingerprint FROM session_transcript_fingerprints WHERE session_id = ?"
+    ).get("session:before-preflight")).toEqual({ fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/u) });
+    preflighted.close();
+  });
+
   test("creates one WAL-complete snapshot and a nonce-bound ready receipt after migration validation", async () => {
     const { databaseId, databasePath, newBundle, oldBundle, root } = await fixture(21);
     const abandonedStage = join(root, ".masthead.sqlite.migration-backup-stage-abandoned");

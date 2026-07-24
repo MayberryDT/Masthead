@@ -10,7 +10,9 @@ import {
   withExclusiveDatabaseMaintenance
 } from "./databaseBackup.ts";
 import { CURRENT_SCHEMA_VERSION, migrateDatabase, validateCurrentDatabaseSchema } from "./db/schema.ts";
+import { initializeSessionTranscriptFingerprintIndex } from "./db/sessionTranscriptFingerprintIndex.ts";
 import { quickCheckMastheadDatabase } from "./db/sqlite.ts";
+import { runLegacyWorkbenchPublicationBackfill } from "../workbench/legacyPublicationBackfill.ts";
 
 export type ProductionBundleIdentity = {
   bundleDigest: string;
@@ -79,6 +81,14 @@ export type ProductionTransitionOptions = {
   onFullIntegrityCheck?: (databasePath: string) => void;
 };
 
+export type ProductionTransitionPreflightResult = {
+  batches: number;
+  databaseId: string;
+  fingerprintsPopulated: number;
+  legacyCandidates: number;
+  state: "ready_to_activate";
+};
+
 export function productionTransitionJournalPath(databasePath: string): string {
   return `${resolve(databasePath)}.production-transition.json`;
 }
@@ -130,6 +140,7 @@ export async function prepareProductionTransition(
         migrateDatabase(database);
         quickCheckMastheadDatabase(database);
         validateCurrentDatabaseSchema(database);
+        runPreListenStartupPreflight(database);
         options.onBoundary?.("after_migrate", database);
       } finally {
         database.close();
@@ -157,6 +168,51 @@ export async function prepareProductionTransition(
       throw error;
     }
   });
+}
+
+export async function preflightProductionTransition(
+  inputValue: ProductionTransitionInput
+): Promise<ProductionTransitionPreflightResult> {
+  const input = validateInput(inputValue);
+  return withExclusiveDatabaseMaintenance(input.databasePath, async () => {
+    const receipt = await readAndValidateJournal(input);
+    if (receipt.state !== "ready_to_activate") {
+      throw new Error(`transition_preflight_state_invalid:${receipt.state}`);
+    }
+    const database = new DatabaseSync(input.databasePath);
+    try {
+      database.exec("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 3000;");
+      validateCurrentDatabaseSchema(database);
+      const identity = database.prepare(
+        "SELECT setting_json AS value FROM app_settings WHERE setting_key = 'database_identity'"
+      ).get() as { value: string } | undefined;
+      const databaseId = parseDatabaseId(identity?.value);
+      if (databaseId !== receipt.databaseId) throw new Error("transition_preflight_identity_mismatch");
+      const result = runPreListenStartupPreflight(database);
+      quickCheckMastheadDatabase(database);
+      validateCurrentDatabaseSchema(database);
+      const foreignKeyFailures = database.prepare("PRAGMA foreign_key_check").all();
+      if (foreignKeyFailures.length > 0) {
+        throw new Error(`transition_preflight_foreign_key_check_failed:${JSON.stringify(foreignKeyFailures.slice(0, 10))}`);
+      }
+      return {
+        batches: result.fingerprints.batches,
+        databaseId,
+        fingerprintsPopulated: result.fingerprints.fingerprintsPopulated,
+        legacyCandidates: result.legacy.totalCandidates,
+        state: "ready_to_activate"
+      };
+    } finally {
+      database.close();
+    }
+  });
+}
+
+function runPreListenStartupPreflight(database: DatabaseSync) {
+  return {
+    fingerprints: initializeSessionTranscriptFingerprintIndex(database),
+    legacy: runLegacyWorkbenchPublicationBackfill(database)
+  };
 }
 
 export async function restoreProductionTransition(
@@ -499,6 +555,7 @@ export async function runProductionTransitionMaintenanceCli(argv = process.argv.
   const input = JSON.parse(argv[requestIndex + 1]) as ProductionTransitionInput;
   if (action === "prepare") return prepareProductionTransition(input);
   if (action === "restore") return restoreProductionTransition(input);
+  if (action === "preflight") return preflightProductionTransition(input);
   if (action === "complete") {
     await completeProductionTransition(input);
     return { completed: true };

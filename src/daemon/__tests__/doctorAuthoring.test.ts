@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 // @ts-expect-error Doctor is a runtime JavaScript entrypoint with exported pure contract helpers.
-import { inspectAuthoringCapabilities, inspectInstanceManifestIdentity, resolveAuthoringCommand } from "../../../scripts/masthead-doctor.js";
+import { getJsonWithRetry, inspectAuthoringCapabilities, inspectInstanceManifestIdentity, resolveAuthoringCommand } from "../../../scripts/masthead-doctor.js";
 
 describe("Doctor authoring checks", () => {
   test("requires the exact guided V5 authoring contract and current instance identity", () => {
@@ -135,6 +135,7 @@ describe("Doctor authoring checks", () => {
       updatedAt: "2026-07-19T12:00:00.000Z"
     };
     expect(inspectInstanceManifestIdentity(manifest, health, health.runtime.baseUrl)).toMatchObject({ ok: true, problems: [] });
+    expect(inspectInstanceManifestIdentity(manifest, health, `${health.runtime.baseUrl}/`)).toMatchObject({ ok: true, problems: [] });
     const mismatches = [
       [{ ...manifest, schemaVersion: 2 }, health, health.runtime.baseUrl, "manifest schema version mismatch"],
       [{ ...manifest, updatedAt: "not-a-time" }, health, health.runtime.baseUrl, "manifest timestamp is invalid"],
@@ -151,5 +152,27 @@ describe("Doctor authoring checks", () => {
       expect(inspectInstanceManifestIdentity(changedManifest, changedHealth, expectedBaseUrl)).toMatchObject({ ok: false });
       expect(inspectInstanceManifestIdentity(changedManifest, changedHealth, expectedBaseUrl).problems).toContain(problem);
     }
+  });
+
+  test("retries transient read-only endpoint failures without hiding durable errors", async () => {
+    let attempts = 0;
+    const fetchImpl = async () => {
+      attempts += 1;
+      if (attempts === 1) return new Response("request timeout", { status: 408 });
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
+    };
+    await expect(getJsonWithRetry("/settings", {
+      baseUrl: "http://127.0.0.1:17383",
+      fetchImpl,
+      retryDelayMs: 0
+    })).resolves.toEqual({ ok: true });
+    expect(attempts).toBe(2);
+
+    await expect(getJsonWithRetry("/settings", {
+      attempts: 2,
+      baseUrl: "http://127.0.0.1:17383",
+      fetchImpl: async () => new Response("bad request", { status: 400 }),
+      retryDelayMs: 0
+    })).rejects.toThrow("/settings returned 400");
   });
 });

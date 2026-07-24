@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { chmod, link, lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -89,6 +89,21 @@ describe("database writer lock", () => {
     await winners[0].value.release();
     const successor = await acquireLegacyDataDirectoryGuard(dataDirectory);
     locks.push(successor);
+  });
+
+  test.skipIf(process.platform === "win32")("creates the compatibility sentinel mode 0600 under umask 0002", async () => {
+    const dataDirectory = await createTempDir("masthead-sentinel-mode-");
+    const previousUmask = process.umask(0o002);
+    let guard;
+    try {
+      guard = await acquireLegacyDataDirectoryGuard(dataDirectory);
+    } finally {
+      process.umask(previousUmask);
+    }
+    locks.push(guard);
+
+    const info = await lstat(join(dataDirectory, "runtime", "database.lock"));
+    expect(info.mode & 0o777).toBe(0o600);
   });
 
   test("blocks on a stale compatibility sentinel without mutating it", async () => {
@@ -225,26 +240,28 @@ describe("database writer lock", () => {
     const tempDir = await createTempDir("masthead-crashed-db-lease-");
     const databasePath = join(tempDir, "masthead.sqlite");
     const leasePath = `${databasePath}.lease.sqlite`;
-    const child = spawn(process.execPath, [
+    const childArguments = [
       "--input-type=module",
       "-e",
       "import { DatabaseSync } from 'node:sqlite'; const db = new DatabaseSync(process.argv[1]); db.exec('PRAGMA busy_timeout = 0; BEGIN EXCLUSIVE;'); console.log('ready'); setInterval(() => {}, 1000);",
       leasePath
-    ], { stdio: ["ignore", "pipe", "ignore"] });
+    ];
+    const child = spawn(process.execPath, childArguments, { stdio: ["ignore", "pipe", "ignore"] });
+    expect(child.spawnfile).toBe(process.execPath);
+    expect(child.spawnargs).toEqual([process.execPath, ...childArguments]);
+    const childIdentity = await captureOwnedChildIdentity(child);
     const childExit = once(child, "exit");
     try {
-      await once(child.stdout!, "data");
+      await waitForOwnedChildReady(child, 5_000);
       await expect(acquireDatabaseWriterLock(databasePath)).rejects.toThrow("already leased");
-      child.kill("SIGKILL");
-      await childExit;
+      await terminateOwnedChild(child, childIdentity, childExit, 5_000);
 
       const recovered = await acquireDatabaseWriterLock(databasePath);
       locks.push(recovered);
       expect(recovered.lockPath).toBe(leasePath);
     } finally {
       if (child.exitCode === null && child.signalCode === null) {
-        child.kill("SIGKILL");
-        await childExit;
+        await terminateOwnedChild(child, childIdentity, childExit, 5_000);
       }
     }
   });
@@ -258,4 +275,81 @@ async function createTempDir(prefix: string): Promise<string> {
 
 function accessPath(path: string): Promise<boolean> {
   return lstat(path).then(() => true).catch(() => false);
+}
+
+type OwnedChildIdentity = { pid: number; starttime?: string };
+
+async function captureOwnedChildIdentity(child: ChildProcess): Promise<OwnedChildIdentity> {
+  if (!Number.isSafeInteger(child.pid) || !child.pid || child.pid < 1) throw new Error("crash-child PID was not assigned");
+  if (process.platform !== "linux") return { pid: child.pid };
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    const starttime = await linuxProcessStarttime(child.pid);
+    if (starttime) return { pid: child.pid, starttime };
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
+  }
+  throw new Error(`crash-child ${child.pid} start identity was not observable within 2000ms`);
+}
+
+async function waitForOwnedChildReady(child: ChildProcess, timeoutMs: number): Promise<void> {
+  const ready = once(child.stdout!, "data").then(() => undefined);
+  const exited = once(child, "exit").then(([code, signal]) => {
+    throw new Error(`crash-child exited before readiness (code=${code}, signal=${signal ?? "none"})`);
+  });
+  const failed = once(child, "error").then(([error]) => { throw error; });
+  await bounded(Promise.race([ready, exited, failed]), timeoutMs, "crash-child did not signal readiness");
+}
+
+async function terminateOwnedChild(
+  child: ChildProcess,
+  expected: OwnedChildIdentity,
+  childExit: Promise<unknown[]>,
+  timeoutMs: number
+): Promise<void> {
+  if (child.pid !== expected.pid) throw new Error("crash-child PID changed before cleanup");
+  if (process.platform === "linux") {
+    const currentStarttime = await linuxProcessStarttime(expected.pid);
+    if (!currentStarttime) {
+      await bounded(childExit, timeoutMs, "crash-child exit event was not observed after process disappearance");
+      return;
+    }
+    if (!expected.starttime || currentStarttime !== expected.starttime) {
+      throw new Error("crash-child PID was reused before cleanup; no signal was sent");
+    }
+    const children = await readFile(`/proc/${expected.pid}/task/${expected.pid}/children`, "utf8");
+    if (children.trim()) throw new Error(`crash-child unexpectedly owns descendants: ${children.trim()}`);
+  }
+  if (!child.kill("SIGKILL")) throw new Error("crash-child exact SIGKILL was not accepted");
+  await bounded(childExit, timeoutMs, "crash-child did not exit after exact SIGKILL");
+  if (process.platform === "linux" && await linuxProcessStarttime(expected.pid) === expected.starttime) {
+    throw new Error("crash-child exact PID/start identity remained after cleanup");
+  }
+}
+
+async function linuxProcessStarttime(pid: number): Promise<string | undefined> {
+  try {
+    const stat = await readFile(`/proc/${pid}/stat`, "utf8");
+    const close = stat.lastIndexOf(")");
+    if (close < 0) throw new Error("malformed proc stat");
+    return stat.slice(close + 1).trim().split(/\s+/u)[19];
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && ["ENOENT", "ESRCH"].includes(String(error.code))) {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+async function bounded<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`${message} within ${timeoutMs}ms`)), timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
