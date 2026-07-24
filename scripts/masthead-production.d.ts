@@ -201,6 +201,10 @@ export function activateStagedProductionInstallation(
   receipt: StagedProductionInstallationReceipt | string,
   dependencies?: Record<string, unknown>
 ): Promise<Record<string, unknown>>;
+export function abortStagedProductionInstallation(
+  receipt: StagedProductionInstallationReceipt | string,
+  dependencies?: Record<string, unknown>
+): Promise<Record<string, unknown>>;
 export function loadStagedProductionInstallation(receiptPath: string): Promise<StagedProductionInstallationReceipt>;
 export function finalizeStagedProductionInstallation(
   receipt: StagedProductionInstallationReceipt | string,

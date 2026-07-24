@@ -252,9 +252,15 @@ export async function restoreProductionTransition(
 ): Promise<ProductionTransitionReceipt> {
   const input = validateInput(inputValue);
   return withExclusiveDatabaseMaintenance(input.databasePath, async (ownership) => {
+    await cleanupAbandonedMigrationStagesInsideOwnership(input.databasePath);
     const receipt = await readAndValidateJournal(input);
     if (!["snapshot_ready", "ready_to_activate", "restoring", "restore_failed", "restored"].includes(receipt.state)) {
       throw new Error(`transition_restore_state_invalid:${receipt.state}`);
+    }
+    if (receipt.state === "restored") {
+      const active = verifyDatabase(input.databasePath, { foreignKeys: true });
+      if (!matchesSourceDatabase(active, receipt)) throw new Error("transition_restored_database_mismatch");
+      return receipt;
     }
     await restoreSnapshotInsideOwnership(
       receipt,

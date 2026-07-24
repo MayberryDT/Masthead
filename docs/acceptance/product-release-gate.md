@@ -74,6 +74,10 @@ or release instructions.
 - [ ] Finalization leaves exactly one versioned production bundle, `current` points to it, no staged
       receipt/journal/helper remains, and the database directory contains one active database plus at
       most one sibling backup.
+- [ ] An activated candidate without matching healthy startup proof can be superseded only through
+      receipt-bound `abort`; abort proves the candidate process set empty, restores the prior bundle
+      and database identity when needed, resumes after interruption, cleans abandoned migration
+      stages, and permits a newer stage without manual deletion or fabricated startup proof.
 
 ## Automated release candidate gates
 
