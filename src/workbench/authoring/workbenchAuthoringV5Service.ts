@@ -4,9 +4,11 @@ import {
   activeOrAvailableWorkbenchAuthoringV5Pack,
   activateWorkbenchAuthoringV5Pack,
   completeWorkbenchAuthoringV5PackRecord,
+  getWorkbenchAuthoringV5EvidenceSnapshot,
   getSavedWorkbenchAuthoringV5Pack,
   getWorkbenchAuthoringV5PackReceipt,
   getWorkbenchAuthoringV5RequestReceipt,
+  insertWorkbenchAuthoringV5EvidenceSnapshot,
   insertWorkbenchAuthoringV5Request,
   listWorkbenchAuthoringV5EvidenceAccess,
   listWorkbenchAuthoringV5Packs,
@@ -83,6 +85,9 @@ export function createWorkbenchAuthoringV5Request(
     }
     const requestId = `authoring-v5-request:${randomUUID()}`;
     const packSessionIds = fixedPacks(preflight.sessions.map(({ sessionId }) => sessionId));
+    const revisionInputBySessionId = new Map(
+      preflight.revisionInputs.map((revisionInput) => [revisionInput.sessionId, revisionInput])
+    );
     const request = insertWorkbenchAuthoringV5Request(db, {
       actorId: input.actorId,
       identity: {
@@ -93,7 +98,9 @@ export function createWorkbenchAuthoringV5Request(
         instanceManifest: input.currentIdentity.instanceManifest
       },
       packs: packSessionIds.map((sessionIds, ordinal) => ({
-        evidenceRevision: evidenceCatalog.guidedAuthoringEvidenceRevision(db, sessionIds),
+        evidenceRevision: evidenceCatalog.guidedAuthoringEvidenceRevisionFromInputs(
+          sessionIds.map((sessionId) => revisionInputBySessionId.get(sessionId)!)
+        ),
         ordinal,
         packId: stableRecordId("authoring-v5-pack", [requestId, String(ordinal)]),
         sessionIds
@@ -101,6 +108,14 @@ export function createWorkbenchAuthoringV5Request(
       requestId,
       sessions: preflight.sessions.map(({ sessionId }, ordinal) => ({ ordinal, sessionId }))
     });
+    for (const { sessionId } of preflight.sessions) {
+      insertWorkbenchAuthoringV5EvidenceSnapshot(db, {
+        evidence: [...iterateSessionTranscriptItems(db, { order: "asc", sessionId })],
+        requestId,
+        sessionDigest: revisionInputBySessionId.get(sessionId)!.sessionDigest,
+        sessionId
+      });
+    }
     bumpDataRevisionInTransaction(db, "workbench");
     const result = {
       handoff: {
@@ -228,11 +243,11 @@ export function inspectWorkbenchAuthoringV5Pack(
   return withImmediateTransaction(db, () => {
     const pack = requireWorkbenchAuthoringV5Pack(db, input.packId);
     if (pack.status !== "active") throw new Error("authoring_v5_pack_not_inspectable");
-    assertCurrentEvidenceRevision(db, pack);
+    assertFrozenOrCurrentEvidenceAvailable(db, pack);
     const before = coverage(db, pack.packId);
     const sessionId = input.sessionId ?? before.find(({ complete }) => !complete)?.sessionId ?? pack.sessionIds[0]!;
     if (!pack.sessionIds.includes(sessionId)) throw new Error("authoring_v5_session_not_in_pack");
-    const canonical = [...iterateSessionTranscriptItems(db, { order: "asc", sessionId })];
+    const canonical = evidenceForPackSession(db, pack, sessionId);
     const accessed = new Set(
       listWorkbenchAuthoringV5EvidenceAccess(db, pack.packId, pack.evidenceRevision)
         .filter((row) => row.sessionId === sessionId)
@@ -275,7 +290,7 @@ export function buildWorkbenchAuthoringV5Scaffold(
 ) {
   const pack = requireWorkbenchAuthoringV5Pack(db, input.packId);
   if (pack.status !== "active") throw new Error("authoring_v5_pack_not_scaffoldable");
-  assertCurrentEvidenceRevision(db, pack);
+  assertFrozenOrCurrentEvidenceAvailable(db, pack);
   if (coverage(db, pack.packId).some(({ complete }) => !complete)) throw new Error("authoring_v5_evidence_incomplete");
   const draft: WorkbenchAuthoringV5Draft = {
     bundleVersion: WORKBENCH_AUTHORING_V5_VERSION,
@@ -284,7 +299,7 @@ export function buildWorkbenchAuthoringV5Scaffold(
     optionalConsiderations: [],
     packId: pack.packId,
     sessions: pack.sessionIds.map((sessionId) => ({
-      evidenceCatalog: [...iterateSessionTranscriptItems(db, { order: "asc", sessionId })].map(catalogItem),
+      evidenceCatalog: evidenceForPackSession(db, pack, sessionId).map(catalogItem),
       fields: blankFields(),
       sessionId
     }))
@@ -304,9 +319,12 @@ export function saveWorkbenchAuthoringV5Draft(
   return withImmediateTransaction(db, () => {
     const pack = requireWorkbenchAuthoringV5Pack(db, input.packId);
     if (pack.status !== "active" && pack.status !== "saved") throw new Error("authoring_v5_pack_not_saveable");
-    assertCurrentEvidenceRevision(db, pack);
+    assertFrozenOrCurrentEvidenceAvailable(db, pack);
     const draft = parseWorkbenchAuthoringV5Draft(db, input.draft, pack);
-    const outcomes = draft.sessions.map((session) => classifySessionDraft(db, session));
+    const outcomes = draft.sessions.map((session) => classifySessionDraft(
+      session,
+      evidenceForPackSession(db, pack, session.sessionId)
+    ));
     const saved = saveWorkbenchAuthoringV5PackDraft(db, { draft, outcomes, packId: pack.packId });
     bumpDataRevisionInTransaction(db, "workbench");
     return {
@@ -329,7 +347,7 @@ export function finishWorkbenchAuthoringV5Pack(
   return withImmediateTransaction(db, () => {
     const pack = requireWorkbenchAuthoringV5Pack(db, input.packId);
     if (pack.status !== "saved") throw new Error("authoring_v5_pack_not_ready");
-    assertCurrentEvidenceRevision(db, pack);
+    assertFrozenOrCurrentEvidenceAvailable(db, pack);
     const saved = getSavedWorkbenchAuthoringV5Pack(db, pack.packId);
     if (!saved) throw new Error("authoring_v5_saved_draft_missing");
     const request = requireWorkbenchAuthoringV5Request(db, pack.requestId);
@@ -457,11 +475,30 @@ function assertCurrentEvidenceRevision(db: MastheadDatabase, pack: ReturnType<ty
   }
 }
 
+function assertFrozenOrCurrentEvidenceAvailable(
+  db: MastheadDatabase,
+  pack: ReturnType<typeof requireWorkbenchAuthoringV5Pack>
+): void {
+  const hasCompleteSnapshot = pack.sessionIds.every((sessionId) => (
+    Boolean(getWorkbenchAuthoringV5EvidenceSnapshot(db, pack.requestId, sessionId))
+  ));
+  if (!hasCompleteSnapshot) assertCurrentEvidenceRevision(db, pack);
+}
+
+function evidenceForPackSession(
+  db: MastheadDatabase,
+  pack: ReturnType<typeof requireWorkbenchAuthoringV5Pack>,
+  sessionId: string
+) {
+  const snapshot = getWorkbenchAuthoringV5EvidenceSnapshot(db, pack.requestId, sessionId);
+  return snapshot?.evidence ?? [...iterateSessionTranscriptItems(db, { order: "asc", sessionId })];
+}
+
 function coverage(db: MastheadDatabase, packId: string) {
   const pack = requireWorkbenchAuthoringV5Pack(db, packId);
   const accessed = listWorkbenchAuthoringV5EvidenceAccess(db, packId, pack.evidenceRevision);
   return pack.sessionIds.map((sessionId) => {
-    const totalItems = [...iterateSessionTranscriptItems(db, { order: "asc", sessionId })].length;
+    const totalItems = evidenceForPackSession(db, pack, sessionId).length;
     const accessedItems = new Set(accessed.filter((row) => row.sessionId === sessionId).map(({ evidenceRef }) => evidenceRef)).size;
     return { sessionId, accessedItems, totalItems, complete: accessedItems >= totalItems };
   });
@@ -500,8 +537,7 @@ function parseWorkbenchAuthoringV5Draft(
     throw new Error("invalid_workbench_authoring_v5_membership");
   }
   for (const session of value.sessions) {
-    const canonicalCatalog = [...iterateSessionTranscriptItems(db, { order: "asc", sessionId: session.sessionId })]
-      .map(catalogItem);
+    const canonicalCatalog = evidenceForPackSession(db, pack, session.sessionId).map(catalogItem);
     if (!sameEvidenceCatalog(session.evidenceCatalog, canonicalCatalog)) {
       throw new Error("invalid_workbench_authoring_v5_evidence_catalog");
     }
@@ -617,15 +653,13 @@ function sameStrings(value: unknown, expected: string[]): boolean {
 
 // Kept separate so S4 can replace classification without changing save/finish state transitions.
 function classifySessionDraft(
-  db: MastheadDatabase,
-  session: WorkbenchAuthoringV5Draft["sessions"][number]
+  session: WorkbenchAuthoringV5Draft["sessions"][number],
+  canonicalEvidence: ReturnType<typeof evidenceForPackSession>
 ): WorkbenchAuthoringV5SessionOutcome {
-  const liveEvidenceIds = new Set(
-    [...iterateSessionTranscriptItems(db, { order: "asc", sessionId: session.sessionId })].map(({ itemId }) => itemId)
-  );
+  const canonicalEvidenceIds = new Set(canonicalEvidence.map(({ itemId }) => itemId));
   const catalogIds = new Set(session.evidenceCatalog.map(({ id }) => id));
   const referencedIds = Object.values(session.fields.evidenceRefs).flat();
-  const unknown = [...new Set(referencedIds.filter((id) => !liveEvidenceIds.has(id) || !catalogIds.has(id)))];
+  const unknown = [...new Set(referencedIds.filter((id) => !canonicalEvidenceIds.has(id) || !catalogIds.has(id)))];
   if (unknown.length > 0) {
     return {
       disposition: "hard_reject",

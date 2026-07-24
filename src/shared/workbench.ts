@@ -78,6 +78,7 @@ export type WorkbenchActivityDto = {
 
 export type WorkbenchQueueSessionDto = {
   sessionId: string;
+  compileReady: boolean;
   title: string;
   project?: string;
   runtime: string;

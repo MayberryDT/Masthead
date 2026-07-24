@@ -190,6 +190,11 @@ const migrations = [
     version: 37,
     name: "037_guided_authoring_v5_contract",
     path: resolve(currentDir, "migrations/037_guided_authoring_v5_contract.sql")
+  },
+  {
+    version: 38,
+    name: "038_workbench_authoring_v5_evidence_snapshots",
+    path: resolve(currentDir, "migrations/038_workbench_authoring_v5_evidence_snapshots.sql")
   }
 ];
 
@@ -259,6 +264,7 @@ const criticalTables = [
   "guided_authoring_assignments",
   "workbench_authoring_v5_requests",
   "workbench_authoring_v5_request_sessions",
+  "workbench_authoring_v5_evidence_snapshots",
   "workbench_authoring_v5_packs",
   "workbench_authoring_v5_pack_sessions",
   "workbench_authoring_v5_evidence_access",

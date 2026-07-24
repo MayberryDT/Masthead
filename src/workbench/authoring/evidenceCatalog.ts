@@ -52,6 +52,13 @@ export function getAuthoringEvidenceSnapshot(
   return collectAuthoringEvidenceSnapshot(db, strictSessionIds(sessionIds));
 }
 
+export function hasUsableAuthoringEvidence(db: MastheadDatabase, sessionId: string): boolean {
+  for (const item of iterateSessionTranscriptItems(db, { order: "asc", sessionId })) {
+    if (isUsableAuthoringEvidenceItem(item)) return true;
+  }
+  return false;
+}
+
 export function guidedAuthoringEvidenceRevisionFromInputs(
   inputs: AuthoringEvidenceRevisionInput[]
 ): string {
@@ -167,7 +174,7 @@ function collectAuthoringEvidenceSnapshot(
       firstObservedAt ??= item.observedAt || undefined;
       lastObservedAt = item.observedAt || lastObservedAt;
       counts.set(item.kind, (counts.get(item.kind) ?? 0) + 1);
-      if (item.lowValue !== true && hasSemanticRedactedText(item.narrativeText ?? item.text)) {
+      if (isUsableAuthoringEvidenceItem(item)) {
         usableCanonicalEvidence = true;
       }
       if (item.kind === "message") {
@@ -215,6 +222,10 @@ function collectAuthoringEvidenceSnapshot(
     },
     sessions
   };
+}
+
+function isUsableAuthoringEvidenceItem(item: SessionTranscriptItem): boolean {
+  return item.lowValue !== true && hasSemanticRedactedText(item.narrativeText ?? item.text);
 }
 
 function serializeCanonicalEvidenceItem(item: SessionTranscriptItem): string {

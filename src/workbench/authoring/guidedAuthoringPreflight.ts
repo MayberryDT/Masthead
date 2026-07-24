@@ -1,11 +1,17 @@
 import { getSessionDossier } from "../../daemon/db/sessionDossierRepository.ts";
 import type { MastheadDatabase } from "../../daemon/db/sqlite.ts";
-import { readWorkbenchSessionState } from "../../daemon/db/workbenchPipelineRepository.ts";
+import {
+  readWorkbenchSessionState,
+  type WorkbenchSessionStateRecord
+} from "../../daemon/db/workbenchPipelineRepository.ts";
 import type { SessionDossierDto } from "../../shared/sessionDossier.ts";
 import type { WorkbenchAuthoringEvidenceManifest } from "../../shared/workbenchAuthoring.ts";
 import type { WorkbenchAuthoringV5SelectionDto } from "../../shared/workbenchAuthoringV5.ts";
 import * as evidenceCatalog from "./evidenceCatalog.ts";
-import type { AuthoringEvidenceRevisionInput } from "./evidenceCatalog.ts";
+import type {
+  AuthoringEvidenceRevisionInput,
+  AuthoringEvidenceSessionSnapshot
+} from "./evidenceCatalog.ts";
 
 export type GuidedCompileReadySession = {
   sessionId: string;
@@ -20,6 +26,54 @@ export type GuidedSelectionPreflightResult = {
   revisionInputs: AuthoringEvidenceRevisionInput[];
   selection: WorkbenchAuthoringV5SelectionDto;
 };
+
+type GuidedSessionEligibility =
+  | {
+      eligible: true;
+      dossier: SessionDossierDto;
+      evidence: WorkbenchAuthoringEvidenceManifest["sessions"][number];
+    }
+  | {
+      eligible: false;
+      reason: WorkbenchAuthoringV5SelectionDto["excludedSessions"][number]["reason"];
+    };
+
+export function evaluateWorkbenchAuthoringV5Eligibility(
+  db: MastheadDatabase,
+  sessionId: string,
+  captured?: AuthoringEvidenceSessionSnapshot
+): GuidedSessionEligibility {
+  const dossier = getSessionDossier(db, sessionId);
+  if (!dossier) return { eligible: false, reason: "session_not_found" };
+  const state = readWorkbenchSessionState(db, sessionId);
+  if (state && state.publicationStatus !== "publish_path") {
+    return { eligible: false, reason: "not_on_publish_path" };
+  }
+  if (!state || !workbenchStateIsCompileReady(state)) {
+    return { eligible: false, reason: "not_compile_ready" };
+  }
+  const evidence = captured ?? evidenceCatalog.getAuthoringEvidenceSnapshot(db, [sessionId]).sessions[0]!;
+  if (!evidence.usableCanonicalEvidence) {
+    return { eligible: false, reason: "missing_canonical_evidence" };
+  }
+  return {
+    dossier,
+    eligible: true,
+    evidence: evidence.evidence
+  };
+}
+
+export function isWorkbenchAuthoringV5CompileReady(
+  db: MastheadDatabase,
+  state: WorkbenchSessionStateRecord
+): boolean {
+  return workbenchStateIsCompileReady(state) && evidenceCatalog.hasUsableAuthoringEvidence(db, state.sessionId);
+}
+
+function workbenchStateIsCompileReady(state: WorkbenchSessionStateRecord): boolean {
+  const transcriptReady = state.transcriptStatus === "available" || state.transcriptStatus === "imported";
+  return state.publicationStatus === "publish_path" && transcriptReady && state.qualityStatus === "passed";
+}
 
 export function assertGuidedSelectionCompileReady(
   db: MastheadDatabase,
@@ -39,27 +93,12 @@ export function assertGuidedSelectionCompileReady(
   const sessions: GuidedCompileReadySession[] = [];
   const excludedSessions: WorkbenchAuthoringV5SelectionDto["excludedSessions"] = [];
   for (const sessionId of sessionIds) {
-    const dossier = getSessionDossier(db, sessionId);
-    if (!dossier) {
-      excludedSessions.push({ reason: "session_not_found", sessionId });
+    const eligibility = evaluateWorkbenchAuthoringV5Eligibility(db, sessionId, snapshotById.get(sessionId)!);
+    if (!eligibility.eligible) {
+      excludedSessions.push({ reason: eligibility.reason, sessionId });
       continue;
     }
-    const state = readWorkbenchSessionState(db, sessionId);
-    if (state && state.publicationStatus !== "publish_path") {
-      excludedSessions.push({ reason: "not_on_publish_path", sessionId });
-      continue;
-    }
-    const transcriptReady = state?.transcriptStatus === "available" || state?.transcriptStatus === "imported";
-    if (!state || state.publicationStatus !== "publish_path" || !transcriptReady || state.qualityStatus !== "passed") {
-      excludedSessions.push({ reason: "not_compile_ready", sessionId });
-      continue;
-    }
-    const captured = snapshotById.get(sessionId)!;
-    if (!captured.usableCanonicalEvidence) {
-      excludedSessions.push({ reason: "missing_canonical_evidence", sessionId });
-      continue;
-    }
-    sessions.push({ dossier, evidence: captured.evidence, ordinal: sessions.length, sessionId });
+    sessions.push({ dossier: eligibility.dossier, evidence: eligibility.evidence, ordinal: sessions.length, sessionId });
   }
   return {
     manifest: snapshot.manifest,

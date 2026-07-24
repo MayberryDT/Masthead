@@ -7,6 +7,7 @@ import { GUIDED_AUTHORING_IDENTITY_HEADERS } from "../../shared/guidedAuthoring.
 import type { GuidedAuthoringBundleV4 } from "../../shared/guidedAuthoring.ts";
 import { identityFromManifest } from "../../shared/instanceIdentity.ts";
 import type { SessionTranscriptItem } from "../../shared/sessionTranscript.ts";
+import type { WorkbenchAuthoringV5Draft } from "../../shared/workbenchAuthoringV5.ts";
 import type { DaemonConfig } from "../config.ts";
 import { markSessionCompileReady, seedSession } from "../db/__tests__/sessionTestHelpers.ts";
 import { createGuidedAuthoringRequest } from "../db/guidedAuthoringRepository.ts";
@@ -34,6 +35,107 @@ afterEach(async () => {
 });
 
 describe("Workbench authoring HTTP API", () => {
+  test("Workbench readiness and V5 request creation agree on a mixed 10-session eligible selection", async () => {
+    const { baseUrl, daemon } = await startTestDaemon();
+    const eligibleSessionIds = Array.from({ length: 10 }, (_, index) => `session:v5-ready:${index}`);
+    const unreadySessionId = "session:v5-ready:missing-evidence";
+    for (const sessionId of [...eligibleSessionIds, unreadySessionId]) seedAuthoringSession(daemon, sessionId);
+    removeCanonicalEvidence(daemon.database, unreadySessionId);
+
+    const queue = (await getJson(baseUrl, "/workbench/sessions?limit=20")).body;
+    expect(queue.sessions.filter((session: any) => session.compileReady).map((session: any) => session.sessionId).sort())
+      .toEqual([...eligibleSessionIds].sort());
+
+    const identity = authoringIdentity((await getJson(baseUrl, "/workbench/authoring/capabilities")).body);
+    const created = await postJson(baseUrl, "/workbench/authoring/v5/requests", {
+      expectedIdentity: identity,
+      sessionIds: [...eligibleSessionIds, unreadySessionId]
+    }, 201);
+
+    expect(created.body).toMatchObject({
+      request: { packSizes: [10], sessionCount: 10 },
+      selection: {
+        eligibleSessionCount: 10,
+        excludedSessionCount: 1,
+        excludedSessions: [{ reason: "missing_canonical_evidence", sessionId: unreadySessionId }],
+        requestedSessionCount: 11
+      }
+    });
+  });
+
+  test("public V5 inspect, scaffold, and save read request-frozen evidence after live ingestion changes", async () => {
+    const { baseUrl, daemon } = await startTestDaemon();
+    const sessionIds = Array.from({ length: 5 }, (_, index) => `session:v5-frozen:${index}`);
+    for (const sessionId of sessionIds) seedAuthoringSession(daemon, sessionId);
+    const identity = authoringIdentity((await getJson(baseUrl, "/workbench/authoring/capabilities")).body);
+    const created = await postJson(baseUrl, "/workbench/authoring/v5/requests", {
+      expectedIdentity: identity,
+      sessionIds
+    }, 201);
+    const requestId = created.body.request.requestId as string;
+    const started = await postJson(
+      baseUrl,
+      `/workbench/authoring/v5/requests/${encodeURIComponent(requestId)}/start`,
+      { expectedIdentity: identity }
+    );
+    const packId = started.body.pack.packId as string;
+
+    daemon.database.prepare(
+      `INSERT INTO messages (
+        message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      `${sessionIds[0]}:later-message`,
+      sessionIds[0],
+      "assistant",
+      "Evidence ingested after V5 request creation.",
+      `${sessionIds[0]}:later-message-hash`,
+      "2026-06-25T12:01:00.000Z",
+      "{}",
+      "authoritative"
+    );
+
+    const inspected = await getJson(
+      baseUrl,
+      `/workbench/authoring/v5/packs/${encodeURIComponent(packId)}/inspect?sessionId=${encodeURIComponent(sessionIds[0]!)}&limit=250`,
+      200,
+      authoringHeaders(identity)
+    );
+
+    expect(inspected.body).toMatchObject({
+      evidenceRevision: created.body.request.evidenceRevision ?? started.body.pack.evidenceRevision,
+      packId,
+      sessionId: sessionIds[0]
+    });
+    expect(inspected.body.evidence.items.map((item: SessionTranscriptItem) => item.itemId))
+      .not.toContain(`${sessionIds[0]}:later-message`);
+
+    for (const sessionId of sessionIds.slice(1)) {
+      await getJson(
+        baseUrl,
+        `/workbench/authoring/v5/packs/${encodeURIComponent(packId)}/inspect?sessionId=${encodeURIComponent(sessionId)}&limit=250`,
+        200,
+        authoringHeaders(identity)
+      );
+    }
+    const scaffold = await getJson(
+      baseUrl,
+      `/workbench/authoring/v5/packs/${encodeURIComponent(packId)}/scaffold`
+    );
+    expect(scaffold.body.draft.sessions[0].evidenceCatalog.map((item: { id: string }) => item.id))
+      .not.toContain(`${sessionIds[0]}:later-message`);
+
+    const saved = await postJson(
+      baseUrl,
+      `/workbench/authoring/v5/packs/${encodeURIComponent(packId)}/draft`,
+      { draft: authorV5Scaffold(scaffold.body.draft), expectedIdentity: identity }
+    );
+    expect(saved.body.outcomes).toHaveLength(5);
+    expect(saved.body.outcomes).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ disposition: "hard_reject" })
+    ]));
+  });
+
   test("retires legacy request creation without writing a duplicate V5 state machine", async () => {
     const { baseUrl, daemon } = await startTestDaemon();
     seedAuthoringSession(daemon, "session:legacy-create-retired");
@@ -304,6 +406,12 @@ function seedAuthoringSession(daemon: MastheadDaemon, sessionId: string): void {
   markSessionCompileReady(daemon.database, sessionId);
 }
 
+function removeCanonicalEvidence(db: MastheadDatabase, sessionId: string): void {
+  for (const table of ["messages", "tool_results", "tool_calls", "file_effects", "runtime_signals", "checkpoints"]) {
+    db.prepare(`DELETE FROM ${table} WHERE session_id = ?`).run(sessionId);
+  }
+}
+
 function totalChanges(db: MastheadDatabase): number {
   return Number((db.prepare("SELECT total_changes() AS count").get() as { count: number }).count);
 }
@@ -371,6 +479,40 @@ function authorGuidedScaffold(
     }
   };
   return draft;
+}
+
+function authorV5Scaffold(draft: WorkbenchAuthoringV5Draft): WorkbenchAuthoringV5Draft {
+  const authored = structuredClone(draft);
+  for (const session of authored.sessions) {
+    const evidenceRef = session.evidenceCatalog[0]?.id;
+    if (!evidenceRef) throw new Error("expected_v5_evidence_catalog");
+    session.fields = {
+      decisions: ["Keep callback state bound to the signed request."],
+      description: "Repaired OAuth callback state handling and covered the stable transition with a regression test.",
+      evidenceRefs: {
+        description: [evidenceRef],
+        keyWork: [evidenceRef],
+        outcome: [evidenceRef],
+        purpose: [evidenceRef],
+        title: [evidenceRef],
+        verification: [evidenceRef]
+      },
+      keyWork: ["Updated callback state handling and added a focused regression test."],
+      keywords: ["oauth", "callback", "state transition"],
+      outcome: "The callback now preserves validated state through authentication.",
+      purpose: "Fix the OAuth authentication callback without weakening request validation.",
+      title: "Repair OAuth callback state handling",
+      verification: { status: "passed", summary: "The focused callback regression test passes." }
+    };
+  }
+  const evidenceRef = authored.sessions[0]?.evidenceCatalog[0]?.id;
+  authored.optionalConsiderations = [{
+    decision: "no",
+    ...(evidenceRef ? { evidenceRef } : {}),
+    kind: "runbook",
+    reason: "The evidence describes a focused code correction rather than a repeatable operational procedure."
+  }];
+  return authored;
 }
 
 function validGuidedDraft(input: {

@@ -114,6 +114,7 @@ import { migrateLegacyJournalOnce } from "./legacyJournalMigration.ts";
 import { runLegacyWorkbenchPublicationBackfill } from "../workbench/legacyPublicationBackfill.ts";
 import { runCaptureQualityPrecheck } from "../workbench/qualityPrecheck.ts";
 import { authoringEvidenceRevision } from "../workbench/authoring/evidenceCatalog.ts";
+import { isWorkbenchAuthoringV5CompileReady } from "../workbench/authoring/guidedAuthoringPreflight.ts";
 import { addSourceExclusion, sourceIsExcluded, sourceRecordIsExcluded } from "./db/sourceRepository.ts";
 import { setSourcePolicy, sourcePolicyExplicitlyEnabled, type SourcePolicyKind } from "./db/sourcePolicyRepository.ts";
 import {
@@ -4776,6 +4777,7 @@ function workbenchQueueSessionDtos(database: MastheadDatabase, states: Workbench
               expiresAt: state.activeClaim.expiresAt
             }
           : undefined,
+        compileReady: isWorkbenchAuthoringV5CompileReady(database, state),
         adrStatus: state.adrStatus,
         bugFixTraceStatus: state.runbookStatus,
         incidentTimelineStatus: state.incidentTimelineStatus,

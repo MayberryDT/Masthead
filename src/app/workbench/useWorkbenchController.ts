@@ -504,8 +504,7 @@ export function useWorkbenchController({
 }
 
 function isCompileReadySession(session: WorkbenchQueueSessionDto): boolean {
-  return (session.transcriptStatus === "available" || session.transcriptStatus === "imported") &&
-    session.qualityStatus === "passed";
+  return session.compileReady;
 }
 
 async function resolveCurrentSelection(

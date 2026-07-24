@@ -6,6 +6,7 @@ import type {
   WorkbenchAuthoringV5RequestReceipt,
   WorkbenchAuthoringV5SessionOutcome
 } from "../../shared/workbenchAuthoringV5.ts";
+import type { SessionTranscriptItem } from "../../shared/sessionTranscript.ts";
 import type { MastheadDatabase } from "./sqlite.ts";
 
 type RequestRow = {
@@ -88,6 +89,44 @@ export function insertWorkbenchAuthoringV5Request(
     pack.sessionIds.forEach((sessionId, ordinal) => insertMembership.run(pack.packId, input.requestId, sessionId, ordinal));
   });
   return requireWorkbenchAuthoringV5Request(db, input.requestId);
+}
+
+export function insertWorkbenchAuthoringV5EvidenceSnapshot(
+  db: MastheadDatabase,
+  input: {
+    requestId: string;
+    sessionId: string;
+    sessionDigest: string;
+    evidence: SessionTranscriptItem[];
+  }
+): void {
+  db.prepare(
+    `INSERT INTO workbench_authoring_v5_evidence_snapshots (
+      request_id, session_id, session_digest, evidence_json, created_at
+    ) VALUES (?, ?, ?, ?, ?)`
+  ).run(
+    input.requestId,
+    input.sessionId,
+    input.sessionDigest,
+    JSON.stringify(input.evidence),
+    new Date().toISOString()
+  );
+}
+
+export function getWorkbenchAuthoringV5EvidenceSnapshot(
+  db: MastheadDatabase,
+  requestId: string,
+  sessionId: string
+): { sessionDigest: string; evidence: SessionTranscriptItem[] } | undefined {
+  const row = db.prepare(
+    `SELECT session_digest AS sessionDigest, evidence_json AS evidenceJson
+     FROM workbench_authoring_v5_evidence_snapshots
+     WHERE request_id = ? AND session_id = ?`
+  ).get(requestId, sessionId) as { sessionDigest: string; evidenceJson: string } | undefined;
+  if (!row) return undefined;
+  const evidence = JSON.parse(row.evidenceJson) as unknown;
+  if (!Array.isArray(evidence)) throw new Error("authoring_v5_evidence_snapshot_invalid");
+  return { evidence: evidence as SessionTranscriptItem[], sessionDigest: row.sessionDigest };
 }
 
 export function getWorkbenchAuthoringV5Request(

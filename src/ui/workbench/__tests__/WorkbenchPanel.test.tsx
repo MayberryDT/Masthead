@@ -594,6 +594,7 @@ describe("WorkbenchPanel", () => {
 
 function session(overrides: Partial<WorkbenchQueueSessionDto> = {}): WorkbenchQueueSessionDto {
   return {
+    compileReady: true,
     activeClaim: undefined,
     adrStatus: "unknown",
     bugFixTraceStatus: "unknown",

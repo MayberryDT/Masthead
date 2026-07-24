@@ -1063,15 +1063,20 @@ async function select(sessionId: string): Promise<void> {
 }
 
 function session(sessionId: string, title: string, overrides: Partial<WorkbenchQueueSessionDto> = {}): WorkbenchQueueSessionDto {
+  const transcriptStatus = overrides.transcriptStatus ?? "imported";
   return {
     bugFixTraceStatus: "unknown",
+    compileReady: overrides.compileReady ?? (
+      (transcriptStatus === "available" || transcriptStatus === "imported") &&
+      (overrides.qualityStatus ?? "passed") === "passed"
+    ),
     latestActivity: undefined,
     nextAction: "check_transcript",
     publicationStatus: "publish_path",
     qualityStatus: "passed",
     sessionDossierStatus: "missing",
     sessionEnrichmentStatus: "missing",
-    transcriptStatus: "imported",
+    transcriptStatus,
     lastActivityAt: "2026-07-07T12:00:00.000Z",
     lifecycle: "ended",
     project: "Masthead",
