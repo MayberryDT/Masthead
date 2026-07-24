@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { readFileSync, readdirSync } from "node:fs";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -170,7 +170,7 @@ describe("offline production transition maintenance", () => {
     expect((await readdir(root)).filter((name) => name.includes("transition-stage"))).toEqual([]);
     await expect(readFile(abandonedStage)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(readFile(abandonedRecoveryStage)).rejects.toMatchObject({ code: "ENOENT" });
-    expect(fullIntegrityChecks).toEqual([receipt.snapshot.path]);
+    expect(fullIntegrityChecks).toEqual([receipt.snapshot.stagePath]);
   });
 
   test("resumes an interrupted prepared migration without duplicating its backup and removes abandoned large stages", async () => {
@@ -209,6 +209,113 @@ describe("offline production transition maintenance", () => {
       .toEqual(["masthead.sqlite.backup-current"]);
     await expect(readFile(abandonedLargeStage)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(readFile(abandonedRecoveryStage)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test.each([
+    "backup_copied",
+    "backup_verified",
+    "migration_stage_complete",
+    "post_migration_verified",
+    "ready_to_activate"
+  ] as const)("resumes after the durable %s checkpoint without repeating that phase", async (phase) => {
+    const { databasePath, newBundle, oldBundle } = await fixture(37);
+    const input = {
+      databasePath,
+      newBundle,
+      nonce: "13131313-1313-4313-8313-131313131313",
+      oldBundle
+    };
+    const firstBoundaries: string[] = [];
+    await expect(prepareProductionTransition(input, {
+      onBoundary: (boundary) => firstBoundaries.push(boundary),
+      simulateProcessDeathAfterPhase: phase
+    })).rejects.toMatchObject({ code: "simulated_production_transition_process_death" });
+    expect(JSON.parse(await readFile(productionTransitionJournalPath(databasePath), "utf8")))
+      .toMatchObject({ preparePhase: phase });
+
+    const resumedBoundaries: string[] = [];
+    await expect(prepareProductionTransition(input, {
+      onBoundary: (boundary) => resumedBoundaries.push(boundary)
+    })).resolves.toMatchObject({
+      preparePhase: "ready_to_activate",
+      sourceSchemaVersion: 37,
+      state: "ready_to_activate",
+      targetSchemaVersion: CURRENT_SCHEMA_VERSION
+    });
+    expect(resumedBoundaries).not.toContain(phase);
+    if (["backup_verified", "migration_stage_complete", "post_migration_verified", "ready_to_activate"].includes(phase)) {
+      expect(resumedBoundaries).not.toContain("backup_copy_started");
+    }
+  });
+
+  test("adopts one complete legacy recovery stage without another database copy", async () => {
+    const { databasePath, newBundle, oldBundle, root } = await fixture(37);
+    const legacyStage = join(root, ".masthead.sqlite.recovery-stage-legacy-complete");
+    await copyFile(databasePath, legacyStage);
+    const before = await stat(legacyStage, { bigint: true });
+    const boundaries: string[] = [];
+
+    const receipt = await prepareProductionTransition({
+      databasePath,
+      newBundle,
+      nonce: "14141414-1414-4414-8414-141414141414",
+      oldBundle
+    }, { onBoundary: (boundary) => boundaries.push(boundary) });
+
+    const after = await stat(receipt.snapshot.path, { bigint: true });
+    expect(boundaries).not.toContain("backup_copy_started");
+    expect(after.ino).toBe(before.ino);
+    expect(receipt).toMatchObject({
+      preparePhase: "ready_to_activate",
+      state: "ready_to_activate"
+    });
+  });
+
+  test("reuses an existing source-matching backup-current without another database copy", async () => {
+    const { databasePath, newBundle, oldBundle, root } = await fixture(37);
+    const backupPath = join(root, "masthead.sqlite.backup-current");
+    await copyFile(databasePath, backupPath);
+    const before = await stat(backupPath, { bigint: true });
+    const boundaries: string[] = [];
+
+    const receipt = await prepareProductionTransition({
+      databasePath,
+      newBundle,
+      nonce: "16161616-1616-4616-8616-161616161616",
+      oldBundle
+    }, { onBoundary: (boundary) => boundaries.push(boundary) });
+
+    const after = await stat(receipt.snapshot.path, { bigint: true });
+    expect(boundaries).not.toContain("backup_copy_started");
+    expect(after.ino).toBe(before.ino);
+    expect(receipt).toMatchObject({ preparePhase: "ready_to_activate", state: "ready_to_activate" });
+  });
+
+  test.each(["wrong", "corrupt"] as const)("rejects a %s receipt-owned recovery stage before migration", async (mode) => {
+    const { databasePath, newBundle, oldBundle } = await fixture(37);
+    const input = {
+      databasePath,
+      newBundle,
+      nonce: "15151515-1515-4515-8515-151515151515",
+      oldBundle
+    };
+    await expect(prepareProductionTransition(input, {
+      simulateProcessDeathAfterPhase: "backup_copied"
+    })).rejects.toMatchObject({ code: "simulated_production_transition_process_death" });
+    const journal = JSON.parse(await readFile(productionTransitionJournalPath(databasePath), "utf8"));
+    if (mode === "corrupt") {
+      await writeFile(journal.snapshot.stagePath, "not a sqlite database");
+    } else {
+      const stage = new DatabaseSync(journal.snapshot.stagePath);
+      stage.prepare("UPDATE app_settings SET setting_json = ? WHERE setting_key = 'database_identity'")
+        .run(JSON.stringify({ databaseId: "wrong-database" }));
+      stage.close();
+    }
+
+    await expect(prepareProductionTransition(input)).rejects.toThrow("transition_snapshot_receipt_mismatch");
+    const active = new DatabaseSync(databasePath, { readOnly: true });
+    expect(active.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 37 });
+    active.close();
   });
 
   test("restores the exact receipt-bound snapshot and source identity before old activation", async () => {

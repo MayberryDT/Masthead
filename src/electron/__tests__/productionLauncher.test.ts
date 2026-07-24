@@ -409,6 +409,42 @@ describe("production lifecycle launcher", () => {
     expect(await realpath(join(productionRoot, "current"))).toBe(candidate.target);
   });
 
+  test("bounds full-database reads when preparation resumes after a verified backup", async () => {
+    const { config, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    await createDatabaseThroughVersion(config.databasePath, 37);
+    const phases: string[] = [];
+    const input = {
+      databasePath: config.databasePath,
+      newBundle: candidate,
+      nonce: "11111111-1111-4111-8111-111111111111",
+      oldBundle: {
+        bundleDigest: config.bundleDigest,
+        gitSha: "a".repeat(40),
+        target: oldTarget,
+        version: "0.1.0"
+      }
+    };
+
+    await expect(prepareProductionTransition(input, {
+      onBoundary(phase) {
+        phases.push(phase);
+        if (phase === "backup_finalized") throw new Error("simulated_sigterm_after_verified_backup");
+      }
+    })).rejects.toThrow("simulated_sigterm_after_verified_backup");
+    await prepareProductionTransition(input, { onBoundary: (phase) => phases.push(phase) });
+
+    const databaseSizedReads = phases.filter((phase) => [
+      "backup_copy_started",
+      "backup_verified",
+      "snapshot_hashed",
+      "after_migrate",
+      "post_migration_verified"
+    ].includes(phase));
+    expect(phases.filter((phase) => phase === "backup_copy_started")).toHaveLength(1);
+    expect(databaseSizedReads.length).toBeLessThanOrEqual(5);
+  });
+
   test("rehydrates the staged receipt and rejects staged bytes or path substitution before activation", async () => {
     const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
     const candidate = await secondBundle(productionRoot, oldTarget);
