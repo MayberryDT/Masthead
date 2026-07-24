@@ -5,8 +5,9 @@ import {
 } from "../shared/guidedAuthoring.ts";
 import {
   WORKBENCH_AUTHORING_V5_OPERATIONS,
+  WORKBENCH_AUTHORING_V5_SAVE_BODY_LIMIT_BYTES,
+  type WorkbenchAuthoringV5AuthoredDraft,
   type WorkbenchAuthoringV5CapabilitiesDto,
-  type WorkbenchAuthoringV5Draft
 } from "../shared/workbenchAuthoringV5.ts";
 import { normalizeMastheadBaseUrl } from "../shared/instanceIdentity.ts";
 import { isAbsoluteAuthoringCommand } from "../shared/workbenchAuthoring.ts";
@@ -37,7 +38,6 @@ export type WorkbenchAuthoringV5HttpContext = {
 };
 export type WorkbenchAuthoringV5HttpHeaders = Record<string, string | string[] | undefined>;
 export type WorkbenchAuthoringV5HttpResult = { status: number; body: unknown };
-const WORKBENCH_AUTHORING_V5_DRAFT_LIMIT_BYTES = 5 * 1024 * 1024;
 
 export function workbenchAuthoringV5Capabilities(
   context: WorkbenchAuthoringV5HttpContext
@@ -136,7 +136,7 @@ export function routeWorkbenchAuthoringV5Request(
         body: saveWorkbenchAuthoringV5Draft(context.db, {
           command: context.authoringCommand,
           currentIdentity: context.identity,
-          draft: body.draft as WorkbenchAuthoringV5Draft,
+          draft: body.draft as WorkbenchAuthoringV5AuthoredDraft,
           expectedIdentity: identity,
           packId
         }),
@@ -247,7 +247,7 @@ export function isWorkbenchAuthoringV5Path(pathname: string): boolean {
 
 export function getWorkbenchAuthoringV5BodyLimit(pathname: string, defaultLimitBytes: number): number {
   return /^\/workbench\/authoring\/v5\/packs\/[^/]+\/draft$/u.test(pathname)
-    ? WORKBENCH_AUTHORING_V5_DRAFT_LIMIT_BYTES
+    ? WORKBENCH_AUTHORING_V5_SAVE_BODY_LIMIT_BYTES
     : defaultLimitBytes;
 }
 

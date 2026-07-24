@@ -3,6 +3,9 @@ import type { SessionTranscriptItem } from "./sessionTranscript.ts";
 import type { WorkbenchAutomaticArtifactKind } from "./workbenchAuthoring.ts";
 
 export const WORKBENCH_AUTHORING_V5_VERSION = "workbench-authoring-v5" as const;
+// The save endpoint carries authored data for at most 12 sessions. Canonical evidence
+// remains in the request snapshot and is deliberately excluded from this byte budget.
+export const WORKBENCH_AUTHORING_V5_SAVE_BODY_LIMIT_BYTES = 1024 * 1024;
 export const WORKBENCH_AUTHORING_V5_OPERATIONS = [
   "bootstrap", "start", "claim", "inspect", "scaffold", "save", "finish", "status", "receipt"
 ] as const;
@@ -147,6 +150,38 @@ export type WorkbenchAuthoringV5Draft = {
   optionalConsiderations: WorkbenchAuthoringV5OptionalConsideration[];
   optionalArtifacts: WorkbenchAuthoringV5OptionalArtifactDraft[];
 };
+
+export type WorkbenchAuthoringV5AuthoredDraft = Omit<WorkbenchAuthoringV5Draft, "sessions"> & {
+  sessions: Array<Pick<WorkbenchAuthoringV5Draft["sessions"][number], "sessionId" | "fields">>;
+};
+
+export function toWorkbenchAuthoringV5AuthoredDraft(
+  draft: WorkbenchAuthoringV5Draft
+): WorkbenchAuthoringV5AuthoredDraft {
+  if (
+    !draft || draft.bundleVersion !== WORKBENCH_AUTHORING_V5_VERSION ||
+    typeof draft.packId !== "string" || !draft.packId.trim() ||
+    typeof draft.evidenceRevision !== "string" || !draft.evidenceRevision.trim() ||
+    !Array.isArray(draft.sessions) ||
+    !Array.isArray(draft.optionalConsiderations) ||
+    !Array.isArray(draft.optionalArtifacts) ||
+    draft.sessions.some((session) => (
+      !session || typeof session !== "object" || Array.isArray(session) ||
+      typeof session.sessionId !== "string" || !session.sessionId.trim() ||
+      !session.fields || typeof session.fields !== "object" || Array.isArray(session.fields)
+    ))
+  ) {
+    throw new Error("invalid_workbench_authoring_v5_bundle");
+  }
+  return {
+    bundleVersion: draft.bundleVersion,
+    evidenceRevision: draft.evidenceRevision,
+    optionalArtifacts: draft.optionalArtifacts,
+    optionalConsiderations: draft.optionalConsiderations,
+    packId: draft.packId,
+    sessions: draft.sessions.map(({ fields, sessionId }) => ({ fields, sessionId }))
+  };
+}
 
 export type WorkbenchAuthoringV5SessionOutcome = {
   sessionId: string;

@@ -95,15 +95,18 @@ job.
 
 The scaffold contains identity, canonical evidence catalogs, and blank skill fields. The agent writes
 title, description, keywords, purpose, outcome, key work, honest verification, and optional-artifact
-judgment. Masthead never writes enrichment prose. Save returns per-session publishable, soft-flag, or
-hard-reject results, and finish publishes passers atomically without a canary, operator approval,
-required opportunity disposition, or request-wide revision halt.
+judgment. Masthead never writes enrichment prose. Save projects the local scaffold to a bounded
+authored draft containing fields, evidence IDs, optional decisions/drafts, and pack/evidence identity;
+the immutable evidence catalog is rehydrated by the daemon instead of echoed over HTTP. Save returns
+per-session publishable, soft-flag, or hard-reject results, and finish publishes passers atomically
+without a canary, operator approval, required opportunity disposition, or request-wide revision halt.
 
 The instance-bound CLI is thin HTTP transport and does not open SQLite for normal authoring. V1–V4
 status, evidence, reviews, and receipts remain readable, while legacy mutations fail with
 `authoring_contract_retired`. Every V5 mutation verifies daemon URL, database ID, build SHA, manifest
 path, and instance identity. See
 [ADR 0016](docs/adr/0016-agent-led-v5-pack-authoring.md),
+[ADR 0017](docs/adr/0017-bounded-v5-authored-draft-transport.md),
 [ADR 0012](docs/adr/0012-daemon-owned-artifact-authoring.md), and the
 [daemon API reference](docs/reference/daemon-api.md).
 

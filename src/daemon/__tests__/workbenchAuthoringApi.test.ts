@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,7 +7,11 @@ import { GUIDED_AUTHORING_IDENTITY_HEADERS } from "../../shared/guidedAuthoring.
 import type { GuidedAuthoringBundleV4 } from "../../shared/guidedAuthoring.ts";
 import { identityFromManifest } from "../../shared/instanceIdentity.ts";
 import type { SessionTranscriptItem } from "../../shared/sessionTranscript.ts";
-import type { WorkbenchAuthoringV5Draft } from "../../shared/workbenchAuthoringV5.ts";
+import {
+  WORKBENCH_AUTHORING_V5_SAVE_BODY_LIMIT_BYTES,
+  toWorkbenchAuthoringV5AuthoredDraft,
+  type WorkbenchAuthoringV5Draft
+} from "../../shared/workbenchAuthoringV5.ts";
 import type { DaemonConfig } from "../config.ts";
 import { markSessionCompileReady, seedSession } from "../db/__tests__/sessionTestHelpers.ts";
 import { createGuidedAuthoringRequest } from "../db/guidedAuthoringRepository.ts";
@@ -17,6 +21,7 @@ import { createMastheadDaemon, type MastheadDaemon } from "../server.ts";
 import { openAuthoringRun } from "../../workbench/authoring/authoringService.ts";
 import * as guidedQuality from "../../workbench/authoring/guidedAuthoringQuality.ts";
 import * as advisorySuggestions from "../../workbench/authoring/advisorySuggestions.ts";
+import { runMastheadCli } from "../../cli/mastheadctl.ts";
 import {
   getWorkbenchAuthoringBodyLimit,
   isWorkbenchAuthoringPath,
@@ -128,12 +133,66 @@ describe("Workbench authoring HTTP API", () => {
     const saved = await postJson(
       baseUrl,
       `/workbench/authoring/v5/packs/${encodeURIComponent(packId)}/draft`,
-      { draft: authorV5Scaffold(scaffold.body.draft), expectedIdentity: identity }
+      { draft: toWorkbenchAuthoringV5AuthoredDraft(authorV5Scaffold(scaffold.body.draft)), expectedIdentity: identity }
     );
     expect(saved.body.outcomes).toHaveLength(5);
     expect(saved.body.outcomes).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ disposition: "hard_reject" })
     ]));
+  });
+
+  test("public CLI saves a bounded authored draft through the real V5 API when its scaffold exceeds 5 MiB", async () => {
+    const { baseUrl, daemon } = await startTestDaemon();
+    const sessionIds = Array.from({ length: 5 }, (_, index) => `session:v5-large:${index}`);
+    for (const sessionId of sessionIds) seedAuthoringSession(daemon, sessionId);
+    daemon.database.prepare("UPDATE messages SET text_redacted = ? WHERE session_id = ?").run(
+      "e".repeat(5 * 1024 * 1024 + 64 * 1024),
+      sessionIds[0]
+    );
+    const identity = authoringIdentity((await getJson(baseUrl, "/workbench/authoring/capabilities")).body);
+    const created = await postJson(baseUrl, "/workbench/authoring/v5/requests", {
+      expectedIdentity: identity,
+      sessionIds
+    }, 201);
+    const started = await postJson(
+      baseUrl,
+      `/workbench/authoring/v5/requests/${encodeURIComponent(created.body.request.requestId)}/start`,
+      { expectedIdentity: identity }
+    );
+    const packId = started.body.pack.packId as string;
+    for (const sessionId of sessionIds) {
+      await getJson(
+        baseUrl,
+        `/workbench/authoring/v5/packs/${encodeURIComponent(packId)}/inspect?sessionId=${encodeURIComponent(sessionId)}&limit=250`,
+        200,
+        authoringHeaders(identity)
+      );
+    }
+    const scaffoldFile = `${identity.instanceManifest}.large-draft.json`;
+    const env = { MASTHEAD_INSTANCE_MANIFEST: identity.instanceManifest };
+    const scaffoldResult = await runMastheadCli([
+      "workbench", "author", "scaffold", "--pack", packId, "--file", scaffoldFile, "--json"
+    ], { env });
+    expect(scaffoldResult.exitCode, scaffoldResult.stderr).toBe(0);
+    const scaffoldBytes = Buffer.byteLength(await readFile(scaffoldFile));
+    const authored = authorV5Scaffold(JSON.parse(await readFile(scaffoldFile, "utf8")));
+    const echoedBodyBytes = Buffer.byteLength(JSON.stringify({ draft: authored, expectedIdentity: identity }));
+    const projected = toWorkbenchAuthoringV5AuthoredDraft(authored);
+    const projectedBodyBytes = Buffer.byteLength(JSON.stringify({ draft: projected, expectedIdentity: identity }));
+
+    expect(scaffoldBytes).toBeGreaterThan(5 * 1024 * 1024);
+    expect(echoedBodyBytes).toBeGreaterThan(5 * 1024 * 1024);
+    expect(projectedBodyBytes).toBeLessThan(WORKBENCH_AUTHORING_V5_SAVE_BODY_LIMIT_BYTES);
+    await writeFile(scaffoldFile, `${JSON.stringify(authored, null, 2)}\n`);
+    const saveResult = await runMastheadCli([
+      "workbench", "author", "save", "--pack", packId, "--file", scaffoldFile, "--json"
+    ], { env });
+    expect(saveResult.exitCode, saveResult.stderr).toBe(0);
+    expect(JSON.parse(saveResult.stdout).outcomes).toHaveLength(5);
+    const stored = daemon.database.prepare(
+      "SELECT draft_json AS draftJson FROM workbench_authoring_v5_packs WHERE pack_id = ?"
+    ).get(packId) as { draftJson: string };
+    expect(JSON.parse(stored.draftJson).sessions[0]).not.toHaveProperty("evidenceCatalog");
   });
 
   test("retires legacy request creation without writing a duplicate V5 state machine", async () => {
@@ -318,7 +377,7 @@ describe("Workbench authoring HTTP API", () => {
     )).toBe(5 * 1024 * 1024);
     expect(getWorkbenchAuthoringBodyLimit(
       "/workbench/authoring/v5/packs/authoring-v5-pack%3Aone/draft", 1024
-    )).toBe(5 * 1024 * 1024);
+    )).toBe(WORKBENCH_AUTHORING_V5_SAVE_BODY_LIMIT_BYTES);
     expect(getWorkbenchAuthoringBodyLimit("/workbench/authoring/requests", 1024)).toBe(1024);
   });
 
@@ -340,6 +399,12 @@ describe("Workbench authoring HTTP API", () => {
       baseUrl,
       "/workbench/authoring/assignments/missing/draft",
       JSON.stringify({ padding: "x".repeat(5 * 1024 * 1024) }),
+      400
+    )).body).toMatchObject({ error: { code: "request_body_too_large" }, ok: false });
+    expect((await postRaw(
+      baseUrl,
+      "/workbench/authoring/v5/packs/missing/draft",
+      JSON.stringify({ padding: "x".repeat(WORKBENCH_AUTHORING_V5_SAVE_BODY_LIMIT_BYTES) }),
       400
     )).body).toMatchObject({ error: { code: "request_body_too_large" }, ok: false });
 

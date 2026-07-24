@@ -1,5 +1,5 @@
 import type {
-  WorkbenchAuthoringV5Draft,
+  WorkbenchAuthoringV5AuthoredDraft,
   WorkbenchAuthoringV5PackDto,
   WorkbenchAuthoringV5PackReceipt,
   WorkbenchAuthoringV5RequestDto,
@@ -246,7 +246,7 @@ export function listWorkbenchAuthoringV5EvidenceAccess(
 
 export function saveWorkbenchAuthoringV5PackDraft(
   db: MastheadDatabase,
-  input: { packId: string; draft: WorkbenchAuthoringV5Draft; outcomes: WorkbenchAuthoringV5SessionOutcome[] }
+  input: { packId: string; draft: WorkbenchAuthoringV5AuthoredDraft; outcomes: WorkbenchAuthoringV5SessionOutcome[] }
 ): WorkbenchAuthoringV5PackDto {
   const pack = requireWorkbenchAuthoringV5Pack(db, input.packId);
   if (pack.status === "completed") throw new Error("authoring_v5_pack_completed");
@@ -263,7 +263,7 @@ export function saveWorkbenchAuthoringV5PackDraft(
 export function getSavedWorkbenchAuthoringV5Pack(
   db: MastheadDatabase,
   packId: string
-): { draft: WorkbenchAuthoringV5Draft; outcomes: WorkbenchAuthoringV5SessionOutcome[] } | undefined {
+): { draft: WorkbenchAuthoringV5AuthoredDraft; outcomes: WorkbenchAuthoringV5SessionOutcome[] } | undefined {
   const row = db.prepare(
     "SELECT draft_json AS draftJson, outcomes_json AS outcomesJson FROM workbench_authoring_v5_packs WHERE pack_id = ?"
   ).get(packId) as { draftJson: string | null; outcomesJson: string | null } | undefined;

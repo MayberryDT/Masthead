@@ -134,12 +134,16 @@ Write endpoints are local daemon operations. They are not exposed through MCP.
   canonical refs. Weak verification wording and thin key work are soft flags; honest
   unrun-verification boundaries remain publishable. Grounding
   refs apply only to title, description, purpose, outcome, key work, and verification—not every
-  nested field. `POST /workbench/authoring/v5/packs/:packId/finish` atomically publishes passers,
+  nested field. The draft request is a `WorkbenchAuthoringV5AuthoredDraft` capped at 1 MiB for the
+  maximum 12-session pack: it includes authored fields and evidence IDs but excludes the scaffold's
+  immutable `evidenceCatalog`. The daemon rehydrates and validates that catalog from its request
+  snapshot at save and finish. `POST /workbench/authoring/v5/packs/:packId/finish` atomically publishes passers,
   records rejects, publishes any attached optional artifacts, releases the next pack, and returns
   idempotent pack/request receipts with dossier, reject, soft-flag, considered-no, and optional
   publication counts. All are primary-only.
 - The V5 CLI loop is `bootstrap` → `start`/`claim` → `inspect` → `scaffold --file` → `save --file` →
-  `finish`, with `status` and `receipt` reads by request ID.
+  `finish`, with `status` and `receipt` reads by request ID. The scaffold file remains evidence-rich
+  locally; `save --file` sends only its bounded authored projection.
 
 ### Retired authoring mutations
 

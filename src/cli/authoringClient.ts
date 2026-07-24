@@ -16,7 +16,10 @@ import type {
   WorkbenchAuthoringV5RequestReceipt,
   WorkbenchAuthoringV5SessionOutcome
 } from "../shared/workbenchAuthoringV5.ts";
-import { isWorkbenchAuthoringV5CapabilitiesDto } from "../shared/workbenchAuthoringV5.ts";
+import {
+  isWorkbenchAuthoringV5CapabilitiesDto,
+  toWorkbenchAuthoringV5AuthoredDraft
+} from "../shared/workbenchAuthoringV5.ts";
 import {
   assertGuidedAuthoringExpectedIdentity,
   GuidedAuthoringIdentityError,
@@ -116,7 +119,7 @@ export class MastheadAuthoringClient {
       binding.baseUrl,
       "POST",
       `/workbench/authoring/v5/packs/${encodeURIComponent(packId)}/draft`,
-      { draft, expectedIdentity: binding.expected }
+      { draft: toWorkbenchAuthoringV5AuthoredDraft(draft), expectedIdentity: binding.expected }
     );
   }
 

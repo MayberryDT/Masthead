@@ -18,6 +18,14 @@ inspect, scaffold, save, and finish operations do not depend on mutable live-ing
 Existing V5 audit rows have no snapshot records; they remain readable and use the legacy live-evidence
 path only while their stored evidence revision still matches.
 
+ADR 0017 changes no tables. Evidence-rich scaffold files remain valid local authoring inputs, but the
+current CLI projects them to a bounded authored draft before save. The daemon stores authored fields,
+reference IDs, optional decisions/drafts, and pack/evidence identity, then rehydrates canonical
+catalogs from the immutable request snapshot during save and atomic finish. Previously stored full
+draft JSON remains readable and its embedded catalog is ignored in favor of Masthead-owned evidence.
+The existing stable identity contract is unchanged: if installation changes the build SHA, create a
+new V5 request rather than attempting to resume a request bound to the previous build.
+
 ## Open V4 requests
 
 An open V4 request cannot continue. Start, progress-recording inspect, draft save, canary decision,

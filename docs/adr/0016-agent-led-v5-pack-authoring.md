@@ -25,7 +25,9 @@ durable infrastructure and evidence checks while leaving all enrichment meaning 
    remainder. The agent must finish every pack; resume exists only to recover a crash.
 4. Masthead returns an evidence catalog and blank skill fields. The agent writes title,
    description, keywords, purpose, outcome, key work, honest verification, and optional-artifact
-   judgment. Masthead never writes enrichment prose.
+   judgment. Masthead never writes enrichment prose. The local scaffold retains the catalog, while
+   save uses the bounded authored projection defined by ADR 0017 and rehydrates canonical evidence
+   server-side.
 5. Save classifies each session independently. Hard rejects are skipped and recorded; soft flags may
    publish with a warning; neither outcome creates a request-wide `needs_revision` state.
 6. Knowledge opportunities are nonbinding. Each pack records grounded yes/no consideration, and an

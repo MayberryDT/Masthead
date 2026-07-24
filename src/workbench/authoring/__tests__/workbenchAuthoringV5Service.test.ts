@@ -8,7 +8,10 @@ import { openMastheadDatabase, type MastheadDatabase } from "../../../daemon/db/
 import { getLogbookArtifactDetail } from "../../../daemon/db/logbookArtifactRepository.ts";
 import { readCurrentSessionEnrichment } from "../../../daemon/db/enrichmentRepository.ts";
 import type { DurableSessionEnrichment } from "../../../shared/sessionEnrichment.ts";
-import type { WorkbenchAuthoringV5Draft } from "../../../shared/workbenchAuthoringV5.ts";
+import {
+  toWorkbenchAuthoringV5AuthoredDraft,
+  type WorkbenchAuthoringV5Draft
+} from "../../../shared/workbenchAuthoringV5.ts";
 import {
   bootstrapWorkbenchAuthoringV5Request,
   buildWorkbenchAuthoringV5Scaffold,
@@ -466,7 +469,7 @@ describe("workbench-authoring-v5 loop", () => {
     db.close();
   });
 
-  test("rejects agent-modified evidence catalog content even when evidence IDs are unchanged", async () => {
+  test("rehydrates canonical evidence instead of trusting modified local scaffold content", async () => {
     const db = await testDatabase();
     const sessionIds = ["session:v5:catalog-integrity:1", "session:v5:catalog-integrity:2"];
     for (const sessionId of sessionIds) seedCompileReadySession(db, sessionId);
@@ -481,9 +484,67 @@ describe("workbench-authoring-v5 loop", () => {
     const authored = authorDraft(buildWorkbenchAuthoringV5Scaffold(db, { command, packId: started.pack.packId }).draft);
     authored.sessions[0]!.evidenceCatalog[0]!.text = "Agent-supplied replacement evidence text.";
 
-    expect(() => saveWorkbenchAuthoringV5Draft(db, {
-      command, currentIdentity: identity, draft: authored, expectedIdentity: identity, packId: started.pack.packId
-    })).toThrow("invalid_workbench_authoring_v5_evidence_catalog");
+    const saved = saveWorkbenchAuthoringV5Draft(db, {
+      command,
+      currentIdentity: identity,
+      draft: toWorkbenchAuthoringV5AuthoredDraft(authored),
+      expectedIdentity: identity,
+      packId: started.pack.packId
+    });
+
+    expect(saved.outcomes.every(({ disposition }) => disposition === "publishable")).toBe(true);
+    const stored = db.prepare(
+      "SELECT draft_json AS draftJson FROM workbench_authoring_v5_packs WHERE pack_id = ?"
+    ).get(started.pack.packId) as { draftJson: string };
+    expect(JSON.parse(stored.draftJson).sessions[0]).not.toHaveProperty("evidenceCatalog");
+    db.close();
+  });
+
+  test("finishes a previously stored evidence-rich draft through immutable snapshot rehydration", async () => {
+    const db = await testDatabase();
+    const sessionIds = ["session:v5:legacy-draft:1", "session:v5:legacy-draft:2"];
+    for (const sessionId of sessionIds) seedCompileReadySession(db, sessionId);
+    const created = createWorkbenchAuthoringV5Request(db, {
+      actorId: "agent:test", command, currentIdentity: identity, expectedIdentity: identity, sessionIds
+    });
+    const started = startWorkbenchAuthoringV5Pack(db, {
+      command, currentIdentity: identity, expectedIdentity: identity, requestId: created.request.requestId
+    });
+    if (!("pack" in started)) throw new Error("expected_active_pack");
+    await inspectWholePack(db, started.pack.packId);
+    const authored = authorDraft(buildWorkbenchAuthoringV5Scaffold(db, {
+      command,
+      packId: started.pack.packId
+    }).draft);
+    const canonicalObservedAt = authored.sessions[0]!.evidenceCatalog[0]!.observedAt;
+    saveWorkbenchAuthoringV5Draft(db, {
+      command,
+      currentIdentity: identity,
+      draft: toWorkbenchAuthoringV5AuthoredDraft(authored),
+      expectedIdentity: identity,
+      packId: started.pack.packId
+    });
+    const legacyStoredDraft = structuredClone(authored);
+    legacyStoredDraft.sessions[0]!.evidenceCatalog[0]!.observedAt = "1900-01-01T00:00:00.000Z";
+    legacyStoredDraft.sessions[0]!.evidenceCatalog[0]!.text = "Untrusted persisted evidence replacement.";
+    db.prepare("UPDATE workbench_authoring_v5_packs SET draft_json = ? WHERE pack_id = ?").run(
+      JSON.stringify(legacyStoredDraft),
+      started.pack.packId
+    );
+
+    expect(() => finishWorkbenchAuthoringV5Pack(db, {
+      command,
+      currentIdentity: identity,
+      expectedIdentity: { ...identity, buildSha: "build:next" },
+      packId: started.pack.packId
+    })).toThrow("build_identity_mismatch");
+    expect(finishWorkbenchAuthoringV5Pack(db, {
+      command, currentIdentity: identity, expectedIdentity: identity, packId: started.pack.packId
+    }).receipt.counts).toMatchObject({ attempted: 2, published: 2 });
+    const capsule = readCurrentSessionEnrichment(db, sessionIds[0]!, "session_capsule")?.content as {
+      durableEnrichment: DurableSessionEnrichment;
+    };
+    expect(capsule.durableEnrichment.sessionTitle.evidenceRefs[0]?.observedAt).toBe(canonicalObservedAt);
     db.close();
   });
 
@@ -643,6 +704,59 @@ describe("workbench-authoring-v5 loop", () => {
       kind: "runbook",
       reason: submitted.optionalConsiderations[0]!.reason
     });
+    db.close();
+  });
+
+  test("rolls back every publication effect when finish fails and remains safely retryable", async () => {
+    const db = await testDatabase();
+    const sessionIds = ["session:v5:atomic:1", "session:v5:atomic:2"];
+    for (const sessionId of sessionIds) seedCompileReadySession(db, sessionId);
+    const created = createWorkbenchAuthoringV5Request(db, {
+      actorId: "agent:test", command, currentIdentity: identity, expectedIdentity: identity, sessionIds
+    });
+    const started = startWorkbenchAuthoringV5Pack(db, {
+      command, currentIdentity: identity, expectedIdentity: identity, requestId: created.request.requestId
+    });
+    if (!("pack" in started)) throw new Error("expected_active_pack");
+    await inspectWholePack(db, started.pack.packId);
+    const authored = authorDraft(buildWorkbenchAuthoringV5Scaffold(db, {
+      command,
+      packId: started.pack.packId
+    }).draft);
+    saveWorkbenchAuthoringV5Draft(db, {
+      command,
+      currentIdentity: identity,
+      draft: toWorkbenchAuthoringV5AuthoredDraft(authored),
+      expectedIdentity: identity,
+      packId: started.pack.packId
+    });
+    const artifactsBefore = db.prepare(
+      "SELECT COUNT(*) AS count FROM session_artifacts WHERE session_id IN (?, ?)"
+    ).get(...sessionIds) as { count: number };
+    db.exec(`CREATE TRIGGER fail_v5_finish_activity
+      BEFORE INSERT ON workbench_activity
+      WHEN NEW.event_type = 'authoring_pack_finished' AND NEW.session_id = '${sessionIds[1]}'
+      BEGIN SELECT RAISE(ABORT, 'forced_finish_failure'); END;`);
+
+    expect(() => finishWorkbenchAuthoringV5Pack(db, {
+      command, currentIdentity: identity, expectedIdentity: identity, packId: started.pack.packId
+    })).toThrow("forced_finish_failure");
+
+    expect(db.prepare(
+      "SELECT status, receipt_json AS receiptJson FROM workbench_authoring_v5_packs WHERE pack_id = ?"
+    ).get(started.pack.packId)).toEqual({ receiptJson: null, status: "saved" });
+    expect(db.prepare(
+      "SELECT COUNT(*) AS count FROM session_artifacts WHERE session_id IN (?, ?)"
+    ).get(...sessionIds)).toEqual(artifactsBefore);
+    expect(db.prepare(
+      `SELECT COUNT(*) AS count FROM workbench_activity
+       WHERE related_run_id = ? AND event_type IN ('authoring_session_published', 'authoring_pack_finished')`
+    ).get(created.request.requestId)).toEqual({ count: 0 });
+
+    db.exec("DROP TRIGGER fail_v5_finish_activity;");
+    expect(finishWorkbenchAuthoringV5Pack(db, {
+      command, currentIdentity: identity, expectedIdentity: identity, packId: started.pack.packId
+    }).receipt.counts).toMatchObject({ attempted: 2, published: 2 });
     db.close();
   });
 

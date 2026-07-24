@@ -28,6 +28,8 @@ import {
   WORKBENCH_AUTHORING_V5_VERSION,
   WORKBENCH_AUTHORING_V5_HARD_REJECT_CODES,
   WORKBENCH_AUTHORING_V5_SOFT_FLAG_CODES,
+  toWorkbenchAuthoringV5AuthoredDraft,
+  type WorkbenchAuthoringV5AuthoredDraft,
   type WorkbenchAuthoringV5Draft,
   type WorkbenchAuthoringV5EvidenceCatalogItem,
   type WorkbenchAuthoringV5Fields,
@@ -311,7 +313,7 @@ export function saveWorkbenchAuthoringV5Draft(
   db: MastheadDatabase,
   input: MutationIdentity & {
     command: string;
-    draft: WorkbenchAuthoringV5Draft;
+    draft: WorkbenchAuthoringV5AuthoredDraft;
     packId: string;
   }
 ) {
@@ -325,7 +327,11 @@ export function saveWorkbenchAuthoringV5Draft(
       session,
       evidenceForPackSession(db, pack, session.sessionId)
     ));
-    const saved = saveWorkbenchAuthoringV5PackDraft(db, { draft, outcomes, packId: pack.packId });
+    const saved = saveWorkbenchAuthoringV5PackDraft(db, {
+      draft: toWorkbenchAuthoringV5AuthoredDraft(draft),
+      outcomes,
+      packId: pack.packId
+    });
     bumpDataRevisionInTransaction(db, "workbench");
     return {
       draftRevision: saved.currentDraftRevision,
@@ -350,8 +356,9 @@ export function finishWorkbenchAuthoringV5Pack(
     assertFrozenOrCurrentEvidenceAvailable(db, pack);
     const saved = getSavedWorkbenchAuthoringV5Pack(db, pack.packId);
     if (!saved) throw new Error("authoring_v5_saved_draft_missing");
+    const draft = parseWorkbenchAuthoringV5Draft(db, saved.draft, pack);
     const request = requireWorkbenchAuthoringV5Request(db, pack.requestId);
-    const publishable = saved.draft.sessions.filter(({ sessionId }) => (
+    const publishable = draft.sessions.filter(({ sessionId }) => (
       saved.outcomes.find((outcome) => outcome.sessionId === sessionId)?.disposition !== "hard_reject"
     ));
     for (const session of publishable) {
@@ -368,7 +375,7 @@ export function finishWorkbenchAuthoringV5Pack(
     });
     const optionalArtifacts = stageWorkbenchAuthoringV5OptionalArtifactsInTransaction(db, {
       actorId: request.actorId,
-      artifacts: saved.draft.optionalArtifacts,
+      artifacts: draft.optionalArtifacts,
       sessionIds: pack.sessionIds
     });
     const published = publishStagedGuidedArtifactsInTransaction(db, { dossierArtifacts, optionalArtifacts });
@@ -377,7 +384,7 @@ export function finishWorkbenchAuthoringV5Pack(
       completedAt,
       counts: {
         attempted: saved.outcomes.length,
-        consideredNo: saved.draft.optionalConsiderations.filter(({ decision }) => decision === "no").length,
+        consideredNo: draft.optionalConsiderations.filter(({ decision }) => decision === "no").length,
         optionalPublished: optionalArtifacts.length,
         published: publishable.length,
         rejected: saved.outcomes.filter(({ disposition }) => disposition === "hard_reject").length,
@@ -386,7 +393,7 @@ export function finishWorkbenchAuthoringV5Pack(
       draftRevision: pack.currentDraftRevision,
       evidenceRevision: pack.evidenceRevision,
       optionalArtifacts: published.publishedArtifacts.filter(({ kind }) => kind !== "session_dossier") as WorkbenchAuthoringV5PackReceipt["optionalArtifacts"],
-      optionalConsiderations: saved.draft.optionalConsiderations,
+      optionalConsiderations: draft.optionalConsiderations,
       outcomes: saved.outcomes,
       packId: pack.packId,
       publishedArtifacts: published.publishedArtifacts.filter(({ kind }) => kind === "session_dossier") as WorkbenchAuthoringV5PackReceipt["publishedArtifacts"],
@@ -399,7 +406,7 @@ export function finishWorkbenchAuthoringV5Pack(
     const hasLaterPack = listWorkbenchAuthoringV5Packs(db, pack.requestId)
       .some(({ ordinal, status }) => ordinal > pack.ordinal && status === "pending");
     const requestReceipt = hasLaterPack ? undefined : requestReceiptFrom([...completedReceipts, packReceipt], completedAt, pack.requestId);
-    recordFinishActivity(db, request.actorId, packReceipt, saved.draft, Boolean(requestReceipt));
+    recordFinishActivity(db, request.actorId, packReceipt, draft, Boolean(requestReceipt));
     completeWorkbenchAuthoringV5PackRecord(db, { packReceipt, ...(requestReceipt ? { requestReceipt } : {}) });
     bumpDataRevisionInTransaction(db, "logbook");
     bumpDataRevisionInTransaction(db, "workbench");
@@ -524,7 +531,7 @@ function blankFields(): WorkbenchAuthoringV5Fields {
 
 function parseWorkbenchAuthoringV5Draft(
   db: MastheadDatabase,
-  value: WorkbenchAuthoringV5Draft,
+  value: WorkbenchAuthoringV5AuthoredDraft,
   pack: ReturnType<typeof requireWorkbenchAuthoringV5Pack>
 ): WorkbenchAuthoringV5Draft {
   if (!value || value.bundleVersion !== WORKBENCH_AUTHORING_V5_VERSION || value.packId !== pack.packId ||
@@ -533,14 +540,15 @@ function parseWorkbenchAuthoringV5Draft(
     throw new Error("invalid_workbench_authoring_v5_bundle");
   }
   if (value.sessions.length !== pack.sessionIds.length ||
-      value.sessions.some((session, index) => session.sessionId !== pack.sessionIds[index] || !session.fields || !Array.isArray(session.evidenceCatalog))) {
+      value.sessions.some((session, index) => session.sessionId !== pack.sessionIds[index] || !session.fields)) {
     throw new Error("invalid_workbench_authoring_v5_membership");
   }
-  for (const session of value.sessions) {
-    const canonicalCatalog = evidenceForPackSession(db, pack, session.sessionId).map(catalogItem);
-    if (!sameEvidenceCatalog(session.evidenceCatalog, canonicalCatalog)) {
-      throw new Error("invalid_workbench_authoring_v5_evidence_catalog");
-    }
+  const sessions: WorkbenchAuthoringV5Draft["sessions"] = value.sessions.map((session) => ({
+    evidenceCatalog: evidenceForPackSession(db, pack, session.sessionId).map(catalogItem),
+    fields: session.fields,
+    sessionId: session.sessionId
+  }));
+  for (const session of sessions) {
     const fields = session.fields;
     const refs = fields.evidenceRefs;
     if (
@@ -552,8 +560,7 @@ function parseWorkbenchAuthoringV5Draft(
       !isStringArray(refs.keyWork) || !isStringArray(refs.verification) ||
       !fields.verification ||
       !["passed", "failed", "mixed", "missing", "unknown"].includes(fields.verification.status) ||
-      typeof fields.verification.summary !== "string" ||
-      session.evidenceCatalog.some(({ id }) => typeof id !== "string" || !id.trim())
+      typeof fields.verification.summary !== "string"
     ) {
       throw new Error("invalid_workbench_authoring_v5_fields");
     }
@@ -568,12 +575,12 @@ function parseWorkbenchAuthoringV5Draft(
   if (considerationByKind.size !== value.optionalConsiderations.length) {
     throw new Error("invalid_workbench_authoring_v5_optional_consideration");
   }
-  const canonicalIds = new Set(value.sessions.flatMap(({ evidenceCatalog }) => evidenceCatalog.map(({ id }) => id)));
+  const canonicalIds = new Set(sessions.flatMap(({ evidenceCatalog }) => evidenceCatalog.map(({ id }) => id)));
   if (value.optionalConsiderations.some(({ evidenceRef }) => evidenceRef && !canonicalIds.has(evidenceRef))) {
     throw new Error("invalid_workbench_authoring_v5_optional_evidence_ref");
   }
   if (value.optionalArtifacts.some((artifact) => (
-    !isOptionalArtifactDraft(artifact, considerationByKind.get(artifact.kind), pack.sessionIds, value.sessions)
+    !isOptionalArtifactDraft(artifact, considerationByKind.get(artifact.kind), pack.sessionIds, sessions)
   ))) {
     throw new Error("invalid_workbench_authoring_v5_optional_artifact");
   }
@@ -581,23 +588,11 @@ function parseWorkbenchAuthoringV5Draft(
   if (new Set(draftIds).size !== draftIds.length) {
     throw new Error("invalid_workbench_authoring_v5_optional_artifact");
   }
-  return structuredClone(value);
+  return structuredClone({ ...value, sessions });
 }
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
-}
-
-function sameEvidenceCatalog(
-  submitted: WorkbenchAuthoringV5EvidenceCatalogItem[],
-  canonical: WorkbenchAuthoringV5EvidenceCatalogItem[]
-): boolean {
-  return submitted.length === canonical.length && submitted.every((item, index) => {
-    const expected = canonical[index];
-    return Boolean(expected) && item.id === expected.id && item.itemId === expected.itemId &&
-      item.kind === expected.kind && item.observedAt === expected.observedAt &&
-      item.role === expected.role && item.text === expected.text && item.source === expected.source;
-  });
 }
 
 function isOptionalConsideration(value: unknown): value is WorkbenchAuthoringV5OptionalConsideration {
