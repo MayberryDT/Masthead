@@ -26,7 +26,8 @@ import {
   getWorkbenchAuthoringV5RequestStatus,
   inspectWorkbenchAuthoringV5Pack,
   saveWorkbenchAuthoringV5Draft,
-  startWorkbenchAuthoringV5Pack
+  startWorkbenchAuthoringV5Pack,
+  WorkbenchAuthoringV5NoEligibleSessionsError
 } from "../workbench/authoring/workbenchAuthoringV5Service.ts";
 
 export type WorkbenchAuthoringV5HttpContext = {
@@ -251,6 +252,16 @@ export function getWorkbenchAuthoringV5BodyLimit(pathname: string, defaultLimitB
 }
 
 export function workbenchAuthoringV5ErrorResult(error: unknown): WorkbenchAuthoringV5HttpResult {
+  if (error instanceof WorkbenchAuthoringV5NoEligibleSessionsError) {
+    return {
+      body: {
+        error: { code: error.message, message: "No selected sessions are eligible for V5 authoring" },
+        ok: false,
+        selection: error.selection
+      },
+      status: 409
+    };
+  }
   const message = error instanceof Error ? error.message : String(error);
   const code = message.split(":", 1)[0] || "authoring_v5_request_failed";
   if (code.endsWith("_not_found")) return failure(404, code, message);

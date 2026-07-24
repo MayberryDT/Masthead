@@ -1172,6 +1172,12 @@ function guidedRequestResult(requestId: string) {
       command: `/home/test/.local/bin/mastheadctl workbench author start --request '${requestId}' --json`,
       kind: "start" as const,
       reason: "Start or resume the next fixed pack."
+    },
+    selection: {
+      eligibleSessionCount: 2,
+      excludedSessionCount: 0,
+      excludedSessions: [],
+      requestedSessionCount: 2
     }
   };
 }

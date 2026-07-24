@@ -71,6 +71,107 @@ describe("Workbench authoring V5 HTTP API", () => {
     db.close();
   });
 
+  test("creates a V5 request from the eligible subset when selected readiness has gone stale", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "masthead-authoring-v5-api-stale-readiness-"));
+    tempDirs.push(directory);
+    const db = await openMastheadDatabase(join(directory, "masthead.sqlite"));
+    migrateDatabase(db);
+    const identity = {
+      baseUrl: "http://127.0.0.1:17373",
+      buildSha: "build:test",
+      databaseId: "database:test",
+      instanceId: "instance:test",
+      instanceManifest: join(directory, "masthead-instance.json")
+    };
+    const context = { authoringCommand: "/opt/masthead/bin/mastheadctl", db, identity };
+    const eligibleSessionId = "session:v5-api:eligible";
+    const missingEvidenceSessionId = "session:ab45dfb06a13a6eb35b4381038192368";
+    for (const sessionId of [eligibleSessionId, missingEvidenceSessionId]) {
+      seedSession(db, { lifecycle: "completed", model: "gpt-5.6-sol", project: "Masthead", sessionId, title: sessionId });
+      markSessionCompileReady(db, sessionId);
+    }
+    for (const table of ["messages", "tool_results", "tool_calls", "file_effects", "checkpoints", "runtime_signals"]) {
+      db.prepare(`DELETE FROM ${table} WHERE session_id = ?`).run(missingEvidenceSessionId);
+    }
+
+    const created = routeWorkbenchAuthoringV5Request(context, {
+      body: { expectedIdentity: identity, sessionIds: [eligibleSessionId, missingEvidenceSessionId] },
+      method: "POST",
+      url: new URL("http://127.0.0.1/workbench/authoring/v5/requests")
+    });
+
+    expect(created).toMatchObject({
+      body: {
+        request: { sessionCount: 1 },
+        selection: {
+          eligibleSessionCount: 1,
+          excludedSessions: [{ reason: "missing_canonical_evidence", sessionId: missingEvidenceSessionId }],
+          requestedSessionCount: 2
+        }
+      },
+      status: 201
+    });
+    expect(db.prepare(
+      "SELECT session_id AS sessionId FROM workbench_authoring_v5_request_sessions ORDER BY ordinal"
+    ).all()).toEqual([{ sessionId: eligibleSessionId }]);
+    expect(db.prepare(
+      "SELECT session_id AS sessionId FROM workbench_activity WHERE event_type = 'authoring_request_created'"
+    ).all()).toEqual([{ sessionId: eligibleSessionId }]);
+    expect(db.prepare(
+      "SELECT COUNT(*) AS count FROM workbench_activity WHERE event_type = 'authoring_daemon_error'"
+    ).get()).toEqual({ count: 0 });
+    db.close();
+  });
+
+  test("returns a typed non-500 result when no selected session has canonical evidence", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "masthead-authoring-v5-api-no-eligible-"));
+    tempDirs.push(directory);
+    const db = await openMastheadDatabase(join(directory, "masthead.sqlite"));
+    migrateDatabase(db);
+    const identity = {
+      baseUrl: "http://127.0.0.1:17373",
+      buildSha: "build:test",
+      databaseId: "database:test",
+      instanceId: "instance:test",
+      instanceManifest: join(directory, "masthead-instance.json")
+    };
+    const context = { authoringCommand: "/opt/masthead/bin/mastheadctl", db, identity };
+    const sessionId = "session:v5-api:no-canonical-evidence";
+    seedSession(db, { lifecycle: "completed", model: "gpt-5.6-sol", project: "Masthead", sessionId, title: sessionId });
+    markSessionCompileReady(db, sessionId);
+    for (const table of ["messages", "tool_results", "tool_calls", "file_effects", "checkpoints", "runtime_signals"]) {
+      db.prepare(`DELETE FROM ${table} WHERE session_id = ?`).run(sessionId);
+    }
+
+    const created = routeWorkbenchAuthoringV5Request(context, {
+      body: { expectedIdentity: identity, sessionIds: [sessionId] },
+      method: "POST",
+      url: new URL("http://127.0.0.1/workbench/authoring/v5/requests")
+    });
+
+    expect(created).toEqual({
+      body: {
+        error: {
+          code: "authoring_v5_no_eligible_sessions",
+          message: "No selected sessions are eligible for V5 authoring"
+        },
+        ok: false,
+        selection: {
+          eligibleSessionCount: 0,
+          excludedSessionCount: 1,
+          excludedSessions: [{ reason: "missing_canonical_evidence", sessionId }],
+          requestedSessionCount: 1
+        }
+      },
+      status: 409
+    });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM workbench_authoring_v5_requests").get()).toEqual({ count: 0 });
+    expect(db.prepare(
+      "SELECT COUNT(*) AS count FROM workbench_activity WHERE event_type = 'authoring_daemon_error'"
+    ).get()).toEqual({ count: 0 });
+    db.close();
+  });
+
   test("records later identity failures as canonical session-scoped Activity", async () => {
     const directory = await mkdtemp(join(tmpdir(), "masthead-authoring-v5-api-error-"));
     tempDirs.push(directory);

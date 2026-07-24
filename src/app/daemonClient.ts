@@ -33,7 +33,8 @@ import {
   isWorkbenchAuthoringV5CapabilitiesDto,
   type WorkbenchAuthoringV5CapabilitiesDto,
   type WorkbenchAuthoringV5NextAction,
-  type WorkbenchAuthoringV5RequestDto
+  type WorkbenchAuthoringV5RequestDto,
+  type WorkbenchAuthoringV5SelectionDto
 } from "../shared/workbenchAuthoringV5";
 
 export type { SessionTranscriptCoverage, SessionTranscriptItem, SessionTranscriptResult };
@@ -1333,6 +1334,7 @@ export type CreateGuidedAuthoringRequestResponse = {
   handoff: { requestId: string; startCommand: string };
   request: WorkbenchAuthoringV5RequestDto;
   nextAction: WorkbenchAuthoringV5NextAction;
+  selection: WorkbenchAuthoringV5SelectionDto;
 };
 
 export async function createGuidedAuthoringRequest(

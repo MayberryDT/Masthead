@@ -44,6 +44,22 @@ export type WorkbenchAuthoringV5NextAction = {
   reason: string;
 };
 
+export type WorkbenchAuthoringV5SelectionExclusionReason =
+  | "session_not_found"
+  | "not_on_publish_path"
+  | "not_compile_ready"
+  | "missing_canonical_evidence";
+
+export type WorkbenchAuthoringV5SelectionDto = {
+  requestedSessionCount: number;
+  eligibleSessionCount: number;
+  excludedSessionCount: number;
+  excludedSessions: Array<{
+    sessionId: string;
+    reason: WorkbenchAuthoringV5SelectionExclusionReason;
+  }>;
+};
+
 export type WorkbenchAuthoringV5RequestDto = {
   requestId: string;
   actorId: string;

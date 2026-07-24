@@ -3,6 +3,7 @@ import type { MastheadDatabase } from "../../daemon/db/sqlite.ts";
 import { readWorkbenchSessionState } from "../../daemon/db/workbenchPipelineRepository.ts";
 import type { SessionDossierDto } from "../../shared/sessionDossier.ts";
 import type { WorkbenchAuthoringEvidenceManifest } from "../../shared/workbenchAuthoring.ts";
+import type { WorkbenchAuthoringV5SelectionDto } from "../../shared/workbenchAuthoringV5.ts";
 import * as evidenceCatalog from "./evidenceCatalog.ts";
 import type { AuthoringEvidenceRevisionInput } from "./evidenceCatalog.ts";
 
@@ -17,6 +18,7 @@ export type GuidedSelectionPreflightResult = {
   sessions: GuidedCompileReadySession[];
   manifest: WorkbenchAuthoringEvidenceManifest;
   revisionInputs: AuthoringEvidenceRevisionInput[];
+  selection: WorkbenchAuthoringV5SelectionDto;
 };
 
 export function assertGuidedSelectionCompileReady(
@@ -34,24 +36,40 @@ export function assertGuidedSelectionCompileReady(
   }
   const snapshot = evidenceCatalog.getAuthoringEvidenceSnapshot(db, sessionIds);
   const snapshotById = new Map(snapshot.sessions.map((session) => [session.revisionInput.sessionId, session]));
-  const sessions = sessionIds.map((sessionId, ordinal) => {
+  const sessions: GuidedCompileReadySession[] = [];
+  const excludedSessions: WorkbenchAuthoringV5SelectionDto["excludedSessions"] = [];
+  for (const sessionId of sessionIds) {
     const dossier = getSessionDossier(db, sessionId);
-    if (!dossier) throw new Error(`session_not_found:${sessionId}`);
+    if (!dossier) {
+      excludedSessions.push({ reason: "session_not_found", sessionId });
+      continue;
+    }
     const state = readWorkbenchSessionState(db, sessionId);
     if (state && state.publicationStatus !== "publish_path") {
-      throw new Error(`authoring_session_not_on_publish_path:${sessionId}`);
+      excludedSessions.push({ reason: "not_on_publish_path", sessionId });
+      continue;
     }
     const transcriptReady = state?.transcriptStatus === "available" || state?.transcriptStatus === "imported";
     if (!state || state.publicationStatus !== "publish_path" || !transcriptReady || state.qualityStatus !== "passed") {
-      throw new Error(`authoring_session_not_compile_ready:${sessionId}`);
+      excludedSessions.push({ reason: "not_compile_ready", sessionId });
+      continue;
     }
     const captured = snapshotById.get(sessionId)!;
-    if (!captured.usableCanonicalEvidence) throw new Error(`missing_canonical_evidence:${sessionId}`);
-    return { dossier, evidence: captured.evidence, ordinal, sessionId };
-  });
+    if (!captured.usableCanonicalEvidence) {
+      excludedSessions.push({ reason: "missing_canonical_evidence", sessionId });
+      continue;
+    }
+    sessions.push({ dossier, evidence: captured.evidence, ordinal: sessions.length, sessionId });
+  }
   return {
     manifest: snapshot.manifest,
     revisionInputs: sessions.map(({ sessionId }) => snapshotById.get(sessionId)!.revisionInput),
+    selection: {
+      eligibleSessionCount: sessions.length,
+      excludedSessionCount: excludedSessions.length,
+      excludedSessions,
+      requestedSessionCount: sessionIds.length
+    },
     sessions
   };
 }

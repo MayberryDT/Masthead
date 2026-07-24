@@ -33,6 +33,7 @@ import {
   type WorkbenchAuthoringV5OptionalConsideration,
   type WorkbenchAuthoringV5PackReceipt,
   type WorkbenchAuthoringV5RequestReceipt,
+  type WorkbenchAuthoringV5SelectionDto,
   type WorkbenchAuthoringV5SessionOutcome
 } from "../../shared/workbenchAuthoringV5.ts";
 import type { GuidedAuthoringExpectedIdentity } from "../../shared/instanceIdentity.ts";
@@ -59,6 +60,12 @@ type MutationIdentity = {
   expectedIdentity: GuidedAuthoringExpectedIdentity;
 };
 
+export class WorkbenchAuthoringV5NoEligibleSessionsError extends Error {
+  constructor(readonly selection: WorkbenchAuthoringV5SelectionDto) {
+    super("authoring_v5_no_eligible_sessions");
+  }
+}
+
 export function createWorkbenchAuthoringV5Request(
   db: MastheadDatabase,
   input: MutationIdentity & {
@@ -71,6 +78,9 @@ export function createWorkbenchAuthoringV5Request(
   assertRequestMembership(input.sessionIds);
   return withImmediateTransaction(db, () => {
     const preflight = assertGuidedSelectionCompileReady(db, input.sessionIds);
+    if (preflight.sessions.length === 0) {
+      throw new WorkbenchAuthoringV5NoEligibleSessionsError(preflight.selection);
+    }
     const requestId = `authoring-v5-request:${randomUUID()}`;
     const packSessionIds = fixedPacks(preflight.sessions.map(({ sessionId }) => sessionId));
     const request = insertWorkbenchAuthoringV5Request(db, {
@@ -98,9 +108,10 @@ export function createWorkbenchAuthoringV5Request(
         startCommand: `${input.command} workbench author bootstrap --request ${shellQuote(requestId)} --json`
       },
       nextAction: startAction(input.command, requestId),
-      request
+      request,
+      selection: preflight.selection
     };
-    for (const sessionId of input.sessionIds) {
+    for (const { sessionId } of preflight.sessions) {
       recordWorkbenchActivity(db, {
         actor: { id: input.actorId, kind: "agent" },
         details: { packCount: request.packCount, requestId },
