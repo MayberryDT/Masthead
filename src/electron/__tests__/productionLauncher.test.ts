@@ -2233,6 +2233,39 @@ describe("production lifecycle launcher", () => {
     ], { HOME: homeDir })).resolves.toMatchObject({ staged: true });
   });
 
+  test("cancels an older unactivated receipt through the currently trusted lifecycle maintenance runtime", async () => {
+    const { config, homeDir, productionRoot, target: trustedRuntimeTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, trustedRuntimeTarget);
+    await createDatabaseThroughVersion(config.databasePath, 37);
+    const staged = await runCli([
+      "stage", "--bundle", candidate.target, "--bundle-digest", candidate.bundleDigest,
+      "--data-dir", config.dataDirectory, "--production-root", productionRoot
+    ], { HOME: homeDir });
+    const receiptPath = staged.receiptPath as string;
+
+    await expect(runCli(["activate", "--receipt", receiptPath], { HOME: homeDir }, {
+      assertOffline: async () => undefined,
+      prepareMaintenance: (request: any) => prepareProductionTransition(request, {
+        simulateProcessDeathAfterPhase: "backup_copied"
+      }),
+      runDesktopDatabaseCommand: () => undefined
+    })).rejects.toMatchObject({ code: "simulated_production_transition_process_death" });
+
+    let selectedRuntimeTarget: string | undefined;
+    await expect(runCli(["abort", "--receipt", receiptPath], { HOME: homeDir }, {
+      assertOffline: async () => undefined,
+      cancellationMaintenanceTarget: trustedRuntimeTarget,
+      runCancellationMaintenance: async (maintenanceConfig: any, action: string, request: any) => {
+        selectedRuntimeTarget = maintenanceConfig.target;
+        expect(action).toBe("cancel");
+        return cancelProductionTransition(request);
+      },
+      runDesktopDatabaseCommand: () => undefined
+    })).resolves.toMatchObject({ aborted: true, cancelled: true, target: trustedRuntimeTarget });
+    expect(selectedRuntimeTarget).toBe(trustedRuntimeTarget);
+    expect(selectedRuntimeTarget).not.toBe(candidate.target);
+  });
+
   test("cancels multiple stale unactivated receipts one at a time without deleting unrelated candidates or stages", async () => {
     const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
     await createDatabaseThroughVersion(config.databasePath, 37);

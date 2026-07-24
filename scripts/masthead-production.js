@@ -938,6 +938,35 @@ function stagedCandidateConfig(receipt) {
   };
 }
 
+async function trustedCancellationMaintenanceConfig(receipt, dependencyOverrides) {
+  const modulePath = fileURLToPath(import.meta.url);
+  const target = resolve(
+    dependencyOverrides.cancellationMaintenanceTarget ??
+    join(dirname(modulePath), "..", "..", "..")
+  );
+  const runtime = productionRuntimePaths(target);
+  if (!dependencyOverrides.cancellationMaintenanceTarget && await realpath(runtime.lifecycle) !== await realpath(modulePath)) {
+    throw new Error("Trusted production cancellation runtime does not contain the executing lifecycle module.");
+  }
+  await assertRequiredProductionRuntimeResources(runtime);
+  const [manifest, release] = await Promise.all([
+    verifyPackagedBundleManifest({
+      bundleRoot: target,
+      executablePath: runtime.executable,
+      nodePath: runtime.node,
+      resourcesPath: join(target, "resources")
+    }),
+    readRelease(target)
+  ]);
+  return {
+    ...stagedCandidateConfig(receipt),
+    bundleDigest: manifest.bundleDigest,
+    gitSha: release.gitSha,
+    target,
+    version: release.version
+  };
+}
+
 function assertPreparedStagedMaintenance(receipt, request) {
   if (
     receipt?.schemaVersion !== 1 || receipt.state !== "ready_to_activate" ||
@@ -1360,11 +1389,11 @@ async function cancelUnactivatedStagedProductionInstallation(receipt, pending, d
   let databaseRestored = receipt.cancellationDatabaseRestored === true;
   if (transitionBinding.kind === "owned") {
     await writeActivationJournal(journalPath, receipt, "abort-cancel-before-database-cancel");
-    const cancelMaintenance = dependencyOverrides.cancelMaintenance ?? ((request) => runMaintenanceChild(
-      stagedCandidateConfig(receipt),
-      "cancel",
-      request
-    ));
+    const cancelMaintenance = dependencyOverrides.cancelMaintenance ?? (async (request) => {
+      const maintenanceConfig = await trustedCancellationMaintenanceConfig(receipt, dependencyOverrides);
+      const runCancellationMaintenance = dependencyOverrides.runCancellationMaintenance ?? runMaintenanceChild;
+      return runCancellationMaintenance(maintenanceConfig, "cancel", request);
+    });
     const cancelled = await cancelMaintenance(stagedTransitionRequest(receipt));
     assertCancelledStagedMaintenance(cancelled, receipt);
     databaseRestored = cancelled.databaseRestored;
