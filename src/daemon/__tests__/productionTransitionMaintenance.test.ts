@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { readFileSync, readdirSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -171,6 +171,44 @@ describe("offline production transition maintenance", () => {
     await expect(readFile(abandonedStage)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(readFile(abandonedRecoveryStage)).rejects.toMatchObject({ code: "ENOENT" });
     expect(fullIntegrityChecks).toEqual([receipt.snapshot.path]);
+  });
+
+  test("resumes an interrupted prepared migration without duplicating its backup and removes abandoned large stages", async () => {
+    const { databasePath, newBundle, oldBundle, root } = await fixture(37);
+    const input = {
+      databasePath,
+      newBundle,
+      nonce: "12121212-1212-4212-8212-121212121212",
+      oldBundle
+    };
+    const prepared = await prepareProductionTransition(input);
+    const backupBefore = await stat(prepared.snapshot.path, { bigint: true });
+    const backupBytesBefore = await readFile(prepared.snapshot.path);
+    await writeFile(productionTransitionJournalPath(databasePath), `${JSON.stringify({
+      ...prepared,
+      state: "snapshot_ready"
+    })}\n`);
+    const abandonedLargeStage = join(root, ".masthead.sqlite.migration-backup-stage-11gb-equivalent");
+    const abandonedRecoveryStage = join(root, ".masthead.sqlite.recovery-stage-11gb-equivalent");
+    await writeFile(abandonedLargeStage, "interrupted backup stage");
+    await writeFile(abandonedRecoveryStage, "interrupted migration recovery stage");
+
+    const resumed = await prepareProductionTransition(input);
+
+    const backupAfter = await stat(resumed.snapshot.path, { bigint: true });
+    expect(resumed).toMatchObject({
+      databaseId: prepared.databaseId,
+      snapshot: prepared.snapshot,
+      sourceSchemaVersion: 37,
+      state: "ready_to_activate",
+      targetSchemaVersion: CURRENT_SCHEMA_VERSION
+    });
+    expect(backupAfter.ino).toBe(backupBefore.ino);
+    expect(await readFile(resumed.snapshot.path)).toEqual(backupBytesBefore);
+    expect(readdirSync(root).filter((name) => name.startsWith("masthead.sqlite.backup-")))
+      .toEqual(["masthead.sqlite.backup-current"]);
+    await expect(readFile(abandonedLargeStage)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(abandonedRecoveryStage)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   test("restores the exact receipt-bound snapshot and source identity before old activation", async () => {

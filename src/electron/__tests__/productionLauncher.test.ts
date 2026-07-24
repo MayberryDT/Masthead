@@ -4,9 +4,10 @@ import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { PassThrough } from "node:stream";
-import { chmod, lstat, mkdir, mkdtemp, open as openFile, readFile, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, open as openFile, readFile, readdir, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, test } from "vitest";
 import { writePackagedBundleManifest } from "../../../scripts/packaged-bundle-manifest.js";
@@ -37,6 +38,8 @@ import {
   transitionProduction,
   waitForMaintenanceChild
 } from "../../../scripts/masthead-production.js";
+import { completeProductionTransition, prepareProductionTransition } from "../../daemon/productionTransitionMaintenance.ts";
+import { CURRENT_SCHEMA_VERSION, getOrCreateDatabaseIdentity } from "../../daemon/db/schema.ts";
 
 const cleanup: string[] = [];
 const VALID_PNG = Buffer.from(
@@ -200,6 +203,23 @@ async function publishStartupManifest(receipt: any) {
   }));
 }
 
+async function createDatabaseThroughVersion(databasePath: string, throughVersion: number) {
+  await mkdir(dirname(databasePath), { recursive: true });
+  const migrationsDirectory = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "daemon", "db", "migrations");
+  const database = new DatabaseSync(databasePath);
+  database.exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY NOT NULL, name TEXT NOT NULL, applied_at TEXT NOT NULL);");
+  for (const filename of (await readdir(migrationsDirectory)).filter((name) => /^\d{3}_.+\.sql$/u.test(name)).sort()) {
+    const version = Number(filename.slice(0, 3));
+    if (version > throughVersion) break;
+    database.exec(readFileSync(join(migrationsDirectory, filename), "utf8"));
+    database.prepare("INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)")
+      .run(version, filename.slice(0, -4), "2026-07-24T12:00:00.000Z");
+  }
+  const databaseId = getOrCreateDatabaseIdentity(database);
+  database.close();
+  return databaseId;
+}
+
 describe("production lifecycle launcher", () => {
   test("stages and activates an instance-bound production installation without runtime or database side effects", async () => {
     const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
@@ -246,6 +266,142 @@ describe("production lifecycle launcher", () => {
     expect(await readFile(activeInstanceLauncherPath, "utf8")).toContain("MASTHEAD_INSTANCE_MANIFEST");
     await expect(lstat(receipt.instanceManifestPath)).rejects.toMatchObject({ code: "ENOENT" });
     expect(await realpath(oldTarget)).toBe(oldTarget);
+  });
+
+  test("prepares a candidate schema offline before activation so large migration work cannot consume the startup health budget", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const databaseId = await createDatabaseThroughVersion(config.databasePath, 37);
+    const receipt = await stageProductionInstallation({
+      bundleDigest: candidate.bundleDigest,
+      dataDirectory: config.dataDirectory,
+      databasePath: config.databasePath,
+      homeDir,
+      productionRoot,
+      sourceBundlePath: candidate.target
+    });
+
+    const activated = await activateStagedProductionInstallation(receipt.receiptPath, {
+      assertOffline: async () => undefined,
+      prepareMaintenance: (request: any) => prepareProductionTransition(request),
+      runDesktopDatabaseCommand: () => undefined
+    });
+
+    let daemonMigrationStarted = false;
+    let scans = 0;
+    const electron = processRecord({
+      argv: [join(candidate.target, "masthead"), `--user-data-dir=${config.dataDirectory}`],
+      environ: { MASTHEAD_DATA_DIR: config.dataDirectory, MASTHEAD_DB_PATH: config.databasePath },
+      exe: join(candidate.target, "masthead")
+    });
+    const daemon = processRecord({
+      argv: [
+        join(candidate.target, "resources", "daemon", "node"),
+        join(candidate.target, "resources", "daemon", "dist", "src", "daemon", "main.js")
+      ],
+      environ: { MASTHEAD_DATA_DIR: config.dataDirectory, MASTHEAD_DB_PATH: config.databasePath },
+      exe: join(candidate.target, "resources", "daemon", "node"), pid: 43, starttime: "daemon"
+    });
+    const health = {
+      buildSha: candidate.gitSha,
+      buildVersion: candidate.version,
+      data: { dataDirectory: config.dataDirectory, databaseId, databasePath: config.databasePath },
+      ok: true,
+      product: "masthead",
+      runtime: { port: config.port, writable: true },
+      schemaVersion: CURRENT_SCHEMA_VERSION
+    };
+    const started = await startProduction({
+      ...config,
+      bundleDigest: candidate.bundleDigest,
+      gitSha: candidate.gitSha,
+      target: candidate.target,
+      version: candidate.version
+    }, {
+      acquireLease: async () => ({ release: async () => undefined }),
+      captureSpawned: async () => undefined,
+      cleanupSpawned: async () => ({ stopped: true }),
+      completePreparedActivation: (request: any) => completeProductionTransition(request),
+      currentTarget: async () => candidate.target,
+      fetchHealth: async () => undefined,
+      ownershipProbe: async () => undefined,
+      portBindable: async () => true,
+      readProcesses: async () => (++scans === 1 ? [] : [electron, daemon]),
+      spawnElectron: async () => {
+        const database = new DatabaseSync(config.databasePath, { readOnly: true });
+        const schemaVersion = Number(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version ?? 0);
+        database.close();
+        if (schemaVersion < CURRENT_SCHEMA_VERSION) {
+          daemonMigrationStarted = true;
+          await writeFile(join(config.dataDirectory, ".masthead.sqlite.migration-backup-stage-11gb-equivalent"), "staging");
+        }
+        return 90;
+      },
+      waitForHealth: async () => {
+        if (daemonMigrationStarted) throw new Error("Pinned Masthead production health did not become available within 5 minutes.");
+        return health;
+      }
+    });
+
+    expect(started).toMatchObject({ pid: 90, started: true });
+    expect(daemonMigrationStarted).toBe(false);
+    expect(activated).toMatchObject({
+      databaseId,
+      sourceSchemaVersion: 37,
+      targetSchemaVersion: CURRENT_SCHEMA_VERSION
+    });
+    expect(await loadStagedProductionInstallation(receipt.receiptPath)).toMatchObject({
+      databaseId,
+      sourceSchemaVersion: 37,
+      targetSchemaVersion: CURRENT_SCHEMA_VERSION,
+      transitionNonce: receipt.stagingNonce
+    });
+  });
+
+  test("resumes activation after prepared-database process death without another backup or stale migration stages", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    await createDatabaseThroughVersion(config.databasePath, 37);
+    const receipt = await stageProductionInstallation({
+      bundleDigest: candidate.bundleDigest,
+      dataDirectory: config.dataDirectory,
+      databasePath: config.databasePath,
+      homeDir,
+      productionRoot,
+      sourceBundlePath: candidate.target
+    });
+    const prepareMaintenance = (request: any) => prepareProductionTransition(request);
+
+    await expect(activateStagedProductionInstallation(receipt.receiptPath, {
+      assertOffline: async () => undefined,
+      prepareMaintenance,
+      runDesktopDatabaseCommand: () => undefined,
+      simulateProcessDeathAfterStep: "database-prepared"
+    })).rejects.toMatchObject({ code: "simulated_activation_process_death" });
+    expect(await realpath(join(productionRoot, "current"))).toBe(oldTarget);
+    const preparedReceipt = await loadStagedProductionInstallation(receipt.receiptPath);
+    const backupPath = join(config.dataDirectory, "masthead.sqlite.backup-current");
+    const backupBefore = await stat(backupPath, { bigint: true });
+    const abandonedStage = join(config.dataDirectory, ".masthead.sqlite.migration-backup-stage-11gb-equivalent");
+    await writeFile(abandonedStage, "interrupted migration stage");
+
+    await expect(activateStagedProductionInstallation(receipt.receiptPath, {
+      assertOffline: async () => undefined,
+      prepareMaintenance,
+      runDesktopDatabaseCommand: () => undefined
+    })).resolves.toMatchObject({
+      activated: true,
+      databaseId: preparedReceipt.databaseId,
+      sourceSchemaVersion: 37,
+      targetSchemaVersion: CURRENT_SCHEMA_VERSION
+    });
+
+    const backupAfter = await stat(backupPath, { bigint: true });
+    expect(backupAfter.ino).toBe(backupBefore.ino);
+    expect((await readdir(config.dataDirectory)).filter((name) => name.startsWith("masthead.sqlite.backup-")))
+      .toEqual(["masthead.sqlite.backup-current"]);
+    await expect(readFile(abandonedStage)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await realpath(join(productionRoot, "current"))).toBe(candidate.target);
   });
 
   test("rehydrates the staged receipt and rejects staged bytes or path substitution before activation", async () => {

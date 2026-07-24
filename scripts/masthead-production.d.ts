@@ -156,6 +156,10 @@ export type StagedProductionInstallationReceipt = {
   launched: false;
   databaseOpened: false;
   activatedAt?: string;
+  databaseId?: string;
+  sourceSchemaVersion?: number;
+  targetSchemaVersion?: number;
+  transitionNonce?: string;
   stagingNonce: string;
   sourceDigest: string;
   buildSha: string;

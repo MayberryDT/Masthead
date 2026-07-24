@@ -100,39 +100,70 @@ export async function prepareProductionTransition(
   const input = validateInput(inputValue);
   return withExclusiveDatabaseMaintenance(input.databasePath, async (ownership) => {
     await cleanupAbandonedMigrationStagesInsideOwnership(input.databasePath);
-    await assertCleanTransitionBoundary(input.databasePath);
-    const activeBefore = verifyDatabase(input.databasePath, { foreignKeys: true });
-    options.onFullIntegrityCheck?.(join(dirname(input.databasePath), `${basename(input.databasePath)}.backup-current`));
-    const backupReceipt = await createSingleConsistentBackupInsideExclusiveMaintenance(
-      input.databasePath,
-      ownership
-    );
-    if (backupReceipt.databaseId !== activeBefore.databaseId) throw new Error("transition_snapshot_identity_mismatch");
-    const receipt = {
-      databaseId: activeBefore.databaseId,
-      databasePath: input.databasePath,
-      newBundle: input.newBundle,
-      nonce: input.nonce,
-      ...(input.rollbackMode === "offline_only"
-        ? { legacyTarget: input.legacyTarget }
-        : { oldBundle: input.oldBundle }),
-      ...(input.rollbackMode === "offline_only"
-        ? { rollbackMode: "offline_only" as const, schemaVersion: 2 as const }
-        : { schemaVersion: 1 as const }),
-      snapshot: {
-        path: backupReceipt.backupPath,
-        sha256: await hashFile(backupReceipt.backupPath),
-        sizeBytes: backupReceipt.sizeBytes
-      },
-      sourceMigrationLedger: activeBefore.migrationLedger,
-      sourceSchemaFingerprint: activeBefore.schemaFingerprint,
-      sourceSchemaVersion: activeBefore.schemaVersion,
-      state: "snapshot_ready",
-      targetSchemaVersion: CURRENT_SCHEMA_VERSION,
-      updatedAt: new Date().toISOString()
-    } as ProductionTransitionReceipt;
-    await writeJournal(receipt);
-    options.onBoundary?.("snapshot_ready");
+    let receipt: ProductionTransitionReceipt;
+    const journalExists = await lstat(productionTransitionJournalPath(input.databasePath))
+      .then(() => true)
+      .catch((error) => {
+        if (isErrno(error, "ENOENT")) return false;
+        throw error;
+      });
+    if (journalExists) {
+      receipt = await readAndValidateJournal(input);
+      if (!["snapshot_ready", "ready_to_activate"].includes(receipt.state)) {
+        throw new Error(`transition_prepare_resume_state_invalid:${receipt.state}`);
+      }
+      await verifySnapshot(receipt, options, "receipt");
+      const active = verifyDatabase(input.databasePath, { foreignKeys: true });
+      if (receipt.state === "ready_to_activate") {
+        if (active.databaseId !== receipt.databaseId || active.schemaVersion !== receipt.targetSchemaVersion) {
+          throw new Error("transition_ready_database_mismatch");
+        }
+        validatePreparedDatabase(input.databasePath);
+        return receipt;
+      }
+      if (active.databaseId === receipt.databaseId && active.schemaVersion === receipt.targetSchemaVersion) {
+        validatePreparedDatabase(input.databasePath);
+        receipt.state = "ready_to_activate";
+        receipt.updatedAt = new Date().toISOString();
+        await writeJournal(receipt);
+        return receipt;
+      }
+      if (!matchesSourceDatabase(active, receipt)) throw new Error("transition_resume_database_mismatch");
+    } else {
+      await assertCleanTransitionBoundary(input.databasePath);
+      const activeBefore = verifyDatabase(input.databasePath, { foreignKeys: true });
+      options.onFullIntegrityCheck?.(join(dirname(input.databasePath), `${basename(input.databasePath)}.backup-current`));
+      const backupReceipt = await createSingleConsistentBackupInsideExclusiveMaintenance(
+        input.databasePath,
+        ownership
+      );
+      if (backupReceipt.databaseId !== activeBefore.databaseId) throw new Error("transition_snapshot_identity_mismatch");
+      receipt = {
+        databaseId: activeBefore.databaseId,
+        databasePath: input.databasePath,
+        newBundle: input.newBundle,
+        nonce: input.nonce,
+        ...(input.rollbackMode === "offline_only"
+          ? { legacyTarget: input.legacyTarget }
+          : { oldBundle: input.oldBundle }),
+        ...(input.rollbackMode === "offline_only"
+          ? { rollbackMode: "offline_only" as const, schemaVersion: 2 as const }
+          : { schemaVersion: 1 as const }),
+        snapshot: {
+          path: backupReceipt.backupPath,
+          sha256: await hashFile(backupReceipt.backupPath),
+          sizeBytes: backupReceipt.sizeBytes
+        },
+        sourceMigrationLedger: activeBefore.migrationLedger,
+        sourceSchemaFingerprint: activeBefore.schemaFingerprint,
+        sourceSchemaVersion: activeBefore.schemaVersion,
+        state: "snapshot_ready",
+        targetSchemaVersion: CURRENT_SCHEMA_VERSION,
+        updatedAt: new Date().toISOString()
+      } as ProductionTransitionReceipt;
+      await writeJournal(receipt);
+      options.onBoundary?.("snapshot_ready");
+    }
     try {
       const database = new DatabaseSync(input.databasePath);
       try {
@@ -427,6 +458,15 @@ function verifyDatabase(
       schemaFingerprint: createHash("sha256").update(JSON.stringify(schemaObjects)).digest("hex"),
       schemaVersion: migrationLedger.at(-1)?.version ?? 0
     };
+  } finally {
+    database.close();
+  }
+}
+
+function validatePreparedDatabase(path: string): void {
+  const database = new DatabaseSync(path, { readOnly: true });
+  try {
+    validateCurrentDatabaseSchema(database);
   } finally {
     database.close();
   }

@@ -4,9 +4,10 @@
 
 Use the normal verified install path whenever the current bundle has a valid release manifest and pinned launcher digest. The cold path requires all of the following before it changes the database or `current` symlink:
 
-Normal Electron startup and the production lifecycle share a five-minute health deadline. Opening or
-migrating the real large database is allowed to use that budget; Electron must not terminate its
-exact child after the former eight-second wait.
+Normal Electron startup has a five-minute health deadline. A staged activation prepares and validates
+an existing database with the candidate's offline transition maintenance before changing `current`;
+startup then verifies the receipt-bound database identity and target schema instead of spending its
+health budget on backup or migration work.
 
 Normal writable startup may clear only a proven-stale canonical V4 compatibility sentinel. The
 database-writer and runtime SQLite leases must already be exclusive; the sentinel must be a regular,
@@ -15,7 +16,7 @@ dead PID. Cleanup binds the bytes to an open no-follow file descriptor, atomical
 pathname, rechecks inode and PID, and preserves that quarantined inode under its unique name. A malformed, live,
 symlinked, replaced, or identity-drifting sentinel is preserved and startup fails closed.
 
-The normal install can also be driven as three explicit filesystem phases. `stage --bundle <path>` writes a durable receipt without changing the active surface; after the old daemon is proved stopped, `activate --receipt <path>` switches the attested files with rollback on any failure; after the new daemon has published a fresh matching instance manifest, `finalize --receipt <path>` removes the receipt, staged files, and every obsolete production install artifact. Finalize fails closed before that startup proof exists, so it cannot delete the rollback bundle immediately after activation.
+The normal install can also be driven as three explicit filesystem phases. `stage --bundle <path>` writes a durable receipt without changing the active surface; after the old daemon is proved stopped, `activate --receipt <path>` prepares the database under the lifecycle and database leases, records its identity and source/target schema in the receipt, then switches the attested files. After the new daemon has published a fresh matching instance manifest, `finalize --receipt <path>` removes the receipt, staged files, and every obsolete production install artifact. Finalize fails closed before that startup proof exists, so it cannot delete the rollback bundle immediately after activation.
 
 Headless activation proof must be supervised by `scripts/masthead-private-display.js`. It creates a
 unique cookie-gated Xvfb display and private runtime, removes every real X11, Wayland, authority, and

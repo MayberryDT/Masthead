@@ -764,7 +764,19 @@ export async function activateStagedProductionInstallation(receiptInput, depende
       await rm(productionStagePendingPath(preliminaryReceipt.productionRoot));
     }
     if (await gatePendingProductionLifecycle(preliminaryReceipt.productionRoot, "activate", preliminaryReceipt.receiptPath) === "completed") {
-      return { activated: true, launched: false, databaseOpened: false, currentPath: preliminaryReceipt.currentPath, target: preliminaryReceipt.target };
+      return {
+        activated: true,
+        launched: false,
+        databaseOpened: Boolean(preliminaryReceipt.databaseId),
+        currentPath: preliminaryReceipt.currentPath,
+        target: preliminaryReceipt.target,
+        ...(preliminaryReceipt.databaseId ? {
+          databaseId: preliminaryReceipt.databaseId,
+          sourceSchemaVersion: preliminaryReceipt.sourceSchemaVersion,
+          targetSchemaVersion: preliminaryReceipt.targetSchemaVersion,
+          transitionNonce: preliminaryReceipt.transitionNonce
+        } : {})
+      };
     }
     return await activateStagedProductionInstallationUnlocked(receiptPath, dependencyOverrides);
   } finally {
@@ -806,6 +818,27 @@ async function activateStagedProductionInstallationUnlocked(receiptPath, depende
   const expectedLeaseAssignment = `MASTHEAD_LIFECYCLE_LEASE=${shellQuote(receipt.lifecycleLeasePath)}`;
   if (!stagedLifecycleBody.toString("utf8").split("\n").includes(expectedLeaseAssignment)) {
     throw new Error("Staged production lifecycle launcher does not bind the receipt lifecycle lease.");
+  }
+  const databaseExists = await lstat(receipt.databasePath).then(() => true).catch((error) => {
+    if (error && typeof error === "object" && error.code === "ENOENT") return false;
+    throw error;
+  });
+  if (databaseExists) {
+    const maintenanceRequest = stagedTransitionRequest(receipt);
+    const prepareMaintenance = dependencyOverrides.prepareMaintenance ?? ((request) => runMaintenanceChild(
+      stagedCandidateConfig(receipt),
+      "prepare",
+      request
+    ));
+    const maintenanceReceipt = await prepareMaintenance(maintenanceRequest);
+    assertPreparedStagedMaintenance(maintenanceReceipt, maintenanceRequest);
+    receipt.databaseId = maintenanceReceipt.databaseId;
+    receipt.sourceSchemaVersion = maintenanceReceipt.sourceSchemaVersion;
+    receipt.targetSchemaVersion = maintenanceReceipt.targetSchemaVersion;
+    receipt.transitionNonce = maintenanceRequest.nonce;
+    await persistStagedReceipt(receipt);
+    await dependencyOverrides.onStep?.("database-prepared");
+    simulateActivationProcessDeath(dependencyOverrides, "database-prepared");
   }
   const activationJournalPath = productionActivationJournalPath(receipt.productionRoot);
   let activationCommitted = false;
@@ -858,12 +891,63 @@ async function activateStagedProductionInstallationUnlocked(receiptPath, depende
   return {
     activated: true,
     launched: false,
-    databaseOpened: false,
+    databaseOpened: databaseExists,
     currentPath: receipt.currentPath,
     target: receipt.target,
     activeInstanceLauncherPath: receipt.activeInstanceLauncherPath,
-    instanceManifestPath: receipt.instanceManifestPath
+    instanceManifestPath: receipt.instanceManifestPath,
+    ...(receipt.databaseId ? {
+      databaseId: receipt.databaseId,
+      sourceSchemaVersion: receipt.sourceSchemaVersion,
+      targetSchemaVersion: receipt.targetSchemaVersion,
+      transitionNonce: receipt.transitionNonce
+    } : {})
   };
+}
+
+function stagedTransitionRequest(receipt) {
+  return {
+    databasePath: receipt.databasePath,
+    newBundle: {
+      bundleDigest: receipt.sourceDigest,
+      gitSha: receipt.buildSha,
+      target: receipt.target,
+      version: receipt.buildVersion
+    },
+    nonce: receipt.stagingNonce,
+    oldBundle: {
+      bundleDigest: receipt.rollbackBundle.bundleDigest,
+      gitSha: receipt.rollbackBundle.buildSha,
+      target: receipt.rollbackBundle.path,
+      version: receipt.rollbackBundle.version
+    }
+  };
+}
+
+function stagedCandidateConfig(receipt) {
+  return {
+    bundleDigest: receipt.sourceDigest,
+    dataDirectory: receipt.dataDirectory,
+    databasePath: receipt.databasePath,
+    gitSha: receipt.buildSha,
+    lifecycleLeasePath: receipt.lifecycleLeasePath,
+    port: receipt.port,
+    productionRoot: receipt.productionRoot,
+    target: receipt.target,
+    version: receipt.buildVersion
+  };
+}
+
+function assertPreparedStagedMaintenance(receipt, request) {
+  if (
+    receipt?.schemaVersion !== 1 || receipt.state !== "ready_to_activate" ||
+    receipt.databasePath !== request.databasePath || receipt.nonce !== request.nonce ||
+    !sameBundleIdentity(receipt.oldBundle, request.oldBundle) ||
+    !sameBundleIdentity(receipt.newBundle, request.newBundle) ||
+    typeof receipt.databaseId !== "string" || !receipt.databaseId ||
+    !Number.isSafeInteger(receipt.sourceSchemaVersion) || receipt.sourceSchemaVersion < 0 ||
+    !Number.isSafeInteger(receipt.targetSchemaVersion) || receipt.targetSchemaVersion < receipt.sourceSchemaVersion
+  ) throw new Error("Staged production maintenance receipt does not match the activation authority.");
 }
 
 function simulateActivationProcessDeath(dependencies, step) {
@@ -1281,6 +1365,12 @@ function stagedReceiptRecord(receipt) {
     launched: false,
     databaseOpened: false,
     ...(receipt.activatedAt ? { activatedAt: receipt.activatedAt } : {}),
+    ...(receipt.databaseId ? {
+      databaseId: receipt.databaseId,
+      sourceSchemaVersion: receipt.sourceSchemaVersion,
+      targetSchemaVersion: receipt.targetSchemaVersion,
+      transitionNonce: receipt.transitionNonce
+    } : {}),
     stagingNonce: receipt.stagingNonce,
     sourceDigest: receipt.sourceDigest,
     buildSha: receipt.buildSha,
@@ -1488,6 +1578,18 @@ function validateStagedReceiptPaths(receipt) {
     !/^[0-9a-f]{64}$/u.test(receipt.rollbackBundle.bundleDigest)
   ) throw new Error("Staged receipt rollback bundle identity is invalid.");
   if (receipt.activatedAt !== undefined && !Number.isFinite(Date.parse(receipt.activatedAt))) throw new Error("Staged receipt activation timestamp is invalid.");
+  const preparedIdentityFields = [
+    receipt.databaseId,
+    receipt.sourceSchemaVersion,
+    receipt.targetSchemaVersion,
+    receipt.transitionNonce
+  ];
+  if (preparedIdentityFields.some((value) => value !== undefined) && (
+    typeof receipt.databaseId !== "string" || !receipt.databaseId ||
+    !Number.isSafeInteger(receipt.sourceSchemaVersion) || receipt.sourceSchemaVersion < 0 ||
+    !Number.isSafeInteger(receipt.targetSchemaVersion) || receipt.targetSchemaVersion < receipt.sourceSchemaVersion ||
+    receipt.transitionNonce !== receipt.stagingNonce
+  )) throw new Error("Staged receipt database preparation identity is invalid.");
   if (resolve(receipt.instanceDir) !== receipt.instanceDir) throw new Error("Staged receipt instance directory is invalid.");
   if (
     !isAbsolute(receipt.stagedSurface.launcherPath) ||
@@ -1622,6 +1724,12 @@ export async function startProduction(configInput, dependencyOverrides = {}, env
     await dependencies.onLifecycleLeaseAcquired?.();
     await reconcileProductionStageIntent(config.productionRoot, config.lifecycleLeasePath);
     await gatePendingProductionLifecycle(config.productionRoot, "start");
+    const stagedActivation = await preparedStagedActivationForStart(config);
+    if (stagedActivation) {
+      config.expectedDatabaseId = stagedActivation.receipt.databaseId;
+      config.expectedSchemaVersion = stagedActivation.receipt.targetSchemaVersion;
+      config.transitionNonce = stagedActivation.receipt.transitionNonce;
+    }
     let interruptedStart;
     const pending = await dependencies.readMaintenanceJournal();
     if ((pending?.schemaVersion === 2 || pending?.rollbackMode === "offline_only") && !config.transitionNonce) {
@@ -1653,6 +1761,9 @@ export async function startProduction(configInput, dependencyOverrides = {}, env
     if (pinnedProcesses.length > 0) {
       assertPinnedTopology(pinnedProcesses, config.target);
       assertMatchingHealth(health, config);
+      if (stagedActivation && pending) {
+        await dependencies.completePreparedActivation(stagedActivation.request);
+      }
       if (interruptedStart) {
         await dependencies.completeInterruptedStart(interruptedStart);
         await dependencies.cleanupInterruptedStart(interruptedStart);
@@ -1684,6 +1795,9 @@ export async function startProduction(configInput, dependencyOverrides = {}, env
       const startedHealth = await dependencies.waitForHealth();
       assertMatchingHealth(startedHealth, config);
       assertPinnedTopology(await classifiedProcesses(config, dependencies), config.target);
+      if (stagedActivation && pending) {
+        await dependencies.completePreparedActivation(stagedActivation.request);
+      }
       if (interruptedStart) {
         await dependencies.completeInterruptedStart(interruptedStart);
         await dependencies.cleanupInterruptedStart(interruptedStart);
@@ -1701,6 +1815,27 @@ export async function startProduction(configInput, dependencyOverrides = {}, env
   } finally {
     await lease.release();
   }
+}
+
+async function preparedStagedActivationForStart(config) {
+  let journal;
+  try {
+    journal = JSON.parse(await readFile(productionActivationJournalPath(config.productionRoot), "utf8"));
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "ENOENT") return undefined;
+    throw new Error("Production activation journal is invalid before start.", { cause: error });
+  }
+  if (journal?.schemaVersion !== 2 || journal.phase !== "activation-committed" || !journal.receipt) return undefined;
+  const receipt = hydrateStagedReceiptRecord(journal.receipt, journal.receiptPath);
+  assertActivationJournalReceiptBinding(journal, receipt);
+  if (!receipt.databaseId) return undefined;
+  if (
+    receipt.target !== config.target || receipt.sourceDigest !== config.bundleDigest ||
+    receipt.buildSha !== config.gitSha || receipt.buildVersion !== config.version ||
+    receipt.databasePath !== config.databasePath || receipt.dataDirectory !== config.dataDirectory ||
+    receipt.productionRoot !== config.productionRoot || receipt.transitionNonce !== receipt.stagingNonce
+  ) throw new Error("Prepared staged activation does not match the pinned start identity.");
+  return { receipt, request: stagedTransitionRequest(receipt) };
 }
 
 export function productionElectronEnvironment(environment = process.env) {
@@ -2399,6 +2534,7 @@ function defaultDependencies(config) {
   return {
     acquireLease: () => acquireLifecycleLease(config.lifecycleLeasePath),
     captureSpawned: (pid) => captureSpawnedProcess(pid, config),
+    completePreparedActivation: (request) => runMaintenanceChild(config, "complete", request),
     currentTarget: () => realpath(join(config.productionRoot, "current")).catch(() => undefined),
     fetchHealth: () => fetchHealth(config.port),
     completeInterruptedStart: (request) => runMaintenanceChild(
