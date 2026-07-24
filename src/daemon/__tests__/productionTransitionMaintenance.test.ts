@@ -8,6 +8,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import { CURRENT_SCHEMA_VERSION, getOrCreateDatabaseIdentity, migrateDatabase } from "../db/schema.ts";
 import { initializeSessionTranscriptFingerprintIndex } from "../db/sessionTranscriptFingerprintIndex.ts";
 import {
+  cancelProductionTransition,
   preflightProductionTransition,
   prepareProductionTransition,
   productionTransitionJournalPath,
@@ -271,6 +272,75 @@ describe("offline production transition maintenance", () => {
       preparePhase: "ready_to_activate",
       state: "ready_to_activate"
     });
+  });
+
+  test("cancels backup_copied without rewriting the source database or shared backup", async () => {
+    const { databaseId, databasePath, newBundle, oldBundle } = await fixture(37);
+    const input = {
+      databasePath,
+      newBundle,
+      nonce: "18181818-1818-4818-8818-181818181818",
+      oldBundle
+    };
+    const backupPath = `${databasePath}.backup-current`;
+    await copyFile(databasePath, backupPath);
+    const databaseBefore = await stat(databasePath, { bigint: true });
+    const backupBefore = await stat(backupPath, { bigint: true });
+    await expect(prepareProductionTransition(input, {
+      simulateProcessDeathAfterPhase: "backup_copied"
+    })).rejects.toMatchObject({ code: "simulated_production_transition_process_death" });
+
+    await expect(cancelProductionTransition(input)).resolves.toEqual({
+      cancelled: true,
+      databaseId,
+      databaseRestored: false,
+      sourceSchemaVersion: 37,
+      targetSchemaVersion: CURRENT_SCHEMA_VERSION
+    });
+    expect(await stat(databasePath, { bigint: true })).toMatchObject({
+      dev: databaseBefore.dev,
+      ino: databaseBefore.ino,
+      mtimeNs: databaseBefore.mtimeNs,
+      size: databaseBefore.size
+    });
+    expect(await stat(backupPath, { bigint: true })).toMatchObject({
+      dev: backupBefore.dev,
+      ino: backupBefore.ino,
+      mtimeNs: backupBefore.mtimeNs,
+      size: backupBefore.size
+    });
+    await expect(readFile(productionTransitionJournalPath(databasePath))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("cancels ready_to_activate by restoring the source schema while retaining backup-current", async () => {
+    const { databaseId, databasePath, newBundle, oldBundle } = await fixture(37);
+    const input = {
+      databasePath,
+      newBundle,
+      nonce: "19191919-1919-4919-8919-191919191919",
+      oldBundle
+    };
+    const prepared = await prepareProductionTransition(input);
+    const backupBefore = await stat(prepared.snapshot.path, { bigint: true });
+
+    await expect(cancelProductionTransition(input)).resolves.toMatchObject({
+      cancelled: true,
+      databaseId,
+      databaseRestored: true,
+      sourceSchemaVersion: 37,
+      targetSchemaVersion: CURRENT_SCHEMA_VERSION
+    });
+    const restored = new DatabaseSync(databasePath, { readOnly: true });
+    expect(getOrCreateDatabaseIdentity(restored)).toBe(databaseId);
+    expect(restored.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 37 });
+    restored.close();
+    expect(await stat(prepared.snapshot.path, { bigint: true })).toMatchObject({
+      dev: backupBefore.dev,
+      ino: backupBefore.ino,
+      mtimeNs: backupBefore.mtimeNs,
+      size: backupBefore.size
+    });
+    await expect(readFile(productionTransitionJournalPath(databasePath))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   test("adopts one complete legacy recovery stage without another database copy", async () => {

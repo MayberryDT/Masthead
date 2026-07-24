@@ -328,6 +328,64 @@ export async function restoreProductionTransition(
   });
 }
 
+export async function cancelProductionTransition(
+  inputValue: ProductionTransitionInput,
+  options: ProductionTransitionOptions = {}
+): Promise<{
+  cancelled: true;
+  databaseId: string;
+  databaseRestored: boolean;
+  sourceSchemaVersion: number;
+  targetSchemaVersion: number;
+}> {
+  const input = validateInput(inputValue);
+  return withExclusiveDatabaseMaintenance(input.databasePath, async (ownership) => {
+    const receipt = await readAndValidateJournal(input);
+    const active = verifyDatabase(input.databasePath, {
+      foreignKeys: true,
+      pageIntegrity: "none",
+      onPageIntegrityCheck: options.onPageIntegrityCheck
+    });
+    let databaseRestored = false;
+    if (matchesTargetDatabase(active, receipt)) {
+      await restoreSnapshotInsideOwnership(receipt, ownership, options, "full");
+      databaseRestored = true;
+    } else if (!matchesSourceDatabase(active, receipt)) {
+      throw new Error("transition_cancel_database_mismatch");
+    }
+
+    const ownedStagePath = receiptOwnedRecoveryStagePath(input.databasePath, input.nonce);
+    if (receipt.snapshot.stagePath === ownedStagePath && receipt.snapshot.stagePath !== receipt.snapshot.path) {
+      const stageExists = await lstat(receipt.snapshot.stagePath).then(() => true).catch((error) => {
+        if (isErrno(error, "ENOENT")) return false;
+        throw error;
+      });
+      if (stageExists) {
+        await assertDurableFileIdentity(
+          receipt.snapshot.stagePath,
+          receipt.snapshot.fileIdentity!,
+          "transition_cancel_stage_mismatch"
+        );
+        await rmDatabase(receipt.snapshot.stagePath);
+      }
+    }
+    await rm(productionTransitionJournalPath(input.databasePath));
+    const directory = await open(dirname(input.databasePath), "r");
+    try {
+      await directory.sync();
+    } finally {
+      await directory.close();
+    }
+    return {
+      cancelled: true,
+      databaseId: receipt.databaseId,
+      databaseRestored,
+      sourceSchemaVersion: receipt.sourceSchemaVersion,
+      targetSchemaVersion: receipt.targetSchemaVersion
+    };
+  });
+}
+
 function finalSnapshotPath(databasePath: string): string {
   return join(dirname(databasePath), `${basename(databasePath)}.backup-current`);
 }
@@ -916,6 +974,7 @@ export async function runProductionTransitionMaintenanceCli(argv = process.argv.
   const input = JSON.parse(argv[requestIndex + 1]) as ProductionTransitionInput;
   if (action === "prepare") return prepareProductionTransition(input);
   if (action === "restore") return restoreProductionTransition(input);
+  if (action === "cancel") return cancelProductionTransition(input);
   if (action === "preflight") return preflightProductionTransition(input);
   if (action === "complete") {
     await completeProductionTransition(input);

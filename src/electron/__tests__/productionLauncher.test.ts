@@ -4,7 +4,7 @@ import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { PassThrough } from "node:stream";
-import { chmod, lstat, mkdir, mkdtemp, open as openFile, readFile, readdir, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, copyFile, lstat, mkdir, mkdtemp, open as openFile, readFile, readdir, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -40,6 +40,7 @@ import {
   waitForMaintenanceChild
 } from "../../../scripts/masthead-production.js";
 import {
+  cancelProductionTransition,
   completeProductionTransition,
   prepareProductionTransition,
   restoreProductionTransition
@@ -139,15 +140,22 @@ async function fixture({ includeIcon = true, iconContents = VALID_PNG } = {}) {
   };
 }
 
-async function secondBundle(productionRoot: string, sourceTarget: string) {
+async function secondBundle(
+  productionRoot: string,
+  sourceTarget: string,
+  identity: { shaCharacter?: string; version?: string } = {}
+) {
   const { cp, rm } = await import("node:fs/promises");
-  const target = join(productionRoot, "Masthead-linux-x64-0.2.0-candidate");
+  const version = identity.version ?? "0.2.0";
+  const shaCharacter = identity.shaCharacter ?? "b";
+  const gitSha = shaCharacter.repeat(40);
+  const target = join(productionRoot, `Masthead-linux-x64-${version}-candidate`);
   await cp(sourceTarget, target, { recursive: true });
   await writeFile(join(target, "masthead"), "candidate-binary", { mode: 0o755 });
   await writeFile(join(target, "resources", "app.asar"), "candidate-app");
   await writeFile(join(target, "resources", "daemon", "release.json"), JSON.stringify({
-    gitSha: "b".repeat(40),
-    version: "0.2.0"
+    gitSha,
+    version
   }));
   await rm(join(target, "resources", "release-manifest.json"), { force: true });
   const manifest = await writePackagedBundleManifest({
@@ -157,9 +165,9 @@ async function secondBundle(productionRoot: string, sourceTarget: string) {
   });
   return {
     bundleDigest: manifest.bundleDigest,
-    gitSha: "b".repeat(40),
+    gitSha,
     target,
-    version: "0.2.0"
+    version
   };
 }
 
@@ -2153,6 +2161,256 @@ describe("production lifecycle launcher", () => {
     await expect(runCli(["activate", "--receipt", receiptPath], { HOME: homeDir }, { assertOffline: async () => undefined })).resolves.toMatchObject({ activated: true });
     await publishStartupManifest(receiptPath);
     await expect(runCli(["finalize", "--receipt", receiptPath], { HOME: homeDir }, { verifyLiveProof: async () => undefined })).resolves.toMatchObject({ finalized: true });
+  });
+
+  test("public abort cancels an unactivated candidate after backup_copied so a newer candidate can stage", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const databaseId = await createDatabaseThroughVersion(config.databasePath, 37);
+    const backupPath = `${config.databasePath}.backup-current`;
+    await copyFile(config.databasePath, backupPath);
+    const backupBefore = await stat(backupPath, { bigint: true });
+    const staged = await runCli([
+      "stage", "--bundle", candidate.target, "--bundle-digest", candidate.bundleDigest,
+      "--data-dir", config.dataDirectory, "--production-root", productionRoot
+    ], { HOME: homeDir });
+    const receiptPath = staged.receiptPath as string;
+
+    await expect(runCli(["activate", "--receipt", receiptPath], { HOME: homeDir }, {
+      assertOffline: async () => undefined,
+      prepareMaintenance: (request: any) => prepareProductionTransition(request, {
+        simulateProcessDeathAfterPhase: "backup_copied"
+      }),
+      runDesktopDatabaseCommand: () => undefined
+    })).rejects.toMatchObject({ code: "simulated_production_transition_process_death" });
+    expect(await loadStagedProductionInstallation(receiptPath)).not.toHaveProperty("activatedAt");
+    expect(JSON.parse(await readFile(`${config.databasePath}.production-transition.json`, "utf8")))
+      .toMatchObject({ preparePhase: "backup_copied", state: "snapshot_ready" });
+
+    await expect(runCli(["abort", "--receipt", receiptPath], { HOME: homeDir }, {
+      assertOffline: async () => undefined,
+      cancelMaintenance: (request: any) => cancelProductionTransition(request),
+      runDesktopDatabaseCommand: () => undefined,
+      simulateAbortProcessDeathAfterStep: "database-cancelled"
+    })).rejects.toMatchObject({ code: "simulated_abort_process_death" });
+    await expect(lstat(receiptPath)).resolves.toBeDefined();
+    await expect(lstat(candidate.target)).resolves.toBeDefined();
+    await expect(lstat(`${config.databasePath}.production-transition.json`)).rejects.toMatchObject({ code: "ENOENT" });
+
+    await expect(runCli(["abort", "--receipt", receiptPath], { HOME: homeDir }, {
+      assertOffline: async () => undefined,
+      runDesktopDatabaseCommand: () => undefined
+    })).resolves.toMatchObject({
+      aborted: true,
+      cancelled: true,
+      databaseId,
+      databaseRestored: false,
+      recovered: true,
+      target: oldTarget
+    });
+    expect(await realpath(join(productionRoot, "current"))).toBe(oldTarget);
+    for (const path of [receiptPath, candidate.target, staged.stagedInstanceLauncherPath as string]) {
+      await expect(lstat(path)).rejects.toMatchObject({ code: "ENOENT" });
+    }
+    await expect(lstat(`${config.databasePath}.production-transition.json`)).rejects.toMatchObject({ code: "ENOENT" });
+    const active = new DatabaseSync(config.databasePath, { readOnly: true });
+    expect(getOrCreateDatabaseIdentity(active)).toBe(databaseId);
+    expect(Number(active.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version)).toBe(37);
+    active.close();
+    expect(await stat(backupPath, { bigint: true })).toMatchObject({
+      dev: backupBefore.dev,
+      ino: backupBefore.ino,
+      mtimeNs: backupBefore.mtimeNs,
+      size: backupBefore.size
+    });
+    await expect(runCli(["abort", "--receipt", receiptPath], { HOME: homeDir }))
+      .resolves.toMatchObject({ aborted: true, cancelled: true, recovered: true, target: oldTarget });
+
+    const newer = await secondBundle(productionRoot, oldTarget, { shaCharacter: "c", version: "0.3.0" });
+    await expect(runCli([
+      "stage", "--bundle", newer.target, "--bundle-digest", newer.bundleDigest,
+      "--data-dir", config.dataDirectory, "--production-root", productionRoot
+    ], { HOME: homeDir })).resolves.toMatchObject({ staged: true });
+  });
+
+  test("cancels multiple stale unactivated receipts one at a time without deleting unrelated candidates or stages", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    await createDatabaseThroughVersion(config.databasePath, 37);
+    const backupPath = `${config.databasePath}.backup-current`;
+    await copyFile(config.databasePath, backupPath);
+    const backupBefore = await stat(backupPath, { bigint: true });
+    const firstCandidate = await secondBundle(productionRoot, oldTarget, { shaCharacter: "b", version: "0.2.0" });
+    const first = await runCli([
+      "stage", "--bundle", firstCandidate.target, "--bundle-digest", firstCandidate.bundleDigest,
+      "--data-dir", config.dataDirectory, "--production-root", productionRoot
+    ], { HOME: homeDir });
+    const secondCandidate = await secondBundle(productionRoot, oldTarget, { shaCharacter: "c", version: "0.3.0" });
+    const second = await runCli([
+      "stage", "--bundle", secondCandidate.target, "--bundle-digest", secondCandidate.bundleDigest,
+      "--data-dir", config.dataDirectory, "--production-root", productionRoot
+    ], { HOME: homeDir });
+    await expect(runCli(["activate", "--receipt", second.receiptPath as string], { HOME: homeDir }, {
+      assertOffline: async () => undefined,
+      prepareMaintenance: (request: any) => prepareProductionTransition(request, {
+        simulateProcessDeathAfterPhase: "backup_copied"
+      }),
+      runDesktopDatabaseCommand: () => undefined
+    })).rejects.toMatchObject({ code: "simulated_production_transition_process_death" });
+
+    await expect(runCli(["abort", "--receipt", second.receiptPath as string], { HOME: homeDir }, {
+      assertOffline: async () => undefined,
+      cancelMaintenance: (request: any) => cancelProductionTransition(request),
+      runDesktopDatabaseCommand: () => undefined
+    })).resolves.toMatchObject({ aborted: true, cancelled: true, target: oldTarget });
+    for (const path of [first.receiptPath as string, firstCandidate.target, first.stagedInstanceLauncherPath as string]) {
+      await expect(lstat(path)).resolves.toBeDefined();
+    }
+    await expect(lstat(secondCandidate.target)).rejects.toMatchObject({ code: "ENOENT" });
+
+    await expect(runCli(["abort", "--receipt", first.receiptPath as string], { HOME: homeDir }, {
+      assertOffline: async () => undefined,
+      runDesktopDatabaseCommand: () => undefined
+    })).resolves.toMatchObject({ aborted: true, cancelled: true, target: oldTarget });
+    await expect(lstat(firstCandidate.target)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(runCli(["abort", "--receipt", second.receiptPath as string], { HOME: homeDir }))
+      .resolves.toMatchObject({ aborted: true, cancelled: true, recovered: true, target: oldTarget });
+    expect(await stat(backupPath, { bigint: true })).toMatchObject({
+      dev: backupBefore.dev,
+      ino: backupBefore.ino,
+      mtimeNs: backupBefore.mtimeNs,
+      size: backupBefore.size
+    });
+
+    const newer = await secondBundle(productionRoot, oldTarget, { shaCharacter: "d", version: "0.4.0" });
+    await expect(runCli([
+      "stage", "--bundle", newer.target, "--bundle-digest", newer.bundleDigest,
+      "--data-dir", config.dataDirectory, "--production-root", productionRoot
+    ], { HOME: homeDir })).resolves.toMatchObject({ staged: true });
+  });
+
+  test("retains a candidate bundle shared by another unactivated receipt until the final owner cancels", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const stage = () => runCli([
+      "stage", "--bundle", candidate.target, "--bundle-digest", candidate.bundleDigest,
+      "--data-dir", config.dataDirectory, "--production-root", productionRoot
+    ], { HOME: homeDir });
+    const first = await stage();
+    const second = await stage();
+
+    await expect(runCli(["abort", "--receipt", first.receiptPath as string], { HOME: homeDir }, {
+      assertOffline: async () => undefined
+    })).resolves.toMatchObject({ aborted: true, cancelled: true, target: oldTarget });
+    await expect(lstat(candidate.target)).resolves.toBeDefined();
+    await expect(lstat(second.receiptPath as string)).resolves.toBeDefined();
+
+    await expect(runCli(["abort", "--receipt", second.receiptPath as string], { HOME: homeDir }, {
+      assertOffline: async () => undefined
+    })).resolves.toMatchObject({ aborted: true, cancelled: true, target: oldTarget });
+    await expect(lstat(candidate.target)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("resumes an interrupted unactivated cancellation and keeps its public result idempotent", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const receipt = await runCli([
+      "stage", "--bundle", candidate.target, "--bundle-digest", candidate.bundleDigest,
+      "--data-dir", config.dataDirectory, "--production-root", productionRoot
+    ], { HOME: homeDir });
+
+    await expect(runCli(["abort", "--receipt", receipt.receiptPath as string], { HOME: homeDir }, {
+      assertOffline: async () => undefined,
+      simulateAbortProcessDeathAfterStep: "staged-0-removed"
+    })).rejects.toMatchObject({ code: "simulated_abort_process_death" });
+    await expect(lstat(receipt.receiptPath as string)).resolves.toBeDefined();
+    await expect(lstat(receipt.stagedInstanceLauncherPath as string)).rejects.toMatchObject({ code: "ENOENT" });
+
+    await expect(runCli(["abort", "--receipt", receipt.receiptPath as string], { HOME: homeDir }, {
+      assertOffline: async () => undefined
+    })).resolves.toMatchObject({ aborted: true, cancelled: true, recovered: true, target: oldTarget });
+    await expect(runCli(["abort", "--receipt", receipt.receiptPath as string], { HOME: homeDir }))
+      .resolves.toMatchObject({ aborted: true, cancelled: true, recovered: true, target: oldTarget });
+  });
+
+  test("refuses unactivated cancellation for a running candidate, current bundle, or changed bundle identity", async () => {
+    const runningFixture = await fixture();
+    const runningCandidate = await secondBundle(runningFixture.productionRoot, runningFixture.target);
+    const runningReceipt = await stageProductionInstallation({
+      bundleDigest: runningCandidate.bundleDigest,
+      sourceBundlePath: runningCandidate.target,
+      dataDirectory: runningFixture.config.dataDirectory,
+      homeDir: runningFixture.homeDir,
+      productionRoot: runningFixture.productionRoot
+    });
+    const electron = processRecord({
+      argv: [join(runningCandidate.target, "masthead"), `--user-data-dir=${runningFixture.config.dataDirectory}`],
+      environ: { MASTHEAD_DATA_DIR: runningFixture.config.dataDirectory, MASTHEAD_DB_PATH: runningFixture.config.databasePath },
+      exe: join(runningCandidate.target, "masthead"),
+      pid: 7331,
+      starttime: "unactivated-candidate-live"
+    });
+    await expect(runCli(["abort", "--receipt", runningReceipt.receiptPath], { HOME: runningFixture.homeDir }, {
+      fetchHealth: async () => undefined,
+      ownershipProbe: async () => undefined,
+      portBindable: async () => true,
+      readProcesses: async () => [electron]
+    })).rejects.toThrow("empty production process set");
+    await expect(lstat(runningReceipt.receiptPath)).resolves.toBeDefined();
+
+    const currentFixture = await fixture();
+    const currentReceipt = await runCli([
+      "stage", "--bundle", currentFixture.target, "--bundle-digest", currentFixture.config.bundleDigest,
+      "--data-dir", currentFixture.config.dataDirectory, "--production-root", currentFixture.productionRoot
+    ], { HOME: currentFixture.homeDir });
+    await expect(runCli(["abort", "--receipt", currentReceipt.receiptPath as string], { HOME: currentFixture.homeDir }, {
+      assertOffline: async () => undefined
+    })).rejects.toThrow("current or finalized production bundle");
+    expect(await realpath(join(currentFixture.productionRoot, "current"))).toBe(currentFixture.target);
+
+    const changedFixture = await fixture();
+    const changedCandidate = await secondBundle(changedFixture.productionRoot, changedFixture.target);
+    const changedReceipt = await stageProductionInstallation({
+      bundleDigest: changedCandidate.bundleDigest,
+      sourceBundlePath: changedCandidate.target,
+      dataDirectory: changedFixture.config.dataDirectory,
+      homeDir: changedFixture.homeDir,
+      productionRoot: changedFixture.productionRoot
+    });
+    await writeFile(join(changedCandidate.target, "masthead"), "changed-after-stage", { mode: 0o755 });
+    await expect(runCli(["abort", "--receipt", changedReceipt.receiptPath], { HOME: changedFixture.homeDir }, {
+      assertOffline: async () => undefined
+    })).rejects.toThrow();
+    await expect(lstat(changedReceipt.receiptPath)).resolves.toBeDefined();
+    expect(await realpath(join(changedFixture.productionRoot, "current"))).toBe(changedFixture.target);
+  });
+
+  test("refuses unactivated cancellation when the prepared database identity no longer matches its receipt", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    await createDatabaseThroughVersion(config.databasePath, 37);
+    const receipt = await runCli([
+      "stage", "--bundle", candidate.target, "--bundle-digest", candidate.bundleDigest,
+      "--data-dir", config.dataDirectory, "--production-root", productionRoot
+    ], { HOME: homeDir });
+    await expect(runCli(["activate", "--receipt", receipt.receiptPath as string], { HOME: homeDir }, {
+      assertOffline: async () => undefined,
+      prepareMaintenance: (request: any) => prepareProductionTransition(request, {
+        simulateProcessDeathAfterPhase: "backup_copied"
+      }),
+      runDesktopDatabaseCommand: () => undefined
+    })).rejects.toMatchObject({ code: "simulated_production_transition_process_death" });
+    const database = new DatabaseSync(config.databasePath);
+    database.prepare("UPDATE app_settings SET setting_json = ? WHERE setting_key = 'database_identity'")
+      .run(JSON.stringify({ databaseId: "database:changed" }));
+    database.close();
+
+    await expect(runCli(["abort", "--receipt", receipt.receiptPath as string], { HOME: homeDir }, {
+      assertOffline: async () => undefined,
+      cancelMaintenance: (request: any) => cancelProductionTransition(request)
+    })).rejects.toThrow("transition_cancel_database_mismatch");
+    await expect(lstat(receipt.receiptPath as string)).resolves.toBeDefined();
+    await expect(lstat(candidate.target)).resolves.toBeDefined();
+    expect(await realpath(join(productionRoot, "current"))).toBe(oldTarget);
   });
 
   test("public abort restores an activated candidate that never produced healthy startup proof", async () => {

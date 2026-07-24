@@ -160,6 +160,7 @@ export type StagedProductionInstallationReceipt = {
   sourceSchemaVersion?: number;
   targetSchemaVersion?: number;
   transitionNonce?: string;
+  cancellationDatabaseRestored?: boolean;
   stagingNonce: string;
   sourceDigest: string;
   buildSha: string;
