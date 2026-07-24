@@ -417,6 +417,151 @@ describe("production lifecycle launcher", () => {
     expect(await realpath(join(productionRoot, "current"))).toBe(candidate.target);
   });
 
+  test("fails closed when a prepared staged receipt is retried with a different maintenance authority", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    await mkdir(config.dataDirectory, { recursive: true });
+    await writeFile(config.databasePath, "prepared database bytes");
+    const staged = await stageProductionInstallation({
+      bundleDigest: candidate.bundleDigest,
+      dataDirectory: config.dataDirectory,
+      databasePath: config.databasePath,
+      homeDir,
+      productionRoot,
+      sourceBundlePath: candidate.target
+    });
+    const authority = (nonce: string) => {
+      const request = {
+        databasePath: config.databasePath,
+        newBundle: {
+          bundleDigest: staged.sourceDigest,
+          gitSha: staged.buildSha,
+          target: staged.target,
+          version: staged.buildVersion
+        },
+        nonce,
+        oldBundle: {
+          bundleDigest: staged.rollbackBundle.bundleDigest,
+          gitSha: staged.rollbackBundle.buildSha,
+          target: staged.rollbackBundle.path,
+          version: staged.rollbackBundle.version
+        }
+      };
+      return {
+        request,
+        receipt: {
+          ...request,
+          databaseId: "database:prepared",
+          schemaVersion: 1,
+          sourceSchemaVersion: 37,
+          state: "ready_to_activate",
+          targetSchemaVersion: CURRENT_SCHEMA_VERSION
+        }
+      };
+    };
+    const originalAuthority = authority("31313131-3131-4131-8131-313131313131");
+    const substitutedAuthority = authority("32323232-3232-4232-8232-323232323232");
+
+    await expect(activateStagedProductionInstallation(staged.receiptPath, {
+      assertOffline: async () => undefined,
+      preparedMaintenanceAuthority: originalAuthority,
+      runDesktopDatabaseCommand: () => undefined,
+      simulateProcessDeathAfterStep: "database-prepared"
+    })).rejects.toMatchObject({ code: "simulated_activation_process_death" });
+    await expect(activateStagedProductionInstallation(staged.receiptPath, {
+      assertOffline: async () => undefined,
+      preparedMaintenanceAuthority: substitutedAuthority,
+      runDesktopDatabaseCommand: () => undefined
+    })).rejects.toThrow("already bound to a different maintenance authority");
+
+    expect(await realpath(join(productionRoot, "current"))).toBe(oldTarget);
+    expect(await loadStagedProductionInstallation(staged.receiptPath)).toMatchObject({
+      databaseId: "database:prepared",
+      transitionNonce: originalAuthority.request.nonce
+    });
+    await expect(lstat(join(productionRoot, ".masthead-install-activation.journal.json")))
+      .rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("restarts and finalizes an activated staged receipt with its externally prepared authority", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const databaseId = await createDatabaseThroughVersion(config.databasePath, 37);
+    const staged = await stageProductionInstallation({
+      bundleDigest: candidate.bundleDigest,
+      dataDirectory: config.dataDirectory,
+      databasePath: config.databasePath,
+      homeDir,
+      productionRoot,
+      sourceBundlePath: candidate.target
+    });
+    const request = {
+      databasePath: config.databasePath,
+      newBundle: candidate,
+      nonce: "33333333-3333-4333-8333-333333333333",
+      oldBundle: {
+        bundleDigest: config.bundleDigest,
+        gitSha: "a".repeat(40),
+        target: oldTarget,
+        version: "0.1.0"
+      }
+    };
+    const maintenanceReceipt = await prepareProductionTransition(request);
+    await activateStagedProductionInstallation(staged.receiptPath, {
+      assertOffline: async () => undefined,
+      preparedMaintenanceAuthority: { request, receipt: maintenanceReceipt },
+      runDesktopDatabaseCommand: () => undefined
+    });
+    await publishStartupManifest(staged);
+
+    const electron = processRecord({
+      argv: [join(candidate.target, "masthead"), `--user-data-dir=${config.dataDirectory}`],
+      environ: { MASTHEAD_DATA_DIR: config.dataDirectory, MASTHEAD_DB_PATH: config.databasePath },
+      exe: join(candidate.target, "masthead")
+    });
+    const daemon = processRecord({
+      argv: [
+        join(candidate.target, "resources", "daemon", "node"),
+        join(candidate.target, "resources", "daemon", "dist", "src", "daemon", "main.js")
+      ],
+      environ: { MASTHEAD_DATA_DIR: config.dataDirectory, MASTHEAD_DB_PATH: config.databasePath },
+      exe: join(candidate.target, "resources", "daemon", "node"),
+      pid: 43,
+      starttime: "daemon"
+    });
+    const health = {
+      buildSha: candidate.gitSha,
+      buildVersion: candidate.version,
+      data: { dataDirectory: config.dataDirectory, databaseId, databasePath: config.databasePath },
+      ok: true,
+      product: "masthead",
+      runtime: { port: config.port, writable: true },
+      schemaVersion: CURRENT_SCHEMA_VERSION
+    };
+    let completedNonce: string | undefined;
+    await expect(startProduction({
+      ...config,
+      bundleDigest: candidate.bundleDigest,
+      gitSha: candidate.gitSha,
+      target: candidate.target,
+      version: candidate.version
+    }, {
+      acquireLease: async () => ({ release: async () => undefined }),
+      completePreparedActivation: async (completedRequest: any) => {
+        completedNonce = completedRequest.nonce;
+        await completeProductionTransition(completedRequest);
+      },
+      currentTarget: async () => candidate.target,
+      fetchHealth: async () => health,
+      readProcesses: async () => [electron, daemon],
+      transitionGuard: async () => undefined
+    })).resolves.toMatchObject({ alreadyRunning: true, started: false });
+    expect(completedNonce).toBe(request.nonce);
+    await expect(finalizeStagedProductionInstallation(staged.receiptPath, {
+      verifyLiveProof: async () => undefined
+    })).resolves.toMatchObject({ finalized: true, receiptRemoved: true });
+  });
+
   test("bounds full-database reads when preparation resumes after a verified backup", async () => {
     const { config, productionRoot, target: oldTarget } = await fixture();
     const candidate = await secondBundle(productionRoot, oldTarget);
@@ -4012,8 +4157,241 @@ describe("production lifecycle launcher", () => {
     await expect(access(staleBundle)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  test("public install carries one prepared maintenance authority through default staged activation", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const maintenanceProbePath = join(config.dataDirectory, "second-maintenance-authority.json");
+    const candidateNodePath = join(candidate.target, "resources", "daemon", "node");
+    const candidateMaintenancePath = join(
+      candidate.target,
+      "resources",
+      "daemon",
+      "dist",
+      "src",
+      "daemon",
+      "productionTransitionMaintenance.js"
+    );
+    await writeFile(candidateNodePath, [
+      "#!/usr/bin/env bash",
+      `exec '${process.execPath}' "$@"`,
+      ""
+    ].join("\n"), { mode: 0o755 });
+    await writeFile(candidateMaintenancePath, [
+      'const fs = require("node:fs");',
+      "const request = JSON.parse(process.argv[process.argv.indexOf('--request') + 1]);",
+      `fs.writeFileSync(${JSON.stringify(maintenanceProbePath)}, JSON.stringify(request));`,
+      "const journal = JSON.parse(fs.readFileSync(`${request.databasePath}.production-transition.json`, 'utf8'));",
+      "if (journal.nonce !== request.nonce) { fs.writeSync(2, 'transition_receipt_mismatch\\n'); process.exitCode = 1; }",
+      "else { process.stdout.write(JSON.stringify(journal)); }",
+      ""
+    ].join("\n"));
+    const manifest = await writePackagedBundleManifest({
+      bundleRoot: candidate.target,
+      executablePath: join(candidate.target, "masthead"),
+      resourcesPath: join(candidate.target, "resources")
+    });
+    candidate.bundleDigest = manifest.bundleDigest;
+    await createDatabaseThroughVersion(config.databasePath, 37);
+    const launcherPath = join(homeDir, ".local", "bin", "masthead-production");
+    const desktopPath = join(homeDir, ".local", "share", "applications", "ai.animas.masthead.desktop");
+    await writeFile(launcherPath, `MASTHEAD_BUNDLE_DIGEST='${config.bundleDigest}'\n`, { mode: 0o755 });
+    await writeFile(desktopPath, "previous desktop entry\n");
+
+    const calls: string[] = [];
+    const preparedNonces: string[] = [];
+    const result = await transitionProduction({
+      bundleDigest: candidate.bundleDigest,
+      bundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      databasePath: config.databasePath,
+      homeDir,
+      port: config.port,
+      productionRoot
+    }, {
+      acquireLease: async () => ({ release: async () => calls.push("release") }),
+      assertOffline: async () => calls.push("offline"),
+      cleanupCandidate: async () => calls.push("cleanup-candidate"),
+      completeMaintenance: async (request: any) => {
+        calls.push(`complete:${request.nonce}`);
+        await completeProductionTransition(request);
+      },
+      prepareMaintenance: async (request: any) => {
+        calls.push(`prepare:${request.nonce}`);
+        preparedNonces.push(request.nonce);
+        return prepareProductionTransition(request);
+      },
+      restoreMaintenance: (request: any) => restoreProductionTransition(request),
+      runDesktopDatabaseCommand: () => undefined,
+      start: async (startConfig: any) => {
+        calls.push(`start:${startConfig.transitionNonce}`);
+        if (startConfig.target === candidate.target) {
+          const receiptName = (await readdir(productionRoot)).find((entry) => entry.endsWith(".receipt.json"));
+          if (!receiptName) throw new Error("missing staged receipt");
+          const receipt = await loadStagedProductionInstallation(join(productionRoot, receiptName));
+          expect(receipt.transitionNonce).toBe(startConfig.transitionNonce);
+          await publishStartupManifest(receipt);
+        }
+        return { started: true };
+      },
+      stop: async () => { calls.push("stop"); return { stopped: true }; },
+      verifyLiveProof: async () => calls.push("finalize-proof")
+    });
+
+    expect(result).toMatchObject({ activated: true, target: candidate.target });
+    expect(preparedNonces).toHaveLength(1);
+    await expect(lstat(maintenanceProbePath)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(calls).toEqual([
+      "stop",
+      `prepare:${preparedNonces[0]}`,
+      "offline",
+      `start:${preparedNonces[0]}`,
+      `complete:${preparedNonces[0]}`,
+      "finalize-proof",
+      "finalize-proof",
+      "release"
+    ]);
+  });
+
+  test("public install rollback preserves one authority and leaves its staged receipt abortable", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    await createDatabaseThroughVersion(config.databasePath, 37);
+    const launcherPath = join(homeDir, ".local", "bin", "masthead-production");
+    const desktopPath = join(homeDir, ".local", "share", "applications", "ai.animas.masthead.desktop");
+    const oldLauncher = `MASTHEAD_BUNDLE_DIGEST='${config.bundleDigest}'\n`;
+    const oldDesktop = "previous desktop entry\n";
+    await writeFile(launcherPath, oldLauncher, { mode: 0o755 });
+    await writeFile(desktopPath, oldDesktop);
+    const calls: string[] = [];
+    let transitionNonce: string | undefined;
+
+    await expect(transitionProduction({
+      bundleDigest: candidate.bundleDigest,
+      bundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      databasePath: config.databasePath,
+      homeDir,
+      port: config.port,
+      productionRoot
+    }, {
+      acquireLease: async () => ({ release: async () => calls.push("release") }),
+      assertOffline: async () => calls.push("offline"),
+      cleanupCandidate: async () => calls.push("cleanup-candidate"),
+      completeMaintenance: async (request: any) => {
+        calls.push(`complete:${request.nonce}`);
+        await completeProductionTransition(request);
+      },
+      prepareMaintenance: async (request: any) => {
+        transitionNonce = request.nonce;
+        calls.push(`prepare:${request.nonce}`);
+        return prepareProductionTransition(request);
+      },
+      restoreMaintenance: async (request: any) => {
+        calls.push(`restore:${request.nonce}`);
+        return restoreProductionTransition(request);
+      },
+      runDesktopDatabaseCommand: () => undefined,
+      start: async (startConfig: any) => {
+        if (startConfig.target === candidate.target) {
+          calls.push(`start-candidate:${startConfig.transitionNonce}`);
+          throw new Error("candidate health failed");
+        }
+        calls.push(`start-rollback:${startConfig.transitionNonce}`);
+        return { started: true };
+      },
+      stop: async () => { calls.push("stop"); return { stopped: true }; }
+    })).rejects.toThrow("candidate health failed; rollback restarted=true");
+
+    expect(await realpath(join(productionRoot, "current"))).toBe(oldTarget);
+    expect(await readFile(launcherPath, "utf8")).toBe(oldLauncher);
+    expect(await readFile(desktopPath, "utf8")).toBe(oldDesktop);
+    await expect(lstat(`${config.databasePath}.production-transition.json`))
+      .rejects.toMatchObject({ code: "ENOENT" });
+    await expect(lstat(join(productionRoot, ".masthead-install-activation.journal.json")))
+      .rejects.toMatchObject({ code: "ENOENT" });
+    const receiptName = (await readdir(productionRoot)).find((entry) => entry.endsWith(".receipt.json"));
+    if (!receiptName) throw new Error("missing rolled-back staged receipt");
+    const rolledBackReceiptPath = join(productionRoot, receiptName);
+    const rolledBackReceipt = await loadStagedProductionInstallation(rolledBackReceiptPath);
+    expect(rolledBackReceipt).not.toHaveProperty("activatedAt");
+    expect(rolledBackReceipt).toMatchObject({
+      target: candidate.target,
+      transitionNonce
+    });
+    expect(calls).toEqual([
+      "stop",
+      `prepare:${transitionNonce}`,
+      "offline",
+      `start-candidate:${transitionNonce}`,
+      "cleanup-candidate",
+      `restore:${transitionNonce}`,
+      `start-rollback:${transitionNonce}`,
+      `complete:${transitionNonce}`,
+      "release"
+    ]);
+    await expect(abortStagedProductionInstallation(rolledBackReceiptPath, {
+      assertOffline: async () => undefined
+    })).resolves.toMatchObject({ aborted: true, cancelled: true, databaseRestored: false });
+  });
+
+  test("public install rejects a mismatched prepared receipt before surface activation and restarts rollback", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    await mkdir(config.dataDirectory, { recursive: true });
+    await writeFile(config.databasePath, "database exists");
+    const launcherPath = join(homeDir, ".local", "bin", "masthead-production");
+    const desktopPath = join(homeDir, ".local", "share", "applications", "ai.animas.masthead.desktop");
+    const oldLauncher = `MASTHEAD_BUNDLE_DIGEST='${config.bundleDigest}'\n`;
+    await writeFile(launcherPath, oldLauncher, { mode: 0o755 });
+    await writeFile(desktopPath, "previous desktop entry\n");
+    let rollbackStarted = false;
+
+    await expect(transitionProduction({
+      bundleDigest: candidate.bundleDigest,
+      bundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      databasePath: config.databasePath,
+      homeDir,
+      port: config.port,
+      productionRoot
+    }, {
+      acquireLease: async () => ({ release: async () => undefined }),
+      assertOffline: async () => undefined,
+      cleanupCandidate: async () => undefined,
+      completeMaintenance: async () => undefined,
+      prepareMaintenance: async (request: any) => ({
+        ...request,
+        databaseId: "database:prepared",
+        nonce: "34343434-3434-4434-8434-343434343434",
+        schemaVersion: 1,
+        sourceSchemaVersion: 37,
+        state: "ready_to_activate",
+        targetSchemaVersion: CURRENT_SCHEMA_VERSION
+      }),
+      restoreMaintenance: async (request: any) => ({
+        ...request,
+        databaseId: "database:prepared",
+        sourceSchemaVersion: 37,
+        state: "restored"
+      }),
+      runDesktopDatabaseCommand: () => undefined,
+      start: async (startConfig: any) => {
+        rollbackStarted = startConfig.target === oldTarget;
+        return { started: true };
+      },
+      stop: async () => ({ stopped: true })
+    })).rejects.toThrow("Staged production maintenance receipt does not match the activation authority.; rollback restarted=true");
+
+    expect(rollbackStarted).toBe(true);
+    expect(await realpath(join(productionRoot, "current"))).toBe(oldTarget);
+    expect(await readFile(launcherPath, "utf8")).toBe(oldLauncher);
+    await expect(lstat(join(productionRoot, ".masthead-install-activation.journal.json")))
+      .rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   test("activates a staged desktop identity before refreshing the Linux desktop database", async () => {
     const { config, homeDir, productionRoot, target } = await fixture();
+    await createDatabaseThroughVersion(config.databasePath, 37);
     const launcherPath = join(homeDir, ".local", "bin", "masthead-production");
     const desktopPath = join(homeDir, ".local", "share", "applications", "ai.animas.masthead.desktop");
     await writeFile(launcherPath, `MASTHEAD_BUNDLE_DIGEST='${config.bundleDigest}'\n`, { mode: 0o755 });
@@ -4030,9 +4408,9 @@ describe("production lifecycle launcher", () => {
     }, {
       acquireLease: async () => ({ release: async () => undefined }),
       assertOffline: async () => undefined,
-      completeMaintenance: async () => undefined,
+      completeMaintenance: (request: any) => completeProductionTransition(request),
       currentTarget: async () => target,
-      prepareMaintenance: async () => ({ databaseId: "database:test", targetSchemaVersion: 1 }),
+      prepareMaintenance: (request: any) => prepareProductionTransition(request),
       readMaintenanceJournal: async () => undefined,
       runDesktopDatabaseCommand: (command: string) => {
         expect(readFileSync(desktopPath, "utf8")).toContain("StartupWMClass=masthead");

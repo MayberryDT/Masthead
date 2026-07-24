@@ -309,8 +309,12 @@ export async function transitionProduction(input, dependencyOverrides = {}) {
   const noLifecycleLease = async () => ({ release: async () => undefined });
   const dependencies = {
     acquireLease: () => acquireLifecycleLease(config.lifecycleLeasePath),
-    activateLaunchers: (staged) => staged?.receiptVersion === "masthead-production-stage-v1"
-      ? activateStagedProductionInstallationUnlocked(staged.receiptPath, { assertOffline: dependencyOverrides.assertOffline, runDesktopDatabaseCommand: dependencyOverrides.runDesktopDatabaseCommand })
+    activateLaunchers: (staged, preparedMaintenanceAuthority) => staged?.receiptVersion === "masthead-production-stage-v1"
+      ? activateStagedProductionInstallationUnlocked(staged.receiptPath, {
+        assertOffline: dependencyOverrides.assertOffline,
+        preparedMaintenanceAuthority,
+        runDesktopDatabaseCommand: dependencyOverrides.runDesktopDatabaseCommand
+      })
       : activateStagedLaunchers(staged, dependencyOverrides.runDesktopDatabaseCommand),
     cleanupCandidate: (candidate) => stopProduction(candidate, { acquireLease: noLifecycleLease }),
     completeMaintenance: (request) => runMaintenanceChild(config, "complete", request),
@@ -442,7 +446,10 @@ export async function transitionProduction(input, dependencyOverrides = {}) {
     let started;
     try {
       await dependencies.swapCurrent(productionRoot, target);
-      await dependencies.activateLaunchers(staged);
+      await dependencies.activateLaunchers(staged, {
+        request: maintenanceRequest,
+        receipt: maintenanceReceipt
+      });
       started = await dependencies.start({
         ...config,
         expectedDatabaseId: maintenanceReceipt.databaseId,
@@ -823,15 +830,27 @@ async function activateStagedProductionInstallationUnlocked(receiptPath, depende
     if (error && typeof error === "object" && error.code === "ENOENT") return false;
     throw error;
   });
+  if (!databaseExists && dependencyOverrides.preparedMaintenanceAuthority) {
+    throw new Error("Prepared production maintenance authority requires the receipt-bound database to exist.");
+  }
   if (databaseExists) {
-    const maintenanceRequest = stagedTransitionRequest(receipt);
-    const prepareMaintenance = dependencyOverrides.prepareMaintenance ?? ((request) => runMaintenanceChild(
-      stagedCandidateConfig(receipt),
-      "prepare",
-      request
-    ));
-    const maintenanceReceipt = await prepareMaintenance(maintenanceRequest);
+    let maintenanceRequest;
+    let maintenanceReceipt;
+    if (dependencyOverrides.preparedMaintenanceAuthority) {
+      maintenanceRequest = dependencyOverrides.preparedMaintenanceAuthority.request;
+      maintenanceReceipt = dependencyOverrides.preparedMaintenanceAuthority.receipt;
+      assertPreparedMaintenanceRequestMatchesStagedReceipt(maintenanceRequest, receipt);
+    } else {
+      maintenanceRequest = stagedTransitionRequest(receipt);
+      const prepareMaintenance = dependencyOverrides.prepareMaintenance ?? ((request) => runMaintenanceChild(
+        stagedCandidateConfig(receipt),
+        "prepare",
+        request
+      ));
+      maintenanceReceipt = await prepareMaintenance(maintenanceRequest);
+    }
     assertPreparedStagedMaintenance(maintenanceReceipt, maintenanceRequest);
+    assertStagedMaintenanceAuthorityBinding(receipt, maintenanceRequest, maintenanceReceipt);
     receipt.databaseId = maintenanceReceipt.databaseId;
     receipt.sourceSchemaVersion = maintenanceReceipt.sourceSchemaVersion;
     receipt.targetSchemaVersion = maintenanceReceipt.targetSchemaVersion;
@@ -905,7 +924,11 @@ async function activateStagedProductionInstallationUnlocked(receiptPath, depende
   };
 }
 
-function stagedTransitionRequest(receipt) {
+function productionTransitionAuthorityNonce(receipt) {
+  return receipt.transitionNonce ?? receipt.stagingNonce;
+}
+
+function stagedTransitionRequest(receipt, nonce = productionTransitionAuthorityNonce(receipt)) {
   return {
     databasePath: receipt.databasePath,
     newBundle: {
@@ -914,7 +937,7 @@ function stagedTransitionRequest(receipt) {
       target: receipt.target,
       version: receipt.buildVersion
     },
-    nonce: receipt.stagingNonce,
+    nonce,
     oldBundle: {
       bundleDigest: receipt.rollbackBundle.bundleDigest,
       gitSha: receipt.rollbackBundle.buildSha,
@@ -922,6 +945,29 @@ function stagedTransitionRequest(receipt) {
       version: receipt.rollbackBundle.version
     }
   };
+}
+
+function isProductionTransitionNonce(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(value || "");
+}
+
+function assertPreparedMaintenanceRequestMatchesStagedReceipt(request, receipt) {
+  const expected = stagedTransitionRequest(receipt, request?.nonce);
+  if (
+    !isProductionTransitionNonce(request?.nonce) ||
+    request.databasePath !== expected.databasePath ||
+    !sameBundleIdentity(request.oldBundle, expected.oldBundle) ||
+    !sameBundleIdentity(request.newBundle, expected.newBundle)
+  ) throw new Error("Prepared production maintenance request does not match the staged activation receipt.");
+}
+
+function assertStagedMaintenanceAuthorityBinding(stagedReceipt, request, maintenanceReceipt) {
+  if (stagedReceipt.transitionNonce !== undefined && (
+    stagedReceipt.transitionNonce !== request.nonce ||
+    stagedReceipt.databaseId !== maintenanceReceipt.databaseId ||
+    stagedReceipt.sourceSchemaVersion !== maintenanceReceipt.sourceSchemaVersion ||
+    stagedReceipt.targetSchemaVersion !== maintenanceReceipt.targetSchemaVersion
+  )) throw new Error("Staged production receipt is already bound to a different maintenance authority.");
 }
 
 function stagedCandidateConfig(receipt) {
@@ -1494,13 +1540,13 @@ async function bindUnactivatedTransitionReceipt(receipt) {
   const journal = await readTransitionJournal(receipt.databasePath);
   if (!journal) {
     if (receipt.databaseId && (
-      receipt.transitionNonce !== receipt.stagingNonce ||
+      !isProductionTransitionNonce(receipt.transitionNonce) ||
       !Number.isSafeInteger(receipt.sourceSchemaVersion) ||
       !Number.isSafeInteger(receipt.targetSchemaVersion)
     )) throw new Error("Cancelled production transition receipt identity is malformed.");
     return { kind: receipt.databaseId ? "completed" : "none" };
   }
-  if (journal.nonce === receipt.stagingNonce) {
+  if (journal.nonce === productionTransitionAuthorityNonce(receipt)) {
     if (!transitionJournalMatchesReceipt(journal, receipt)) {
       throw new Error("Production transition journal does not match the unactivated staged receipt.");
     }
@@ -1520,21 +1566,30 @@ async function bindUnactivatedTransitionReceipt(receipt) {
     return { kind: "owned" };
   }
 
-  const foreignReceiptPath = join(receipt.productionRoot, `.masthead-install-${journal.nonce}.receipt.json`);
-  const foreignReceipt = await loadStagedProductionInstallation(foreignReceiptPath).catch((error) => {
-    throw new Error("Production transition journal belongs to an unknown staged receipt.", { cause: error });
-  });
+  const foreignReceipt = await findStagedReceiptByTransitionNonce(receipt.productionRoot, journal.nonce);
+  if (!foreignReceipt) throw new Error("Production transition journal belongs to an unknown staged receipt.");
   if (foreignReceipt.activatedAt || !transitionJournalMatchesReceipt(journal, foreignReceipt)) {
     throw new Error("Production transition journal does not match its foreign staged receipt authority.");
   }
   const targetedStagePath = join(
     dirname(receipt.databasePath),
-    `.${basename(receipt.databasePath)}.recovery-stage-${receipt.stagingNonce}`
+    `.${basename(receipt.databasePath)}.recovery-stage-${productionTransitionAuthorityNonce(receipt)}`
   );
   if (journal.snapshot?.stagePath === targetedStagePath) {
     throw new Error("Another staged receipt currently owns this receipt's recovery stage; cancel that receipt first.");
   }
   return { kind: "foreign", protectedStagePath: journal.snapshot?.stagePath };
+}
+
+async function findStagedReceiptByTransitionNonce(productionRoot, nonce) {
+  const matches = [];
+  for (const entry of await readdir(productionRoot, { withFileTypes: true })) {
+    if (!entry.isFile() || !/^\.masthead-install-[0-9a-f-]{36}\.receipt\.json$/u.test(entry.name)) continue;
+    const candidate = await loadStagedProductionInstallation(join(productionRoot, entry.name));
+    if (productionTransitionAuthorityNonce(candidate) === nonce) matches.push(candidate);
+  }
+  if (matches.length > 1) throw new Error("Production transition journal matches multiple staged receipt authorities.");
+  return matches[0];
 }
 
 function assertCancelledStagedMaintenance(cancelled, receipt) {
@@ -2080,7 +2135,7 @@ function validateStagedReceiptPaths(receipt) {
     typeof receipt.databaseId !== "string" || !receipt.databaseId ||
     !Number.isSafeInteger(receipt.sourceSchemaVersion) || receipt.sourceSchemaVersion < 0 ||
     !Number.isSafeInteger(receipt.targetSchemaVersion) || receipt.targetSchemaVersion < receipt.sourceSchemaVersion ||
-    receipt.transitionNonce !== receipt.stagingNonce
+    !isProductionTransitionNonce(receipt.transitionNonce)
   )) throw new Error("Staged receipt database preparation identity is invalid.");
   if (resolve(receipt.instanceDir) !== receipt.instanceDir) throw new Error("Staged receipt instance directory is invalid.");
   if (
@@ -2325,7 +2380,7 @@ async function preparedStagedActivationForStart(config) {
     receipt.target !== config.target || receipt.sourceDigest !== config.bundleDigest ||
     receipt.buildSha !== config.gitSha || receipt.buildVersion !== config.version ||
     receipt.databasePath !== config.databasePath || receipt.dataDirectory !== config.dataDirectory ||
-    receipt.productionRoot !== config.productionRoot || receipt.transitionNonce !== receipt.stagingNonce
+    receipt.productionRoot !== config.productionRoot || !isProductionTransitionNonce(receipt.transitionNonce)
   ) throw new Error("Prepared staged activation does not match the pinned start identity.");
   return { receipt, request: stagedTransitionRequest(receipt) };
 }
@@ -2528,12 +2583,54 @@ function refreshDesktopDatabase(applicationDirectory, runCommand = spawnSync) {
 }
 
 async function restoreStagedLaunchers(staged) {
+  const installation = staged;
   if (staged?.activeInstanceLauncherPath && staged?.previousInstanceLauncher) {
     await restoreSnapshot(staged.activeInstanceLauncherPath, staged.previousInstanceLauncher);
   }
   if (staged?.stagedSurface) staged = staged.stagedSurface;
   await restoreSnapshot(staged.launcherPath, staged.previousLauncher);
   await restoreSnapshot(staged.desktopPath, staged.previousDesktop);
+  if (installation?.receiptVersion === "masthead-production-stage-v1") {
+    await demoteRolledBackStagedActivation(installation.receiptPath);
+  }
+}
+
+async function demoteRolledBackStagedActivation(receiptPath) {
+  const receipt = await loadStagedProductionInstallation(receiptPath);
+  const journalPath = productionActivationJournalPath(receipt.productionRoot);
+  let journal;
+  try {
+    journal = JSON.parse(await readFile(journalPath, "utf8"));
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "ENOENT" && !receipt.activatedAt) return;
+    throw error;
+  }
+  if (journal?.schemaVersion !== 2 || journal.phase !== "activation-committed" || !journal.receipt) {
+    throw new Error("Rolled-back production activation journal is not durably committed.");
+  }
+  const journalReceipt = hydrateStagedReceiptRecord(journal.receipt, journal.receiptPath);
+  const journalReceiptHash = createHash("sha256").update(JSON.stringify(journal.receipt)).digest("hex");
+  if (journalReceiptHash !== journal.receiptHash) {
+    throw new Error("Rolled-back production activation journal receipt hash mismatch.");
+  }
+  assertActivationJournalReceiptBinding(journal, journalReceipt);
+  if (
+    receipt.receiptPath !== journalReceipt.receiptPath || receipt.activatedAt !== journalReceipt.activatedAt ||
+    receipt.transitionNonce !== journalReceipt.transitionNonce || receipt.databaseId !== journalReceipt.databaseId ||
+    receipt.sourceSchemaVersion !== journalReceipt.sourceSchemaVersion ||
+    receipt.targetSchemaVersion !== journalReceipt.targetSchemaVersion
+  ) throw new Error("Rolled-back production staged receipt changed from its committed activation authority.");
+  if (await realpath(receipt.currentPath) !== receipt.previousCurrentTarget) {
+    throw new Error("Rolled-back production current target does not match the staged receipt rollback target.");
+  }
+  await Promise.all([
+    assertSnapshotUnchanged(receipt.activeInstanceLauncherPath, receipt.previousInstanceLauncher),
+    assertSnapshotUnchanged(receipt.stagedSurface.launcherPath, receipt.previousLauncher),
+    assertSnapshotUnchanged(receipt.stagedSurface.desktopPath, receipt.previousDesktop)
+  ]);
+  delete receipt.activatedAt;
+  await persistStagedReceipt(receipt);
+  await rm(journalPath);
 }
 
 async function discardStagedLaunchers(staged) {
@@ -4013,7 +4110,7 @@ async function cleanupCancelledDatabaseArtifacts(receipt, protectedStagePath) {
     )) throw new Error("Production cancellation database identity does not match the receipt-bound source database.");
     const stagePath = join(
       dataDirectory,
-      `.${basename(databasePath)}.recovery-stage-${receipt.stagingNonce}`
+      `.${basename(databasePath)}.recovery-stage-${productionTransitionAuthorityNonce(receipt)}`
     );
     if (stagePath !== protectedStagePath && await pathExists(stagePath)) {
       const info = await lstat(stagePath);
@@ -4090,7 +4187,7 @@ async function assertCancelledProductionHygiene(receipt, protectedStagePath, pre
   }
   const databaseStagePath = join(
     receipt.dataDirectory,
-    `.${basename(receipt.databasePath)}.recovery-stage-${receipt.stagingNonce}`
+    `.${basename(receipt.databasePath)}.recovery-stage-${productionTransitionAuthorityNonce(receipt)}`
   );
   if (databaseStagePath !== protectedStagePath && await pathExists(databaseStagePath)) {
     throw new Error(`Production cancellation retained its receipt-owned database stage: ${databaseStagePath}`);
