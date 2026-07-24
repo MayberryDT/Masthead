@@ -356,7 +356,15 @@ describe("production lifecycle launcher", () => {
       }
     });
 
-    expect(started).toMatchObject({ pid: 90, started: true });
+    expect(started).toMatchObject({
+      pid: 90,
+      started: true,
+      maintenanceCompletion: {
+        completed: true,
+        owner: "staged_start",
+        request: { nonce: receipt.stagingNonce }
+      }
+    });
     expect(daemonMigrationStarted).toBe(false);
     expect(activated).toMatchObject({
       databaseId,
@@ -539,7 +547,7 @@ describe("production lifecycle launcher", () => {
       schemaVersion: CURRENT_SCHEMA_VERSION
     };
     let completedNonce: string | undefined;
-    await expect(startProduction({
+    const started = await startProduction({
       ...config,
       bundleDigest: candidate.bundleDigest,
       gitSha: candidate.gitSha,
@@ -555,7 +563,16 @@ describe("production lifecycle launcher", () => {
       fetchHealth: async () => health,
       readProcesses: async () => [electron, daemon],
       transitionGuard: async () => undefined
-    })).resolves.toMatchObject({ alreadyRunning: true, started: false });
+    });
+    expect(started).toMatchObject({
+      alreadyRunning: true,
+      started: false,
+      maintenanceCompletion: {
+        completed: true,
+        owner: "staged_start",
+        request: { nonce: request.nonce }
+      }
+    });
     expect(completedNonce).toBe(request.nonce);
     await expect(finalizeStagedProductionInstallation(staged.receiptPath, {
       verifyLiveProof: async () => undefined
@@ -4250,6 +4267,161 @@ describe("production lifecycle launcher", () => {
       "finalize-proof",
       "release"
     ]);
+  });
+
+  test("public install completes its prepared maintenance authority exactly once during staged start", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const databaseId = await createDatabaseThroughVersion(config.databasePath, 37);
+    const launcherPath = join(homeDir, ".local", "bin", "masthead-production");
+    const desktopPath = join(homeDir, ".local", "share", "applications", "ai.animas.masthead.desktop");
+    await writeFile(launcherPath, `MASTHEAD_BUNDLE_DIGEST='${config.bundleDigest}'\n`, { mode: 0o755 });
+    await writeFile(desktopPath, "previous desktop entry\n");
+    const electron = processRecord({
+      argv: [join(candidate.target, "masthead"), `--user-data-dir=${config.dataDirectory}`],
+      environ: { MASTHEAD_DATA_DIR: config.dataDirectory, MASTHEAD_DB_PATH: config.databasePath },
+      exe: join(candidate.target, "masthead")
+    });
+    const daemon = processRecord({
+      argv: [
+        join(candidate.target, "resources", "daemon", "node"),
+        join(candidate.target, "resources", "daemon", "dist", "src", "daemon", "main.js")
+      ],
+      environ: { MASTHEAD_DATA_DIR: config.dataDirectory, MASTHEAD_DB_PATH: config.databasePath },
+      exe: join(candidate.target, "resources", "daemon", "node"),
+      pid: 43,
+      starttime: "daemon"
+    });
+    const health = {
+      buildSha: candidate.gitSha,
+      buildVersion: candidate.version,
+      data: { dataDirectory: config.dataDirectory, databaseId, databasePath: config.databasePath },
+      ok: true,
+      product: "masthead",
+      runtime: { port: config.port, writable: true },
+      schemaVersion: CURRENT_SCHEMA_VERSION
+    };
+    const calls: string[] = [];
+    let startCompletionCalls = 0;
+    let outerCompletionCalls = 0;
+
+    const result = await transitionProduction({
+      bundleDigest: candidate.bundleDigest,
+      bundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      databasePath: config.databasePath,
+      homeDir,
+      port: config.port,
+      productionRoot
+    }, {
+      acquireLease: async () => ({ release: async () => calls.push("release") }),
+      assertOffline: async () => calls.push("offline"),
+      cleanupCandidate: async () => calls.push("cleanup-candidate"),
+      completeMaintenance: async (request: any) => {
+        outerCompletionCalls += 1;
+        calls.push(`outer-complete:${request.nonce}`);
+        try {
+          await completeProductionTransition(request);
+        } catch (error) {
+          throw new Error(`Production maintenance complete failed (code=1, signal=none): ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+        }
+      },
+      prepareMaintenance: async (request: any) => {
+        calls.push(`prepare:${request.nonce}`);
+        return prepareProductionTransition(request);
+      },
+      restoreMaintenance: (request: any) => restoreProductionTransition(request),
+      runDesktopDatabaseCommand: () => undefined,
+      start: async (startConfig: any) => {
+        const receiptName = (await readdir(productionRoot)).find((entry) => entry.endsWith(".receipt.json"));
+        if (!receiptName) throw new Error("missing staged receipt");
+        await publishStartupManifest(join(productionRoot, receiptName));
+        return startProduction(startConfig, {
+          acquireLease: async () => ({ release: async () => undefined }),
+          completePreparedActivation: async (request: any) => {
+            startCompletionCalls += 1;
+            calls.push(`start-complete:${request.nonce}`);
+            await completeProductionTransition(request);
+          },
+          currentTarget: async () => candidate.target,
+          fetchHealth: async () => health,
+          readProcesses: async () => [electron, daemon],
+          transitionGuard: async () => undefined
+        });
+      },
+      stop: async () => { calls.push("stop"); return { stopped: true }; },
+      verifyLiveProof: async () => calls.push("finalize-proof")
+    });
+
+    expect(result).toMatchObject({ activated: true, target: candidate.target });
+    expect(startCompletionCalls).toBe(1);
+    expect(outerCompletionCalls).toBe(0);
+    expect(calls.filter((call) => call.includes("complete:"))).toHaveLength(1);
+  });
+
+  test("public install does not restore an already-completed transition when start completion proof mismatches", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    await createDatabaseThroughVersion(config.databasePath, 37);
+    const launcherPath = join(homeDir, ".local", "bin", "masthead-production");
+    const desktopPath = join(homeDir, ".local", "share", "applications", "ai.animas.masthead.desktop");
+    await writeFile(launcherPath, `MASTHEAD_BUNDLE_DIGEST='${config.bundleDigest}'\n`, { mode: 0o755 });
+    await writeFile(desktopPath, "previous desktop entry\n");
+    let preparedRequest: any;
+    let preparedReceipt: any;
+    let fallbackCompleted = false;
+    let restored = false;
+    const calls: string[] = [];
+
+    await expect(transitionProduction({
+      bundleDigest: candidate.bundleDigest,
+      bundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      databasePath: config.databasePath,
+      homeDir,
+      port: config.port,
+      productionRoot
+    }, {
+      acquireLease: async () => ({ release: async () => calls.push("release") }),
+      assertOffline: async () => undefined,
+      cleanupCandidate: async () => calls.push("cleanup-candidate"),
+      completeMaintenance: async () => { fallbackCompleted = true; },
+      prepareMaintenance: async (request: any) => {
+        preparedRequest = request;
+        preparedReceipt = await prepareProductionTransition(request);
+        return preparedReceipt;
+      },
+      restoreMaintenance: async () => { restored = true; throw new Error("must not restore completed transition"); },
+      runDesktopDatabaseCommand: () => undefined,
+      start: async () => {
+        await completeProductionTransition(preparedRequest);
+        return {
+          started: true,
+          maintenanceCompletion: {
+            schemaVersion: 1,
+            owner: "staged_start",
+            completed: true,
+            request: {
+              ...preparedRequest,
+              nonce: "35353535-3535-4535-8535-353535353535"
+            },
+            databaseId: preparedReceipt.databaseId,
+            sourceSchemaVersion: preparedReceipt.sourceSchemaVersion,
+            targetSchemaVersion: preparedReceipt.targetSchemaVersion
+          }
+        };
+      },
+      stop: async () => ({ stopped: true })
+    })).rejects.toThrow(
+      "Started production maintenance completion does not match the prepared transition authority.; rollback skipped; maintenance completion outcome unproven"
+    );
+
+    expect(calls).toEqual(["cleanup-candidate", "release"]);
+    expect(fallbackCompleted).toBe(false);
+    expect(restored).toBe(false);
+    expect(await realpath(join(productionRoot, "current"))).toBe(candidate.target);
+    await expect(lstat(`${config.databasePath}.production-transition.json`))
+      .rejects.toMatchObject({ code: "ENOENT" });
   });
 
   test("public install rollback preserves one authority and leaves its staged receipt abortable", async () => {

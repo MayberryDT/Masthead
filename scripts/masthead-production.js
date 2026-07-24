@@ -444,6 +444,7 @@ export async function transitionProduction(input, dependencyOverrides = {}) {
       throw new Error(`${error instanceof Error ? error.message : String(error)}; pre-activation restart=${restarted}`, { cause: error });
     }
     let started;
+    let maintenanceCompletionOutcomeUnproven = false;
     try {
       await dependencies.swapCurrent(productionRoot, target);
       await dependencies.activateLaunchers(staged, {
@@ -456,7 +457,15 @@ export async function transitionProduction(input, dependencyOverrides = {}) {
         expectedSchemaVersion: maintenanceReceipt.targetSchemaVersion,
         transitionNonce: maintenanceRequest.nonce
       });
-      await dependencies.completeMaintenance(maintenanceRequest);
+      if (started?.maintenanceCompletion) {
+        maintenanceCompletionOutcomeUnproven = true;
+        assertStartedMaintenanceCompletion(started.maintenanceCompletion, maintenanceRequest, maintenanceReceipt);
+        maintenanceCompletionOutcomeUnproven = false;
+      } else {
+        maintenanceCompletionOutcomeUnproven = true;
+        await dependencies.completeMaintenance(maintenanceRequest);
+        maintenanceCompletionOutcomeUnproven = false;
+      }
     } catch (error) {
       if (error?.code === "maintenance_child_exit_unproven") {
         throw new Error(`${error.message}; rollback skipped`, { cause: error });
@@ -468,6 +477,9 @@ export async function transitionProduction(input, dependencyOverrides = {}) {
           `${error instanceof Error ? error.message : String(error)}; rollback skipped; candidate cleanup error=${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
           { cause: error }
         );
+      }
+      if (maintenanceCompletionOutcomeUnproven) {
+        throw new Error(`${error instanceof Error ? error.message : String(error)}; rollback skipped; maintenance completion outcome unproven`, { cause: error });
       }
       let restarted = false;
       try {
@@ -968,6 +980,30 @@ function assertStagedMaintenanceAuthorityBinding(stagedReceipt, request, mainten
     stagedReceipt.sourceSchemaVersion !== maintenanceReceipt.sourceSchemaVersion ||
     stagedReceipt.targetSchemaVersion !== maintenanceReceipt.targetSchemaVersion
   )) throw new Error("Staged production receipt is already bound to a different maintenance authority.");
+}
+
+function completedStagedMaintenanceAuthority(stagedActivation) {
+  return {
+    schemaVersion: 1,
+    owner: "staged_start",
+    completed: true,
+    request: stagedActivation.request,
+    databaseId: stagedActivation.receipt.databaseId,
+    sourceSchemaVersion: stagedActivation.receipt.sourceSchemaVersion,
+    targetSchemaVersion: stagedActivation.receipt.targetSchemaVersion
+  };
+}
+
+function assertStartedMaintenanceCompletion(completion, request, maintenanceReceipt) {
+  if (
+    completion?.schemaVersion !== 1 || completion.owner !== "staged_start" || completion.completed !== true ||
+    completion.request?.databasePath !== request.databasePath || completion.request.nonce !== request.nonce ||
+    !sameBundleIdentity(completion.request?.oldBundle, request.oldBundle) ||
+    !sameBundleIdentity(completion.request?.newBundle, request.newBundle) ||
+    completion.databaseId !== maintenanceReceipt.databaseId ||
+    completion.sourceSchemaVersion !== maintenanceReceipt.sourceSchemaVersion ||
+    completion.targetSchemaVersion !== maintenanceReceipt.targetSchemaVersion
+  ) throw new Error("Started production maintenance completion does not match the prepared transition authority.");
 }
 
 function stagedCandidateConfig(receipt) {
@@ -2308,14 +2344,21 @@ export async function startProduction(configInput, dependencyOverrides = {}, env
     if (pinnedProcesses.length > 0) {
       assertPinnedTopology(pinnedProcesses, config.target);
       assertMatchingHealth(health, config);
+      let maintenanceCompletion;
       if (stagedActivation && pending) {
         await dependencies.completePreparedActivation(stagedActivation.request);
+        maintenanceCompletion = completedStagedMaintenanceAuthority(stagedActivation);
       }
       if (interruptedStart) {
         await dependencies.completeInterruptedStart(interruptedStart);
         await dependencies.cleanupInterruptedStart(interruptedStart);
       }
-      return { alreadyRunning: true, started: false, pids: pinnedProcesses.map((record) => record.pid).sort((a, b) => a - b) };
+      return {
+        alreadyRunning: true,
+        started: false,
+        pids: pinnedProcesses.map((record) => record.pid).sort((a, b) => a - b),
+        ...(maintenanceCompletion ? { maintenanceCompletion } : {})
+      };
     }
     if (health) throw new Error(`Refusing to start because port ${config.port} serves a process that is not the pinned production target.`);
     if (!(await dependencies.portBindable())) throw new Error(`Refusing to start because port ${config.port} is occupied by an unrelated listener.`);
@@ -2342,14 +2385,21 @@ export async function startProduction(configInput, dependencyOverrides = {}, env
       const startedHealth = await dependencies.waitForHealth();
       assertMatchingHealth(startedHealth, config);
       assertPinnedTopology(await classifiedProcesses(config, dependencies), config.target);
+      let maintenanceCompletion;
       if (stagedActivation && pending) {
         await dependencies.completePreparedActivation(stagedActivation.request);
+        maintenanceCompletion = completedStagedMaintenanceAuthority(stagedActivation);
       }
       if (interruptedStart) {
         await dependencies.completeInterruptedStart(interruptedStart);
         await dependencies.cleanupInterruptedStart(interruptedStart);
       }
-      return { health: startedHealth, pid, started: true };
+      return {
+        health: startedHealth,
+        pid,
+        started: true,
+        ...(maintenanceCompletion ? { maintenanceCompletion } : {})
+      };
     } catch (error) {
       const cleanup = dependencies.cleanupSpawned
         ? await dependencies.cleanupSpawned(captured, dependencies)
