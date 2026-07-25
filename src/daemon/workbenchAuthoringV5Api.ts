@@ -81,6 +81,7 @@ export function routeWorkbenchAuthoringV5Request(
           creationToken,
           currentIdentity: context.identity,
           expectedIdentity: expectedIdentityFromBody(body),
+          reEnrich: body.reEnrich === true,
           sessionIds: stringArray(body.sessionIds, "sessionIds")
         });
       if (created.preparation.status === "preparing") {
@@ -96,6 +97,7 @@ export function routeWorkbenchAuthoringV5Request(
             creationToken,
             currentIdentity: context.identity,
             expectedIdentity: expectedIdentityFromBody(body),
+            reEnrich: body.reEnrich === true,
             sessionIds: stringArray(body.sessionIds, "sessionIds")
           });
         }

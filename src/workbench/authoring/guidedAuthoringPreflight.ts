@@ -60,13 +60,16 @@ export function evaluateWorkbenchAuthoringV5Eligibility(
 
 export function workbenchAuthoringV5ReadinessReason(
   db: MastheadDatabase,
-  sessionId: string
+  sessionId: string,
+  options: { reEnrich?: boolean } = {}
 ): WorkbenchAuthoringV5SelectionDto["excludedSessions"][number]["reason"] | undefined {
   const exists = db.prepare("SELECT 1 AS present FROM sessions WHERE session_id = ?").get(sessionId);
   if (!exists) return "session_not_found";
   const state = readWorkbenchSessionState(db, sessionId);
-  if (state && state.publicationStatus !== "publish_path") return "not_on_publish_path";
-  if (!state || !workbenchStateIsCompileReady(state)) return "not_compile_ready";
+  const eligiblePublicationStatus = state?.publicationStatus === "publish_path" ||
+    (options.reEnrich === true && state?.publicationStatus === "published");
+  if (state && !eligiblePublicationStatus) return "not_on_publish_path";
+  if (!state || !workbenchStateIsCompileReady(state, options)) return "not_compile_ready";
   return undefined;
 }
 
@@ -77,9 +80,10 @@ export function isWorkbenchAuthoringV5CompileReady(
   return workbenchStateIsCompileReady(state) && evidenceCatalog.hasUsableAuthoringEvidence(db, state.sessionId);
 }
 
-function workbenchStateIsCompileReady(state: WorkbenchSessionStateRecord): boolean {
+function workbenchStateIsCompileReady(state: WorkbenchSessionStateRecord, options: { reEnrich?: boolean } = {}): boolean {
   const transcriptReady = state.transcriptStatus === "available" || state.transcriptStatus === "imported";
-  return state.publicationStatus === "publish_path" && transcriptReady && state.qualityStatus === "passed";
+  return (state.publicationStatus === "publish_path" || (options.reEnrich === true && state.publicationStatus === "published")) &&
+    transcriptReady && state.qualityStatus === "passed";
 }
 
 export function assertGuidedSelectionCompileReady(

@@ -26,6 +26,7 @@ import {
 import {
   COMPACTION_BANNER_FIXTURE,
   CRON_BOILERPLATE_FIXTURE,
+  S7_FALSE_GREEN_FIXTURES,
   UNSUPPORTED_COMPLETION_THRASH_FIXTURE
 } from "../__fixtures__/v5QualityFailures.ts";
 
@@ -59,6 +60,50 @@ afterEach(async () => {
 });
 
 describe("workbench-authoring-v5 loop", () => {
+  test("rejects S7 false-green metadata and filler dossiers while publishing a useful skill-shaped dossier", async () => {
+    const db = await testDatabase();
+    const sessionIds = Array.from({ length: 4 }, (_, index) => `session:v5:s7-quality:${index + 1}`);
+    for (const sessionId of sessionIds) seedCompileReadySession(db, sessionId);
+    const created = createWorkbenchAuthoringV5Request(db, {
+      actorId: "agent:test", command, currentIdentity: identity, expectedIdentity: identity, sessionIds
+    });
+    const started = startWorkbenchAuthoringV5Pack(db, {
+      command, currentIdentity: identity, expectedIdentity: identity, requestId: created.request.requestId
+    });
+    if (!("pack" in started)) throw new Error("expected_active_pack");
+    await inspectWholePack(db, started.pack.packId);
+    const authored = authorDraft(buildWorkbenchAuthoringV5Scaffold(db, { command, packId: started.pack.packId }).draft);
+    for (const [index, fixture] of [
+      S7_FALSE_GREEN_FIXTURES.environmentContext,
+      S7_FALSE_GREEN_FIXTURES.agentsContext,
+      S7_FALSE_GREEN_FIXTURES.conversationalFiller
+    ].entries()) {
+      const fields = authored.sessions[index]!.fields;
+      fields.title = fixture.title;
+      fields.description = fixture.description;
+      fields.purpose = fixture.purpose;
+      fields.keywords = [...fixture.keywords];
+    }
+    const saved = saveWorkbenchAuthoringV5Draft(db, {
+      command, currentIdentity: identity, draft: authored, expectedIdentity: identity, packId: started.pack.packId
+    });
+    expect(saved.outcomes.map(({ disposition }) => disposition)).toEqual(["hard_reject", "hard_reject", "hard_reject", "publishable"]);
+    expect(saved.outcomes[0]!.findings.map(({ code }) => code)).toContain("context_or_metadata_title");
+    expect(saved.outcomes[1]!.findings.map(({ code }) => code)).toContain("templated_request_echo");
+    expect(saved.outcomes[2]!.findings.map(({ code }) => code)).toContain("conversational_filler_title");
+    const finished = finishWorkbenchAuthoringV5Pack(db, {
+      command, currentIdentity: identity, expectedIdentity: identity, packId: started.pack.packId
+    });
+    expect(finished.receipt.counts).toMatchObject({ attempted: 4, published: 1, rejected: 3 });
+    expect(getLogbookArtifactDetail(db, finished.receipt.publishedArtifacts[0]!.artifactId)?.capsule.title).toContain("OAuth callback fix");
+    const reEnrich = createWorkbenchAuthoringV5Request(db, {
+      actorId: "agent:test", command, currentIdentity: identity, expectedIdentity: identity,
+      reEnrich: true, sessionIds: [sessionIds[3]!]
+    });
+    expect(reEnrich.selection).toMatchObject({ eligibleSessionCount: 1, excludedSessionCount: 0 });
+    db.close();
+  });
+
   test.each([1, 2, 3, 4])("accepts a %i-session final pack", async (sessionCount) => {
     const db = await testDatabase();
     const sessionIds = Array.from({ length: sessionCount }, (_, index) => `session:v5:small:${index + 1}`);

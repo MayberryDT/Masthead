@@ -18,3 +18,25 @@ export const COMPACTION_BANNER_FIXTURE =
 
 export const CRON_BOILERPLATE_FIXTURE =
   "The scheduled cron run completed and queued the next authoring batch.";
+
+/** Exact production-shaped outputs that must be rejected at the V5 save seam. */
+export const S7_FALSE_GREEN_FIXTURES = {
+  agentsContext: {
+    description: "Worked on the request to AGENTS.md instructions for /home/tyler ## Skills A skill is a set of local instructions.",
+    keywords: ["home", "tyler", "skills"],
+    purpose: "Worked on the request to AGENTS.md instructions for /home/tyler ## Skills A skill is a set of local instructions.",
+    title: "AGENTS.md instructions for /home/tyler ## Skills A skill is a set of local instructions"
+  },
+  conversationalFiller: {
+    description: "Worked on the request to This is pretty good, but I think we can make it better.",
+    keywords: ["pretty", "good", "think"],
+    purpose: "Worked on the request to This is pretty good, but I think we can make it better.",
+    title: "This is pretty good, but I think we can make it better"
+  },
+  environmentContext: {
+    description: "Worked on the request to /home/tyler bash 2026-04-17 Asia/Tokyo.",
+    keywords: ["shell investigation", "update plan", "write stdin", "home", "tyler", "bash", "asia"],
+    purpose: "Worked on the request to /home/tyler bash 2026-04-17 Asia/Tokyo.",
+    title: "Home/tyler bash 2026-04-17 Asia/Tokyo"
+  }
+} as const;

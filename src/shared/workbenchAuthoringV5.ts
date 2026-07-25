@@ -26,10 +26,14 @@ export type WorkbenchAuthoringV5PackStatus = "pending" | "available" | "active" 
 export type WorkbenchAuthoringV5Disposition = "publishable" | "soft_flag" | "hard_reject";
 export const WORKBENCH_AUTHORING_V5_HARD_REJECT_CODES = [
   "empty_or_generic_title",
+  "context_or_metadata_title",
+  "conversational_filler_title",
   "empty_or_generic_description",
+  "templated_request_echo",
   "protocol_or_compaction_boilerplate",
   "empty_keywords",
   "insufficient_keywords",
+  "metadata_or_tool_keywords",
   "purpose_not_user_ask",
   "missing_core_field_grounding",
   "unknown_canonical_evidence_ref"

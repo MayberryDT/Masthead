@@ -43,6 +43,18 @@ export function classifyWorkbenchAuthoringV5Session(
       message: "Title must name the session's specific user work."
     });
   }
+  if (isContextOrMetadataTitle(session.fields.title)) {
+    findings.push({
+      code: "context_or_metadata_title",
+      message: "Title must name the substantive work, not a path, timestamp, timezone, or session context."
+    });
+  }
+  if (isConversationalFillerTitle(session.fields.title)) {
+    findings.push({
+      code: "conversational_filler_title",
+      message: "Title must name the substantive work rather than conversational filler."
+    });
+  }
   if (isEmptyOrGenericDescription(session.fields.description)) {
     findings.push({
       code: "empty_or_generic_description",
@@ -56,6 +68,12 @@ export function classifyWorkbenchAuthoringV5Session(
       message: "Summary and purpose must describe the user's work, not authoring protocol, compaction, or pack mechanics."
     });
   }
+  if ([session.fields.description, session.fields.purpose].some(isTemplatedRequestEcho)) {
+    findings.push({
+      code: "templated_request_echo",
+      message: "Description and purpose must synthesize the substantive request and outcome, not echo a request template."
+    });
+  }
   const keywordCount = new Set(session.fields.keywords.map((keyword) => keyword.trim().toLowerCase()).filter(Boolean)).size;
   if (keywordCount === 0) {
     findings.push({
@@ -66,6 +84,12 @@ export function classifyWorkbenchAuthoringV5Session(
     findings.push({
       code: "insufficient_keywords",
       message: "At least three distinct search keywords are required."
+    });
+  }
+  if (hasMetadataOrToolDominatedKeywords(session.fields.keywords, session.fields.title)) {
+    findings.push({
+      code: "metadata_or_tool_keywords",
+      message: "Keywords must describe the substantive work rather than paths, timestamps, tool operations, or title filler."
     });
   }
   if (purposeClearlyMissesUserAsk(session)) {
@@ -166,6 +190,44 @@ function isEmptyOrGenericTitle(value: string, sessionId: string): boolean {
   const normalized = value.replace(/\s+/g, " ").trim().toLowerCase().replace(/[.!?]+$/g, "");
   return !/[a-z0-9]/i.test(normalized) || normalized === sessionId.toLowerCase() || GENERIC_TITLES.has(normalized) ||
     /^(?:codex|claude|cursor|masthead)?\s*(?:work\s*)?session\s*\d*$/i.test(normalized);
+}
+
+function isContextOrMetadataTitle(value: string): boolean {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  const tokens = normalized.toLowerCase().match(/[a-z0-9]+/g) ?? [];
+  const metadataTokens = tokens.filter((token) => (
+    ["home", "asia", "tokyo", "utc", "timezone"].includes(token) ||
+    /^\d{4}$/.test(token) || /^\d{1,2}$/.test(token)
+  ));
+  return /(?:^|\s)[/~]|\b\w+\/\w+\b/.test(normalized) ||
+    /\b\d{4}-\d{2}-\d{2}\b/.test(normalized) ||
+    /\b(?:utc|gmt|asia\/[a-z_]+)\b/i.test(normalized) ||
+    (tokens.length > 0 && metadataTokens.length / tokens.length >= 0.5);
+}
+
+function isConversationalFillerTitle(value: string): boolean {
+  return /^(?:this is )?(?:pretty |really )?(?:good|nice)(?:,? but (?:i )?(?:think|feel) we can make (?:it )?better)?[.!?]*$/i.test(
+    value.replace(/\s+/g, " ").trim()
+  );
+}
+
+function isTemplatedRequestEcho(value: string): boolean {
+  return /^(?:worked on|complete) (?:the )?(?:user'?s )?request to\b/i.test(value.replace(/\s+/g, " ").trim());
+}
+
+function hasMetadataOrToolDominatedKeywords(keywords: string[], title: string): boolean {
+  const titleTokens = new Set(title.toLowerCase().match(/[a-z0-9]+/g) ?? []);
+  const titleFillerTokens = new Set(["better", "good", "nice", "pretty", "really", "think", "this"]);
+  const metadataTitle = isContextOrMetadataTitle(title) || /\bagents\.md\b|\bskills?\b/i.test(title);
+  const noise = keywords.filter((keyword) => {
+    const normalized = keyword.trim().toLowerCase();
+    const tokens = normalized.match(/[a-z0-9]+/g) ?? [];
+    return /(?:^|\s)[/~]|\b\d{4}-\d{2}-\d{2}\b|\b(?:utc|gmt|asia\/|tokyo)\b/.test(normalized) ||
+      /^(?:home|asia|shell investigation|update plan|write stdin)$/i.test(normalized) ||
+      (metadataTitle && tokens.length > 0 && tokens.every((token) => titleTokens.has(token))) ||
+      (tokens.length > 0 && tokens.every((token) => titleTokens.has(token) && titleFillerTokens.has(token)));
+  });
+  return keywords.length > 0 && noise.length / keywords.length >= 0.5;
 }
 
 function isEmptyOrGenericDescription(value: string): boolean {

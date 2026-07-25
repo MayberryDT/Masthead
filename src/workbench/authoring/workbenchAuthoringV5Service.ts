@@ -96,6 +96,7 @@ export function createWorkbenchAuthoringV5Request(
     actorId: string;
     command: string;
     creationToken: string;
+    reEnrich?: boolean;
     sessionIds: string[];
   }
 ) {
@@ -113,7 +114,7 @@ export function createWorkbenchAuthoringV5Request(
     })).digest("hex");
     const readinessBySessionId = Object.fromEntries(input.sessionIds.map((sessionId) => [
       sessionId,
-      workbenchAuthoringV5ReadinessReason(db, sessionId) ?? null
+      workbenchAuthoringV5ReadinessReason(db, sessionId, { reEnrich: input.reEnrich }) ?? null
     ]));
     const preparation = insertWorkbenchAuthoringV5Preparation(db, {
       actorId: input.actorId,
@@ -320,6 +321,7 @@ export function bootstrapWorkbenchAuthoringV5Request(
       objective: "Author specific, evidence-grounded session knowledge for every session in the request.",
       scaffoldWritesProse: false as const,
       authoredFields: ["title", "description", "keywords", "purpose", "outcome", "keyWork", "decisions", "verification"],
+      synthesisRule: "Synthesize each dossier from the substantive user ask and retained outcome. Do not treat environment, AGENTS/skill, monitor, protocol, path, timestamp, timezone, or tool rows as the primary ask, and do not extract first-message text, paths, timestamps, or tool tokens deterministically.",
       loop: ["start", "inspect", "scaffold", "save", "finish"],
       obligation: "Continue until the immutable request-complete receipt is returned. Resume is only crash recovery."
     },
