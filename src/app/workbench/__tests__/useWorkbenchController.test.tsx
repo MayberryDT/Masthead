@@ -117,6 +117,7 @@ describe("useWorkbenchController", () => {
     expect(createGuidedAuthoringRequest).toHaveBeenCalledWith(baseUrl, {
       buildSha: "build:test",
       databaseId: "database:test",
+      creationToken: expect.any(String),
       expectedIdentity: {
         baseUrl: "http://127.0.0.1:17373",
         buildSha: "build:test",
@@ -156,6 +157,24 @@ describe("useWorkbenchController", () => {
     expect(latest().actionError).toBe("guided request unavailable");
     expect(latest().activity).toEqual([]);
     expect(createGuidedAuthoringRequest).toHaveBeenCalledTimes(2);
+  });
+
+  test("reuses the creation token when the same failed selection is retried", async () => {
+    mockWorkbenchResponse([session("session:a", "First session")]);
+    vi.mocked(createGuidedAuthoringRequest).mockRejectedValue(new Error("response_lost"));
+
+    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
+    await waitFor(() => latest().sessions.length === 1);
+    await select("session:a");
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await expect(act(async () => {
+        await latest().copyAgentPrompt();
+      })).rejects.toThrow("response_lost");
+    }
+
+    const tokens = vi.mocked(createGuidedAuthoringRequest).mock.calls.map(([, input]) => input.creationToken);
+    expect(tokens).toEqual([expect.any(String), tokens[0]]);
   });
 
   test("keeps instance identity failures in transient action feedback without inventing Activity", async () => {

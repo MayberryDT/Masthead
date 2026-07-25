@@ -52,10 +52,7 @@ describe("Workbench authoring HTTP API", () => {
       .toEqual([...eligibleSessionIds].sort());
 
     const identity = authoringIdentity((await getJson(baseUrl, "/workbench/authoring/capabilities")).body);
-    const created = await postJson(baseUrl, "/workbench/authoring/v5/requests", {
-      expectedIdentity: identity,
-      sessionIds: [...eligibleSessionIds, unreadySessionId]
-    }, 201);
+    const created = await createReadyV5Request(baseUrl, identity, [...eligibleSessionIds, unreadySessionId]);
 
     expect(created.body).toMatchObject({
       request: { packSizes: [10], sessionCount: 10 },
@@ -68,15 +65,187 @@ describe("Workbench authoring HTTP API", () => {
     });
   });
 
+  test("prepares a 3,000-session V5 request without starving health or exposing partial authoring state", async () => {
+    const { baseUrl, daemon } = await startTestDaemon();
+    const sessionIds = Array.from({ length: 3_000 }, (_, index) => `session:v5-full-selection:${index}`);
+    const lastSessionId = sessionIds.at(-1)!;
+    for (const sessionId of sessionIds) seedAuthoringSession(daemon, sessionId);
+    let delayedInsertCount = 0;
+    daemon.database.function("test_authoring_snapshot_delay", () => {
+      delayedInsertCount += 1;
+      if (delayedInsertCount % 5 === 0) {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1);
+      }
+      return 0;
+    });
+    daemon.database.exec(`CREATE TEMP TRIGGER test_slow_authoring_snapshot
+      AFTER INSERT ON workbench_authoring_v5_evidence_snapshots
+      BEGIN
+        SELECT test_authoring_snapshot_delay();
+      END`);
+    daemon.database.exec(`CREATE TEMP TRIGGER test_slow_authoring_request_session
+      AFTER INSERT ON workbench_authoring_v5_request_sessions
+      BEGIN
+        SELECT test_authoring_snapshot_delay();
+      END`);
+    const identity = authoringIdentity((await getJson(baseUrl, "/workbench/authoring/capabilities")).body);
+    let maximumEventLoopGapMs = 0;
+    let lastEventLoopTick = Date.now();
+    const responsivenessProbe = setInterval(() => {
+      const now = Date.now();
+      maximumEventLoopGapMs = Math.max(maximumEventLoopGapMs, now - lastEventLoopTick);
+      lastEventLoopTick = now;
+    }, 10);
+
+    const creationStartedAt = Date.now();
+    const creationResponse = await fetch(`${baseUrl}/workbench/authoring/v5/requests`, {
+      body: JSON.stringify({ creationToken: "full-selection-responsive", expectedIdentity: identity, sessionIds }),
+      headers: { accept: "application/json", "content-type": "application/json" },
+      method: "POST"
+    });
+    const creationElapsedMs = Date.now() - creationStartedAt;
+    const created = await creationResponse.json() as any;
+
+    expect(creationResponse.status).toBe(202);
+    expect(creationElapsedMs).toBeLessThan(2_000);
+    expect(created.preparation).toMatchObject({ preparedSessionCount: 0, status: "preparing" });
+    const requestId = created.preparation.requestId as string;
+    daemon.database.prepare(
+      `INSERT INTO messages (
+        message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "message:after-full-selection-acceptance",
+      lastSessionId,
+      "assistant",
+      "Evidence appended after the request acceptance cutoff.",
+      "hash:after-full-selection-acceptance",
+      "2026-07-24T20:00:00.000Z",
+      "{}",
+      "authoritative"
+    );
+    expect(() => daemon.database.prepare(
+      "UPDATE messages SET text_redacted = ? WHERE session_id = ?"
+    ).run("Mutated after request acceptance.", lastSessionId)).toThrow("authoring_v5_evidence_frozen");
+    expect(() => daemon.database.prepare(
+      "DELETE FROM messages WHERE session_id = ?"
+    ).run(lastSessionId)).toThrow("authoring_v5_evidence_frozen");
+
+    const healthStartedAt = Date.now();
+    const health = await fetch(`${baseUrl}/health`, { signal: AbortSignal.timeout(1_000) });
+    expect(health.status).toBe(200);
+    expect(Date.now() - healthStartedAt).toBeLessThan(1_000);
+
+    const prematureStart = await postJson(
+      baseUrl,
+      `/workbench/authoring/v5/requests/${encodeURIComponent(requestId)}/start`,
+      { expectedIdentity: identity },
+      409
+    );
+    expect(prematureStart.body).toMatchObject({
+      error: { code: "authoring_v5_request_preparing" },
+      ok: false
+    });
+    expect(daemon.database.prepare(
+      "SELECT COUNT(*) AS count FROM workbench_authoring_v5_packs WHERE request_id = ? AND status IN ('available','active')"
+    ).get(requestId)).toEqual({ count: 0 });
+
+    const ready = await waitForV5RequestStatus(baseUrl, requestId, "open", 45_000);
+    clearInterval(responsivenessProbe);
+    expect(maximumEventLoopGapMs).toBeLessThan(750);
+    expect(ready.request).toMatchObject({
+      packCount: 250,
+      packSizes: Array.from({ length: 250 }, () => 12),
+      sessionCount: 3_000,
+      status: "open"
+    });
+    expect(daemon.database.prepare(
+      "SELECT COUNT(*) AS count FROM workbench_authoring_v5_evidence_snapshots WHERE request_id = ?"
+    ).get(requestId)).toEqual({ count: 3_000 });
+    const lastSnapshot = daemon.database.prepare(
+      "SELECT evidence_json AS evidenceJson FROM workbench_authoring_v5_evidence_snapshots WHERE request_id = ? AND session_id = ?"
+    ).get(requestId, lastSessionId) as { evidenceJson: string };
+    expect(lastSnapshot.evidenceJson).toContain("preparation_pages");
+    const frozenEvidence = daemon.database.prepare(
+      `SELECT GROUP_CONCAT(evidence_json, '') AS evidenceJson
+       FROM workbench_authoring_v5_preparation_evidence_pages WHERE request_id = ? AND session_id = ?`
+    ).get(requestId, lastSessionId) as { evidenceJson: string };
+    expect(frozenEvidence.evidenceJson).not.toContain("message:after-full-selection-acceptance");
+    expect(frozenEvidence.evidenceJson).not.toContain("Mutated after request acceptance.");
+    expect(daemon.database.prepare(
+      "UPDATE messages SET text_redacted = ? WHERE session_id = ?"
+    ).run("Mutation allowed after preparation is durable.", lastSessionId)).toMatchObject({ changes: 2 });
+    expect(daemon.database.prepare(
+      "SELECT COUNT(*) AS count FROM workbench_activity WHERE related_run_id = ? AND event_type = 'authoring_request_created'"
+    ).get(requestId)).toEqual({ count: 3_000 });
+  }, 60_000);
+
+  test("fails preparation terminally without exposing a request when no frozen selection member is eligible", async () => {
+    const { baseUrl, daemon } = await startTestDaemon();
+    const sessionId = "session:v5-preparation-terminal-failure";
+    seedAuthoringSession(daemon, sessionId);
+    removeCanonicalEvidence(daemon.database, sessionId);
+    const identity = authoringIdentity((await getJson(baseUrl, "/workbench/authoring/capabilities")).body);
+    const accepted = await postJson(baseUrl, "/workbench/authoring/v5/requests", {
+      creationToken: "terminal-no-eligible",
+      expectedIdentity: identity,
+      sessionIds: [sessionId]
+    }, 202);
+    const requestId = accepted.body.handoff.requestId as string;
+
+    const terminal = await waitForV5PreparationFailure(baseUrl, requestId, 5_000);
+    expect(terminal).toMatchObject({
+      error: { code: "authoring_v5_no_eligible_sessions" },
+      nextAction: { kind: "complete" },
+      ok: false,
+      selection: {
+        eligibleSessionCount: 0,
+        excludedSessions: [{ reason: "missing_canonical_evidence", sessionId }]
+      }
+    });
+    expect(daemon.database.prepare(
+      "SELECT COUNT(*) AS count FROM workbench_authoring_v5_requests WHERE request_id = ?"
+    ).get(requestId)).toEqual({ count: 0 });
+    expect(daemon.database.prepare(
+      "SELECT COUNT(*) AS count FROM workbench_authoring_v5_packs WHERE request_id = ?"
+    ).get(requestId)).toEqual({ count: 0 });
+    const terminalStart = await postJson(
+      baseUrl,
+      `/workbench/authoring/v5/requests/${encodeURIComponent(requestId)}/start`,
+      { expectedIdentity: identity },
+      409
+    );
+    expect(terminalStart.body).toMatchObject({
+      error: { code: "authoring_v5_no_eligible_sessions" },
+      nextAction: { kind: "complete" },
+      preparation: { requestId, status: "failed" }
+    });
+    expect(daemon.database.prepare(
+      "SELECT COUNT(*) AS count FROM workbench_activity WHERE related_run_id = ? AND event_type = 'authoring_request_preparation_failed'"
+    ).get(requestId)).toEqual({ count: 1 });
+
+    const repeated = await postJson(baseUrl, "/workbench/authoring/v5/requests", {
+      creationToken: "terminal-no-eligible",
+      expectedIdentity: identity,
+      sessionIds: [sessionId]
+    }, 409);
+    expect(repeated.body).toMatchObject({
+      error: { code: "authoring_v5_no_eligible_sessions" },
+      nextAction: { kind: "complete" },
+      preparation: { requestId, status: "failed" },
+      selection: { eligibleSessionCount: 0 }
+    });
+    expect(daemon.database.prepare(
+      "SELECT COUNT(*) AS count FROM workbench_activity WHERE related_run_id = ? AND event_type = 'authoring_request_preparation_failed'"
+    ).get(requestId)).toEqual({ count: 1 });
+  });
+
   test("public V5 inspect, scaffold, and save read request-frozen evidence after live ingestion changes", async () => {
     const { baseUrl, daemon } = await startTestDaemon();
     const sessionIds = Array.from({ length: 5 }, (_, index) => `session:v5-frozen:${index}`);
     for (const sessionId of sessionIds) seedAuthoringSession(daemon, sessionId);
     const identity = authoringIdentity((await getJson(baseUrl, "/workbench/authoring/capabilities")).body);
-    const created = await postJson(baseUrl, "/workbench/authoring/v5/requests", {
-      expectedIdentity: identity,
-      sessionIds
-    }, 201);
+    const created = await createReadyV5Request(baseUrl, identity, sessionIds);
     const requestId = created.body.request.requestId as string;
     const started = await postJson(
       baseUrl,
@@ -150,10 +319,7 @@ describe("Workbench authoring HTTP API", () => {
       sessionIds[0]
     );
     const identity = authoringIdentity((await getJson(baseUrl, "/workbench/authoring/capabilities")).body);
-    const created = await postJson(baseUrl, "/workbench/authoring/v5/requests", {
-      expectedIdentity: identity,
-      sessionIds
-    }, 201);
+    const created = await createReadyV5Request(baseUrl, identity, sessionIds);
     const started = await postJson(
       baseUrl,
       `/workbench/authoring/v5/requests/${encodeURIComponent(created.body.request.requestId)}/start`,
@@ -650,6 +816,17 @@ async function postJson(baseUrl: string, path: string, body: unknown = {}, expec
   return postRaw(baseUrl, path, JSON.stringify(body), expectedStatus);
 }
 
+async function createReadyV5Request(baseUrl: string, identity: any, sessionIds: string[]): Promise<any> {
+  const creationToken = `test-create:${sessionIds.join("|")}`;
+  const accepted = await postJson(baseUrl, "/workbench/authoring/v5/requests", {
+    creationToken,
+    expectedIdentity: identity,
+    sessionIds
+  }, 202);
+  const ready = await waitForV5RequestStatus(baseUrl, accepted.body.handoff.requestId, "open", 10_000);
+  return { body: { ...ready, handoff: accepted.body.handoff }, status: 200 };
+}
+
 async function postRaw(baseUrl: string, path: string, body: string, expectedStatus: number) {
   const response = await fetch(`${baseUrl}${path}`, {
     body,
@@ -658,4 +835,34 @@ async function postRaw(baseUrl: string, path: string, body: string, expectedStat
   });
   expect(response.status).toBe(expectedStatus);
   return { body: (await response.json()) as any, status: response.status };
+}
+
+async function waitForV5RequestStatus(
+  baseUrl: string,
+  requestId: string,
+  expectedStatus: string,
+  timeoutMs: number
+): Promise<any> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const response = await fetch(`${baseUrl}/workbench/authoring/v5/requests/${encodeURIComponent(requestId)}`);
+    const body = await response.json() as any;
+    if (body.request?.status === expectedStatus) return body;
+    if (body.preparation?.status === "failed") {
+      throw new Error(`v5_request_preparation_failed:${JSON.stringify(body.preparation)}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`timed_out_waiting_for_v5_request_status:${expectedStatus}`);
+}
+
+async function waitForV5PreparationFailure(baseUrl: string, requestId: string, timeoutMs: number): Promise<any> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const response = await fetch(`${baseUrl}/workbench/authoring/v5/requests/${encodeURIComponent(requestId)}`);
+    const body = await response.json() as any;
+    if (response.status === 409) return body;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("timed_out_waiting_for_v5_preparation_failure");
 }

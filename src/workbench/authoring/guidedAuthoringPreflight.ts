@@ -43,15 +43,10 @@ export function evaluateWorkbenchAuthoringV5Eligibility(
   sessionId: string,
   captured?: AuthoringEvidenceSessionSnapshot
 ): GuidedSessionEligibility {
+  const readinessReason = workbenchAuthoringV5ReadinessReason(db, sessionId);
+  if (readinessReason) return { eligible: false, reason: readinessReason };
   const dossier = getSessionDossier(db, sessionId);
   if (!dossier) return { eligible: false, reason: "session_not_found" };
-  const state = readWorkbenchSessionState(db, sessionId);
-  if (state && state.publicationStatus !== "publish_path") {
-    return { eligible: false, reason: "not_on_publish_path" };
-  }
-  if (!state || !workbenchStateIsCompileReady(state)) {
-    return { eligible: false, reason: "not_compile_ready" };
-  }
   const evidence = captured ?? evidenceCatalog.getAuthoringEvidenceSnapshot(db, [sessionId]).sessions[0]!;
   if (!evidence.usableCanonicalEvidence) {
     return { eligible: false, reason: "missing_canonical_evidence" };
@@ -61,6 +56,18 @@ export function evaluateWorkbenchAuthoringV5Eligibility(
     eligible: true,
     evidence: evidence.evidence
   };
+}
+
+export function workbenchAuthoringV5ReadinessReason(
+  db: MastheadDatabase,
+  sessionId: string
+): WorkbenchAuthoringV5SelectionDto["excludedSessions"][number]["reason"] | undefined {
+  const exists = db.prepare("SELECT 1 AS present FROM sessions WHERE session_id = ?").get(sessionId);
+  if (!exists) return "session_not_found";
+  const state = readWorkbenchSessionState(db, sessionId);
+  if (state && state.publicationStatus !== "publish_path") return "not_on_publish_path";
+  if (!state || !workbenchStateIsCompileReady(state)) return "not_compile_ready";
+  return undefined;
 }
 
 export function isWorkbenchAuthoringV5CompileReady(

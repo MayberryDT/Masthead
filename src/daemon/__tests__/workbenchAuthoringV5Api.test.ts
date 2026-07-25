@@ -10,6 +10,7 @@ import {
   routeWorkbenchAuthoringV5Request,
   workbenchAuthoringV5Capabilities
 } from "../workbenchAuthoringV5Api.ts";
+import { prepareWorkbenchAuthoringV5RequestStep } from "../../workbench/authoring/workbenchAuthoringV5Service.ts";
 
 const tempDirs: string[] = [];
 
@@ -30,7 +31,7 @@ describe("Workbench authoring V5 HTTP API", () => {
       instanceId: "instance:test",
       instanceManifest: join(directory, "masthead-instance.json")
     };
-    const context = { authoringCommand: "/opt/masthead/bin/mastheadctl", db, identity };
+    const context = v5Context(db, identity);
     const sessionIds = Array.from({ length: 5 }, (_, index) => `session:v5-api:${index}`);
     sessionIds.forEach((sessionId) => {
       seedSession(db, { lifecycle: "completed", model: "gpt-5.6-sol", project: "Masthead", sessionId, title: sessionId });
@@ -46,7 +47,7 @@ describe("Workbench authoring V5 HTTP API", () => {
     expect(isWorkbenchAuthoringV5Path("/workbench/authoring/v5/requests")).toBe(true);
 
     const created = routeWorkbenchAuthoringV5Request(context, {
-      body: { expectedIdentity: identity, sessionIds },
+      body: { creationToken: "api-bootstrap", expectedIdentity: identity, sessionIds },
       method: "POST",
       url: new URL("http://127.0.0.1/workbench/authoring/v5/requests")
     });
@@ -83,7 +84,7 @@ describe("Workbench authoring V5 HTTP API", () => {
       instanceId: "instance:test",
       instanceManifest: join(directory, "masthead-instance.json")
     };
-    const context = { authoringCommand: "/opt/masthead/bin/mastheadctl", db, identity };
+    const context = v5Context(db, identity);
     const eligibleSessionId = "session:v5-api:eligible";
     const missingEvidenceSessionId = "session:ab45dfb06a13a6eb35b4381038192368";
     for (const sessionId of [eligibleSessionId, missingEvidenceSessionId]) {
@@ -95,7 +96,7 @@ describe("Workbench authoring V5 HTTP API", () => {
     }
 
     const created = routeWorkbenchAuthoringV5Request(context, {
-      body: { expectedIdentity: identity, sessionIds: [eligibleSessionId, missingEvidenceSessionId] },
+      body: { creationToken: "api-stale-readiness", expectedIdentity: identity, sessionIds: [eligibleSessionId, missingEvidenceSessionId] },
       method: "POST",
       url: new URL("http://127.0.0.1/workbench/authoring/v5/requests")
     });
@@ -135,7 +136,7 @@ describe("Workbench authoring V5 HTTP API", () => {
       instanceId: "instance:test",
       instanceManifest: join(directory, "masthead-instance.json")
     };
-    const context = { authoringCommand: "/opt/masthead/bin/mastheadctl", db, identity };
+    const context = v5Context(db, identity);
     const sessionId = "session:v5-api:no-canonical-evidence";
     seedSession(db, { lifecycle: "completed", model: "gpt-5.6-sol", project: "Masthead", sessionId, title: sessionId });
     markSessionCompileReady(db, sessionId);
@@ -144,7 +145,7 @@ describe("Workbench authoring V5 HTTP API", () => {
     }
 
     const created = routeWorkbenchAuthoringV5Request(context, {
-      body: { expectedIdentity: identity, sessionIds: [sessionId] },
+      body: { creationToken: "api-no-eligible", expectedIdentity: identity, sessionIds: [sessionId] },
       method: "POST",
       url: new URL("http://127.0.0.1/workbench/authoring/v5/requests")
     });
@@ -184,14 +185,14 @@ describe("Workbench authoring V5 HTTP API", () => {
       instanceId: "instance:test",
       instanceManifest: join(directory, "masthead-instance.json")
     };
-    const context = { authoringCommand: "/opt/masthead/bin/mastheadctl", db, identity };
+    const context = v5Context(db, identity);
     const sessionIds = Array.from({ length: 20 }, (_, index) => `session:v5-api-error:${index}`);
     sessionIds.forEach((sessionId) => {
       seedSession(db, { lifecycle: "completed", model: "gpt-5.6-sol", project: "Masthead", sessionId, title: sessionId });
       markSessionCompileReady(db, sessionId);
     });
     const created = routeWorkbenchAuthoringV5Request(context, {
-      body: { expectedIdentity: identity, sessionIds },
+      body: { creationToken: "api-identity-error", expectedIdentity: identity, sessionIds },
       method: "POST",
       url: new URL("http://127.0.0.1/workbench/authoring/v5/requests")
     });
@@ -216,3 +217,16 @@ describe("Workbench authoring V5 HTTP API", () => {
     db.close();
   });
 });
+
+function v5Context(db: Awaited<ReturnType<typeof openMastheadDatabase>>, identity: any) {
+  return {
+    authoringCommand: "/opt/masthead/bin/mastheadctl",
+    db,
+    identity,
+    schedulePreparation: (requestId: string) => {
+      while (!prepareWorkbenchAuthoringV5RequestStep(db, requestId).done) {
+        // Direct API tests run the durable coordinator loop synchronously.
+      }
+    }
+  };
+}

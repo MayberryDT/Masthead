@@ -195,6 +195,11 @@ const migrations = [
     version: 38,
     name: "038_workbench_authoring_v5_evidence_snapshots",
     path: resolve(currentDir, "migrations/038_workbench_authoring_v5_evidence_snapshots.sql")
+  },
+  {
+    version: 39,
+    name: "039_workbench_authoring_v5_preparation",
+    path: resolve(currentDir, "migrations/039_workbench_authoring_v5_preparation.sql")
   }
 ];
 
@@ -265,6 +270,9 @@ const criticalTables = [
   "workbench_authoring_v5_requests",
   "workbench_authoring_v5_request_sessions",
   "workbench_authoring_v5_evidence_snapshots",
+  "workbench_authoring_v5_request_preparations",
+  "workbench_authoring_v5_preparation_sessions",
+  "workbench_authoring_v5_preparation_evidence_pages",
   "workbench_authoring_v5_packs",
   "workbench_authoring_v5_pack_sessions",
   "workbench_authoring_v5_evidence_access",

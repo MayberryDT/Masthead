@@ -4,9 +4,12 @@ import type {
   WorkbenchAuthoringV5PackReceipt,
   WorkbenchAuthoringV5RequestDto,
   WorkbenchAuthoringV5RequestReceipt,
+  WorkbenchAuthoringV5PreparationDto,
+  WorkbenchAuthoringV5SelectionDto,
   WorkbenchAuthoringV5SessionOutcome
 } from "../../shared/workbenchAuthoringV5.ts";
 import type { SessionTranscriptItem } from "../../shared/sessionTranscript.ts";
+import type { SessionTranscriptRowIdCutoffs } from "./sessionTranscriptRepository.ts";
 import type { MastheadDatabase } from "./sqlite.ts";
 
 type RequestRow = {
@@ -53,13 +56,252 @@ export type CreateWorkbenchAuthoringV5RecordInput = {
   packs: Array<{ packId: string; ordinal: number; evidenceRevision: string; sessionIds: string[] }>;
 };
 
+export type WorkbenchAuthoringV5PreparationRecord = WorkbenchAuthoringV5PreparationDto & {
+  creationToken: string;
+  requestFingerprint: string;
+  actorId: string;
+  identity: {
+    creationInstanceId: string;
+    instanceManifest: string;
+    baseUrl: string;
+    databaseId: string;
+    buildSha: string;
+  };
+  requestedSessionIds: string[];
+  readinessBySessionId: Record<string, WorkbenchAuthoringV5SelectionDto["excludedSessions"][number]["reason"] | null>;
+  evidenceCutoffs: SessionTranscriptRowIdCutoffs;
+  selection?: WorkbenchAuthoringV5SelectionDto;
+};
+
+export function insertWorkbenchAuthoringV5Preparation(
+  db: MastheadDatabase,
+  input: {
+    requestId: string;
+    creationToken: string;
+    requestFingerprint: string;
+    actorId: string;
+    identity: WorkbenchAuthoringV5PreparationRecord["identity"];
+    requestedSessionIds: string[];
+    readinessBySessionId: WorkbenchAuthoringV5PreparationRecord["readinessBySessionId"];
+    evidenceCutoffs: SessionTranscriptRowIdCutoffs;
+  }
+): WorkbenchAuthoringV5PreparationRecord {
+  const existing = getWorkbenchAuthoringV5PreparationByToken(db, input.creationToken);
+  if (existing) {
+    if (existing.requestFingerprint !== input.requestFingerprint) {
+      throw new Error("authoring_v5_creation_token_conflict");
+    }
+    return existing;
+  }
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO workbench_authoring_v5_request_preparations (
+      request_id, creation_token, request_fingerprint, actor_id, creation_instance_id,
+      instance_manifest, base_url, database_id, build_sha, requested_session_ids_json,
+      readiness_json, evidence_cutoffs_json, status, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'preparing', ?, ?)`
+  ).run(
+    input.requestId, input.creationToken, input.requestFingerprint, input.actorId,
+    input.identity.creationInstanceId, input.identity.instanceManifest, input.identity.baseUrl,
+    input.identity.databaseId, input.identity.buildSha, JSON.stringify(input.requestedSessionIds),
+    JSON.stringify(input.readinessBySessionId), JSON.stringify(input.evidenceCutoffs), now, now
+  );
+  return requireWorkbenchAuthoringV5Preparation(db, input.requestId);
+}
+
+export function getWorkbenchAuthoringV5Preparation(
+  db: MastheadDatabase,
+  requestId: string
+): WorkbenchAuthoringV5PreparationRecord | undefined {
+  const row = db.prepare(
+    `SELECT request_id AS requestId, creation_token AS creationToken,
+      request_fingerprint AS requestFingerprint, actor_id AS actorId,
+      creation_instance_id AS creationInstanceId, instance_manifest AS instanceManifest,
+      base_url AS baseUrl, database_id AS databaseId, build_sha AS buildSha,
+      requested_session_ids_json AS requestedSessionIdsJson, readiness_json AS readinessJson,
+      evidence_cutoffs_json AS evidenceCutoffsJson, status,
+      selection_json AS selectionJson, error_code AS errorCode, error_message AS errorMessage,
+      created_at AS createdAt, updated_at AS updatedAt, completed_at AS completedAt
+     FROM workbench_authoring_v5_request_preparations WHERE request_id = ?`
+  ).get(requestId) as any;
+  if (!row) return undefined;
+  const requestedSessionIds = JSON.parse(row.requestedSessionIdsJson) as unknown;
+  if (!Array.isArray(requestedSessionIds) || requestedSessionIds.some((value) => typeof value !== "string")) {
+    throw new Error("authoring_v5_preparation_invalid");
+  }
+  const readinessBySessionId = JSON.parse(row.readinessJson) as WorkbenchAuthoringV5PreparationRecord["readinessBySessionId"];
+  const evidenceCutoffs = JSON.parse(row.evidenceCutoffsJson) as SessionTranscriptRowIdCutoffs;
+  const prepared = db.prepare(
+    "SELECT COUNT(*) AS count FROM workbench_authoring_v5_preparation_sessions WHERE request_id = ?"
+  ).get(requestId) as { count: number };
+  return {
+    actorId: row.actorId,
+    createdAt: row.createdAt,
+    creationToken: row.creationToken,
+    identity: {
+      baseUrl: row.baseUrl,
+      buildSha: row.buildSha,
+      creationInstanceId: row.creationInstanceId,
+      databaseId: row.databaseId,
+      instanceManifest: row.instanceManifest
+    },
+    preparedSessionCount: Number(prepared.count),
+    readinessBySessionId,
+    evidenceCutoffs,
+    requestFingerprint: row.requestFingerprint,
+    requestId: row.requestId,
+    requestedSessionCount: requestedSessionIds.length,
+    requestedSessionIds: requestedSessionIds as string[],
+    status: row.status,
+    updatedAt: row.updatedAt,
+    ...(row.completedAt ? { completedAt: row.completedAt } : {}),
+    ...(row.errorCode ? { errorCode: row.errorCode } : {}),
+    ...(row.errorMessage ? { errorMessage: row.errorMessage } : {}),
+    ...(row.selectionJson ? { selection: JSON.parse(row.selectionJson) } : {})
+  };
+}
+
+export function requireWorkbenchAuthoringV5Preparation(
+  db: MastheadDatabase,
+  requestId: string
+): WorkbenchAuthoringV5PreparationRecord {
+  const preparation = getWorkbenchAuthoringV5Preparation(db, requestId);
+  if (!preparation) throw new Error("authoring_v5_request_not_found");
+  return preparation;
+}
+
+export function getWorkbenchAuthoringV5PreparationByToken(
+  db: MastheadDatabase,
+  creationToken: string
+): WorkbenchAuthoringV5PreparationRecord | undefined {
+  const row = db.prepare(
+    "SELECT request_id AS requestId FROM workbench_authoring_v5_request_preparations WHERE creation_token = ?"
+  ).get(creationToken) as { requestId: string } | undefined;
+  return row ? getWorkbenchAuthoringV5Preparation(db, row.requestId) : undefined;
+}
+
+export function listPreparingWorkbenchAuthoringV5RequestIds(db: MastheadDatabase): string[] {
+  return (db.prepare(
+    "SELECT request_id AS requestId FROM workbench_authoring_v5_request_preparations WHERE status = 'preparing' ORDER BY created_at"
+  ).all() as Array<{ requestId: string }>).map(({ requestId }) => requestId);
+}
+
+export function nextWorkbenchAuthoringV5PreparationOrdinal(db: MastheadDatabase, requestId: string): number | undefined {
+  const preparation = requireWorkbenchAuthoringV5Preparation(db, requestId);
+  const row = db.prepare(
+    "SELECT COALESCE(MAX(ordinal) + 1, 0) AS ordinal FROM workbench_authoring_v5_preparation_sessions WHERE request_id = ?"
+  ).get(requestId) as { ordinal: number };
+  const ordinal = Number(row.ordinal);
+  return ordinal < preparation.requestedSessionCount ? ordinal : undefined;
+}
+
+export function recordWorkbenchAuthoringV5PreparedSession(
+  db: MastheadDatabase,
+  input: {
+    requestId: string;
+    sessionId: string;
+    ordinal: number;
+    outcome: "eligible" | "excluded";
+    exclusionReason?: WorkbenchAuthoringV5SelectionDto["excludedSessions"][number]["reason"];
+    sessionDigest?: string;
+  }
+): void {
+  db.prepare(
+    `INSERT OR IGNORE INTO workbench_authoring_v5_preparation_sessions
+     (request_id, session_id, ordinal, outcome, exclusion_reason, session_digest)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(
+    input.requestId, input.sessionId, input.ordinal, input.outcome,
+    input.exclusionReason ?? null, input.sessionDigest ?? null
+  );
+  db.prepare(
+    "UPDATE workbench_authoring_v5_request_preparations SET updated_at = ? WHERE request_id = ?"
+  ).run(new Date().toISOString(), input.requestId);
+}
+
+export function listWorkbenchAuthoringV5PreparedSessions(
+  db: MastheadDatabase,
+  requestId: string
+): Array<{
+  sessionId: string;
+  ordinal: number;
+  outcome: "eligible" | "excluded";
+  exclusionReason: WorkbenchAuthoringV5SelectionDto["excludedSessions"][number]["reason"] | null;
+  sessionDigest: string | null;
+}> {
+  return db.prepare(
+    `SELECT session_id AS sessionId, ordinal, outcome, exclusion_reason AS exclusionReason,
+      session_digest AS sessionDigest
+     FROM workbench_authoring_v5_preparation_sessions WHERE request_id = ? ORDER BY ordinal`
+  ).all(requestId) as any;
+}
+
+export function completeWorkbenchAuthoringV5Preparation(
+  db: MastheadDatabase,
+  requestId: string,
+  selection: WorkbenchAuthoringV5SelectionDto
+): void {
+  const now = new Date().toISOString();
+  db.prepare(
+    `UPDATE workbench_authoring_v5_request_preparations
+     SET status = 'ready', selection_json = ?, error_code = NULL, error_message = NULL,
+         completed_at = ?, updated_at = ? WHERE request_id = ? AND status = 'preparing'`
+  ).run(JSON.stringify(selection), now, now, requestId);
+}
+
+export function recordWorkbenchAuthoringV5PreparationSelection(
+  db: MastheadDatabase,
+  requestId: string,
+  selection: WorkbenchAuthoringV5SelectionDto
+): void {
+  db.prepare(
+    "UPDATE workbench_authoring_v5_request_preparations SET selection_json = ?, updated_at = ? WHERE request_id = ?"
+  ).run(JSON.stringify(selection), new Date().toISOString(), requestId);
+}
+
+export function retryWorkbenchAuthoringV5Preparation(db: MastheadDatabase, requestId: string): void {
+  const now = new Date().toISOString();
+  db.prepare(
+    `UPDATE workbench_authoring_v5_request_preparations
+     SET status = 'preparing', error_code = NULL, error_message = NULL, completed_at = NULL, updated_at = ?
+     WHERE request_id = ? AND status = 'failed'`
+  ).run(now, requestId);
+}
+
+export function failWorkbenchAuthoringV5Preparation(
+  db: MastheadDatabase,
+  requestId: string,
+  error: unknown
+): void {
+  const now = new Date().toISOString();
+  const message = error instanceof Error ? error.message : String(error);
+  const code = message.split(":", 1)[0] || "authoring_v5_preparation_failed";
+  db.prepare(
+    `UPDATE workbench_authoring_v5_request_preparations
+     SET status = 'failed', error_code = ?, error_message = ?, completed_at = ?, updated_at = ?
+     WHERE request_id = ? AND status = 'preparing'`
+  ).run(code, message, now, now, requestId);
+}
+
 export function insertWorkbenchAuthoringV5Request(
   db: MastheadDatabase,
   input: CreateWorkbenchAuthoringV5RecordInput
 ): WorkbenchAuthoringV5RequestDto {
+  insertWorkbenchAuthoringV5RequestShell(db, input);
+  insertWorkbenchAuthoringV5RequestSessions(db, input.requestId, input.sessions);
+  for (const [packIndex, pack] of input.packs.entries()) {
+    insertWorkbenchAuthoringV5Pack(db, input.requestId, pack, packIndex === 0);
+  }
+  return requireWorkbenchAuthoringV5Request(db, input.requestId);
+}
+
+export function insertWorkbenchAuthoringV5RequestShell(
+  db: MastheadDatabase,
+  input: Pick<CreateWorkbenchAuthoringV5RecordInput, "actorId" | "identity" | "requestId">
+): void {
   const now = new Date().toISOString();
   db.prepare(
-    `INSERT INTO workbench_authoring_v5_requests (
+    `INSERT OR IGNORE INTO workbench_authoring_v5_requests (
       request_id, actor_id, creation_instance_id, instance_manifest, base_url, database_id,
       build_sha, status, created_at, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)`
@@ -67,28 +309,48 @@ export function insertWorkbenchAuthoringV5Request(
     input.requestId, input.actorId, input.identity.creationInstanceId, input.identity.instanceManifest,
     input.identity.baseUrl, input.identity.databaseId, input.identity.buildSha, now, now
   );
+}
+
+export function insertWorkbenchAuthoringV5RequestSessions(
+  db: MastheadDatabase,
+  requestId: string,
+  sessions: Array<{ sessionId: string; ordinal: number }>
+): void {
   const insertSession = db.prepare(
-    `INSERT INTO workbench_authoring_v5_request_sessions
+    `INSERT OR IGNORE INTO workbench_authoring_v5_request_sessions
      (request_id, session_id, ordinal, state) VALUES (?, ?, ?, 'pending')`
   );
-  for (const session of input.sessions) insertSession.run(input.requestId, session.sessionId, session.ordinal);
+  for (const session of sessions) insertSession.run(requestId, session.sessionId, session.ordinal);
+}
+
+export function insertWorkbenchAuthoringV5Pack(
+  db: MastheadDatabase,
+  requestId: string,
+  pack: CreateWorkbenchAuthoringV5RecordInput["packs"][number],
+  available: boolean
+): void {
+  const now = new Date().toISOString();
   const insertPack = db.prepare(
-    `INSERT INTO workbench_authoring_v5_packs
+    `INSERT OR IGNORE INTO workbench_authoring_v5_packs
      (pack_id, request_id, ordinal, status, evidence_revision, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)`
   );
   const insertMembership = db.prepare(
-    `INSERT INTO workbench_authoring_v5_pack_sessions
+    `INSERT OR IGNORE INTO workbench_authoring_v5_pack_sessions
      (pack_id, request_id, session_id, ordinal) VALUES (?, ?, ?, ?)`
   );
-  input.packs.forEach((pack, packIndex) => {
-    insertPack.run(
-      pack.packId, input.requestId, pack.ordinal, packIndex === 0 ? "available" : "pending",
-      pack.evidenceRevision, now, now
-    );
-    pack.sessionIds.forEach((sessionId, ordinal) => insertMembership.run(pack.packId, input.requestId, sessionId, ordinal));
-  });
-  return requireWorkbenchAuthoringV5Request(db, input.requestId);
+  insertPack.run(
+    pack.packId, requestId, pack.ordinal, available ? "available" : "pending",
+    pack.evidenceRevision, now, now
+  );
+  pack.sessionIds.forEach((sessionId, ordinal) => insertMembership.run(pack.packId, requestId, sessionId, ordinal));
+}
+
+export function releaseFirstWorkbenchAuthoringV5Pack(db: MastheadDatabase, requestId: string): void {
+  db.prepare(
+    `UPDATE workbench_authoring_v5_packs SET status = 'available', updated_at = ?
+     WHERE request_id = ? AND ordinal = 0 AND status = 'pending'`
+  ).run(new Date().toISOString(), requestId);
 }
 
 export function insertWorkbenchAuthoringV5EvidenceSnapshot(
@@ -101,7 +363,7 @@ export function insertWorkbenchAuthoringV5EvidenceSnapshot(
   }
 ): void {
   db.prepare(
-    `INSERT INTO workbench_authoring_v5_evidence_snapshots (
+    `INSERT OR IGNORE INTO workbench_authoring_v5_evidence_snapshots (
       request_id, session_id, session_digest, evidence_json, created_at
     ) VALUES (?, ?, ?, ?, ?)`
   ).run(
@@ -109,6 +371,78 @@ export function insertWorkbenchAuthoringV5EvidenceSnapshot(
     input.sessionId,
     input.sessionDigest,
     JSON.stringify(input.evidence),
+    new Date().toISOString()
+  );
+}
+
+export function insertWorkbenchAuthoringV5PreparationEvidencePage(
+  db: MastheadDatabase,
+  input: {
+    requestId: string;
+    sessionId: string;
+    pageOrdinal: number;
+    itemOffset: number;
+    items: SessionTranscriptItem[];
+    usableEvidence: boolean;
+    pageDigest: string;
+  }
+): void {
+  db.prepare(
+    `INSERT OR IGNORE INTO workbench_authoring_v5_preparation_evidence_pages (
+      request_id, session_id, page_ordinal, item_offset, item_count,
+      usable_evidence, page_digest, evidence_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    input.requestId,
+    input.sessionId,
+    input.pageOrdinal,
+    input.itemOffset,
+    input.items.length,
+    input.usableEvidence ? 1 : 0,
+    input.pageDigest,
+    JSON.stringify(input.items)
+  );
+}
+
+export function getWorkbenchAuthoringV5PreparationEvidenceProgress(
+  db: MastheadDatabase,
+  requestId: string,
+  sessionId: string
+): { nextOffset: number; nextPageOrdinal: number; usableEvidence: boolean; pageDigests: string[] } {
+  const rows = db.prepare(
+    `SELECT page_ordinal AS pageOrdinal, item_offset AS itemOffset, item_count AS itemCount,
+      usable_evidence AS usableEvidence, page_digest AS pageDigest
+     FROM workbench_authoring_v5_preparation_evidence_pages
+     WHERE request_id = ? AND session_id = ? ORDER BY page_ordinal`
+  ).all(requestId, sessionId) as Array<{
+    pageOrdinal: number;
+    itemOffset: number;
+    itemCount: number;
+    usableEvidence: number;
+    pageDigest: string;
+  }>;
+  const last = rows.at(-1);
+  return {
+    nextOffset: last ? Number(last.itemOffset) + Number(last.itemCount) : 0,
+    nextPageOrdinal: last ? Number(last.pageOrdinal) + 1 : 0,
+    pageDigests: rows.map(({ pageDigest }) => pageDigest),
+    usableEvidence: rows.some(({ usableEvidence }) => Number(usableEvidence) === 1)
+  };
+}
+
+export function insertPagedWorkbenchAuthoringV5EvidenceSnapshot(
+  db: MastheadDatabase,
+  input: { requestId: string; sessionId: string; sessionDigest: string }
+): void {
+  db.prepare(
+    `INSERT OR IGNORE INTO workbench_authoring_v5_evidence_snapshots (
+      request_id, session_id, session_digest, evidence_json, created_at
+    ) VALUES (?, ?, ?, ?, ?)`
+  ).run(
+    input.requestId,
+    input.sessionId,
+    input.sessionDigest,
+    JSON.stringify({ storage: "preparation_pages" }),
     new Date().toISOString()
   );
 }
@@ -125,8 +459,24 @@ export function getWorkbenchAuthoringV5EvidenceSnapshot(
   ).get(requestId, sessionId) as { sessionDigest: string; evidenceJson: string } | undefined;
   if (!row) return undefined;
   const evidence = JSON.parse(row.evidenceJson) as unknown;
-  if (!Array.isArray(evidence)) throw new Error("authoring_v5_evidence_snapshot_invalid");
-  return { evidence: evidence as SessionTranscriptItem[], sessionDigest: row.sessionDigest };
+  if (Array.isArray(evidence)) return { evidence: evidence as SessionTranscriptItem[], sessionDigest: row.sessionDigest };
+  if (
+    evidence && typeof evidence === "object" && !Array.isArray(evidence) &&
+    (evidence as { storage?: unknown }).storage === "preparation_pages"
+  ) {
+    const pages = db.prepare(
+      `SELECT evidence_json AS evidenceJson
+       FROM workbench_authoring_v5_preparation_evidence_pages
+       WHERE request_id = ? AND session_id = ? ORDER BY page_ordinal`
+    ).all(requestId, sessionId) as Array<{ evidenceJson: string }>;
+    const items = pages.flatMap((page) => {
+      const parsed = JSON.parse(page.evidenceJson) as unknown;
+      if (!Array.isArray(parsed)) throw new Error("authoring_v5_evidence_snapshot_invalid");
+      return parsed as SessionTranscriptItem[];
+    });
+    return { evidence: items, sessionDigest: row.sessionDigest };
+  }
+  throw new Error("authoring_v5_evidence_snapshot_invalid");
 }
 
 export function getWorkbenchAuthoringV5Request(

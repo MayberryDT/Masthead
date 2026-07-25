@@ -1328,13 +1328,15 @@ export type CreateGuidedAuthoringRequestInput = {
   databaseId: string;
   buildSha: string;
   sessionIds: string[];
+  creationToken?: string;
 };
 
 export type CreateGuidedAuthoringRequestResponse = {
   handoff: { requestId: string; startCommand: string };
-  request: WorkbenchAuthoringV5RequestDto;
+  preparation?: import("../shared/workbenchAuthoringV5.ts").WorkbenchAuthoringV5PreparationDto;
+  request?: WorkbenchAuthoringV5RequestDto;
   nextAction: WorkbenchAuthoringV5NextAction;
-  selection: WorkbenchAuthoringV5SelectionDto;
+  selection?: WorkbenchAuthoringV5SelectionDto;
 };
 
 export async function createGuidedAuthoringRequest(
@@ -1343,7 +1345,10 @@ export async function createGuidedAuthoringRequest(
   options: { signal?: AbortSignal } = {}
 ): Promise<CreateGuidedAuthoringRequestResponse> {
   return postJson<CreateGuidedAuthoringRequestResponse>(activeProjectionUrl, "/workbench/authoring/v5/requests", {
-    body: input,
+    body: {
+      ...input,
+      creationToken: input.creationToken ?? globalThis.crypto.randomUUID()
+    },
     label: "create guided authoring request",
     signal: options.signal
   });

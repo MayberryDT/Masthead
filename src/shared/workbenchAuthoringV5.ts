@@ -39,13 +39,73 @@ export type WorkbenchAuthoringV5FindingCode =
   | typeof WORKBENCH_AUTHORING_V5_HARD_REJECT_CODES[number]
   | typeof WORKBENCH_AUTHORING_V5_SOFT_FLAG_CODES[number];
 export type WorkbenchAuthoringV5NextActionKind =
-  | "start" | "inspect" | "scaffold" | "save" | "finish" | "claim_next" | "complete";
+  | "wait" | "start" | "inspect" | "scaffold" | "save" | "finish" | "claim_next" | "complete";
+
+export type WorkbenchAuthoringV5PreparationDto = {
+  requestId: string;
+  status: "preparing" | "ready" | "failed";
+  requestedSessionCount: number;
+  preparedSessionCount: number;
+  errorCode?: string;
+  errorMessage?: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+};
 
 export type WorkbenchAuthoringV5NextAction = {
   kind: WorkbenchAuthoringV5NextActionKind;
   command: string;
   reason: string;
 };
+
+export function toWorkbenchAuthoringV5PreparationDto(
+  preparation: WorkbenchAuthoringV5PreparationDto
+): WorkbenchAuthoringV5PreparationDto {
+  return {
+    createdAt: preparation.createdAt,
+    preparedSessionCount: preparation.preparedSessionCount,
+    requestId: preparation.requestId,
+    requestedSessionCount: preparation.requestedSessionCount,
+    status: preparation.status,
+    updatedAt: preparation.updatedAt,
+    ...(preparation.completedAt ? { completedAt: preparation.completedAt } : {}),
+    ...(preparation.errorCode ? { errorCode: preparation.errorCode } : {}),
+    ...(preparation.errorMessage ? { errorMessage: preparation.errorMessage } : {})
+  };
+}
+
+export function workbenchAuthoringV5PreparationWaitAction(
+  command: string,
+  requestId: string
+): WorkbenchAuthoringV5NextAction {
+  return {
+    command: `${command} workbench author bootstrap --request ${quoteWorkbenchAuthoringV5Argument(requestId)} --json`,
+    kind: "wait",
+    reason: "The daemon is durably preparing the frozen request evidence. Retry bootstrap until preparation is ready."
+  };
+}
+
+export function workbenchAuthoringV5PreparationRetryAction(
+  command: string,
+  requestId: string
+): WorkbenchAuthoringV5NextAction {
+  return {
+    command: `${command} workbench author start --request ${quoteWorkbenchAuthoringV5Argument(requestId)} --json`,
+    kind: "start",
+    reason: "Retry the durable preparation from its last committed evidence page."
+  };
+}
+
+export function workbenchAuthoringV5PreparationTerminalAction(
+  reason: string
+): WorkbenchAuthoringV5NextAction {
+  return { command: "", kind: "complete", reason };
+}
+
+function quoteWorkbenchAuthoringV5Argument(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
 
 export type WorkbenchAuthoringV5SelectionExclusionReason =
   | "session_not_found"

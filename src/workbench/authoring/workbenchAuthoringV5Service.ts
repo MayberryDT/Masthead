@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { stableRecordId } from "../../daemon/identity.ts";
 import {
   activeOrAvailableWorkbenchAuthoringV5Pack,
@@ -8,11 +8,25 @@ import {
   getSavedWorkbenchAuthoringV5Pack,
   getWorkbenchAuthoringV5PackReceipt,
   getWorkbenchAuthoringV5RequestReceipt,
-  insertWorkbenchAuthoringV5EvidenceSnapshot,
-  insertWorkbenchAuthoringV5Request,
+  getWorkbenchAuthoringV5Request,
+  completeWorkbenchAuthoringV5Preparation,
+  getWorkbenchAuthoringV5Preparation,
+  getWorkbenchAuthoringV5PreparationEvidenceProgress,
+  insertWorkbenchAuthoringV5Preparation,
+  insertWorkbenchAuthoringV5PreparationEvidencePage,
+  insertPagedWorkbenchAuthoringV5EvidenceSnapshot,
+  insertWorkbenchAuthoringV5Pack,
+  insertWorkbenchAuthoringV5RequestSessions,
+  insertWorkbenchAuthoringV5RequestShell,
   listWorkbenchAuthoringV5EvidenceAccess,
   listWorkbenchAuthoringV5Packs,
+  listWorkbenchAuthoringV5PreparedSessions,
+  nextWorkbenchAuthoringV5PreparationOrdinal,
+  recordWorkbenchAuthoringV5PreparedSession,
+  recordWorkbenchAuthoringV5PreparationSelection,
   recordWorkbenchAuthoringV5EvidenceAccess,
+  releaseFirstWorkbenchAuthoringV5Pack,
+  retryWorkbenchAuthoringV5Preparation,
   requestBindingForWorkbenchAuthoringV5Pack,
   requireWorkbenchAuthoringV5Pack,
   requireWorkbenchAuthoringV5Request,
@@ -20,7 +34,11 @@ import {
 } from "../../daemon/db/workbenchAuthoringV5Repository.ts";
 import { bumpDataRevisionInTransaction } from "../../daemon/db/dataRevisionRepository.ts";
 import { type MastheadDatabase, withImmediateTransaction } from "../../daemon/db/sqlite.ts";
-import { iterateSessionTranscriptItems } from "../../daemon/db/sessionTranscriptRepository.ts";
+import {
+  getCompleteSessionTranscriptPage,
+  iterateSessionTranscriptItems,
+  type SessionTranscriptRowIdCutoffs
+} from "../../daemon/db/sessionTranscriptRepository.ts";
 import { recordWorkbenchActivity } from "../../daemon/db/workbenchPipelineRepository.ts";
 import type { EvidenceRef } from "../../core/types.ts";
 import type { DurableSessionEnrichment } from "../../shared/sessionEnrichment.ts";
@@ -28,7 +46,9 @@ import {
   WORKBENCH_AUTHORING_V5_VERSION,
   WORKBENCH_AUTHORING_V5_HARD_REJECT_CODES,
   WORKBENCH_AUTHORING_V5_SOFT_FLAG_CODES,
+  toWorkbenchAuthoringV5PreparationDto,
   toWorkbenchAuthoringV5AuthoredDraft,
+  workbenchAuthoringV5PreparationWaitAction,
   type WorkbenchAuthoringV5AuthoredDraft,
   type WorkbenchAuthoringV5Draft,
   type WorkbenchAuthoringV5EvidenceCatalogItem,
@@ -46,7 +66,7 @@ import {
   assertStableGuidedRequestBinding
 } from "../../shared/instanceIdentity.ts";
 import * as evidenceCatalog from "./evidenceCatalog.ts";
-import { assertGuidedSelectionCompileReady } from "./guidedAuthoringPreflight.ts";
+import { workbenchAuthoringV5ReadinessReason } from "./guidedAuthoringPreflight.ts";
 import * as workbenchAuthoringV5Quality from "./workbenchAuthoringV5Quality.ts";
 import {
   applyGuidedSessionEnrichmentInTransaction,
@@ -75,23 +95,29 @@ export function createWorkbenchAuthoringV5Request(
   input: MutationIdentity & {
     actorId: string;
     command: string;
+    creationToken: string;
     sessionIds: string[];
   }
 ) {
   assertGuidedAuthoringExpectedIdentity(input.currentIdentity, input.expectedIdentity);
   assertRequestMembership(input.sessionIds);
+  if (!input.creationToken.trim() || input.creationToken !== input.creationToken.trim()) {
+    throw new Error("authoring_v5_creation_token_invalid");
+  }
   return withImmediateTransaction(db, () => {
-    const preflight = assertGuidedSelectionCompileReady(db, input.sessionIds);
-    if (preflight.sessions.length === 0) {
-      throw new WorkbenchAuthoringV5NoEligibleSessionsError(preflight.selection);
-    }
     const requestId = `authoring-v5-request:${randomUUID()}`;
-    const packSessionIds = fixedPacks(preflight.sessions.map(({ sessionId }) => sessionId));
-    const revisionInputBySessionId = new Map(
-      preflight.revisionInputs.map((revisionInput) => [revisionInput.sessionId, revisionInput])
-    );
-    const request = insertWorkbenchAuthoringV5Request(db, {
+    const requestFingerprint = createHash("sha256").update(JSON.stringify({
       actorId: input.actorId,
+      identity: input.currentIdentity,
+      sessionIds: input.sessionIds
+    })).digest("hex");
+    const readinessBySessionId = Object.fromEntries(input.sessionIds.map((sessionId) => [
+      sessionId,
+      workbenchAuthoringV5ReadinessReason(db, sessionId) ?? null
+    ]));
+    const preparation = insertWorkbenchAuthoringV5Preparation(db, {
+      actorId: input.actorId,
+      creationToken: input.creationToken,
       identity: {
         baseUrl: input.currentIdentity.baseUrl,
         buildSha: input.currentIdentity.buildSha,
@@ -99,47 +125,179 @@ export function createWorkbenchAuthoringV5Request(
         databaseId: input.currentIdentity.databaseId,
         instanceManifest: input.currentIdentity.instanceManifest
       },
-      packs: packSessionIds.map((sessionIds, ordinal) => ({
-        evidenceRevision: evidenceCatalog.guidedAuthoringEvidenceRevisionFromInputs(
-          sessionIds.map((sessionId) => revisionInputBySessionId.get(sessionId)!)
-        ),
-        ordinal,
-        packId: stableRecordId("authoring-v5-pack", [requestId, String(ordinal)]),
-        sessionIds
-      })),
+      evidenceCutoffs: currentTranscriptRowIdCutoffs(db),
+      readinessBySessionId,
+      requestFingerprint,
       requestId,
-      sessions: preflight.sessions.map(({ sessionId }, ordinal) => ({ ordinal, sessionId }))
+      requestedSessionIds: input.sessionIds
     });
-    for (const { sessionId } of preflight.sessions) {
-      insertWorkbenchAuthoringV5EvidenceSnapshot(db, {
-        evidence: [...iterateSessionTranscriptItems(db, { order: "asc", sessionId })],
-        requestId,
-        sessionDigest: revisionInputBySessionId.get(sessionId)!.sessionDigest,
+    return {
+      handoff: {
+        requestId: preparation.requestId,
+        startCommand: `${input.command} workbench author bootstrap --request ${shellQuote(preparation.requestId)} --json`
+      },
+      nextAction: preparation.status === "ready"
+        ? startAction(input.command, preparation.requestId)
+        : workbenchAuthoringV5PreparationWaitAction(input.command, preparation.requestId),
+      preparation: toWorkbenchAuthoringV5PreparationDto(preparation),
+      ...(getWorkbenchAuthoringV5Request(db, preparation.requestId)
+        ? { request: requireWorkbenchAuthoringV5Request(db, preparation.requestId) }
+        : {}),
+      ...(preparation.selection ? { selection: preparation.selection } : {})
+    };
+  });
+}
+
+export function prepareWorkbenchAuthoringV5RequestStep(
+  db: MastheadDatabase,
+  requestId: string
+): { done: boolean } {
+  const preparation = getWorkbenchAuthoringV5Preparation(db, requestId);
+  if (!preparation || preparation.status !== "preparing") return { done: true };
+  const ordinal = nextWorkbenchAuthoringV5PreparationOrdinal(db, requestId);
+  if (ordinal === undefined) {
+    return { done: finalizeWorkbenchAuthoringV5Preparation(db, requestId) };
+  }
+  withImmediateTransaction(db, () => {
+    const batchEnd = Math.min(ordinal + 10, preparation.requestedSessionCount);
+    for (let currentOrdinal = ordinal; currentOrdinal < batchEnd; currentOrdinal += 1) {
+      const sessionId = preparation.requestedSessionIds[currentOrdinal]!;
+      const frozenReadinessReason = preparation.readinessBySessionId[sessionId];
+      if (frozenReadinessReason) {
+        recordWorkbenchAuthoringV5PreparedSession(db, {
+          exclusionReason: frozenReadinessReason,
+          ordinal: currentOrdinal,
+          outcome: "excluded",
+          requestId,
+          sessionId
+        });
+        recordPreparationExclusionActivity(db, preparation.actorId, requestId, sessionId, frozenReadinessReason);
+        continue;
+      }
+      const progress = getWorkbenchAuthoringV5PreparationEvidenceProgress(db, requestId, sessionId);
+      const page = getCompleteSessionTranscriptPage(db, {
+        cursor: String(progress.nextOffset),
+        limit: 25,
+        order: "asc",
+        rowIdCutoffs: preparation.evidenceCutoffs,
         sessionId
       });
-    }
-    bumpDataRevisionInTransaction(db, "workbench");
-    const result = {
-      handoff: {
+      const pageJson = JSON.stringify(page.items);
+      insertWorkbenchAuthoringV5PreparationEvidencePage(db, {
+        itemOffset: progress.nextOffset,
+        items: page.items,
+        pageDigest: createHash("sha256").update(pageJson).digest("hex"),
+        pageOrdinal: progress.nextPageOrdinal,
         requestId,
-        startCommand: `${input.command} workbench author bootstrap --request ${shellQuote(requestId)} --json`
-      },
-      nextAction: startAction(input.command, requestId),
-      request,
-      selection: preflight.selection
-    };
-    for (const { sessionId } of preflight.sessions) {
+        sessionId,
+        usableEvidence: evidenceCatalog.hasUsableAuthoringEvidenceItems(page.items)
+      });
+      if (page.nextCursor !== undefined) break;
+      const completeProgress = getWorkbenchAuthoringV5PreparationEvidenceProgress(db, requestId, sessionId);
+      if (!completeProgress.usableEvidence) {
+        recordWorkbenchAuthoringV5PreparedSession(db, {
+          exclusionReason: "missing_canonical_evidence",
+          ordinal: currentOrdinal,
+          outcome: "excluded",
+          requestId,
+          sessionId
+        });
+        recordPreparationExclusionActivity(db, preparation.actorId, requestId, sessionId, "missing_canonical_evidence");
+        continue;
+      }
+      const sessionDigest = `sha256:${createHash("sha256")
+        .update(`${JSON.stringify({ sessionId })}\n`)
+        .update(completeProgress.pageDigests.join("\n"))
+        .digest("hex")}` as const;
+      insertPagedWorkbenchAuthoringV5EvidenceSnapshot(db, {
+        requestId,
+        sessionDigest,
+        sessionId
+      });
+      recordWorkbenchAuthoringV5PreparedSession(db, {
+        ordinal: currentOrdinal,
+        outcome: "eligible",
+        requestId,
+        sessionDigest,
+        sessionId
+      });
       recordWorkbenchActivity(db, {
-        actor: { id: input.actorId, kind: "agent" },
-        details: { packCount: request.packCount, requestId },
+        actor: { id: preparation.actorId, kind: "agent" },
+        details: { requestId },
         eventType: "authoring_request_created",
         relatedRunId: requestId,
         sessionId,
         summary: "V5 authoring request created"
       });
     }
-    return result;
   });
+  return { done: false };
+}
+
+function finalizeWorkbenchAuthoringV5Preparation(db: MastheadDatabase, requestId: string): boolean {
+  const result = withImmediateTransaction(db, (): boolean | { error: WorkbenchAuthoringV5NoEligibleSessionsError } => {
+    const preparation = getWorkbenchAuthoringV5Preparation(db, requestId);
+    if (!preparation || preparation.status !== "preparing") return true;
+    const prepared = listWorkbenchAuthoringV5PreparedSessions(db, requestId);
+    if (prepared.length !== preparation.requestedSessionCount) throw new Error("authoring_v5_preparation_incomplete");
+    const eligible = prepared.filter((row) => row.outcome === "eligible");
+    const excluded = prepared.filter((row) => row.outcome === "excluded");
+    const selection: WorkbenchAuthoringV5SelectionDto = {
+      eligibleSessionCount: eligible.length,
+      excludedSessionCount: excluded.length,
+      excludedSessions: excluded.map((row) => ({
+        reason: row.exclusionReason!,
+        sessionId: row.sessionId
+      })),
+      requestedSessionCount: prepared.length
+    };
+    recordWorkbenchAuthoringV5PreparationSelection(db, requestId, selection);
+    if (eligible.length === 0) return { error: new WorkbenchAuthoringV5NoEligibleSessionsError(selection) };
+    const packSessionIds = fixedPacks(eligible.map(({ sessionId }) => sessionId));
+    const digestBySessionId = new Map(eligible.map((row) => [row.sessionId, row.sessionDigest!]));
+    const requestInput = {
+      actorId: preparation.actorId,
+      identity: preparation.identity,
+      packs: packSessionIds.map((sessionIds, ordinal) => ({
+        evidenceRevision: evidenceCatalog.guidedAuthoringEvidenceRevisionFromInputs(
+          sessionIds.map((sessionId) => ({ sessionDigest: digestBySessionId.get(sessionId) as `sha256:${string}`, sessionId }))
+        ),
+        ordinal,
+        packId: stableRecordId("authoring-v5-pack", [requestId, String(ordinal)]),
+        sessionIds
+      })),
+      requestId,
+      sessions: eligible.map(({ sessionId }, ordinal) => ({ ordinal, sessionId }))
+    };
+    if (!getWorkbenchAuthoringV5Request(db, requestId)) {
+      insertWorkbenchAuthoringV5RequestShell(db, requestInput);
+      return false;
+    }
+    const storedSessionCount = Number((db.prepare(
+      "SELECT COUNT(*) AS count FROM workbench_authoring_v5_request_sessions WHERE request_id = ?"
+    ).get(requestId) as { count: number }).count);
+    if (storedSessionCount < requestInput.sessions.length) {
+      insertWorkbenchAuthoringV5RequestSessions(
+        db,
+        requestId,
+        requestInput.sessions.slice(storedSessionCount, storedSessionCount + 50)
+      );
+      return false;
+    }
+    const storedPackCount = Number((db.prepare(
+      "SELECT COUNT(*) AS count FROM workbench_authoring_v5_packs WHERE request_id = ?"
+    ).get(requestId) as { count: number }).count);
+    if (storedPackCount < requestInput.packs.length) {
+      insertWorkbenchAuthoringV5Pack(db, requestId, requestInput.packs[storedPackCount]!, false);
+      return false;
+    }
+    releaseFirstWorkbenchAuthoringV5Pack(db, requestId);
+    completeWorkbenchAuthoringV5Preparation(db, requestId, selection);
+    bumpDataRevisionInTransaction(db, "workbench");
+    return true;
+  });
+  if (typeof result === "boolean") return result;
+  throw result.error;
 }
 
 export function bootstrapWorkbenchAuthoringV5Request(
@@ -187,6 +345,7 @@ export function bootstrapWorkbenchAuthoringV5Request(
       requestFreezeOnReject: false
     },
     request,
+    ...(status.selection ? { selection: status.selection } : {}),
     ...(status.receipt ? { receipt: status.receipt } : {}),
     nextAction: status.nextAction
   };
@@ -196,6 +355,8 @@ export function startWorkbenchAuthoringV5Pack(
   db: MastheadDatabase,
   input: MutationIdentity & { command: string; requestId: string }
 ) {
+  const preparation = getWorkbenchAuthoringV5Preparation(db, input.requestId);
+  if (preparation?.status !== "ready") throw new Error(`authoring_v5_request_${preparation?.status ?? "not_found"}`);
   const request = requireWorkbenchAuthoringV5Request(db, input.requestId);
   assertRequestIdentity(request, input);
   if (request.status === "completed") {
@@ -228,6 +389,29 @@ export function startWorkbenchAuthoringV5Pack(
       request: requireWorkbenchAuthoringV5Request(db, request.requestId),
       nextAction: packNextAction(db, input.command, pack.packId)
     };
+  });
+}
+
+export function retryFailedWorkbenchAuthoringV5Preparation(
+  db: MastheadDatabase,
+  input: MutationIdentity & { requestId: string }
+) {
+  const preparation = getWorkbenchAuthoringV5Preparation(db, input.requestId);
+  if (!preparation) throw new Error("authoring_v5_request_not_found");
+  assertRequestIdentity({
+    baseUrl: preparation.identity.baseUrl,
+    buildSha: preparation.identity.buildSha,
+    creationInstanceId: preparation.identity.creationInstanceId,
+    databaseId: preparation.identity.databaseId,
+    instanceManifest: preparation.identity.instanceManifest
+  }, input);
+  if (preparation.status !== "failed") throw new Error("authoring_v5_request_not_failed");
+  if (preparation.errorCode === "authoring_v5_no_eligible_sessions") {
+    throw new Error("authoring_v5_no_eligible_sessions");
+  }
+  return withImmediateTransaction(db, () => {
+    retryWorkbenchAuthoringV5Preparation(db, input.requestId);
+    return toWorkbenchAuthoringV5PreparationDto(getWorkbenchAuthoringV5Preparation(db, input.requestId)!);
   });
 }
 
@@ -420,8 +604,10 @@ export function getWorkbenchAuthoringV5RequestStatus(
 ) {
   const request = requireWorkbenchAuthoringV5Request(db, input.requestId);
   const receipt = getWorkbenchAuthoringV5RequestReceipt(db, request.requestId);
+  const preparation = getWorkbenchAuthoringV5Preparation(db, request.requestId);
   return {
     request,
+    ...(preparation?.selection ? { selection: preparation.selection } : {}),
     ...(receipt ? { receipt } : {}),
     nextAction: request.status === "completed" ? completeAction() : requestNextAction(db, input.command, request.requestId)
   };
@@ -457,6 +643,39 @@ function assertRequestMembership(sessionIds: string[]): void {
     throw new Error("authoring_session_id_blank");
   }
   if (new Set(sessionIds).size !== sessionIds.length) throw new Error("authoring_session_id_duplicate");
+}
+
+function currentTranscriptRowIdCutoffs(db: MastheadDatabase): SessionTranscriptRowIdCutoffs {
+  const maximumRowId = (table: string): number => Number((
+    db.prepare(`SELECT COALESCE(MAX(rowid), 0) AS rowId FROM ${table}`).get() as { rowId: number }
+  ).rowId);
+  return {
+    checkpoints: maximumRowId("checkpoints"),
+    fileEffects: maximumRowId("file_effects"),
+    messages: maximumRowId("messages"),
+    runtimeSignals: maximumRowId("runtime_signals"),
+    toolCalls: maximumRowId("tool_calls"),
+    toolResults: maximumRowId("tool_results")
+  };
+}
+
+function recordPreparationExclusionActivity(
+  db: MastheadDatabase,
+  actorId: string,
+  requestId: string,
+  sessionId: string,
+  reason: WorkbenchAuthoringV5SelectionDto["excludedSessions"][number]["reason"]
+): void {
+  const exists = db.prepare("SELECT 1 AS present FROM sessions WHERE session_id = ?").get(sessionId);
+  if (!exists) return;
+  recordWorkbenchActivity(db, {
+    actor: { id: actorId, kind: "agent" },
+    details: { reason, requestId },
+    eventType: "authoring_request_session_excluded",
+    relatedRunId: requestId,
+    sessionId,
+    summary: "Session excluded from V5 authoring request"
+  });
 }
 
 function assertRequestIdentity(request: {
@@ -861,6 +1080,7 @@ function packNextAction(db: MastheadDatabase, command: string, packId: string): 
 function startAction(command: string, requestId: string): WorkbenchAuthoringV5NextAction {
   return { kind: "start", command: `${command} workbench author start --request ${shellQuote(requestId)} --json`, reason: "Start or resume the next fixed pack." };
 }
+
 function inspectAction(command: string, packId: string): WorkbenchAuthoringV5NextAction {
   return { kind: "inspect", command: `${command} workbench author inspect --pack ${shellQuote(packId)} --json`, reason: "Inspect the next unread canonical evidence page." };
 }

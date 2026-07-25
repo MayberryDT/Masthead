@@ -185,6 +185,7 @@ import {
   isWorkbenchAuthoringPath,
   routeWorkbenchAuthoringRequest
 } from "./workbenchAuthoringApi.ts";
+import { createWorkbenchAuthoringV5PreparationCoordinator } from "./workbenchAuthoringV5PreparationCoordinator.ts";
 
 export type MastheadDaemon = {
   server: Server;
@@ -251,6 +252,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       runLegacyWorkbenchPublicationBackfill(database);
       const databaseIdentity = getOrCreateDatabaseIdentity(database);
       const interruptedImportJobIds = recoverInterruptedImportJobs(database);
+      const authoringV5PreparationCoordinator = createWorkbenchAuthoringV5PreparationCoordinator(database);
+      authoringV5PreparationCoordinator.resume();
 
     const defaultLiveRuntime: RuntimeKind = "claude_code";
     const defaultLiveSource = liveHookSourceForRuntime(defaultLiveRuntime);
@@ -2698,7 +2701,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         {
           authoringCommand,
           identity: guidedIdentity(),
-          db: database
+          db: database,
+          schedulePreparation: authoringV5PreparationCoordinator.schedule
         },
         { body, headers: request.headers, method: request.method ?? "GET", url }
       );
@@ -3858,6 +3862,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         try {
           await immediateLiveIngestPersistence;
           await deferredLiveIngestQueue.close();
+          await authoringV5PreparationCoordinator.close();
         } catch (error) {
           deferredQueueError = error;
         } finally {

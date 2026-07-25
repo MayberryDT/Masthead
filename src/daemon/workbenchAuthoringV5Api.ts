@@ -6,6 +6,10 @@ import {
 import {
   WORKBENCH_AUTHORING_V5_OPERATIONS,
   WORKBENCH_AUTHORING_V5_SAVE_BODY_LIMIT_BYTES,
+  toWorkbenchAuthoringV5PreparationDto,
+  workbenchAuthoringV5PreparationRetryAction,
+  workbenchAuthoringV5PreparationTerminalAction,
+  workbenchAuthoringV5PreparationWaitAction,
   type WorkbenchAuthoringV5AuthoredDraft,
   type WorkbenchAuthoringV5CapabilitiesDto,
 } from "../shared/workbenchAuthoringV5.ts";
@@ -13,9 +17,11 @@ import { normalizeMastheadBaseUrl } from "../shared/instanceIdentity.ts";
 import { isAbsoluteAuthoringCommand } from "../shared/workbenchAuthoring.ts";
 import type { MastheadDatabase } from "./db/sqlite.ts";
 import {
+  getWorkbenchAuthoringV5Preparation,
   getWorkbenchAuthoringV5Pack,
   getWorkbenchAuthoringV5Request,
-  listWorkbenchAuthoringV5Packs
+  listWorkbenchAuthoringV5Packs,
+  type WorkbenchAuthoringV5PreparationRecord
 } from "./db/workbenchAuthoringV5Repository.ts";
 import { recordWorkbenchActivity } from "./db/workbenchPipelineRepository.ts";
 import {
@@ -26,6 +32,7 @@ import {
   getWorkbenchAuthoringV5RequestReceiptStatus,
   getWorkbenchAuthoringV5RequestStatus,
   inspectWorkbenchAuthoringV5Pack,
+  retryFailedWorkbenchAuthoringV5Preparation,
   saveWorkbenchAuthoringV5Draft,
   startWorkbenchAuthoringV5Pack,
   WorkbenchAuthoringV5NoEligibleSessionsError
@@ -35,12 +42,13 @@ export type WorkbenchAuthoringV5HttpContext = {
   authoringCommand: string;
   db: MastheadDatabase;
   identity: GuidedAuthoringExpectedIdentity;
+  schedulePreparation: (requestId: string) => void;
 };
 export type WorkbenchAuthoringV5HttpHeaders = Record<string, string | string[] | undefined>;
 export type WorkbenchAuthoringV5HttpResult = { status: number; body: unknown };
 
 export function workbenchAuthoringV5Capabilities(
-  context: WorkbenchAuthoringV5HttpContext
+  context: Pick<WorkbenchAuthoringV5HttpContext, "authoringCommand" | "identity">
 ): WorkbenchAuthoringV5CapabilitiesDto {
   if (!isAbsoluteAuthoringCommand(context.authoringCommand)) throw new Error("authoring_command_unavailable");
   return {
@@ -66,22 +74,91 @@ export function routeWorkbenchAuthoringV5Request(
     if (pathname === "/workbench/authoring/v5/requests") {
       if (request.method !== "POST") return methodNotAllowed();
       const body = record(request.body);
-      return {
-        body: createWorkbenchAuthoringV5Request(context.db, {
+      const creationToken = requiredString(body.creationToken, "creationToken");
+      let created = createWorkbenchAuthoringV5Request(context.db, {
           actorId: optionalString(body.actorId) ?? "workbench",
           command: context.authoringCommand,
+          creationToken,
           currentIdentity: context.identity,
           expectedIdentity: expectedIdentityFromBody(body),
           sessionIds: stringArray(body.sessionIds, "sessionIds")
-        }),
-        status: 201
-      };
+        });
+      if (created.preparation.status === "preparing") {
+        context.schedulePreparation(created.preparation.requestId);
+        const latest = getWorkbenchAuthoringV5Preparation(context.db, created.preparation.requestId);
+        if (latest?.status === "failed") {
+          return failedPreparationResult(context.authoringCommand, latest);
+        }
+        if (latest?.status === "ready") {
+          created = createWorkbenchAuthoringV5Request(context.db, {
+            actorId: optionalString(body.actorId) ?? "workbench",
+            command: context.authoringCommand,
+            creationToken,
+            currentIdentity: context.identity,
+            expectedIdentity: expectedIdentityFromBody(body),
+            sessionIds: stringArray(body.sessionIds, "sessionIds")
+          });
+        }
+      }
+      if (created.preparation.status === "failed") {
+        return failedPreparationResult(
+          context.authoringCommand,
+          getWorkbenchAuthoringV5Preparation(context.db, created.preparation.requestId)!
+        );
+      }
+      return { body: created, status: created.preparation.status === "ready" ? 201 : 202 };
     }
 
     const requestMatch = pathname.match(/^\/workbench\/authoring\/v5\/requests\/([^/]+)(?:\/(bootstrap|start|receipt))?$/u);
     if (requestMatch?.[1]) {
       const requestId = decodeSegment(requestMatch[1], "requestId");
       const operation = requestMatch[2];
+      const preparation = getWorkbenchAuthoringV5Preparation(context.db, requestId);
+      if (preparation && preparation.status !== "ready") {
+        if (preparation.status === "preparing") context.schedulePreparation(requestId);
+        const terminalNoEligible = preparation.errorCode === "authoring_v5_no_eligible_sessions";
+        if (
+          preparation.status === "failed" && !terminalNoEligible &&
+          operation === "start" && request.method === "POST"
+        ) {
+          const retried = retryFailedWorkbenchAuthoringV5Preparation(context.db, {
+            currentIdentity: context.identity,
+            expectedIdentity: expectedIdentityFromBody(record(request.body)),
+            requestId
+          });
+          context.schedulePreparation(requestId);
+          return {
+            body: {
+              preparation: retried,
+              nextAction: workbenchAuthoringV5PreparationWaitAction(context.authoringCommand, requestId)
+            },
+            status: 202
+          };
+        }
+        if (request.method === "POST" || preparation.status === "failed") {
+          if (preparation.status === "failed") {
+            return failedPreparationResult(context.authoringCommand, preparation);
+          }
+          const code = "authoring_v5_request_preparing";
+          return {
+            body: {
+              error: { code, message: preparation.errorMessage ?? code },
+              nextAction: workbenchAuthoringV5PreparationWaitAction(context.authoringCommand, requestId),
+              ok: false,
+              preparation: toWorkbenchAuthoringV5PreparationDto(preparation),
+              ...(preparation.selection ? { selection: preparation.selection } : {})
+            },
+            status: 409
+          };
+        }
+        return {
+          body: {
+            preparation: toWorkbenchAuthoringV5PreparationDto(preparation),
+            nextAction: workbenchAuthoringV5PreparationWaitAction(context.authoringCommand, requestId)
+          },
+          status: 202
+        };
+      }
       if (!operation) {
         if (request.method !== "GET") return methodNotAllowed();
         return { body: getWorkbenchAuthoringV5RequestStatus(context.db, { command: context.authoringCommand, requestId }), status: 200 };
@@ -156,6 +233,28 @@ export function routeWorkbenchAuthoringV5Request(
     recordWorkbenchAuthoringV5FailureActivity(context, request, error);
     return workbenchAuthoringV5ErrorResult(error);
   }
+}
+
+function failedPreparationResult(
+  authoringCommand: string,
+  preparation: WorkbenchAuthoringV5PreparationRecord
+): WorkbenchAuthoringV5HttpResult {
+  const code = preparation.errorCode ?? "authoring_v5_request_preparation_failed";
+  const terminalNoEligible = code === "authoring_v5_no_eligible_sessions";
+  return {
+    body: {
+      error: { code, message: preparation.errorMessage ?? code },
+      nextAction: terminalNoEligible
+        ? workbenchAuthoringV5PreparationTerminalAction(
+            "The frozen selection contains no eligible sessions; create a new request after resolving readiness."
+          )
+        : workbenchAuthoringV5PreparationRetryAction(authoringCommand, preparation.requestId),
+      ok: false,
+      preparation: toWorkbenchAuthoringV5PreparationDto(preparation),
+      ...(preparation.selection ? { selection: preparation.selection } : {})
+    },
+    status: 409
+  };
 }
 
 function recordWorkbenchAuthoringV5FailureActivity(

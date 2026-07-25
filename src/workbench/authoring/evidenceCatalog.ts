@@ -8,6 +8,7 @@ import type {
 import {
   getCompleteSessionTranscriptPage,
   iterateSessionTranscriptItems,
+  type SessionTranscriptRowIdCutoffs,
   type SessionTranscriptKindFilter
 } from "../../daemon/db/sessionTranscriptRepository.ts";
 import type { MastheadDatabase } from "../../daemon/db/sqlite.ts";
@@ -33,6 +34,10 @@ export type AuthoringEvidenceSessionSnapshot = {
   usableCanonicalEvidence: boolean;
 };
 
+export type CapturedAuthoringEvidenceSession = AuthoringEvidenceSessionSnapshot & {
+  items: SessionTranscriptItem[];
+};
+
 export type AuthoringEvidenceSnapshot = {
   manifest: WorkbenchAuthoringEvidenceManifest;
   sessions: AuthoringEvidenceSessionSnapshot[];
@@ -52,11 +57,24 @@ export function getAuthoringEvidenceSnapshot(
   return collectAuthoringEvidenceSnapshot(db, strictSessionIds(sessionIds));
 }
 
+export function captureAuthoringEvidenceSession(
+  db: MastheadDatabase,
+  sessionId: string,
+  rowIdCutoffs?: SessionTranscriptRowIdCutoffs
+): CapturedAuthoringEvidenceSession {
+  const items = [...iterateSessionTranscriptItems(db, { order: "asc", rowIdCutoffs, sessionId })];
+  return { ...authoringEvidenceSessionSnapshot(sessionId, items), items };
+}
+
 export function hasUsableAuthoringEvidence(db: MastheadDatabase, sessionId: string): boolean {
   for (const item of iterateSessionTranscriptItems(db, { order: "asc", sessionId })) {
     if (isUsableAuthoringEvidenceItem(item)) return true;
   }
   return false;
+}
+
+export function hasUsableAuthoringEvidenceItems(items: SessionTranscriptItem[]): boolean {
+  return items.some(isUsableAuthoringEvidenceItem);
 }
 
 export function guidedAuthoringEvidenceRevisionFromInputs(
@@ -146,10 +164,30 @@ function collectAuthoringEvidenceSnapshot(
   const legacyHash = createHash("sha256");
   const sessions: AuthoringEvidenceSessionSnapshot[] = [];
   for (const sessionId of sessionIds) {
+    const captured = captureAuthoringEvidenceSession(db, sessionId);
+    legacyHash.update(`${JSON.stringify({ sessionId })}\n`);
+    for (const item of captured.items) legacyHash.update(serializeCanonicalEvidenceItem(item));
+    sessions.push({
+      evidence: captured.evidence,
+      revisionInput: captured.revisionInput,
+      usableCanonicalEvidence: captured.usableCanonicalEvidence
+    });
+  }
+  return {
+    manifest: {
+      evidenceRevision: `sha256:${legacyHash.digest("hex")}`,
+      sessions: sessions.map(({ evidence }) => evidence)
+    },
+    sessions
+  };
+}
+
+function authoringEvidenceSessionSnapshot(
+  sessionId: string,
+  items: SessionTranscriptItem[]
+): AuthoringEvidenceSessionSnapshot {
     const sessionHash = createHash("sha256");
-    const sessionHeader = `${JSON.stringify({ sessionId })}\n`;
-    legacyHash.update(sessionHeader);
-    sessionHash.update(sessionHeader);
+    sessionHash.update(`${JSON.stringify({ sessionId })}\n`);
     const coverage = {
       assistantMessages: 0,
       checkpoints: 0,
@@ -166,9 +204,8 @@ function collectAuthoringEvidenceSnapshot(
     let totalItems = 0;
     let usableCanonicalEvidence = false;
 
-    for (const item of iterateSessionTranscriptItems(db, { order: "asc", sessionId })) {
+    for (const item of items) {
       const serialized = serializeCanonicalEvidenceItem(item);
-      legacyHash.update(serialized);
       sessionHash.update(serialized);
       totalItems += 1;
       firstObservedAt ??= item.observedAt || undefined;
@@ -206,22 +243,14 @@ function collectAuthoringEvidenceSnapshot(
       totalItems,
       warnings: []
     } satisfies WorkbenchAuthoringEvidenceManifest["sessions"][number];
-    sessions.push({
+    return {
       evidence,
       revisionInput: {
         sessionDigest: `sha256:${sessionHash.digest("hex")}`,
         sessionId
       },
       usableCanonicalEvidence
-    });
-  }
-  return {
-    manifest: {
-      evidenceRevision: `sha256:${legacyHash.digest("hex")}`,
-      sessions: sessions.map(({ evidence }) => evidence)
-    },
-    sessions
-  };
+    };
 }
 
 function isUsableAuthoringEvidenceItem(item: SessionTranscriptItem): boolean {

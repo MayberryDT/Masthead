@@ -15,10 +15,11 @@ import {
 import {
   bootstrapWorkbenchAuthoringV5Request,
   buildWorkbenchAuthoringV5Scaffold,
-  createWorkbenchAuthoringV5Request,
+  createWorkbenchAuthoringV5Request as acceptWorkbenchAuthoringV5Request,
   finishWorkbenchAuthoringV5Pack,
   getWorkbenchAuthoringV5RequestStatus,
   inspectWorkbenchAuthoringV5Pack,
+  prepareWorkbenchAuthoringV5RequestStep,
   saveWorkbenchAuthoringV5Draft,
   startWorkbenchAuthoringV5Pack
 } from "../workbenchAuthoringV5Service.ts";
@@ -37,6 +38,21 @@ const identity = {
   instanceManifest: "/tmp/masthead-instance.json"
 };
 const command = "/opt/masthead/bin/mastheadctl";
+let creationSequence = 0;
+
+function createWorkbenchAuthoringV5Request(
+  db: MastheadDatabase,
+  input: Omit<Parameters<typeof acceptWorkbenchAuthoringV5Request>[1], "creationToken">
+) {
+  const creationToken = `service-test:${creationSequence++}`;
+  const accepted = acceptWorkbenchAuthoringV5Request(db, { ...input, creationToken });
+  while (!prepareWorkbenchAuthoringV5RequestStep(db, accepted.preparation.requestId).done) {
+    // Service tests drive the same durable preparation state machine without a daemon coordinator.
+  }
+  const ready = acceptWorkbenchAuthoringV5Request(db, { ...input, creationToken });
+  if (!ready.request || !ready.selection) throw new Error("expected_ready_authoring_request");
+  return { ...ready, request: ready.request, selection: ready.selection };
+}
 
 afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((path) => rm(path, { force: true, recursive: true })));

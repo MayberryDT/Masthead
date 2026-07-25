@@ -37,7 +37,12 @@ export type WorkbenchAuthoringHttpResult = {
 };
 
 export async function routeWorkbenchAuthoringRequest(
-  context: { authoringCommand: string; db: MastheadDatabase; identity?: GuidedAuthoringExpectedIdentity },
+  context: {
+    authoringCommand: string;
+    db: MastheadDatabase;
+    identity?: GuidedAuthoringExpectedIdentity;
+    schedulePreparation?: (requestId: string) => void;
+  },
   request: { method: string; url: URL; body?: unknown; headers?: GuidedAuthoringHttpHeaders }
 ): Promise<WorkbenchAuthoringHttpResult | undefined> {
   const { pathname } = request.url;
@@ -52,7 +57,9 @@ export async function routeWorkbenchAuthoringRequest(
 
     if (isWorkbenchAuthoringV5Path(pathname)) {
       if (!context.identity) throw new Error("authoring_identity_unavailable");
-      return routeWorkbenchAuthoringV5Request({ ...context, identity: context.identity }, request);
+      const schedulePreparation = context.schedulePreparation;
+      if (!schedulePreparation) throw new Error("authoring_v5_preparation_unavailable");
+      return routeWorkbenchAuthoringV5Request({ ...context, identity: context.identity, schedulePreparation }, request);
     }
 
     if (isGuidedAuthoringPath(pathname)) {

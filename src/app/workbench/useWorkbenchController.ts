@@ -106,6 +106,7 @@ export function useWorkbenchController({
   const pageSize = WORKBENCH_PAGE_SIZE;
   const loadRequestId = useRef(0);
   const copyRequestInFlightRef = useRef<Promise<string> | null>(null);
+  const copyCreationRef = useRef<{ fingerprint: string; token: string } | undefined>(undefined);
   const selectedSessionIdsRef = useRef(selectedSessionIds);
   selectedSessionIdsRef.current = selectedSessionIds;
   const { workbench: workbenchRevision } = useMastheadDataRevisions({
@@ -221,6 +222,16 @@ export function useWorkbenchController({
 
     const capabilities = authoringCapabilities;
     const sessionIds = [...agentPromptSessionIds];
+    const creationFingerprint = JSON.stringify({
+      databaseId: capabilities.databaseId,
+      buildSha: capabilities.buildSha,
+      instanceId: capabilities.instanceId,
+      sessionIds
+    });
+    if (copyCreationRef.current?.fingerprint !== creationFingerprint) {
+      copyCreationRef.current = { fingerprint: creationFingerprint, token: globalThis.crypto.randomUUID() };
+    }
+    const creationToken = copyCreationRef.current.token;
     const operation = (async () => {
       setActionBusy(true);
       setActionError(undefined);
@@ -229,8 +240,10 @@ export function useWorkbenchController({
           buildSha: capabilities.buildSha,
           databaseId: capabilities.databaseId,
           expectedIdentity: guidedAuthoringIdentityFromCapabilities(capabilities),
+          creationToken,
           sessionIds
         });
+        if (copyCreationRef.current?.token === creationToken) copyCreationRef.current = undefined;
         return buildWorkbenchHandoff({ capabilities, request });
       } catch (copyError) {
         setActionError(formatActionError(copyError));
