@@ -26,6 +26,7 @@ import {
 import {
   COMPACTION_BANNER_FIXTURE,
   CRON_BOILERPLATE_FIXTURE,
+  PRODUCTION_REMEDIATION_ESCAPE_FIXTURES,
   S7_FALSE_GREEN_FIXTURES,
   UNSUPPORTED_COMPLETION_THRASH_FIXTURE
 } from "../__fixtures__/v5QualityFailures.ts";
@@ -60,6 +61,44 @@ afterEach(async () => {
 });
 
 describe("workbench-authoring-v5 loop", () => {
+  test("hard-rejects production-remediation title and description escapes at save", async () => {
+    const db = await testDatabase();
+    const sessionIds = Array.from({ length: 6 }, (_, index) => `session:v5:remediation-escape:${index + 1}`);
+    for (const sessionId of sessionIds) seedCompileReadySession(db, sessionId);
+    const created = createWorkbenchAuthoringV5Request(db, {
+      actorId: "agent:test", command, currentIdentity: identity, expectedIdentity: identity, sessionIds
+    });
+    const started = startWorkbenchAuthoringV5Pack(db, {
+      command, currentIdentity: identity, expectedIdentity: identity, requestId: created.request.requestId
+    });
+    if (!("pack" in started)) throw new Error("expected_active_pack");
+    await inspectWholePack(db, started.pack.packId);
+    const authored = authorDraft(buildWorkbenchAuthoringV5Scaffold(db, { command, packId: started.pack.packId }).draft);
+    authored.sessions[0]!.fields.title = PRODUCTION_REMEDIATION_ESCAPE_FIXTURES.truncatedRecommendedPluginsTitle;
+    authored.sessions[1]!.fields.title = PRODUCTION_REMEDIATION_ESCAPE_FIXTURES.conversationalTitle;
+    for (const [index, title] of PRODUCTION_REMEDIATION_ESCAPE_FIXTURES.implementationTitles.entries()) {
+      authored.sessions[index + 2]!.fields.title = title;
+    }
+    authored.sessions[4]!.fields.description = PRODUCTION_REMEDIATION_ESCAPE_FIXTURES.addressedRequestDescription;
+
+    const saved = saveWorkbenchAuthoringV5Draft(db, {
+      command, currentIdentity: identity, draft: authored, expectedIdentity: identity, packId: started.pack.packId
+    });
+
+    expect(saved.outcomes.map(({ disposition }) => disposition)).toEqual([
+      "hard_reject", "hard_reject", "hard_reject", "hard_reject", "hard_reject", "publishable"
+    ]);
+    expect(saved.outcomes.map(({ findings }) => findings.map(({ code }) => code))).toEqual([
+      expect.arrayContaining(["protocol_or_compaction_boilerplate"]),
+      expect.arrayContaining(["conversational_filler_title"]),
+      expect.arrayContaining(["conversational_filler_title"]),
+      expect.arrayContaining(["conversational_filler_title"]),
+      expect.arrayContaining(["templated_request_echo"]),
+      []
+    ]);
+    db.close();
+  });
+
   test("rejects S7 false-green metadata and filler dossiers while publishing a useful skill-shaped dossier", async () => {
     const db = await testDatabase();
     const sessionIds = Array.from({ length: 4 }, (_, index) => `session:v5:s7-quality:${index + 1}`);

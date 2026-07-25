@@ -129,6 +129,7 @@ export function classifyWorkbenchAuthoringV5Session(
 function isProtocolOrCompactionBoilerplate(value: string): boolean {
   const normalized = value.replace(/\s+/g, " ").trim().toLowerCase();
   return (
+    /^<recommended_plugins\b/.test(normalized) ||
     /<\/?compaction(?:_summary)?>/.test(normalized) ||
     /\b(?:context|conversation|transcript) (?:was )?compacted\b/.test(normalized) ||
     /\bcompaction (?:banner|checkpoint|summary)\b/.test(normalized) ||
@@ -206,13 +207,17 @@ function isContextOrMetadataTitle(value: string): boolean {
 }
 
 function isConversationalFillerTitle(value: string): boolean {
-  return /^(?:this is )?(?:pretty |really )?(?:good|nice)(?:,? but (?:i )?(?:think|feel) we can make (?:it )?better)?[.!?]*$/i.test(
-    value.replace(/\s+/g, " ").trim()
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return (
+    /^(?:this is )?(?:pretty |really )?(?:good|nice)(?:,? but (?:i )?(?:think|feel) we can make (?:it )?better)?[.!?]*$/i.test(normalized) ||
+    /^(?:okay|ok|sure),? (?:that|this|it) (?:sounds|looks|feels) (?:better|good|great|right)[.!?]*$/i.test(normalized) ||
+    /^(?:(?:okay|ok|sure),? )?(?:please )?(?:go ahead and )?(?:implement|apply|make|do|complete|finish)(?: (?:it|this|that|the (?:change|changes|implementation|plan|request|requested changes)))?[.!?]*$/i.test(normalized)
   );
 }
 
 function isTemplatedRequestEcho(value: string): boolean {
-  return /^(?:worked on|complete) (?:the )?(?:user'?s )?request to\b/i.test(value.replace(/\s+/g, " ").trim());
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return /^(?:(?:worked on|complete) (?:the )?(?:user'?s )?request to|addressed the recorded request\b)/i.test(normalized);
 }
 
 function hasMetadataOrToolDominatedKeywords(keywords: string[], title: string): boolean {

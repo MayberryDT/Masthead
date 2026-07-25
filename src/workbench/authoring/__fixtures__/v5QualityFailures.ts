@@ -40,3 +40,12 @@ export const S7_FALSE_GREEN_FIXTURES = {
     title: "Home/tyler bash 2026-04-17 Asia/Tokyo"
   }
 } as const;
+
+/** Production-remediation escapes that must fail even when the surrounding draft is valid. */
+export const PRODUCTION_REMEDIATION_ESCAPE_FIXTURES = {
+  addressedRequestDescription: "Addressed the recorded request by repairing OAuth callback state validation.",
+  conversationalTitle: "Okay, that sounds better",
+  implementationTitles: ["Implement the requested changes", "Please implement this"],
+  truncatedRecommendedPluginsTitle:
+    "<recommended_plugins> Here is a list of plugins that are available but not installed. - Atlassian Rovo"
+} as const;
