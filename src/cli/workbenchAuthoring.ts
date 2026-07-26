@@ -15,7 +15,10 @@ const recoveryCommands = new Set([
   "audit-v3-template-generation",
   "prepare-v3-template-recovery",
   "invalidate-v3-template-generation",
-  "restore-v3-template-recovery"
+  "restore-v3-template-recovery",
+  "audit-v5-quality-corpus",
+  "prepare-v5-quality-corpus",
+  "invalidate-v5-quality-corpus"
 ]);
 const evidenceKinds = new Set(["all", "user", "assistant", "tools", "checkpoints", "files", "signals"]);
 
@@ -33,6 +36,15 @@ export async function runWorkbenchAuthoringCli(args: string[], options: Workbenc
     return runGuidedAuthoringCli(args.slice(1), options);
   }
   if (recoveryCommands.has(command)) {
+    if (command.includes("v5-quality")) {
+      const { runV5QualityCorpusMaintenance } = await import("./workbenchMaintenance.ts");
+      return runV5QualityCorpusMaintenance(
+        command as "audit-v5-quality-corpus" | "prepare-v5-quality-corpus" | "invalidate-v5-quality-corpus",
+        args,
+        options,
+        json
+      );
+    }
     if (command.includes("v3-template")) {
       const { runFailedV3TemplateRecoveryMaintenance } = await import("./workbenchMaintenance.ts");
       return runFailedV3TemplateRecoveryMaintenance(
@@ -138,6 +150,9 @@ export function workbenchHelp(): string {
     "  mastheadctl workbench prepare-v3-template-recovery --db <path> --incident-contract <path> --receipt <path> --json",
     "  mastheadctl workbench invalidate-v3-template-generation --db <path> --prepared-receipt <path> --confirm --json",
     "  mastheadctl workbench restore-v3-template-recovery --db <path> --prepared-receipt <path> --confirm --json",
+    "  mastheadctl workbench audit-v5-quality-corpus --db <path> --retain-created-by <actor> [--retain-created-by <actor> ...] --json",
+    "  mastheadctl workbench prepare-v5-quality-corpus --db <path> --retain-created-by <actor> [--retain-created-by <actor> ...] --receipt <path> --json",
+    "  mastheadctl workbench invalidate-v5-quality-corpus --db <path> --prepared-receipt <path> --audit-hash <sha256> --confirm --json",
     "  mastheadctl workbench wipe-published --db <path> --confirm --json",
     "",
     "The daemon owns pack membership, evidence, validation, publication, receipts, and identity checks."

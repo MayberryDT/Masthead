@@ -23,6 +23,12 @@ import {
   restoreFailedV3TemplateRecoveryInsideExclusiveMaintenance,
   type FailedV3TemplatePreparedRecovery
 } from "../daemon/db/v3TemplateRecovery.ts";
+import {
+  auditV5QualityCorpus,
+  invalidateV5QualityCorpusRecovery,
+  prepareV5QualityCorpusRecovery,
+  type V5QualityCorpusPreparedRecovery
+} from "../daemon/db/v5QualityCorpusRecovery.ts";
 
 export async function runWipePublishedMaintenance(
   args: string[],
@@ -194,6 +200,54 @@ export async function runFailedV3TemplateRecoveryMaintenance(
   }
 }
 
+export async function runV5QualityCorpusMaintenance(
+  command: "audit-v5-quality-corpus" | "prepare-v5-quality-corpus" | "invalidate-v5-quality-corpus",
+  args: string[],
+  options: { env?: NodeJS.ProcessEnv },
+  json: boolean
+): Promise<CliResult> {
+  const explicitPath = optionValue(args, "--db");
+  if (!explicitPath) return errorResult("missing_argument", "Missing required option: --db", json);
+  const databasePath = resolveWorkbenchDatabasePath({ args, env: options.env });
+  const retainCreatedBy = optionValues(args, "--retain-created-by");
+  const receiptPath = optionValue(args, "--receipt");
+  const preparedPath = optionValue(args, "--prepared-receipt");
+  const expectedAuditHash = optionValue(args, "--audit-hash");
+  if ((command === "audit-v5-quality-corpus" || command === "prepare-v5-quality-corpus") && retainCreatedBy.length === 0) {
+    return errorResult("missing_argument", "Pass at least one --retain-created-by value", json);
+  }
+  if (command === "prepare-v5-quality-corpus" && !receiptPath) {
+    return errorResult("missing_argument", "Missing required option: --receipt", json);
+  }
+  if (command === "invalidate-v5-quality-corpus" && (!preparedPath || !expectedAuditHash)) {
+    return errorResult("missing_argument", "Missing required --prepared-receipt or --audit-hash", json);
+  }
+  if (command === "invalidate-v5-quality-corpus" && !args.includes("--confirm")) {
+    return errorResult("missing_argument", "Pass --confirm to invalidate the exact audited V5 quality corpus", json);
+  }
+  try {
+    await access(databasePath);
+    if (command === "audit-v5-quality-corpus") {
+      const db = new DatabaseSync(databasePath, { readOnly: true });
+      try {
+        return jsonResult({ databasePath, ok: true, audit: auditV5QualityCorpus(db, { retainCreatedBy }) });
+      } finally {
+        db.close();
+      }
+    }
+    if (command === "prepare-v5-quality-corpus") {
+      const prepared = await prepareV5QualityCorpusRecovery(databasePath, retainCreatedBy);
+      await writeFile(receiptPath!, `${JSON.stringify(prepared, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
+      return jsonResult({ databasePath, ok: true, prepared, receiptPath });
+    }
+    const prepared = JSON.parse(await readFile(preparedPath!, "utf8")) as V5QualityCorpusPreparedRecovery;
+    const receipt = await invalidateV5QualityCorpusRecovery(databasePath, prepared, expectedAuditHash!);
+    return jsonResult({ databasePath, ok: true, receipt });
+  } catch (error) {
+    return errorResult("v5_quality_corpus_recovery_refused", error instanceof Error ? error.message : String(error), json);
+  }
+}
+
 async function assertSelfContainedDatabase(databasePath: string, recovery: "v1" | "v3_template"): Promise<void> {
   for (const suffix of ["-wal", "-shm", "-journal"]) {
     try {
@@ -203,6 +257,21 @@ async function assertSelfContainedDatabase(databasePath: string, recovery: "v1" 
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
   }
+}
+
+function optionValues(args: string[], option: string): string[] {
+  const values: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === option) {
+      const value = args[index + 1];
+      if (value && !value.startsWith("--") && value.trim()) values.push(value.trim());
+    } else if (argument.startsWith(`${option}=`)) {
+      const value = argument.slice(option.length + 1).trim();
+      if (value) values.push(value);
+    }
+  }
+  return values;
 }
 
 function optionValue(args: string[], option: string): string | undefined {

@@ -53,6 +53,7 @@ export type DatabaseBackupBoundary = "backup" | "normalize" | "verify" | "finali
 
 export type DatabaseBackupOptions = {
   onBoundary?: (boundary: DatabaseBackupBoundary) => void;
+  verificationMode?: "full_integrity" | "identity_only";
 };
 
 const exclusiveMaintenanceBrand = Symbol("exclusive_database_maintenance");
@@ -178,7 +179,7 @@ export async function createSingleConsistentBackupInsideExclusiveMaintenance(
     normalizeBackupJournal(stagePath);
 
     options.onBoundary?.("verify");
-    const verified = verifyStagedBackup(stagePath);
+    const verified = verifyStagedBackup(stagePath, options.verificationMode ?? "full_integrity");
     const sizeBytes = (await stat(stagePath)).size;
 
     options.onBoundary?.("finalize");
@@ -379,11 +380,14 @@ async function verifyFailedV1RecoveryBackupForInvalidation(
   };
 }
 
-function verifyStagedBackup(stagePath: string): { databaseId: string } {
+function verifyStagedBackup(
+  stagePath: string,
+  verificationMode: "full_integrity" | "identity_only"
+): { databaseId: string } {
   let verified: DatabaseSync | undefined;
   try {
     verified = new DatabaseSync(stagePath, { readOnly: true });
-    verifyOpenDatabaseIntegrity(verified);
+    if (verificationMode === "full_integrity") verifyOpenDatabaseIntegrity(verified);
     const identityRow = verified.prepare(
       "SELECT setting_json AS value FROM app_settings WHERE setting_key = 'database_identity'"
     ).get() as { value: string } | undefined;
