@@ -36,7 +36,6 @@ describe("Masthead instance identity", () => {
       instanceManifest: "/state/masthead/masthead-instance.json",
       instanceId: "instance:test",
       maxSessionsPerAssignment: 12,
-      canarySessions: 3,
       operations: ["start", "inspect", "scaffold", "save", "review", "finish"]
     })).toEqual(identity("instance:test"));
   });

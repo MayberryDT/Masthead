@@ -549,10 +549,14 @@ export function isPositiveVerificationEvidence(
       !hasNegativeVerificationOutcome(`${checkpointLabel} ${evidence.text}`);
   }
   return evidence.kind === "message" &&
-    evidence.role === "assistant" &&
+    (evidence.role === "assistant" || isLegacyEmbeddedAgentTranscript(evidence)) &&
     (hasPositiveVerificationOutcome(support.excerpt) || hasStructuredVerificationReport(support.excerpt)) &&
     !hasNegativeVerificationOutcome(support.excerpt) &&
     !hasLaterNegativeVerificationOutcome(evidence.text, support.excerpt);
+}
+
+function isLegacyEmbeddedAgentTranscript(evidence: WorkbenchValidationEvidence): boolean {
+  return evidence.kind === "message" && /^### Session update\s+\*\*agent\*\*:/u.test(evidence.text.trim());
 }
 
 function supportKindMatchesEvidence(

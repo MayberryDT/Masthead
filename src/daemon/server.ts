@@ -18,7 +18,7 @@ import { LIVE_CONNECTOR_RUNTIMES } from "../adapters/liveRuntimes.ts";
 import { adapterForRuntime } from "../adapters/registry.ts";
 import { createDeterministicEnrichmentProvider } from "../enrichment/deterministicProvider.ts";
 import { createEnrichmentCoordinator, EnrichmentFailedError } from "../enrichment/enrichmentCoordinator.ts";
-import { ALL_RUNTIME_KINDS, RUNTIME_KINDS, type AdapterDiagnostic, type IngestCursor, type RuntimeKind } from "../adapters/types.ts";
+import { ALL_RUNTIME_KINDS, RUNTIME_KINDS, type AdapterDiagnostic, type IngestCursor, type RuntimeKind, type SourceConfidence, type SourceKind } from "../adapters/types.ts";
 import type { DiscoveredSource } from "../adapters/types.ts";
 import { createIngestionState, ingestNormalizedEvent, removeEventFromLiveProjectionState } from "../core/ingestion.ts";
 import { eventLiveProcessingMode } from "../core/liveSessionFacts.ts";
@@ -70,6 +70,7 @@ import { latestLiveStateForSession, latestLiveStateReports, upsertLiveStateRepor
 import { upsertFileEffectsFromGitSnapshot } from "./db/gitSnapshotEffectsRepository.ts";
 import { createRawEventRepository, type RawEventRepository, type RawEventSource } from "./db/rawEventRepository.ts";
 import { getSessionDossier } from "./db/sessionDossierRepository.ts";
+import { getAuthoringEvidenceSnapshot } from "../workbench/authoring/evidenceCatalog.ts";
 import { getSessionTranscript, type SessionTranscriptKindFilter } from "./db/sessionTranscriptRepository.ts";
 import { initializeSessionTranscriptFingerprintIndex } from "./db/sessionTranscriptFingerprintIndex.ts";
 import {
@@ -155,6 +156,7 @@ import type {
   WorkbenchNotAddedSessionDto,
   WorkbenchNotAddedSummaryDto,
   WorkbenchQueueSessionDto,
+  WorkbenchSelectionSnapshotResponse,
   WorkbenchSessionsResponse
 } from "../shared/workbench.ts";
 import { queueWorkbenchSessions } from "../workbench/queueRepository.ts";
@@ -249,7 +251,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       migrateDatabase(database);
       if (pendingMigrations && !config.skipMigrationQuickCheck) quickCheckMastheadDatabase(database);
       initializeSessionTranscriptFingerprintIndex(database);
-      runLegacyWorkbenchPublicationBackfill(database);
+      if (config.legacyWorkbenchBackfillEnabled !== false) runLegacyWorkbenchPublicationBackfill(database);
       const databaseIdentity = getOrCreateDatabaseIdentity(database);
       const interruptedImportJobIds = recoverInterruptedImportJobs(database);
       const authoringV5PreparationCoordinator = createWorkbenchAuthoringV5PreparationCoordinator(database);
@@ -274,7 +276,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     const sessions = createSessionRepository(database, {
       hostId: `host:${config.host}`,
       hostname: config.host,
-      runtimeKind: defaultLiveRuntime
+      runtimeKind: defaultLiveRuntime,
+      reconcileLiveEvidenceOnEveryEvent: config.liveWorkbenchReconciliationOnEveryEvent
     });
     const liveSessionRepositories = new Map<RuntimeKind, SessionRepository>(
       LIVE_INGEST_RUNTIMES.map((runtime) => [
@@ -284,7 +287,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           : createSessionRepository(database, {
               hostId: `host:${config.host}`,
               hostname: config.host,
-              runtimeKind: runtime
+              runtimeKind: runtime,
+              reconcileLiveEvidenceOnEveryEvent: config.liveWorkbenchReconciliationOnEveryEvent
             })
       ] as const)
     );
@@ -294,9 +298,6 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       includeInLiveProjection: (event) => eventLiveProcessingMode(event) === "immediate"
     });
     const gitSnapshots = canonicalGitSnapshots(database);
-    for (const gitSnapshot of gitSnapshots) {
-      upsertFileEffectsFromGitSnapshot(database, canonicalSessionIdForSource(gitSnapshot.sessionId, liveRuntimeForSourceSessionId(gitSnapshot.sessionId)), gitSnapshot);
-    }
     const gitSnapshotSignatures = new Map(gitSnapshots.map((snapshot) => [snapshot.sessionId, gitSnapshotSignature(snapshot)]));
     const terminalGitSnapshotSessionIds = new Set(gitSnapshots.filter(isTerminalGitSnapshot).map((snapshot) => snapshot.sessionId));
     const completedLiveSessionIds = new Set<string>();
@@ -408,6 +409,10 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     const manualDossierEnrichmentJobs = new Map<string, SessionDossierManualEnrichmentJob>();
     let enrichmentQueueScheduled = false;
     let searchIndexQueueScheduled = false;
+
+  function shouldIndexLiveEvent(event: NormalizedEvent): boolean {
+    return config.liveSearchIndexOnEveryEvent !== false || event.type === "session.completed";
+  }
 
   function queueSessionSearchIndex(sessionId: string | undefined): void {
     if (closed) return;
@@ -706,7 +711,13 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         database.exec("ROLLBACK;");
         throw error;
       }
-      for (const sessionId of touchedSessionIds) queueSessionSearchIndex(sessionId);
+      for (const event of latestEventBySession.values()) {
+        if (!event.sessionId || !shouldIndexLiveEvent(event)) continue;
+        queueSessionSearchIndex(canonicalSessionIdForSource(
+          event.sessionId,
+          liveRuntimeForSourceSessionId(event.sessionId)
+        ));
+      }
       for (const event of latestEventBySession.values()) {
         try {
           if (event.sessionId && isTerminalProtectedSession(event.sessionId)) continue;
@@ -744,8 +755,14 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
                 const sessionId = liveSessionRepositoryForEvent(event).upsertLiveEvent(event);
                 if (sessionId) {
                   rememberCompletedLiveSession(event);
-                  if (shouldDeferLiveEnrichmentToHookTranscript(event)) queueSessionSearchIndex(sessionId);
-                  else queueSessionEnrichment(sessionId);
+                  if (
+                    shouldDeferLiveEnrichmentToHookTranscript(event) ||
+                    config.liveCaptureEnrichmentEnabled === false
+                  ) {
+                    if (shouldIndexLiveEvent(event)) queueSessionSearchIndex(sessionId);
+                  } else {
+                    queueSessionEnrichment(sessionId);
+                  }
                 }
                 appendStoreRecordToRawJournal({
                   recordId: `event:${event.eventId}`,
@@ -1096,6 +1113,35 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
   function cachedSourceScanResult(): SourceScanResult {
     const generatedAt = latestScan?.generatedAt ?? new Date().toISOString();
+    const persistedSources = database.prepare(
+      `SELECT adapter, confidence, endpoint, runtime_version AS runtimeVersion, schema_version AS schemaVersion,
+        source_id AS sourceId, source_kind AS sourceKind, source_path AS path
+      FROM ingest_sources
+      WHERE excluded_at IS NULL
+      ORDER BY source_id`
+    ).all() as Array<{
+      adapter: string;
+      confidence: string;
+      endpoint: string | null;
+      path: string | null;
+      runtimeVersion: string | null;
+      schemaVersion: string | null;
+      sourceId: string;
+      sourceKind: string;
+    }>;
+    const sources = persistedSources.flatMap((source): DiscoveredSource[] => {
+      if (!(ALL_RUNTIME_KINDS as readonly string[]).includes(source.adapter)) return [];
+      return [{
+        confidence: source.confidence as SourceConfidence,
+        endpoint: source.endpoint ?? undefined,
+        path: source.path ?? undefined,
+        runtime: source.adapter as RuntimeKind,
+        runtimeVersion: source.runtimeVersion ?? undefined,
+        schemaVersion: source.schemaVersion ?? undefined,
+        sourceId: source.sourceId,
+        sourceKind: source.sourceKind as SourceKind
+      }];
+    });
     return {
       adapters: getAdapterStatuses(database)
         .map((adapter) => ({
@@ -1105,7 +1151,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           label: adapter.label,
           maturity: adapter.maturity as AdapterMaturity,
           runtime: adapter.runtime,
-          sources: [],
+          sources: sources.filter((source) => source.runtime === adapter.runtime),
           state: adapter.state === "disabled" ? "degraded" : adapter.state
         })),
       generatedAt,
@@ -1121,6 +1167,31 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   async function sourceById(sourceId: string): Promise<DiscoveredSource | undefined> {
     const scanned = latestScan?.adapters.flatMap((adapter) => adapter.sources).find((source) => source.sourceId === sourceId);
     if (scanned) return scanned;
+    const stored = database.prepare(
+      `SELECT adapter, confidence, endpoint, runtime_version AS runtimeVersion, schema_version AS schemaVersion,
+        source_kind AS sourceKind, source_path AS path
+      FROM ingest_sources WHERE source_id = ?`
+    ).get(sourceId) as {
+      adapter: string;
+      confidence: string;
+      endpoint: string | null;
+      path: string | null;
+      runtimeVersion: string | null;
+      schemaVersion: string | null;
+      sourceKind: string;
+    } | undefined;
+    if (stored && (ALL_RUNTIME_KINDS as readonly string[]).includes(stored.adapter)) {
+      return {
+        confidence: stored.confidence as SourceConfidence,
+        endpoint: stored.endpoint ?? undefined,
+        path: stored.path ?? undefined,
+        runtime: stored.adapter as RuntimeKind,
+        runtimeVersion: stored.runtimeVersion ?? undefined,
+        schemaVersion: stored.schemaVersion ?? undefined,
+        sourceId,
+        sourceKind: stored.sourceKind as SourceKind
+      };
+    }
     return (await discoverAllSourcesAndPersist()).find((source) => source.sourceId === sourceId);
   }
 
@@ -1456,6 +1527,9 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         skippedWorkUnits: progressUnits.filter((candidate) => candidate.status === "skipped").length,
         stage: "transcript"
       });
+      // A large historic import can take many minutes. Yield between source
+      // units so health, Workbench, and cancellation remain responsive.
+      await yieldToEventLoop();
     }
 
     const finalUnits = listAllImportWorkUnits(database, { importJobId: controls.importJobId });
@@ -1559,10 +1633,11 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   }
 
   async function resumeInterruptedImports(): Promise<void> {
+    const knownSources = latestScan?.adapters.flatMap((adapter) => adapter.sources) ?? await discoverAllSourcesAndPersist();
     for (const importJobId of interruptedImportJobIds) {
       const job = getImportJob(database, importJobId);
       if (!job) continue;
-      const source = await sourceById(job.sourceId);
+      const source = knownSources.find((candidate) => candidate.sourceId === job.sourceId);
       if (!source) {
         const failedAt = new Date().toISOString();
         updateImportJob(database, importJobId, {
@@ -2291,7 +2366,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
     if (request.method === "POST" && url.pathname === "/sources/import/preview") {
       try {
-        const scan = latestScan ?? (await scanSourcesAndPersist());
+        const scan = latestScan ?? cachedSourceScanResult();
         const body = objectRecord(await optionalJsonBody(request));
         const runtimes = setupRuntimesFromBody(body, scan);
         const scope = importScopeFromBody(body);
@@ -2331,7 +2406,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
     if (request.method === "POST" && url.pathname === "/sources/setup/run") {
       try {
-        const scan = latestScan ?? (await scanSourcesAndPersist());
+        const scan = latestScan ?? cachedSourceScanResult();
         const body = objectRecord(await optionalJsonBody(request));
         const runtimes = setupRuntimesFromBody(body, scan);
         const importScope = importScopeFromBody(body);
@@ -2730,6 +2805,44 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         total,
         scope: "default",
         sessions: workbenchQueueSessionDtos(database, states)
+      };
+      sendJson(request, response, config.allowedOrigins, 200, body);
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/workbench/selection-snapshot") {
+      const rows = database.prepare(
+        `SELECT workbench_session_state.session_id AS sessionId,
+                workbench_session_state.transcript_status AS transcriptStatus,
+                workbench_session_state.quality_status AS qualityStatus,
+                EXISTS (
+                  SELECT 1
+                  FROM messages
+                  WHERE messages.session_id = workbench_session_state.session_id
+                    AND messages.role IN ('user', 'assistant')
+                    AND trim(COALESCE(messages.text_redacted, '')) <> ''
+                    AND lower(trim(messages.text_redacted)) NOT IN ('codex hook event', 'runtime signal', 'unknown', 'shell')
+                ) AS hasNarrativeEvidence
+         FROM workbench_session_state
+         JOIN sessions ON sessions.session_id = workbench_session_state.session_id
+         WHERE workbench_session_state.publication_status = 'publish_path'
+           AND sessions.deleted_at IS NULL
+         ORDER BY COALESCE(workbench_session_state.last_activity_at, sessions.last_activity_at, workbench_session_state.updated_at) DESC,
+           workbench_session_state.session_id DESC`
+      ).all() as Array<{ sessionId: string; transcriptStatus: string; qualityStatus: string; hasNarrativeEvidence: number }>;
+      const sessionIds = rows.map((row) => row.sessionId);
+      const body: WorkbenchSelectionSnapshotResponse = {
+        compileReadySessionIds: rows
+          .filter((row) =>
+            (row.transcriptStatus === "available" || row.transcriptStatus === "imported") &&
+            row.qualityStatus === "passed" &&
+            row.hasNarrativeEvidence === 1
+          )
+          .map((row) => row.sessionId),
+        generatedAt: new Date().toISOString(),
+        ok: true,
+        sessionIds,
+        total: sessionIds.length
       };
       sendJson(request, response, config.allowedOrigins, 200, body);
       return;
@@ -3405,7 +3518,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     if (request.method === "POST" && url.pathname === "/sources/connect") {
       try {
         const body = JSON.parse(await readBody(request)) as ConnectSourcesRequest;
-        const scan = latestScan ?? (await scanSourcesAndPersist());
+        const scan = latestScan ?? cachedSourceScanResult();
         const result = connectSelectedSources(database, scan, body, async (kind, runtime, sources, controls) => {
           return runImportWorkerForSources(
             kind,
@@ -4770,6 +4883,12 @@ type WorkbenchNotAddedDetailRow = WorkbenchSessionMetadataRow & {
 
 function workbenchQueueSessionDtos(database: MastheadDatabase, states: WorkbenchSessionStateRecord[]): WorkbenchQueueSessionDto[] {
   const metadata = workbenchSessionMetadata(database, states.map((state) => state.sessionId));
+  const canonicalEvidenceBySessionId = new Map(
+    getAuthoringEvidenceSnapshot(database, states.map((state) => state.sessionId)).sessions.map((session) => [
+      session.revisionInput.sessionId,
+      session.usableCanonicalEvidence
+    ])
+  );
   return states.flatMap((state) => {
     const session = metadata.get(state.sessionId);
     if (!session) return [];
@@ -4785,6 +4904,7 @@ function workbenchQueueSessionDtos(database: MastheadDatabase, states: Workbench
         compileReady: isWorkbenchAuthoringV5CompileReady(database, state),
         adrStatus: state.adrStatus,
         bugFixTraceStatus: state.runbookStatus,
+        canonicalEvidenceReady: canonicalEvidenceBySessionId.get(state.sessionId) === true,
         incidentTimelineStatus: state.incidentTimelineStatus,
         lastActivityAt: session.lastActivityAt,
         latestActivity: listWorkbenchActivity(database, { limit: 1, sessionId: state.sessionId }).map(workbenchActivityDto)[0],

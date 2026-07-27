@@ -252,7 +252,11 @@ function validateSession(
         sessionId: entry.sessionId
       }, { sessionOrdinal });
     }
-    if (evidence?.role === "user" && ["change", "outcome", "verification"].includes(rule.supportKind)) {
+    if (
+      evidence?.role === "user" &&
+      !isLegacyEmbeddedAgentTranscript(evidence) &&
+      ["change", "outcome", "verification"].includes(rule.supportKind)
+    ) {
       valid = false;
       const semantics = rule.supportKind === "change"
         ? { claim: "change", evidence: "performed work" }
@@ -821,8 +825,8 @@ function validateArtifact(input: GuidedAuthoringValidationInput, artifact: Guide
     const message = artifact.kind === "runbook" && missing.axis === "failure or rollback handling"
       ? "Guided runbook draft needs failure handling. Add failure, fallback, recovery, revert, or rollback guidance in deadEnds, risksOrGaps, or preventionNotes, then support that exact field with a verbatim canonical evidence excerpt."
       : artifact.kind === "incident_timeline" && missing.axis === "recovery verification"
-        ? "Keep this supported incident timeline. Set status to recovered, resolved, or closed, then support status with the exact canonical recovery checkpoint that records passed, recovered, restored, or exactly-once verification; do not delete the artifact or dismiss its opportunity to escape this finding."
-      : `Guided ${artifact.kind} draft is missing the ${missing.axis} reuse axis.`;
+        ? "Incident timelines require a terminal status supported by an exact canonical recovery checkpoint that records passed, recovered, restored, or exactly-once verification. If no positive recovery verification exists, use an evidence-backed dismissal or a valid changed_kind artifact; do not invent a terminal recovery status."
+        : `Guided ${artifact.kind} draft is missing the ${missing.axis} reuse axis.`;
     add(3, artifactFinding("incomplete_artifact_rubric", message, `/artifacts/${artifactOrdinal}/output${missing.path}`, artifact), { sessionOrdinal, artifactOrdinal });
   }
   if (artifact.kind === "runbook") {
@@ -1175,6 +1179,10 @@ function assignmentOrdinal(input: GuidedAuthoringValidationInput, sessionId: str
   return index < 0 ? Number.MAX_SAFE_INTEGER : index;
 }
 function normalize(value: string): string { return value.replace(/\s+/gu, " ").trim(); }
+
+function isLegacyEmbeddedAgentTranscript(evidence: WorkbenchValidationEvidence): boolean {
+  return evidence.kind === "message" && /^### Session update\s+\*\*agent\*\*:/u.test(evidence.text.trim());
+}
 function tokens(value: string): string[] { return normalize(value).toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []; }
 function significantTokens(value: string): string[] { return tokens(value).filter((token) => token.length >= 4 && !STOPWORDS.has(token)); }
 function shingles(value: string): Set<string> {

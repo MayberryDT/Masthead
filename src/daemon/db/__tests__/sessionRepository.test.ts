@@ -23,6 +23,30 @@ afterEach(async () => {
 });
 
 describe("session repository", () => {
+  test("defers expensive Workbench reconciliation for live sessions until completion when configured", async () => {
+    const db = await openMigratedDatabase();
+    const repository = createSessionRepository(db, {
+      hostId: "host:test",
+      hostname: "masthead-test-host",
+      reconcileLiveEvidenceOnEveryEvent: false,
+      runtimeKind: "opencode",
+      runtimeVersion: "codex-test"
+    });
+
+    const sessionId = repository.upsertLiveEvent(liveEvent("start", "session.started", { title: "Long-running live session" }))!;
+    repository.upsertLiveEvent(liveEvent("file", "file.changed", { path: "src/large-session.ts" }));
+
+    expect(readWorkbenchSessionState(db, sessionId)).toBeUndefined();
+
+    repository.upsertLiveEvent(liveEvent("complete", "session.completed", { outcome: "completed" }));
+
+    expect(readWorkbenchSessionState(db, sessionId)).toMatchObject({
+      publicationStatus: "publish_path",
+      transcriptStatus: "imported"
+    });
+    db.close();
+  });
+
   test("live evidence changes reopen an automatic suppression", async () => {
     const db = await openMigratedDatabase();
     const repository = createSessionRepository(db, {

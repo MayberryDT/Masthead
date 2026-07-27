@@ -19,6 +19,7 @@ import {
   getAuthoringEvidenceManifest,
   getAuthoringEvidencePage,
   guidedAuthoringEvidenceRevision,
+  guidedAuthoringEvidenceRevisionInputs,
   guidedAuthoringEvidenceRevisionFromInputs
 } from "../evidenceCatalog.ts";
 
@@ -70,7 +71,7 @@ describe("authoring evidence catalog", () => {
     expect(authoringEvidenceRevision.toString()).not.toContain("guidedAuthoringEvidenceRevision");
   });
 
-  test("takes one strict snapshot traversal per lexicographically ordered session", async () => {
+  test("keeps guided revisions on the canonical per-session change index", async () => {
     const db = await testDb();
     seedOneMessageSession(db, "session:b");
     seedOneMessageSession(db, "session:a");
@@ -87,11 +88,9 @@ describe("authoring evidence catalog", () => {
     ]);
     traversal.mockClear();
     expect(guidedAuthoringEvidenceRevision(db, ["session:b", "session:a"])).toMatch(/^sha256:[a-f0-9]{64}$/);
-    expect(traversal).toHaveBeenCalledTimes(2);
-    expect(traversal.mock.calls.map(([, query]) => query)).toEqual([
-      { order: "asc", sessionId: "session:a" },
-      { order: "asc", sessionId: "session:b" }
-    ]);
+    expect(guidedAuthoringEvidenceRevisionInputs(db, ["session:b", "session:a"]).map(({ sessionId }) => sessionId))
+      .toEqual(["session:a", "session:b"]);
+    expect(traversal).not.toHaveBeenCalled();
     traversal.mockRestore();
     db.close();
   });
@@ -111,12 +110,7 @@ describe("authoring evidence catalog", () => {
     const db = await testDb();
     seedOneMessageSession(db, "session:b");
     seedMixedSession(db, "session:a");
-    const snapshot = getAuthoringEvidenceSnapshot(db, ["session:b", "session:a"]);
-    const inputs = snapshot.sessions.map(({ revisionInput }) => revisionInput);
-    expect(inputs).toEqual([
-      { sessionId: "session:a", sessionDigest: authoringEvidenceRevision(db, ["session:a"]) },
-      { sessionId: "session:b", sessionDigest: authoringEvidenceRevision(db, ["session:b"]) }
-    ]);
+    const inputs = guidedAuthoringEvidenceRevisionInputs(db, ["session:b", "session:a"]);
     const dbBacked = guidedAuthoringEvidenceRevision(db, ["session:b", "session:a"]);
     db.close();
 
@@ -370,6 +364,7 @@ describe("authoring evidence catalog", () => {
     ).run("session:projection-revision");
 
     const codexRevision = authoringEvidenceRevision(db, ["session:projection-revision"]);
+    const guidedCodexRevision = guidedAuthoringEvidenceRevision(db, ["session:projection-revision"]);
     expect(getAuthoringEvidencePage(db, { sessionId: "session:projection-revision" }).items[0]).toMatchObject({
       lowValue: true,
       narrativeText: ""
@@ -380,6 +375,7 @@ describe("authoring evidence catalog", () => {
     ).run("session:projection-revision");
 
     expect(authoringEvidenceRevision(db, ["session:projection-revision"])).not.toBe(codexRevision);
+    expect(guidedAuthoringEvidenceRevision(db, ["session:projection-revision"])).not.toBe(guidedCodexRevision);
     db.close();
   });
 

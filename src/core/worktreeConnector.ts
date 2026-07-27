@@ -100,7 +100,7 @@ export function isAllowedReadOnlyBridgeRequest(method: string | undefined, pathn
   if (method !== "GET") return false;
   if (staticReadOnlyBridgePaths.has(pathname)) return true;
   return (
-    /^\/workbench\/authoring\/requests\/[^/]+$/.test(pathname) ||
+    /^\/workbench\/authoring\/requests\/[^/]+(?:\/receipts)?$/.test(pathname) ||
     /^\/workbench\/authoring\/assignments\/[^/]+\/(?:review|scaffold|receipt)$/.test(pathname) ||
     /^\/workbench\/authoring\/v5\/requests\/[^/]+(?:\/(?:bootstrap|receipt))?$/.test(pathname) ||
     /^\/workbench\/authoring\/v5\/packs\/[^/]+\/scaffold$/.test(pathname) ||

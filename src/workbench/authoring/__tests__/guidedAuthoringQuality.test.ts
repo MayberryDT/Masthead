@@ -246,6 +246,54 @@ describe("validateGuidedAuthoringDraft", () => {
     ]);
   });
 
+  test("accepts a legacy transcript-wrapped agent result despite its imported user role", () => {
+    const input = validInput();
+    const evidenceByRef = new Map(input.evidenceByRef);
+    evidenceByRef.set("evidence:result", {
+      ...input.evidenceByRef.get("evidence:result")!,
+      role: "user",
+      text: [
+        "### Session update",
+        "",
+        "**agent**:",
+        "Implemented a pure validator with stable field-specific quality findings; verification was not run."
+      ].join("\n")
+    });
+    input.evidenceByRef = evidenceByRef;
+
+    expect(validateGuidedAuthoringDraft(input)).toEqual({ accepted: true, findings: [] });
+  });
+
+  test("accepts passed verification in a legacy transcript-wrapped agent result", () => {
+    const input = validInput();
+    const draft = input.bundle.sessionEnrichments[0]!;
+    const excerpt = "Verification passed: npm run test passed: 12 tests.";
+    input.evidenceByRef = new Map(input.evidenceByRef).set("evidence:result", {
+      ...input.evidenceByRef.get("evidence:result")!,
+      role: "user",
+      text: [
+        "### Session update",
+        "",
+        "**agent**:",
+        "Implemented a pure validator with stable field-specific quality findings; verification was not run.",
+        excerpt
+      ].join("\n")
+    });
+    draft.enrichment.sessionDossier.verification = {
+      status: "passed",
+      summary: "npm run test passed with 12 tests.",
+      commands: [],
+      failures: [],
+      evidenceRefs: [ref("evidence:result")]
+    };
+    draft.claimSupport.push({
+      ...support("/sessionDossier/verification/summary", "verification", excerpt),
+      evidenceRef: "evidence:result"
+    });
+
+    expect(validateGuidedAuthoringDraft(input)).toEqual({ accepted: true, findings: [] });
+  });
+
   test("emits exact envelope and missing-session finding identities in stable order", () => {
     const input = validInput();
     input.bundle.assignmentId = "assignment:tampered";
@@ -1623,7 +1671,7 @@ describe("validateGuidedAuthoringDraft", () => {
       { code: "incomplete_artifact_rubric", message: "Guided incident_timeline draft is missing the root cause reuse axis.", severity: "error", path: "/artifacts/0/output/rootCause", sessionId: "session:a", artifactDraftId: "draft:incident", artifactKind: "incident_timeline" },
       { code: "missing_claim_support", message: "Populated claim-bearing field requires canonical claim support: rootCause.", severity: "error", path: "/artifacts/0/output/rootCause", sessionId: "session:a", artifactDraftId: "draft:incident", artifactKind: "incident_timeline" },
       { code: "missing_root_cause_support", message: "A causal root-cause assertion requires direct root_cause support; otherwise state that root cause is unknown.", severity: "error", path: "/artifacts/0/output/rootCause", sessionId: "session:a", artifactDraftId: "draft:incident", artifactKind: "incident_timeline" },
-      { code: "incomplete_artifact_rubric", message: "Keep this supported incident timeline. Set status to recovered, resolved, or closed, then support status with the exact canonical recovery checkpoint that records passed, recovered, restored, or exactly-once verification; do not delete the artifact or dismiss its opportunity to escape this finding.", severity: "error", path: "/artifacts/0/output/status", sessionId: "session:a", artifactDraftId: "draft:incident", artifactKind: "incident_timeline" },
+      { code: "incomplete_artifact_rubric", message: "Incident timelines require a terminal status supported by an exact canonical recovery checkpoint that records passed, recovered, restored, or exactly-once verification. If no positive recovery verification exists, use an evidence-backed dismissal or a valid changed_kind artifact; do not invent a terminal recovery status.", severity: "error", path: "/artifacts/0/output/status", sessionId: "session:a", artifactDraftId: "draft:incident", artifactKind: "incident_timeline" },
       { code: "incomplete_artifact_rubric", message: "Guided incident_timeline draft is missing the ordered events reuse axis.", severity: "error", path: "/artifacts/0/output/timeline", sessionId: "session:a", artifactDraftId: "draft:incident", artifactKind: "incident_timeline" },
       { code: "invalid_timeline_order", message: "Incident timeline entries must have valid timestamps in chronological order.", severity: "error", path: "/artifacts/0/output/timeline/0/at", sessionId: "session:a", artifactDraftId: "draft:incident", artifactKind: "incident_timeline" }
     ]);
@@ -1955,7 +2003,7 @@ function rubricIdentityCases(): Array<{ name: string; input: () => GuidedAuthori
     message: kind === "runbook" && axis === "failure or rollback handling"
       ? "Guided runbook draft needs failure handling. Add failure, fallback, recovery, revert, or rollback guidance in deadEnds, risksOrGaps, or preventionNotes, then support that exact field with a verbatim canonical evidence excerpt."
       : kind === "incident_timeline" && axis === "recovery verification"
-        ? "Keep this supported incident timeline. Set status to recovered, resolved, or closed, then support status with the exact canonical recovery checkpoint that records passed, recovered, restored, or exactly-once verification; do not delete the artifact or dismiss its opportunity to escape this finding."
+        ? "Incident timelines require a terminal status supported by an exact canonical recovery checkpoint that records passed, recovered, restored, or exactly-once verification. If no positive recovery verification exists, use an evidence-backed dismissal or a valid changed_kind artifact; do not invent a terminal recovery status."
         : `Guided ${kind} draft is missing the ${axis} reuse axis.`,
     severity: "error",
     path: `/artifacts/0/output${path}`,

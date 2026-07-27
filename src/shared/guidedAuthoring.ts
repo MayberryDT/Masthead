@@ -107,7 +107,6 @@ export type GuidedAuthoringCapabilitiesV4Dto = {
   instanceManifest: string;
   instanceId: string;
   maxSessionsPerAssignment: 12;
-  canarySessions: 3;
   operations: ["start", "inspect", "scaffold", "save", "review", "finish"];
 };
 
@@ -130,7 +129,6 @@ export function isGuidedAuthoringCapabilitiesDto(
     capabilities.bundleVersion === "workbench-authoring-v4" &&
     capabilities.policyVersion === GUIDED_AUTHORING_POLICY_VERSION &&
     capabilities.maxSessionsPerAssignment === 12 &&
-    capabilities.canarySessions === 3 &&
     isRequiredTrimmedString(capabilities.databaseId) &&
     isRequiredTrimmedString(capabilities.buildSha) &&
     isRequiredTrimmedString(capabilities.instanceId) &&

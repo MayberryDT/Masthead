@@ -19,7 +19,10 @@ import {
   type GuidedAuthoringStableRequestBinding
 } from "../../daemon/db/guidedAuthoringRepository.ts";
 import { recordGuidedEnrichmentProvenanceInTransaction } from "../../daemon/db/enrichmentRepository.ts";
-import { resetGuidedAssignmentWorkbenchInTransaction } from "../../daemon/db/workbenchPipelineRepository.ts";
+import {
+  recordWorkbenchActivity,
+  resetGuidedAssignmentWorkbenchInTransaction
+} from "../../daemon/db/workbenchPipelineRepository.ts";
 import { getSessionDossier } from "../../daemon/db/sessionDossierRepository.ts";
 import { type MastheadDatabase, withImmediateTransaction } from "../../daemon/db/sqlite.ts";
 import {
@@ -59,6 +62,7 @@ import type {
   GuidedQualityOpportunity
 } from "./guidedAuthoringQuality.ts";
 import * as guidedQuality from "./guidedAuthoringQuality.ts";
+import { isPositiveVerificationEvidence } from "./artifactQuality.ts";
 import {
   applyGuidedSessionEnrichmentInTransaction,
   publishStagedGuidedArtifactsInTransaction,
@@ -206,7 +210,7 @@ export function startGuidedAssignment(
     listGuidedOpportunities(db, request.requestId).map((opportunity) => [opportunity.opportunityId, opportunity])
   );
   const opportunities = assignment.opportunityIds.map((opportunityId) => opportunitiesById.get(opportunityId)!).filter(Boolean);
-  return {
+  const result: StartGuidedAssignmentResult = {
     assignment,
     authoringContract: guidedDraftContract(input.command, assignment.assignmentId),
     editorialBrief: {
@@ -224,6 +228,7 @@ export function startGuidedAssignment(
         }
       : authoritativeReview.nextAction
   };
+  return result;
 }
 
 export function buildGuidedDraftScaffold(
@@ -245,15 +250,25 @@ export function buildGuidedDraftScaffold(
     evidenceRef: `REPLACE_WITH_${owner}_EVIDENCE_ITEM_ID`,
     excerpt: "REPLACE_WITH_EXACT_CANONICAL_EVIDENCE_EXCERPT"
   });
-  const placeholderEvidenceRef = (id: string) => ({
-    id,
-    kind: "event" as const,
-    observedAt: "1970-01-01T00:00:00.000Z",
-    source: "REPLACE_WITH_CANONICAL_EVIDENCE_SOURCE"
-  });
+  const pointer = (candidate: ScaffoldEvidenceCandidate | undefined, fallbackId: string) =>
+    guidedScaffoldEvidencePointer(candidate, fallbackId);
   const opportunityScaffolds = assignment.opportunityIds.map((opportunityId) => {
     const opportunity = opportunitiesById.get(opportunityId);
     if (!opportunity) throw new Error(`guided_opportunity_not_found:${opportunityId}`);
+    if (
+      opportunity.suggestedKind === "incident_timeline" &&
+      !hasPositiveIncidentRecoveryVerification(opportunity, evidenceByRef)
+    ) {
+      return {
+        artifact: undefined,
+        disposition: {
+          disposition: "dismissed" as const,
+          evidenceRefs: opportunity.evidenceRefs,
+          opportunityId: opportunity.opportunityId,
+          rationale: "REPLACE_WITH_EVIDENCE_BACKED_DISPOSITION_RATIONALE"
+        }
+      };
+    }
     const draftId = stableRecordId("guided-artifact-draft", [
       assignment.assignmentId,
       opportunity.opportunityId,
@@ -272,18 +287,32 @@ export function buildGuidedDraftScaffold(
     };
   });
   const draft: GuidedAuthoringBundleV4 = {
-    artifacts: opportunityScaffolds.map(({ artifact }) => artifact),
+    artifacts: opportunityScaffolds.flatMap(({ artifact }) => artifact ? [artifact] : []),
     assignmentId: assignment.assignmentId,
     bundleVersion: "workbench-authoring-v4",
     evidenceRevision: assignment.evidenceRevision,
     opportunityDispositions: opportunityScaffolds.map(({ disposition }) => disposition),
     sessionEnrichments: assignment.sessionIds.map((sessionId) => {
-      const titleSupport = placeholderSupport("TITLE", "/sessionTitle/text", "reuse");
-      const summarySupport = placeholderSupport("SUMMARY", "/sessionSummary/text", "outcome");
-      const purposeSupport = placeholderSupport("PURPOSE", "/sessionDossier/purpose", "purpose");
-      const outcomeSupport = placeholderSupport("OUTCOME", "/sessionDossier/outcome", "outcome");
-      const keyWorkSupport = placeholderSupport("KEY_WORK", "/sessionDossier/keyWork/0", "change");
-      const verificationSupport = placeholderSupport("VERIFICATION", "/sessionDossier/verification/summary", "verification");
+      const selected = selectGuidedSessionEvidence(sessionId, evidenceByRef);
+      const support = (
+        owner: "TITLE" | "SUMMARY" | "PURPOSE" | "OUTCOME" | "KEY_WORK" | "VERIFICATION",
+        path: string,
+        supportKind: "reuse" | "outcome" | "purpose" | "change" | "verification",
+        candidate: ScaffoldEvidenceCandidate | undefined
+      ) => candidate?.evidence
+        ? {
+            path,
+            supportKind,
+            evidenceRef: candidate.ref,
+            excerpt: guidedScaffoldExcerpt(candidate.evidence)
+          }
+        : placeholderSupport(owner, path, supportKind);
+      const titleSupport = support("TITLE", "/sessionTitle/text", "reuse", selected.change);
+      const summarySupport = support("SUMMARY", "/sessionSummary/text", "outcome", selected.change);
+      const purposeSupport = support("PURPOSE", "/sessionDossier/purpose", "purpose", selected.problem);
+      const outcomeSupport = support("OUTCOME", "/sessionDossier/outcome", "outcome", selected.change);
+      const keyWorkSupport = support("KEY_WORK", "/sessionDossier/keyWork/0", "change", selected.change);
+      const verificationSupport = support("VERIFICATION", "/sessionDossier/verification/summary", "verification", selected.verification);
       return {
         sessionId,
         enrichment: {
@@ -295,13 +324,13 @@ export function buildGuidedDraftScaffold(
             text: "REPLACE_WITH_SPECIFIC_SESSION_TITLE",
             basis: "dominant_work" as const,
             confidence: "low" as const,
-            evidenceRefs: [placeholderEvidenceRef(titleSupport.evidenceRef)]
+            evidenceRefs: [pointer(selected.change, titleSupport.evidenceRef)]
           },
           sessionSummary: {
             text: "REPLACE_WITH_SPECIFIC_SESSION_SUMMARY",
             state: "unknown" as const,
             confidence: "low" as const,
-            evidenceRefs: [placeholderEvidenceRef(summarySupport.evidenceRef)]
+            evidenceRefs: [pointer(selected.change, summarySupport.evidenceRef)]
           },
           sessionDossier: {
             purpose: "REPLACE_WITH_SESSION_PURPOSE",
@@ -311,13 +340,18 @@ export function buildGuidedDraftScaffold(
             blockers: [],
             warnings: [],
             evidenceRefs: [purposeSupport, outcomeSupport, keyWorkSupport]
-              .map((support) => placeholderEvidenceRef(support.evidenceRef)),
+              .map((support) => pointer(
+                support.evidenceRef === selected.problem?.ref
+                  ? selected.problem
+                  : selected.change,
+                support.evidenceRef
+              )),
             verification: {
               status: "unknown" as const,
               summary: "REPLACE_WITH_SUPPORTED_VERIFICATION_RESULT_OR_VERIFICATION_NOT_RUN",
               commands: [],
               failures: [],
-              evidenceRefs: [placeholderEvidenceRef(verificationSupport.evidenceRef)]
+              evidenceRefs: [pointer(selected.verification, verificationSupport.evidenceRef)]
             },
             continuation: { openQuestions: [], constraints: [] }
           }
@@ -340,9 +374,25 @@ export function buildGuidedDraftScaffold(
     nextAction: {
       command: `${input.command} workbench author save --assignment ${assignment.assignmentId} --file ${guidedDraftFilePath(assignment.assignmentId)} --json`,
       kind: "save",
-      reason: "Edit the scaffold into session-work prose: preserve each prefilled claimSupport path and supportKind, replace its placeholder evidenceRef ID and excerpt from inspected evidence, and replace the matching owner placeholder with that evidence item's full {id, kind, observedAt, source} object; preserve daemon-prefilled artifact IDs and artifact-support IDs; put each supported result in its capsule summary, never leave a result-bearing sessionSummary.state unknown even when verification was not run, and keep work completion separate from verification. Every sessionSummary.text must be nonblank. When no outcome or key work is supported and verification is missing or unknown, use the pure summary 'Verification not run.' with low confidence instead of relying on a warning. Write summaries as natural grammatical past-tense or result prose; never form them by prefixing an imperative or title fragment with 'Completed'. Do not narrate that evidence records, shows, contains, or fails to establish a verification result. Preserve direct causal evidence with the prefilled root_cause support; fix its supportKind instead of deleting rootCause or replacing it with unknown. Keep conditional rollback rules in risksOrGaps; use deadEnds only for an approach canonical evidence says was actually attempted and failed or abandoned. Keep compound performed actions in one supported runbook step, remove guided-authoring, evidence-review, verification-boundary, optional-artifact, and pipeline narration, then save."
+      reason: "Edit the scaffold into session-work prose: preserve each prefilled claimSupport path and supportKind. Keep its canonical evidenceRef ID and exact excerpt unless a more specific inspected item is needed; when replacing one, replace the matching owner evidenceRefs entry with that item's full {id, kind, observedAt, source} object. Preserve daemon-prefilled artifact IDs and artifact-support IDs; put each supported result in its capsule summary, never leave a result-bearing sessionSummary.state unknown even when verification was not run, and keep work completion separate from verification. Every sessionSummary.text must be nonblank. When no outcome or key work is supported and verification is missing or unknown, use the pure summary 'Verification not run.' with low confidence instead of relying on a warning. Write summaries as natural grammatical past-tense or result prose; never form them by prefixing an imperative or title fragment with 'Completed'. Do not narrate that evidence records, shows, contains, or fails to establish a verification result. Preserve direct causal evidence with the prefilled root_cause support; fix its supportKind instead of deleting rootCause or replacing it with unknown. If an incident opportunity starts as dismissed because canonical evidence has no positive recovery verification, provide a grounded dismissal rationale or replace it with a valid changed_kind artifact; do not invent a terminal recovery status. Keep conditional rollback rules in risksOrGaps; use deadEnds only for an approach canonical evidence says was actually attempted and failed or abandoned. Keep compound performed actions in one supported runbook step, remove guided-authoring, evidence-review, verification-boundary, optional-artifact, and pipeline narration, then save."
     }
   };
+}
+
+function hasPositiveIncidentRecoveryVerification(
+  opportunity: GuidedAuthoringOpportunityRecord,
+  evidenceByRef: ReadonlyMap<string, WorkbenchValidationEvidence>
+): boolean {
+  return opportunity.evidenceRefs.some((evidenceRef) => {
+    const evidence = evidenceByRef.get(evidenceRef);
+    if (!evidence) return false;
+    return isPositiveVerificationEvidence({
+      evidenceRef,
+      excerpt: evidence.text,
+      path: "status",
+      supportKind: "verification"
+    }, evidence);
+  });
 }
 
 function buildGuidedArtifactScaffold(
@@ -357,7 +407,7 @@ function buildGuidedArtifactScaffold(
     evidenceRef: string
   ) => ({
     evidenceRef,
-    excerpt: "REPLACE_WITH_EXACT_CANONICAL_EVIDENCE_EXCERPT",
+    excerpt: guidedScaffoldExcerpt(evidenceByRef.get(evidenceRef)),
     path,
     supportKind
   });
@@ -471,6 +521,70 @@ type ScaffoldEvidenceCandidate = {
   evidence?: WorkbenchValidationEvidence;
   ref: string;
 };
+
+type GuidedSessionScaffoldEvidence = {
+  change?: ScaffoldEvidenceCandidate;
+  problem?: ScaffoldEvidenceCandidate;
+  verification?: ScaffoldEvidenceCandidate;
+};
+
+function selectGuidedSessionEvidence(
+  sessionId: string,
+  evidenceByRef: ReadonlyMap<string, WorkbenchValidationEvidence>
+): GuidedSessionScaffoldEvidence {
+  const candidates = [...evidenceByRef.entries()]
+    .filter(([, evidence]) => evidence.sessionId === sessionId && !evidence.lowValue && normalizedScaffoldExcerpt(evidence.text).length >= 20)
+    .map(([ref, evidence]) => ({ evidence, ref }))
+    .sort(compareScaffoldEvidence);
+  const pick = (
+    role: "problem" | "change" | "verification",
+    allowUser: boolean
+  ): ScaffoldEvidenceCandidate | undefined => {
+    const eligible = allowUser ? candidates : candidates.filter(({ evidence }) => evidence?.role !== "user");
+    const ranked = eligible.map((candidate) => ({
+      candidate,
+      score: scaffoldEvidenceScore(role, candidate.evidence)
+    })).sort((left, right) => right.score - left.score || compareScaffoldEvidence(left.candidate, right.candidate));
+    return ranked.find(({ score }) => score > 0)?.candidate ?? eligible.at(-1);
+  };
+  return {
+    change: pick("change", false),
+    problem: pick("problem", true),
+    verification: pick("verification", false)
+  };
+}
+
+function guidedScaffoldEvidencePointer(candidate: ScaffoldEvidenceCandidate | undefined, fallbackId: string) {
+  if (!candidate?.evidence) {
+    return {
+      id: fallbackId,
+      kind: "event" as const,
+      observedAt: "1970-01-01T00:00:00.000Z",
+      source: "REPLACE_WITH_CANONICAL_EVIDENCE_SOURCE"
+    };
+  }
+  return {
+    id: candidate.ref,
+    kind: guidedScaffoldEvidenceKind(candidate.evidence.kind),
+    observedAt: candidate.evidence.observedAt,
+    source: "canonical" as const
+  };
+}
+
+function guidedScaffoldEvidenceKind(kind: WorkbenchValidationEvidence["kind"]) {
+  if (kind === "tool_call" || kind === "tool_result") return "command" as const;
+  if (kind === "file_effect") return "file_change" as const;
+  return "event" as const;
+}
+
+function guidedScaffoldExcerpt(evidence: WorkbenchValidationEvidence | undefined): string {
+  const excerpt = normalizedScaffoldExcerpt(evidence?.text ?? "");
+  return excerpt.length >= 20 ? excerpt.slice(0, 600) : "REPLACE_WITH_EXACT_CANONICAL_EVIDENCE_EXCERPT";
+}
+
+function normalizedScaffoldExcerpt(value: string): string {
+  return value.replace(/\s+/gu, " ").trim();
+}
 
 function selectGuidedArtifactEvidence(
   refs: string[],
@@ -648,6 +762,26 @@ function observeGuidedValidationRead(db: MastheadDatabase, family: GuidedValidat
   guidedServiceTestHooks.get(db)?.beforeValidationStateRead?.(family);
 }
 
+function recordGuidedAssignmentActivity(
+  db: MastheadDatabase,
+  assignment: Pick<GuidedAuthoringAssignmentDto, "assignmentId" | "requestId" | "sessionIds"> | string,
+  details: Record<string, unknown>,
+  eventType: string,
+  summary: string
+): void {
+  const sessionId = typeof assignment === "string" ? assignment : assignment.sessionIds[0]!;
+  recordWorkbenchActivity(db, {
+    actor: { id: "guided_authoring", kind: "agent" },
+    details: {
+      ...details,
+      ...(typeof assignment === "string" ? {} : { assignmentId: assignment.assignmentId, requestId: assignment.requestId })
+    },
+    eventType,
+    sessionId,
+    summary
+  });
+}
+
 export function saveGuidedDraft(
   db: MastheadDatabase,
   input: SaveGuidedDraftInput
@@ -679,6 +813,13 @@ export function saveGuidedDraft(
       draft: input.draft,
       findings: validation.findings
     });
+    recordGuidedAssignmentActivity(db, assignment, {
+      findingCount: validation.findings.length,
+      requestId: assignment.requestId,
+      validation: validation.accepted ? "passed" : "needs_revision"
+    }, "guided_draft_saved", validation.accepted
+      ? "Guided draft saved and validation passed"
+      : "Guided draft saved; revision is needed");
     bumpDataRevisionInTransaction(db, "workbench");
     return {
       changedRevision: false,
@@ -736,15 +877,7 @@ export function finishGuidedAssignment(
     if (assignment.acceptedDraftRevision === undefined) throw new Error("guided_assignment_not_ready");
     const request = getGuidedAuthoringRequest(db, assignment.requestId);
     if (!request) throw new Error("guided_request_not_found");
-    const hasCurrentCanaryApproval = assignment.canary && listGuidedOperatorReviews(db, assignment.assignmentId)
-      .some((review) => review.decision === "approved" && review.draftRevision === assignment.acceptedDraftRevision);
-    const ready = (!assignment.canary && assignment.status === "ready_to_finish") || (
-      assignment.canary &&
-      assignment.status === "staged_canary" &&
-      request.status === "awaiting_canary_approval" &&
-      hasCurrentCanaryApproval
-    );
-    if (!ready) throw new Error("guided_assignment_not_ready");
+    if (assignment.status !== "ready_to_finish") throw new Error("guided_assignment_not_ready");
     const accepted = listGuidedDraftReviews(db, assignment.assignmentId).find(({ revision }) => (
       revision === assignment.acceptedDraftRevision
     ));
@@ -820,6 +953,10 @@ export function finishGuidedAssignment(
     publicationBoundary(db, "after_receipt_insert");
     const transition = transitionGuidedAssignmentAfterReceiptInTransaction(db, assignment.assignmentId, stored);
     publicationBoundary(db, "after_request_or_next_assignment_transition");
+    recordGuidedAssignmentActivity(db, assignment, {
+      completedAt: stored.completedAt,
+      requestId: assignment.requestId
+    }, "guided_assignment_published", "Guided assignment published");
     bumpDataRevisionInTransaction(db, "logbook");
     bumpDataRevisionInTransaction(db, "workbench");
     return {
@@ -1013,6 +1150,15 @@ export function inspectGuidedAssignment(
       });
     }
     const state = guidedCoverageState(db, assignment, assignment.evidenceRevision);
+    if (completionBearing && evidence.items.length > 0) {
+      recordGuidedAssignmentActivity(db, assignment, {
+        evidenceItemsRead: evidence.items.length,
+        requestId: assignment.requestId,
+        sessionId,
+        sessionsComplete: state.coverage.filter(({ complete }) => complete).length,
+        sessionsTotal: state.coverage.length
+      }, "guided_evidence_inspected", "Guided evidence inspection advanced");
+    }
     const changesAfter = (db.prepare("SELECT total_changes() AS changes").get() as { changes: number }).changes;
     if (changesAfter > changesBefore) bumpDataRevisionInTransaction(db, "workbench");
     return {
@@ -1044,7 +1190,7 @@ export function reviewGuidedAssignment(
 ): GuidedAuthoringReviewDto {
   const assignment = getGuidedAssignment(db, input.assignmentId);
   if (!assignment) throw new Error("guided_assignment_not_found");
-  const locked = ["staged_canary", "ready_to_finish", "completed"].includes(assignment.status);
+  const locked = ["ready_to_finish", "completed"].includes(assignment.status);
   const liveRevision = evidenceCatalog.guidedAuthoringEvidenceRevision(db, assignment.sessionIds);
   const effectiveRevision = locked ? assignment.evidenceRevision : liveRevision;
   const historicalCoverage = assignment.status === "completed" || (locked && liveRevision !== assignment.evidenceRevision);
@@ -1052,10 +1198,7 @@ export function reviewGuidedAssignment(
   const currentDraft = listGuidedDraftReviews(db, assignment.assignmentId)
     .find(({ revision }) => revision === assignment.currentDraftRevision);
   const visibleDraft = currentDraft?.evidenceRevision === effectiveRevision ? currentDraft : undefined;
-  const operatorReviews = listGuidedOperatorReviews(db, assignment.assignmentId);
-  const hasCurrentApproval = assignment.acceptedDraftRevision !== undefined && operatorReviews.some((review) => (
-    review.decision === "approved" && review.draftRevision === assignment.acceptedDraftRevision
-  ));
+  const operatorReviews: GuidedAuthoringReviewDto["operatorReviews"] = [];
   return {
     assignmentId: assignment.assignmentId,
     coverage: state.coverage,
@@ -1063,7 +1206,7 @@ export function reviewGuidedAssignment(
     editorialQuestions: unresolvedEditorialQuestions(visibleDraft?.draft),
     evidenceRevision: effectiveRevision,
     findings: visibleDraft?.findings ?? [],
-    nextAction: nextReviewAction(input.command, assignment, state, hasCurrentApproval, Boolean(visibleDraft)),
+    nextAction: nextReviewAction(input.command, assignment, state, false, Boolean(visibleDraft)),
     operatorReviews,
     requestId: assignment.requestId,
     status: assignment.status
@@ -1174,20 +1317,6 @@ function nextReviewAction(
 ): GuidedAuthoringNextAction {
   if (assignment.status === "completed") {
     return { command: "", kind: "complete", reason: "The guided authoring request is complete." };
-  }
-  if (assignment.status === "staged_canary") {
-    if (hasCurrentApproval) {
-      return {
-        command: `${command} workbench author finish --assignment ${assignment.assignmentId} --json`,
-        kind: "finish",
-        reason: "The accepted assignment is ready for atomic publication."
-      };
-    }
-    return {
-      command: `${command} workbench author review --assignment ${assignment.assignmentId} --json`,
-      kind: "await_operator",
-      reason: "The canary draft is staged and awaiting operator approval."
-    };
   }
   if (assignment.status === "ready_to_finish") {
     return {

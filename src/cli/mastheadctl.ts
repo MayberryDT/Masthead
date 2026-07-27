@@ -26,7 +26,6 @@ function topLevelHelp(): string {
     "  mastheadctl import repair Preview or apply provenance-scoped import repair",
     "",
     "Try:",
-    "  mastheadctl workbench author start --request <request-id> --json",
     `  ${importRepairHelp().trim()}`
   ].join("\n") + "\n";
 }

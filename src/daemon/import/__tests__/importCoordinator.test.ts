@@ -169,6 +169,7 @@ describe("import coordinator", () => {
     );
     insertUnit.run("unit:succeeded", "manifest:interrupted", "import_job:interrupted", "opencode-sessions", "opencode", "jsonl", "authoritative", "metadata_source", "/tmp/one.jsonl", "succeeded", 1, 1);
     insertUnit.run("unit:running", "manifest:interrupted", "import_job:interrupted", "opencode-sessions", "opencode", "jsonl", "authoritative", "metadata_source", "/tmp/two.jsonl", "running", 0, 0);
+    insertUnit.run("unit:failed", "manifest:interrupted", "import_job:interrupted", "opencode-sessions", "opencode", "jsonl", "authoritative", "metadata_source", "/tmp/three.jsonl", "failed", 1, 0);
 
     const interrupted = recoverInterruptedImportJobs(db, fixedNow);
     expect(interrupted).toEqual(["import_job:interrupted"]);
@@ -179,6 +180,7 @@ describe("import coordinator", () => {
     expect(getImportJob(db, "import_job:interrupted")?.finishedAt).toBeUndefined();
     expect(db.prepare("SELECT status FROM import_work_units WHERE work_unit_id = ?").get("unit:succeeded")).toEqual({ status: "succeeded" });
     expect(db.prepare("SELECT status FROM import_work_units WHERE work_unit_id = ?").get("unit:running")).toEqual({ status: "queued" });
+    expect(db.prepare("SELECT status FROM import_work_units WHERE work_unit_id = ?").get("unit:failed")).toEqual({ status: "failed" });
 
     resumeImportJob(db, "import_job:interrupted", async () => ({
       discoveredCount: 10,
@@ -189,6 +191,75 @@ describe("import coordinator", () => {
     }), fixedNow);
     await waitForJobStatus(db, "import_job:interrupted", "succeeded");
     expect(db.prepare("SELECT COUNT(*) AS count FROM import_jobs").get()).toEqual({ count: 1 });
+    db.close();
+  });
+
+  test("keeps failed work units failed during automatic recovery", async () => {
+    const db = await openTestDatabase();
+    seedSource(db);
+    db.prepare(
+      `INSERT INTO import_jobs (import_job_id, source_id, import_kind, status, updated_at)
+       VALUES (?, ?, ?, ?, ?)`
+    ).run("import_job:failed-unit-recovery", "opencode-sessions", "transcript", "running", fixedNow());
+    db.prepare(
+      `INSERT INTO import_manifests (
+        manifest_id, import_job_id, source_id, runtime_kind, import_kind, scope_json,
+        generated_at, total_units, included_units, excluded_units, total_bytes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "manifest:failed-unit-recovery",
+      "import_job:failed-unit-recovery",
+      "opencode-sessions",
+      "opencode",
+      "transcript",
+      '{"mode":"everything","includeChangedSinceCursor":true}',
+      fixedNow(),
+      2,
+      2,
+      0,
+      20
+    );
+    const insertUnit = db.prepare(
+      `INSERT INTO import_work_units (
+        work_unit_id, manifest_id, import_job_id, source_id, runtime_kind, source_kind,
+        confidence, unit_kind, source_path, status, processed_records, imported_records, failed_records
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    insertUnit.run(
+      "unit:failed",
+      "manifest:failed-unit-recovery",
+      "import_job:failed-unit-recovery",
+      "opencode-sessions",
+      "opencode",
+      "jsonl",
+      "authoritative",
+      "transcript_file",
+      "/tmp/failed.jsonl",
+      "failed",
+      1,
+      0,
+      1
+    );
+    insertUnit.run(
+      "unit:running",
+      "manifest:failed-unit-recovery",
+      "import_job:failed-unit-recovery",
+      "opencode-sessions",
+      "opencode",
+      "jsonl",
+      "authoritative",
+      "transcript_file",
+      "/tmp/running.jsonl",
+      "running",
+      0,
+      0,
+      0
+    );
+
+    recoverInterruptedImportJobs(db, fixedNow);
+
+    expect(db.prepare("SELECT status FROM import_work_units WHERE work_unit_id = ?").get("unit:failed")).toEqual({ status: "failed" });
+    expect(db.prepare("SELECT status FROM import_work_units WHERE work_unit_id = ?").get("unit:running")).toEqual({ status: "queued" });
     db.close();
   });
 

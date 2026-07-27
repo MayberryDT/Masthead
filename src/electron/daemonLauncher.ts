@@ -1,5 +1,5 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
-import { existsSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { createServer } from "node:net";
 import { dirname, join, posix, resolve, win32 } from "node:path";
@@ -22,6 +22,8 @@ import { classifyDaemonHealth } from "../shared/protocol";
 
 const DEFAULT_CONNECTOR_PORT = 17373;
 export const DAEMON_STARTUP_HEALTH_TIMEOUT_MS = 300_000;
+const CONNECTOR_STARTUP_INTERVAL_MS = 200;
+const CONNECTOR_STARTUP_TIMEOUT_MS = DAEMON_STARTUP_HEALTH_TIMEOUT_MS;
 const execFileAsync = promisify(execFile);
 const REQUIRED_CAPABILITIES = [
   "live_projection",
@@ -74,6 +76,13 @@ export type StartLiveConnectorResult = {
   projectionUrl: string;
 };
 
+export function connectorStartupPollPolicy(): { intervalMs: number; timeoutMs: number } {
+  return {
+    intervalMs: CONNECTOR_STARTUP_INTERVAL_MS,
+    timeoutMs: CONNECTOR_STARTUP_TIMEOUT_MS
+  };
+}
+
 export type McpLaunchValidationResult = {
   ready: boolean;
   valid: boolean;
@@ -109,7 +118,6 @@ export type StartLiveConnectorOptions = {
   findAvailablePort?: (startPort: number) => Promise<number>;
   spawnChild?: typeof spawn;
   waitForCollector?: typeof waitForCompatibleCollector;
-  warmConnector?: (baseUrl: string) => Promise<void>;
   verifyAuthoringLauncher?: (launcherPath: string, manifestPath: string, nodePath: string, cliEntry: string) => Promise<void>;
   childTerminationGraceMs?: number;
   readProcessStartIdentity?: (pid: number) => Promise<string | undefined>;
@@ -192,6 +200,7 @@ export function buildDaemonEnv(input: {
     MASTHEAD_INSTANCE_MANIFEST: input.instanceManifest,
     MASTHEAD_DATA_DIR: input.dataDirectory,
     MASTHEAD_DB_PATH: input.databasePath,
+    MASTHEAD_DIAGNOSTIC_LOG_FILE: join(input.dataDirectory, "runtime", "daemon-diagnostics.jsonl"),
     MASTHEAD_HOST: "127.0.0.1",
     ...(input.hookScript ? { MASTHEAD_HOOK_SCRIPT: input.hookScript } : {}),
     MASTHEAD_MCP_COMMAND: input.mcpCommand,
@@ -253,7 +262,6 @@ export async function startLiveConnector(
     await options.prepareAuthoringLauncher?.({ baseUrl, port: target.port, instanceManifest: target.instanceManifest, launcherPath: target.cliCommand });
     await (options.verifyAuthoringLauncher ?? verifyInstanceLauncher)(target.cliCommand, target.instanceManifest, target.nodePath, cliEntryForTarget(target));
     await (options.verifyAuthoringManifest ?? verifyDaemonOwnedManifest)(target.instanceManifest, initialProbe.health);
-    await (options.warmConnector ?? warmProjection)(baseUrl);
     return connectorStartResult(false, baseUrl, "Local Masthead collector is already running.", initialProbe.health);
   }
 
@@ -286,7 +294,8 @@ export async function startLiveConnector(
     stdio: "ignore"
   });
   ownedChildren.add(child);
-  child.once("exit", () => {
+  child.once("exit", (code, signal) => {
+    appendDaemonExitDiagnostic(env.MASTHEAD_DIAGNOSTIC_LOG_FILE, child.pid, code, signal);
     ownedChildren.delete(child);
   });
   const readProcessStartIdentity = options.readProcessStartIdentity ?? readPlatformProcessStartIdentity;
@@ -296,7 +305,6 @@ export async function startLiveConnector(
     spawnedProcessIdentity = await captureSpawnedProcessIdentity(child, readProcessStartIdentity);
     const health = await (options.waitForCollector ?? waitForCompatibleCollector)(port, target.dataDirectory, target.databasePath, cliCommand);
     await (options.verifyAuthoringManifest ?? verifyDaemonOwnedManifest)(target.instanceManifest, health);
-    await (options.warmConnector ?? warmProjection)(baseUrl);
     return connectorStartResult(true, baseUrl, "Started local Masthead collector.", health);
   } catch (error) {
     try {
@@ -349,6 +357,27 @@ export function validateMcpLaunchConfig(target: DaemonLaunchTarget): McpLaunchVa
 export function stopOwnedDaemons(children: Set<ChildProcess>): void {
   for (const child of children) {
     if (child.exitCode === null) child.kill("SIGTERM");
+  }
+}
+
+function appendDaemonExitDiagnostic(
+  diagnosticLogFile: string | undefined,
+  pid: number | undefined,
+  code: number | null,
+  signal: NodeJS.Signals | null
+): void {
+  if (!diagnosticLogFile) return;
+  try {
+    mkdirSync(dirname(diagnosticLogFile), { recursive: true });
+    appendFileSync(diagnosticLogFile, `${JSON.stringify({
+      at: new Date().toISOString(),
+      details: { code, pid, signal },
+      kind: "daemon_child_exit",
+      message: "Masthead daemon child exited",
+      severity: code === 0 || signal === "SIGTERM" ? "info" : "error"
+    })}\n`, "utf8");
+  } catch {
+    // The Electron process must stay usable even if a diagnostic write fails.
   }
 }
 
@@ -467,12 +496,6 @@ function numberField(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-async function warmProjection(baseUrl: string): Promise<void> {
-  const response = await fetch(`${baseUrl}/projection`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(30_000) });
-  if (!response.ok) throw new Error(`Masthead projection warmup failed with HTTP ${response.status}`);
-  await response.arrayBuffer();
-}
-
 export async function verifyInstanceLauncher(launcherPath: string, manifestPath: string, nodePath: string, cliEntry: string): Promise<void> {
   const [body, info] = await Promise.all([readFile(launcherPath, "utf8"), stat(launcherPath)]);
   const expected = renderLiveDevInstanceLauncher({ cliEntry, instanceManifest: manifestPath, nodePath, platform: process.platform });
@@ -571,11 +594,12 @@ async function waitForCompatibleCollector(
   expectedDatabasePath: string,
   expectedCliCommand: string
 ): Promise<MastheadHealthSummary> {
-  const deadline = Date.now() + DAEMON_STARTUP_HEALTH_TIMEOUT_MS;
+  const policy = connectorStartupPollPolicy();
+  const deadline = Date.now() + policy.timeoutMs;
   while (Date.now() < deadline) {
     const probe = await probeCollector(port, expectedDataDirectory, expectedDatabasePath, expectedCliCommand);
     if (probe.state === "compatible") return probe.health;
-    await delay(200);
+    await delay(policy.intervalMs);
   }
   throw new Error(`Started Masthead collector but it did not become compatible at ${connectorBaseUrl(port)}/health`);
 }

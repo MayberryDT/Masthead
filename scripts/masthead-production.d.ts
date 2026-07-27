@@ -58,6 +58,10 @@ export function readProductionProcesses(adapters?: {
   scanContext?: Pick<ProductionConfig, "dataDirectory" | "databasePath" | "productionRoot" | "target">;
   timeoutMs?: number;
 }): Promise<ProductionProcessRecord[]>;
+export function productionRootProcesses(
+  config: Pick<ProductionConfig, "productionRoot">,
+  dependencies: { readProcesses(): Promise<ProductionProcessRecord[]> }
+): Promise<Array<ProductionProcessRecord & { role: "daemon" | "electron" | "maintenance" | "unknown"; target: string }>>;
 export function readOwnedProcessStrict(pid: number, adapters?: {
   currentUid?: number;
   processRoot?: string;

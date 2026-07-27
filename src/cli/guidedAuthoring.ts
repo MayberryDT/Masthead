@@ -214,6 +214,10 @@ function isCliResult(value: string | CliResult): value is CliResult {
   return typeof value !== "string";
 }
 
+function isCliResultValue(value: unknown): value is CliResult {
+  return typeof value === "object" && value !== null && "exitCode" in value && "stdout" in value && "stderr" in value;
+}
+
 function validateOptions(args: string[], allowed: Set<string>, json: boolean): CliResult | undefined {
   const counts = new Map<string, number>();
   for (const arg of args) {

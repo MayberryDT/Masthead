@@ -23,6 +23,7 @@ import type {
   WorkbenchNotAddedResponse,
   WorkbenchNotAddedSummaryDto,
   WorkbenchImportHealthSummaryDto,
+  WorkbenchSelectionSnapshotResponse,
   WorkbenchSessionsResponse
 } from "../shared/workbench";
 import {
@@ -1303,6 +1304,16 @@ export async function getWorkbenchSessions(
   return getJson<WorkbenchSessionsResponse>(baseUrl, "/workbench/sessions", {
     label: "workbench sessions",
     query: { limit: options.limit, offset: options.offset, scope: options.scope },
+    signal: options.signal
+  });
+}
+
+export async function getWorkbenchSelectionSnapshot(
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { signal?: AbortSignal } = {}
+): Promise<WorkbenchSelectionSnapshotResponse> {
+  return getJson<WorkbenchSelectionSnapshotResponse>(baseUrl, "/workbench/selection-snapshot", {
+    label: "workbench selection snapshot",
     signal: options.signal
   });
 }

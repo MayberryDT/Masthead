@@ -9,19 +9,16 @@ import {
 import { normalizeMastheadBaseUrl } from "../shared/instanceIdentity.ts";
 import { isAbsoluteAuthoringCommand } from "../shared/workbenchAuthoring.ts";
 import {
-  approveGuidedCanary,
   buildGuidedDraftScaffold,
   createGuidedRequest,
   finishGuidedAssignment,
   inspectGuidedAssignment,
-  listPendingGuidedCanaries,
-  rejectGuidedCanary,
   reviewGuidedAssignment,
   saveGuidedDraft,
   startGuidedAssignment
 } from "../workbench/authoring/guidedAuthoringService.ts";
 import { parseGuidedAuthoringBundleV4 } from "../workbench/authoring/authoringSchemas.ts";
-import { getGuidedAssignmentReceipt, getGuidedAuthoringRequest } from "./db/guidedAuthoringRepository.ts";
+import { getGuidedAssignmentReceipt, getGuidedAuthoringRequest, listGuidedAuthoringReceipts } from "./db/guidedAuthoringRepository.ts";
 import type { SessionTranscriptKindFilter } from "./db/sessionTranscriptRepository.ts";
 import type { MastheadDatabase } from "./db/sqlite.ts";
 
@@ -48,7 +45,6 @@ export function guidedAuthoringCapabilities(
     baseUrl: context.identity.baseUrl,
     buildSha: context.identity.buildSha,
     bundleVersion: "workbench-authoring-v4",
-    canarySessions: 3,
     capability: "artifact_authoring",
     command,
     databaseId: context.identity.databaseId,
@@ -85,12 +81,7 @@ export function routeGuidedAuthoringRequest(
       };
     }
 
-    if (pathname === "/workbench/authoring/canaries/pending") {
-      if (request.method !== "GET") return methodNotAllowed();
-      return { body: listPendingGuidedCanaries(context.db, { command: context.authoringCommand }), status: 200 };
-    }
-
-    const requestMatch = pathname.match(/^\/workbench\/authoring\/requests\/([^/]+)(?:\/(start|canary-decision))?$/);
+    const requestMatch = pathname.match(/^\/workbench\/authoring\/requests\/([^/]+)(?:\/(start|receipts))?$/);
     if (requestMatch?.[1]) {
       const requestId = decodeSegment(requestMatch[1], "requestId");
       const operation = requestMatch[2];
@@ -99,6 +90,11 @@ export function routeGuidedAuthoringRequest(
         const guidedRequest = getGuidedAuthoringRequest(context.db, requestId);
         if (!guidedRequest) throw new Error("guided_request_not_found");
         return { body: guidedRequest, status: 200 };
+      }
+      if (operation === "receipts") {
+        if (request.method !== "GET") return methodNotAllowed();
+        if (!getGuidedAuthoringRequest(context.db, requestId)) throw new Error("guided_request_not_found");
+        return { body: listGuidedAuthoringReceipts(context.db, requestId), status: 200 };
       }
       if (request.method !== "POST") return methodNotAllowed();
       const body = record(request.body);
@@ -114,25 +110,6 @@ export function routeGuidedAuthoringRequest(
           status: 200
         };
       }
-      const decision = requiredString(body.decision, "decision");
-      if (decision !== "approved" && decision !== "rejected") throw invalid("decision must be approved or rejected");
-      const input = {
-        assignmentId: requiredString(body.assignmentId, "assignmentId"),
-        command: context.authoringCommand,
-        currentIdentity: context.identity,
-        draftRevision: positiveInteger(body.draftRevision, "draftRevision"),
-        evidenceRevision: requiredString(body.evidenceRevision, "evidenceRevision"),
-        expectedIdentity,
-        notes: requiredString(body.notes, "notes"),
-        requestId,
-        reviewedBy: requiredString(body.reviewedBy, "reviewedBy")
-      };
-      return {
-        body: decision === "approved"
-          ? approveGuidedCanary(context.db, input)
-          : rejectGuidedCanary(context.db, input),
-        status: 200
-      };
     }
 
     const assignmentMatch = pathname.match(/^\/workbench\/authoring\/assignments\/([^/]+)\/(inspect|scaffold|draft|review|receipt|finish)$/);

@@ -93,8 +93,43 @@ export function guidedAuthoringEvidenceRevision(
   db: MastheadDatabase,
   sessionIds: string[]
 ): string {
-  const snapshot = getAuthoringEvidenceSnapshot(db, sessionIds);
-  return guidedAuthoringEvidenceRevisionFromInputs(snapshot.sessions.map(({ revisionInput }) => revisionInput));
+  return guidedAuthoringEvidenceRevisionFromInputs(guidedAuthoringEvidenceRevisionInputs(db, sessionIds));
+}
+
+/**
+ * The guided workflow needs a durable change token, not a second full replay of
+ * every selected transcript. Canonical transcript-table mutations advance this
+ * per-session revision in SQLite, so composing it here detects the same class
+ * of evidence changes while keeping large Workbench selections bounded.
+ */
+export function guidedAuthoringEvidenceRevisionInputs(
+  db: MastheadDatabase,
+  sessionIds: string[]
+): AuthoringEvidenceRevisionInput[] {
+  const normalized = strictSessionIds(sessionIds);
+  if (normalized.length === 0) return [];
+  const placeholders = normalized.map(() => "?").join(", ");
+  const rows = db.prepare(
+    `SELECT sessions.session_id AS sessionId,
+            COALESCE(revisions.source_revision, 0) AS sourceRevision,
+            runtimes.runtime_kind AS runtimeKind
+     FROM sessions
+     JOIN runtimes ON runtimes.runtime_id = sessions.runtime_id
+     LEFT JOIN workbench_artifact_candidate_source_revisions revisions
+       ON revisions.session_id = sessions.session_id
+     WHERE sessions.session_id IN (${placeholders})`
+  ).all(...normalized) as Array<{ sessionId: string; sourceRevision: number; runtimeKind: string }>;
+  const revisionBySessionId = new Map(rows.map((row) => [row.sessionId, row]));
+  return normalized.map((sessionId) => {
+    const revision = revisionBySessionId.get(sessionId);
+    const hash = createHash("sha256");
+    hash.update(JSON.stringify({
+      runtimeKind: revision?.runtimeKind ?? "",
+      sessionId,
+      sourceRevision: revision?.sourceRevision ?? 0
+    }));
+    return { sessionDigest: `sha256:${hash.digest("hex")}`, sessionId };
+  });
 }
 
 export function getAuthoringEvidencePage(

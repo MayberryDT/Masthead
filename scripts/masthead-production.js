@@ -3404,8 +3404,13 @@ async function stopColdCandidate(config) {
   return receipt;
 }
 
-async function productionRootProcesses(config, dependencies) {
+export async function productionRootProcesses(config, dependencies) {
   return (await dependencies.readProcesses()).flatMap((record) => {
+    // The installed launcher execs this lifecycle script with the bundle's Node
+    // runtime.  During activation that runner is necessarily under the old
+    // production root, but it owns no Masthead runtime state and must not block
+    // its own offline proof.
+    if (record.pid === process.pid) return [];
     const target = productionTargetForPath(normalizeProcExecutable(record.exe), config.productionRoot);
     if (!target) return [];
     const classified = classifyProductionProcess(record, config) || classifyColdMaintenanceProcess(record, config);

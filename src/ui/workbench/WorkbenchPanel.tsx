@@ -271,6 +271,16 @@ export function WorkbenchPanel({
           >
             Clear
           </AppButton>
+          {onRetry ? (
+            <AppButton
+              variant="quiet"
+              onClick={onRetry}
+              disabled={actionBusy}
+              title="Reload the Workbench queue and activity"
+            >
+              Refresh
+            </AppButton>
+          ) : null}
 
           <div
             className={`workbench-pipeline-rail${pipelineRailOpen ? " is-expanded" : ""}${

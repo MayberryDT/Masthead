@@ -80,6 +80,61 @@ describe("collector autostart", () => {
     root.unmount();
   });
 
+  test("keeps Workbench available when the daemon health check passes but Now projection fails", async () => {
+    const requestedUrls: string[] = [];
+    const invoke = vi.fn(async (command: string) => {
+      if (command === "set_keep_running_in_tray_command") return { ok: true };
+      expect(command).toBe("start_live_connector_command");
+      return {
+        ok: true,
+        started: false,
+        baseUrl: "http://127.0.0.1:17373",
+        command: "masthead daemon",
+        health: { apiVersion: 1, databaseId: "db", mode: "primary" },
+        message: "Reused local Masthead collector.",
+        projectionUrl: "http://127.0.0.1:17373/projection"
+      };
+    });
+    window.mastheadDesktop = { invoke: invoke as unknown as NonNullable<Window["mastheadDesktop"]>["invoke"] };
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback: FrameRequestCallback) => {
+      return window.setTimeout(() => callback(performance.now()), 0);
+    });
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id: number) => window.clearTimeout(id));
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request) => {
+      const requestUrl = String(url);
+      requestedUrls.push(requestUrl);
+      const { host, pathname } = new URL(requestUrl);
+      if (pathname === "/health" && host === "127.0.0.1:17372") return new Response("offline", { status: 503 });
+      if (pathname === "/projection" && host === "127.0.0.1:17373") return new Response("slow projection", { status: 503 });
+      if (pathname === "/workbench/sessions") return jsonResponse({ ok: true, limit: 100, offset: 0, sessions: [], total: 0 });
+      if (pathname === "/workbench/activity") return jsonResponse({ ok: true, activity: [] });
+      if (pathname === "/workbench/not-added-summary") return jsonResponse({ ok: true, total: 0, reasons: [] });
+      if (pathname === "/workbench/authoring/capabilities") return new Response("unavailable", { status: 503 });
+      if (pathname === "/workbench/authoring/canaries/pending") return jsonResponse([]);
+      return jsonResponse(responseForUrl(requestUrl));
+    }));
+
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <MastheadConnectionProvider initialUrl="http://127.0.0.1:17372/projection">
+          <App />
+        </MastheadConnectionProvider>
+      );
+    });
+    await act(async () => {
+      await waitFor(() => commandCallCount(invoke.mock.calls, "start_live_connector_command") === 1);
+      await flushTimers();
+      clickSidebarButton(container, "Workbench");
+      await flushTimers();
+      await flushTimers();
+    });
+
+    expect(requestedUrls.some((url) => urlMatches(url, "/workbench/sessions", "127.0.0.1:17373"))).toBe(true);
+    root.unmount();
+  });
+
   test("keeps first-run sources onboarding open after connector discovery", async () => {
     window.localStorage.clear();
     const connectorFetch = createDetectedConnectorFetch();

@@ -56,6 +56,12 @@ export const READ_ONLY_ENDPOINTS = [
     label: "guided authoring request status",
     allowNotFound: true
   },
+  {
+    method: "GET",
+    path: "/workbench/authoring/requests/request%3Aone/receipts",
+    label: "guided authoring immutable receipts",
+    allowNotFound: true
+  },
   { method: "GET", path: "/workbench/authoring/canaries/pending", label: "pending guided authoring canaries" },
   {
     method: "GET",

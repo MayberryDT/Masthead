@@ -23,6 +23,26 @@ const evidenceRef = {
 };
 const evidenceRefArray = { items: evidenceRef, type: "array" };
 
+// Guided inspection exposes canonical transcript item kinds (for example
+// `message` and `tool_result`) and the handoff explicitly tells an agent to
+// copy the selected item's full reference object into its draft. The durable
+// projection later normalizes those kinds to the compact EvidenceKind union.
+// Accept the inspection vocabulary at the authoring boundary so a grounded
+// draft is not rejected before that normalization can occur.
+const guidedEvidenceRef = {
+  ...evidenceRef,
+  properties: {
+    ...evidenceRef.properties,
+    kind: {
+      enum: [
+        "event", "command", "git_snapshot", "file_change", "conflict", "redaction",
+        "message", "tool_call", "tool_result", "file_effect", "checkpoint", "runtime_signal"
+      ]
+    }
+  }
+};
+const guidedEvidenceRefArray = { items: guidedEvidenceRef, type: "array" };
+
 const durableSessionEnrichment = {
   additionalProperties: false,
   properties: {
