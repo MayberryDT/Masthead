@@ -30,20 +30,34 @@ try {
   const toolNames = tools.result.tools.map((tool) => tool.name).sort();
   assert(JSON.stringify(toolNames) === JSON.stringify([
     "get_artifact",
+    "get_corpus_stats",
+    "get_evidence_excerpt",
+    "get_evidence_transcript",
+    "get_knowledge",
     "get_masthead_coverage",
     "get_project_history",
+    "get_provenance",
     "get_session",
     "get_session_excerpt",
     "get_session_transcript",
+    "list_knowledge",
     "list_project_sessions",
     "search_artifacts",
+    "search_knowledge",
     "search_sessions"
   ]), `unexpected MCP tools: ${toolNames.join(", ")}`);
   assert(toolNames.every((name) => !/write|delete|clear|import|install|uninstall|approve|run|execute/i.test(name)), "MCP exposed a write-capable tool name");
 
+  const knowledgeSearch = await callTool(mcp, "search_knowledge", { query: "MCP smoke", limit: 5 });
+  assert(knowledgeSearch.artifacts.length === 1, "MCP knowledge search returned no published dossier");
+  const knowledge = await callTool(mcp, "get_knowledge", { artifactId: knowledgeSearch.artifacts[0].artifactId });
+  assert(knowledge.artifact?.artifactId === knowledgeSearch.artifacts[0].artifactId, "MCP knowledge detail missing stable artifactId");
+  assert(knowledge.artifact?.provenanceSessionIds?.length === 1, "MCP knowledge detail missing session provenance");
+
   const artifactSearch = await callTool(mcp, "search_artifacts", { query: "MCP smoke", limit: 5 });
   assert(artifactSearch.artifacts.length === 1, "MCP artifact search returned no published dossier");
   const artifact = await callTool(mcp, "get_artifact", { artifactId: artifactSearch.artifacts[0].artifactId });
+  assert(artifact.artifact?.artifactId === artifactSearch.artifacts[0].artifactId, "MCP artifact detail missing stable artifactId");
   assert(artifact.artifact?.provenanceSessionIds?.length === 1, "MCP artifact detail missing session provenance");
 
   const search = await callTool(mcp, "search_sessions", { query: "MCP smoke", limit: 5 });
@@ -73,7 +87,10 @@ try {
 
   const coverage = await callTool(mcp, "get_masthead_coverage", {});
   assert(coverage.sessions >= search.sessions.length, "MCP coverage did not include imported sessions");
-  assert(dbCount(databasePath, "mcp_query_log") >= 9, "MCP query audit log was not written");
+  const stats = await callTool(mcp, "get_corpus_stats", {});
+  assert(stats.publishedArtifacts >= 1, "MCP corpus stats missing published artifacts");
+
+  assert(dbCount(databasePath, "mcp_query_log") >= 11, "MCP query audit log was not written");
 
   const output = { ok: true, databasePath, tools: toolNames, auditRows: dbCount(databasePath, "mcp_query_log") };
   if (process.argv.includes("--json")) console.log(JSON.stringify(output, null, 2));

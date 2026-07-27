@@ -35,7 +35,7 @@ describe("MCP status API", () => {
         queryCount: 1,
         readOnly: true,
         ready: true,
-        toolCount: 9
+        toolCount: 16
       }
     });
     expect(status.status.launchConfig).toBeUndefined();
@@ -75,7 +75,7 @@ describe("MCP status API", () => {
     await writeFile(
       testEntry,
       [
-        "const tools = ['get_artifact','get_masthead_coverage','get_project_history','get_session','get_session_excerpt','get_session_transcript','list_project_sessions','search_artifacts','search_sessions'];",
+        "const tools = ['get_artifact','get_corpus_stats','get_evidence_excerpt','get_evidence_transcript','get_knowledge','get_masthead_coverage','get_project_history','get_provenance','get_session','get_session_excerpt','get_session_transcript','list_knowledge','list_project_sessions','search_artifacts','search_knowledge','search_sessions'];",
         "let buffer = '';",
         "process.stdin.setEncoding('utf8');",
         "process.stdin.on('data', (chunk) => {",
@@ -102,8 +102,8 @@ describe("MCP status API", () => {
       ok: true,
       status: "passed",
       serverInfo: { name: "masthead", version: "api-test" },
-      toolCount: 9,
-      toolNames: expect.arrayContaining(["search_sessions"]),
+      toolCount: 16,
+      toolNames: expect.arrayContaining(["search_knowledge", "search_sessions"]),
       validation: {
         commandExists: true,
         databaseMatches: true,
@@ -115,6 +115,14 @@ describe("MCP status API", () => {
     expect(tools.tools).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
+          name: "search_knowledge",
+          permission: "Read only"
+        }),
+        expect.objectContaining({
+          name: "get_knowledge",
+          permission: "Read only"
+        }),
+        expect.objectContaining({
           name: "search_artifacts",
           permission: "Read only"
         }),
@@ -125,7 +133,11 @@ describe("MCP status API", () => {
         expect.objectContaining({
           name: "search_sessions",
           permission: "Read only",
-          purpose: "Find sessions for evidence and compile"
+          purpose: "LEGACY: Find sessions for evidence (prefer search_knowledge)"
+        }),
+        expect.objectContaining({
+          name: "get_evidence_transcript",
+          permission: "Read only"
         }),
         expect.objectContaining({
           name: "get_session_excerpt",

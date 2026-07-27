@@ -67,7 +67,7 @@ These are the main existing docs this wiki synthesizes:
 - `docs/adr/0009-logbook-only-shows-published-sessions.md` — Workbench pipeline ownership (Logbook unit refined by 0011).
 - `docs/architecture/data-paths.md` — runtime data directory and store ownership.
 - `docs/reference/daemon-api.md` — daemon HTTP API.
-- `docs/reference/mcp-tools.md` — MCP tools (prefer `search_artifacts` / `get_artifact`).
+- `docs/reference/mcp-tools.md` — MCP tools (prefer `search_knowledge` / `get_knowledge`).
 - `docs/reference/sources-v2.md` — Sources V2 live-connect contract (current).
 - `docs/reference/artifact-first-logbook-cutover.md` — wipe/rebuild published artifact state.
 - `docs/reference/production-cold-activation.md` — explicit offline-only boundary for pre-manifest legacy production installs.

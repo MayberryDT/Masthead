@@ -137,7 +137,8 @@ Next action = the single command Masthead requires from the agent at the current
 
 Prefer for reuse:
 
-- `search_artifacts` — published capsules by query/kind/project.
+- `search_knowledge` / `get_knowledge` — published capsules (primary); `search_artifacts` / `get_artifact` remain v1 aliases.
+- Handlers: `src/agentAccess/` (artifact-first agent API); MCP transport: `src/mcp/`.
 - `get_artifact` — body + provenance + evidence refs.
 
 Session tools (`search_sessions`, `get_session`, transcript/excerpts) remain for compile evidence, not the primary memory API. See `docs/reference/mcp-tools.md`.

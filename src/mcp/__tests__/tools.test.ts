@@ -18,6 +18,8 @@ import {
 import { toolDefinitions } from "../protocol.ts";
 import { HISTORICAL_UNTRUSTED_PREFIX } from "../redaction.ts";
 import {
+  getArtifactTool,
+  getKnowledgeTool,
   getMastheadCoverageTool,
   getProjectHistoryTool,
   getSessionTranscriptTool,
@@ -297,12 +299,61 @@ describe("Masthead MCP tools", () => {
     db.close();
   });
 
-  test("registers only read-only MCP tools", () => {
+  test("registers artifact-first primary tools and read-only catalog", () => {
     const names = toolDefinitions().map((tool) => tool.name);
 
-    expect(names).toContain("get_session_transcript");
-    expect(names).toEqual(expect.arrayContaining(["search_sessions", "get_session", "get_session_excerpt", "list_project_sessions", "get_project_history", "get_masthead_coverage"]));
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "search_knowledge",
+        "list_knowledge",
+        "get_knowledge",
+        "get_provenance",
+        "get_evidence_excerpt",
+        "get_evidence_transcript",
+        "get_corpus_stats",
+        "search_artifacts",
+        "get_artifact",
+        "search_sessions",
+        "get_session",
+        "get_session_excerpt",
+        "get_session_transcript",
+        "list_project_sessions",
+        "get_project_history",
+        "get_masthead_coverage"
+      ])
+    );
+    expect(names.indexOf("search_knowledge")).toBeLessThan(names.indexOf("search_artifacts"));
     expect(names.filter((name) => /(apply|write|import|delete|clear|settings|provider|enrich|mutat)/i.test(name))).toEqual([]);
+  });
+
+  test("get_artifact returns stable artifactId on detail (v1 alias of get_knowledge)", async () => {
+    const db = await openDb();
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:artifact-id",
+      title: "Artifact id MCP detail"
+    });
+    const artifact = applySessionArtifact(db, {
+      artifactKind: "session_dossier",
+      content: { title: "Stable id dossier" },
+      contentFingerprint: "mcp-id:fingerprint",
+      createdBy: "test",
+      evidenceRefs: [],
+      schemaVersion: "session-dossier-v1",
+      sessionId: "session:artifact-id",
+      title: "Stable id dossier",
+      validation: { ok: true }
+    });
+    publishSessionArtifact(db, artifact.artifactId);
+
+    const v1 = getArtifactTool(db, { artifactId: artifact.artifactId });
+    const v2 = getKnowledgeTool(db, { artifactId: artifact.artifactId });
+    expect(v1.artifact?.artifactId).toBe(artifact.artifactId);
+    expect(v2.artifact?.artifactId).toBe(artifact.artifactId);
+    expect(v2.artifact?.kind).toBe("session_dossier");
+    db.close();
   });
 });
 

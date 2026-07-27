@@ -1,9 +1,17 @@
+import {
+  getCorpusStats,
+  getEvidenceExcerpt,
+  getEvidenceTranscript,
+  getKnowledge,
+  getProvenance,
+  listKnowledge,
+  searchKnowledge,
+  type EvidenceRole,
+  type KnowledgeKind,
+  type KnowledgeSearchArgs
+} from "../agentAccess/index.ts";
 import { logMcpQuery } from "../daemon/db/mcpAuditRepository.ts";
-import { getLogbookArtifactDetail, searchLogbookArtifacts } from "../daemon/db/logbookArtifactRepository.ts";
-import { getSessionTranscript } from "../daemon/db/sessionTranscriptRepository.ts";
 import type { MastheadDatabase } from "../daemon/db/sqlite.ts";
-import type { SessionArtifactKind } from "../daemon/db/sessionArtifactRepository.ts";
-import { sessionMcpAllowed } from "./policy.ts";
 import {
   coverage,
   getMcpProjectHistory,
@@ -12,7 +20,6 @@ import {
   listMcpProjectSessions,
   searchMcpSessions
 } from "./sessionRetrieval.ts";
-import type { SessionTranscriptItem } from "../shared/sessionTranscript.ts";
 
 export type SearchSessionsArgs = {
   query: string;
@@ -26,42 +33,130 @@ export type SearchSessionsArgs = {
   limit?: number;
 };
 
-export type SearchArtifactsArgs = {
-  query?: string;
-  kind?: SessionArtifactKind;
-  project?: string;
-  limit?: number;
-  offset?: number;
-};
+export type SearchKnowledgeArgs = KnowledgeSearchArgs;
 
-export function searchArtifactsTool(db: MastheadDatabase, args: SearchArtifactsArgs) {
-  const result = searchLogbookArtifacts(db, {
-    kind: args.kind,
-    limit: args.limit ?? 10,
-    offset: args.offset ?? 0,
-    project: args.project,
-    q: args.query
-  });
+/** Artifact-first primary search. */
+export function searchKnowledgeTool(db: MastheadDatabase, args: SearchKnowledgeArgs) {
+  const result = searchKnowledge(db, args);
   logMcpQuery(db, {
     requestedAt: new Date().toISOString(),
     resultCount: result.artifacts.length,
-    sessionIds: result.artifacts.flatMap((artifact) => []),
+    sessionIds: [],
     status: "succeeded",
-    toolName: "search_artifacts"
+    toolName: "search_knowledge"
   });
   return result;
 }
 
-export function getArtifactTool(db: MastheadDatabase, args: { artifactId: string }) {
-  const artifact = getLogbookArtifactDetail(db, args.artifactId);
+export function listKnowledgeTool(db: MastheadDatabase, args: Omit<SearchKnowledgeArgs, "query"> = {}) {
+  const result = listKnowledge(db, args);
   logMcpQuery(db, {
     requestedAt: new Date().toISOString(),
-    resultCount: artifact ? 1 : 0,
-    sessionIds: artifact?.provenanceSessionIds ?? [],
+    resultCount: result.artifacts.length,
+    sessionIds: [],
+    status: "succeeded",
+    toolName: "list_knowledge"
+  });
+  return result;
+}
+
+export function getKnowledgeTool(db: MastheadDatabase, args: { artifactId: string }) {
+  const result = getKnowledge(db, args.artifactId);
+  logMcpQuery(db, {
+    requestedAt: new Date().toISOString(),
+    resultCount: result.artifact ? 1 : 0,
+    sessionIds: result.artifact?.provenanceSessionIds ?? [],
+    status: "succeeded",
+    toolName: "get_knowledge"
+  });
+  return result;
+}
+
+export function getProvenanceTool(db: MastheadDatabase, args: { artifactId: string }) {
+  const result = getProvenance(db, args.artifactId);
+  const sessionIds = "provenance" in result ? result.provenance.sessionIds : [];
+  logMcpQuery(db, {
+    requestedAt: new Date().toISOString(),
+    resultCount: sessionIds.length,
+    sessionIds,
+    status: "succeeded",
+    toolName: "get_provenance"
+  });
+  return result;
+}
+
+export function getEvidenceExcerptTool(
+  db: MastheadDatabase,
+  args: { sessionId: string; artifactId?: string; query?: string; limit?: number; maxBytes?: number }
+) {
+  const result = getEvidenceExcerpt(db, args);
+  logMcpQuery(db, {
+    boundedBytes: result.maxBytes,
+    requestedAt: new Date().toISOString(),
+    resultCount: result.excerpts?.length ?? 0,
+    sessionIds: [args.sessionId],
+    status: "succeeded",
+    toolName: "get_evidence_excerpt"
+  });
+  return result;
+}
+
+export function getEvidenceTranscriptTool(
+  db: MastheadDatabase,
+  args: { sessionId: string; artifactId?: string; limit?: number; maxBytes?: number; role?: EvidenceRole }
+) {
+  const result = getEvidenceTranscript(db, args);
+  logMcpQuery(db, {
+    boundedBytes: result.maxBytes,
+    requestedAt: new Date().toISOString(),
+    resultCount: result.items.length,
+    sessionIds: [args.sessionId],
+    status: "succeeded",
+    toolName: "get_evidence_transcript"
+  });
+  return result;
+}
+
+export function getCorpusStatsTool(db: MastheadDatabase) {
+  const result = getCorpusStats(db);
+  logMcpQuery(db, {
+    requestedAt: new Date().toISOString(),
+    resultCount: result.publishedArtifacts,
+    sessionIds: [],
+    status: "succeeded",
+    toolName: "get_corpus_stats"
+  });
+  return result;
+}
+
+/** @deprecated v1 alias — prefer search_knowledge */
+export function searchArtifactsTool(
+  db: MastheadDatabase,
+  args: { query?: string; kind?: KnowledgeKind; project?: string; limit?: number; offset?: number }
+) {
+  const result = searchKnowledge(db, args);
+  logMcpQuery(db, {
+    requestedAt: new Date().toISOString(),
+    resultCount: result.artifacts.length,
+    sessionIds: [],
+    status: "succeeded",
+    toolName: "search_artifacts"
+  });
+  // v1 shape without ok flag for older clients that only read artifacts/total
+  return { artifacts: result.artifacts, total: result.total };
+}
+
+/** @deprecated v1 alias — prefer get_knowledge; detail now includes artifactId */
+export function getArtifactTool(db: MastheadDatabase, args: { artifactId: string }) {
+  const result = getKnowledge(db, args.artifactId);
+  logMcpQuery(db, {
+    requestedAt: new Date().toISOString(),
+    resultCount: result.artifact ? 1 : 0,
+    sessionIds: result.artifact?.provenanceSessionIds ?? [],
     status: "succeeded",
     toolName: "get_artifact"
   });
-  return { artifact };
+  return { artifact: result.artifact };
 }
 
 export function searchSessionsTool(db: MastheadDatabase, args: SearchSessionsArgs) {
@@ -109,40 +204,28 @@ export function getSessionTranscriptTool(
   db: MastheadDatabase,
   args: { sessionId: string; limit?: number; maxBytes?: number; role?: "user" | "assistant" | "tool" | "all" }
 ) {
-  const maxBytes = clampMaxBytes(args.maxBytes);
-  if (!sessionMcpAllowed(db, args.sessionId)) {
-    const result = { coverage: undefined, items: [], nextCursor: undefined, sessionId: args.sessionId, sourceRefs: [], total: 0 };
-    logMcpQuery(db, {
-      boundedBytes: maxBytes,
-      requestedAt: new Date().toISOString(),
-      resultCount: 0,
-      sessionIds: [args.sessionId],
-      status: "succeeded",
-      toolName: "get_session_transcript"
-    });
-    return result;
-  }
-  const transcript = getSessionTranscript(db, {
-    kind: transcriptKind(args.role),
+  const result = getEvidenceTranscript(db, {
     limit: args.limit,
+    maxBytes: args.maxBytes,
+    role: args.role,
     sessionId: args.sessionId
   });
-  const items = transcript.items.map((item) => boundTranscriptItem(item, maxBytes));
   logMcpQuery(db, {
-    boundedBytes: maxBytes,
+    boundedBytes: result.maxBytes,
     requestedAt: new Date().toISOString(),
-    resultCount: items.length,
+    resultCount: result.items.length,
     sessionIds: [args.sessionId],
     status: "succeeded",
     toolName: "get_session_transcript"
   });
+  // preserve v1 shape
   return {
-    coverage: transcript.coverage,
-    items,
-    nextCursor: transcript.nextCursor,
-    sessionId: args.sessionId,
-    sourceRefs: items.map((item) => item.sourceRef),
-    total: transcript.total
+    coverage: result.coverage,
+    items: result.items,
+    nextCursor: result.nextCursor,
+    sessionId: result.sessionId,
+    sourceRefs: result.sourceRefs,
+    total: result.total
   };
 }
 
@@ -180,33 +263,4 @@ export function getMastheadCoverageTool(db: MastheadDatabase) {
     toolName: "get_masthead_coverage"
   });
   return result;
-}
-
-function transcriptKind(role: "user" | "assistant" | "tool" | "all" | undefined) {
-  if (role === "user" || role === "assistant") return role;
-  if (role === "tool") return "tools";
-  return "all";
-}
-
-function boundTranscriptItem(item: SessionTranscriptItem, maxBytes: number): SessionTranscriptItem {
-  return {
-    ...item,
-    ...(item.narrativeText === undefined ? {} : { narrativeText: boundText(item.narrativeText, maxBytes) }),
-    text: boundText(item.text, maxBytes)
-  };
-}
-
-function boundText(text: string, maxBytes: number): string {
-  if (Buffer.byteLength(text, "utf8") <= maxBytes) return text;
-  let output = "";
-  for (const char of text) {
-    if (Buffer.byteLength(`${output}${char}`, "utf8") > maxBytes) break;
-    output += char;
-  }
-  return output;
-}
-
-function clampMaxBytes(maxBytes: number | undefined): number {
-  if (!Number.isInteger(maxBytes)) return 8_000;
-  return Math.max(1, Math.min(maxBytes as number, 16_000));
 }

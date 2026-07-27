@@ -81,75 +81,124 @@ export type McpToolDto = {
 
 export const MCP_TOOL_CATALOG: McpToolDto[] = [
   {
-    arguments: "optional query, kind, project, limit, offset",
-    dataReturned: "Published artifact capsules (kind, title, summary, provenance, confidence)",
-    name: "search_artifacts",
+    arguments: "optional query, kind, project, dateFrom, dateTo, limit, offset",
+    dataReturned: "Published knowledge capsules (artifactId, kind, title, summary, provenance)",
+    name: "search_knowledge",
     permission: "Read only",
-    purpose: "Search Logbook knowledge artifacts (primary reuse API)"
+    purpose: "PRIMARY: Search published Logbook knowledge for reuse"
+  },
+  {
+    arguments: "optional kind, project, dateFrom, dateTo, limit, offset",
+    dataReturned: "Published knowledge capsules without text query",
+    name: "list_knowledge",
+    permission: "Read only",
+    purpose: "PRIMARY: Browse published knowledge"
   },
   {
     arguments: "artifactId",
-    dataReturned: "Artifact body, provenance sessions, evidence refs, lineage",
+    dataReturned: "Full artifact with artifactId, body, provenance, evidence refs",
+    name: "get_knowledge",
+    permission: "Read only",
+    purpose: "PRIMARY: Read one published knowledge artifact"
+  },
+  {
+    arguments: "artifactId",
+    dataReturned: "Provenance session ids and join rationale",
+    name: "get_provenance",
+    permission: "Read only",
+    purpose: "PRIMARY: List provenance for a published artifact"
+  },
+  {
+    arguments: "sessionId, optional artifactId, query, limit, maxBytes",
+    dataReturned: "Bounded historical excerpt (optionally provenance-gated)",
+    name: "get_evidence_excerpt",
+    permission: "Read only",
+    purpose: "EVIDENCE: Bounded transcript excerpt for claim verification"
+  },
+  {
+    arguments: "sessionId, optional artifactId, role, limit, maxBytes",
+    dataReturned: "Bounded transcript rows (optionally provenance-gated)",
+    name: "get_evidence_transcript",
+    permission: "Read only",
+    purpose: "EVIDENCE: Bounded transcript rows for claim verification"
+  },
+  {
+    arguments: "none",
+    dataReturned: "Published artifact counts by kind plus session coverage",
+    name: "get_corpus_stats",
+    permission: "Read only",
+    purpose: "PRIMARY: Corpus statistics (artifacts first)"
+  },
+  {
+    arguments: "optional query, kind, project, limit, offset",
+    dataReturned: "Published artifact capsules (v1 alias of search_knowledge)",
+    name: "search_artifacts",
+    permission: "Read only",
+    purpose: "Alias of search_knowledge"
+  },
+  {
+    arguments: "artifactId",
+    dataReturned: "Artifact body with stable artifactId (v1 alias of get_knowledge)",
     name: "get_artifact",
     permission: "Read only",
-    purpose: "Read one published artifact with provenance"
+    purpose: "Alias of get_knowledge"
   },
   {
     arguments: "query, optional project/runtime/model/host/state/date filters, limit",
-    dataReturned: "Session summaries with IDs, titles, projects, models, and snippets",
+    dataReturned: "Session summaries (legacy; can be slow on broad queries)",
     name: "search_sessions",
     permission: "Read only",
-    purpose: "Find sessions for evidence and compile"
+    purpose: "LEGACY: Find sessions for evidence (prefer search_knowledge)"
   },
   {
     arguments: "sessionId, maxBytes",
     dataReturned: "Bounded session detail with transcript context",
     name: "get_session",
     permission: "Read only",
-    purpose: "Read one bounded session record"
+    purpose: "LEGACY: Read one bounded session record"
   },
   {
     arguments: "sessionId, optional query, limit, maxBytes",
     dataReturned: "Bounded transcript excerpts",
     name: "get_session_excerpt",
     permission: "Read only",
-    purpose: "Read bounded historical excerpts"
+    purpose: "LEGACY alias of get_evidence_excerpt"
   },
   {
     arguments: "sessionId, optional limit, maxBytes, role",
     dataReturned: "Bounded canonical transcript rows with coverage",
     name: "get_session_transcript",
     permission: "Read only",
-    purpose: "Read canonical transcript evidence"
+    purpose: "LEGACY alias of get_evidence_transcript"
   },
   {
     arguments: "project, limit",
     dataReturned: "Recent session summaries for a project",
     name: "list_project_sessions",
     permission: "Read only",
-    purpose: "List sessions by project"
+    purpose: "LEGACY: List sessions by project"
   },
   {
     arguments: "project, limit",
     dataReturned: "Project session timeline with relevant excerpts",
     name: "get_project_history",
     permission: "Read only",
-    purpose: "Read project history"
+    purpose: "LEGACY: Read project history"
   },
   {
     arguments: "none",
     dataReturned: "Counts for indexed sessions, projects, messages, and audit rows",
     name: "get_masthead_coverage",
     permission: "Read only",
-    purpose: "Inspect Masthead coverage"
+    purpose: "LEGACY session coverage (prefer get_corpus_stats)"
   }
 ];
 
 const allowedPermissions = [
-  "Search published artifacts",
+  "Search published knowledge artifacts",
   "Read published artifact bodies with provenance",
+  "Read provenance-gated historical evidence",
   "Search session summaries for evidence",
-  "Read bounded historical excerpts and transcripts",
   "Read project history"
 ];
 const blockedPermissions = ["Execute shell commands", "Mutate files or Git", "Modify harness sessions"];

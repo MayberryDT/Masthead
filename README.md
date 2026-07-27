@@ -26,7 +26,7 @@ Start with agents: `openwiki/quickstart.md`, `CONTEXT.md`, and
 - Logbook artifact book: `GET /logbook/artifacts` + body/provenance inspector;
   full-body search plus kind · project · date filters; no bulk enrich /
   checkboxes / summary strip.
-- Read-only MCP with **`search_artifacts` / `get_artifact`** preferred for reuse;
+- Read-only MCP with **`search_knowledge` / `get_knowledge`** preferred for reuse (v1 aliases kept);
   session/transcript tools for evidence and compile.
 - `npm run dev` launcher (writable daemon or read-only worktree bridge).
 - Electron Dev desktop launcher (`npm run install:electron-dev-launcher` from the

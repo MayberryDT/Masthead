@@ -1,13 +1,20 @@
 import type { MastheadDatabase } from "../daemon/db/sqlite.ts";
 import {
   getArtifactTool,
+  getCorpusStatsTool,
+  getEvidenceExcerptTool,
+  getEvidenceTranscriptTool,
+  getKnowledgeTool,
   getMastheadCoverageTool,
   getProjectHistoryTool,
+  getProvenanceTool,
   getSessionExcerptTool,
   getSessionTranscriptTool,
   getSessionTool,
+  listKnowledgeTool,
   listProjectSessionsTool,
   searchArtifactsTool,
+  searchKnowledgeTool,
   searchSessionsTool
 } from "./tools.ts";
 
@@ -74,6 +81,55 @@ function handleJsonRpc(db: MastheadDatabase, request: JsonRpcRequest) {
 }
 
 function callTool(db: MastheadDatabase, tool: string, args: Record<string, unknown>): unknown {
+  // --- Artifact-first v2 (primary) ---
+  if (tool === "search_knowledge") {
+    return searchKnowledgeTool(db, {
+      dateFrom: optionalString(args.dateFrom),
+      dateTo: optionalString(args.dateTo),
+      kind: artifactKindArg(args.kind),
+      limit: numberArg(args.limit),
+      offset: numberArg(args.offset),
+      project: optionalString(args.project),
+      query: optionalString(args.query)
+    });
+  }
+  if (tool === "list_knowledge") {
+    return listKnowledgeTool(db, {
+      dateFrom: optionalString(args.dateFrom),
+      dateTo: optionalString(args.dateTo),
+      kind: artifactKindArg(args.kind),
+      limit: numberArg(args.limit),
+      offset: numberArg(args.offset),
+      project: optionalString(args.project)
+    });
+  }
+  if (tool === "get_knowledge") {
+    return getKnowledgeTool(db, { artifactId: requiredString(args.artifactId, "artifactId") });
+  }
+  if (tool === "get_provenance") {
+    return getProvenanceTool(db, { artifactId: requiredString(args.artifactId, "artifactId") });
+  }
+  if (tool === "get_evidence_excerpt") {
+    return getEvidenceExcerptTool(db, {
+      artifactId: optionalString(args.artifactId),
+      limit: numberArg(args.limit),
+      maxBytes: maxBytesArg(args.maxBytes),
+      query: optionalString(args.query),
+      sessionId: requiredString(args.sessionId, "sessionId")
+    });
+  }
+  if (tool === "get_evidence_transcript") {
+    return getEvidenceTranscriptTool(db, {
+      artifactId: optionalString(args.artifactId),
+      limit: numberArg(args.limit),
+      maxBytes: maxBytesArg(args.maxBytes),
+      role: transcriptRoleArg(args.role),
+      sessionId: requiredString(args.sessionId, "sessionId")
+    });
+  }
+  if (tool === "get_corpus_stats") return getCorpusStatsTool(db);
+
+  // --- v1 aliases (compat) ---
   if (tool === "search_artifacts") {
     return searchArtifactsTool(db, {
       kind: artifactKindArg(args.kind),
@@ -131,9 +187,87 @@ function callTool(db: MastheadDatabase, tool: string, args: Record<string, unkno
 export function toolDefinitions() {
   return [
     {
-      name: "search_artifacts",
+      name: "search_knowledge",
       description:
-        "Search published Logbook knowledge artifacts (session dossiers, runbooks, ADRs, incident timelines). Prefer this for reuse.",
+        "PRIMARY: Search published Logbook knowledge (session dossiers, runbooks, ADRs, incident timelines). Prefer this for reuse questions.",
+      inputSchema: objectSchema(
+        {
+          kind: { type: "string", enum: ["session_dossier", "runbook", "adr", "incident_timeline"] },
+          limit: { type: "number" },
+          offset: { type: "number" },
+          project: { type: "string" },
+          query: { type: "string" },
+          dateFrom: { type: "string" },
+          dateTo: { type: "string" }
+        },
+        []
+      )
+    },
+    {
+      name: "list_knowledge",
+      description: "PRIMARY: Browse published knowledge without a text query (kind/project/date filters + pagination).",
+      inputSchema: objectSchema(
+        {
+          kind: { type: "string", enum: ["session_dossier", "runbook", "adr", "incident_timeline"] },
+          limit: { type: "number" },
+          offset: { type: "number" },
+          project: { type: "string" },
+          dateFrom: { type: "string" },
+          dateTo: { type: "string" }
+        },
+        []
+      )
+    },
+    {
+      name: "get_knowledge",
+      description:
+        "PRIMARY: Get one published artifact with stable artifactId, body, provenance sessions, and evidence refs.",
+      inputSchema: objectSchema({ artifactId: { type: "string", minLength: 1 } }, ["artifactId"])
+    },
+    {
+      name: "get_provenance",
+      description: "PRIMARY: List provenance sessions for a published artifact (and join rationale when multi-session).",
+      inputSchema: objectSchema({ artifactId: { type: "string", minLength: 1 } }, ["artifactId"])
+    },
+    {
+      name: "get_evidence_excerpt",
+      description:
+        "EVIDENCE: Bounded historical excerpt for a session. Pass artifactId to require the session is in that artifact's provenance.",
+      inputSchema: objectSchema(
+        {
+          artifactId: { type: "string" },
+          limit: { type: "number" },
+          maxBytes: { type: "number", minimum: 1, maximum: 16000 },
+          query: { type: "string" },
+          sessionId: { type: "string", minLength: 1 }
+        },
+        ["sessionId"]
+      )
+    },
+    {
+      name: "get_evidence_transcript",
+      description:
+        "EVIDENCE: Bounded transcript rows (role filter). Pass artifactId to require provenance membership.",
+      inputSchema: objectSchema(
+        {
+          artifactId: { type: "string" },
+          limit: { type: "number" },
+          maxBytes: { type: "number", minimum: 1, maximum: 16000 },
+          role: { type: "string" },
+          sessionId: { type: "string", minLength: 1 }
+        },
+        ["sessionId"]
+      )
+    },
+    {
+      name: "get_corpus_stats",
+      description: "PRIMARY: Published artifact counts by kind/project plus optional session coverage stats.",
+      inputSchema: objectSchema({})
+    },
+    // v1 aliases
+    {
+      name: "search_artifacts",
+      description: "Alias of search_knowledge (published Logbook artifacts). Prefer search_knowledge.",
       inputSchema: objectSchema(
         {
           kind: { type: "string", enum: ["session_dossier", "runbook", "adr", "incident_timeline"] },
@@ -147,12 +281,13 @@ export function toolDefinitions() {
     },
     {
       name: "get_artifact",
-      description: "Get one published artifact body with provenance and evidence refs.",
+      description: "Alias of get_knowledge. Prefer get_knowledge.",
       inputSchema: objectSchema({ artifactId: { type: "string", minLength: 1 } }, ["artifactId"])
     },
     {
       name: "search_sessions",
-      description: "Search Masthead sessions for evidence and compile (not the primary knowledge reuse API).",
+      description:
+        "LEGACY evidence: Search sessions (can be slow on broad queries). Prefer search_knowledge for reuse.",
       inputSchema: objectSchema(
         {
           dateFrom: { type: "string" },
@@ -170,12 +305,12 @@ export function toolDefinitions() {
     },
     {
       name: "get_session",
-      description: "Get one normalized Masthead session with bounded historical evidence.",
+      description: "LEGACY evidence: Bounded session bag. Prefer get_knowledge + get_evidence_*.",
       inputSchema: objectSchema({ maxBytes: { type: "number", minimum: 1, maximum: 16000 }, sessionId: { type: "string", minLength: 1 } }, ["sessionId"])
     },
     {
       name: "get_session_excerpt",
-      description: "Get a bounded query-relevant historical transcript excerpt labeled as untrusted evidence.",
+      description: "LEGACY alias of get_evidence_excerpt.",
       inputSchema: objectSchema(
         { limit: { type: "number" }, maxBytes: { type: "number", minimum: 1, maximum: 16000 }, query: { type: "string" }, sessionId: { type: "string", minLength: 1 } },
         ["sessionId"]
@@ -183,7 +318,7 @@ export function toolDefinitions() {
     },
     {
       name: "get_session_transcript",
-      description: "Get bounded canonical transcript rows for a session.",
+      description: "LEGACY alias of get_evidence_transcript.",
       inputSchema: objectSchema(
         { limit: { type: "number" }, maxBytes: { type: "number", minimum: 1, maximum: 16000 }, role: { type: "string" }, sessionId: { type: "string", minLength: 1 } },
         ["sessionId"]
@@ -191,17 +326,17 @@ export function toolDefinitions() {
     },
     {
       name: "list_project_sessions",
-      description: "List recent sessions for a project label.",
+      description: "LEGACY: List sessions by project. Prefer list_knowledge/search_knowledge with project.",
       inputSchema: objectSchema({ limit: { type: "number" }, project: { type: "string", minLength: 1 } }, ["project"])
     },
     {
       name: "get_project_history",
-      description: "Get structured project history from normalized session metadata.",
+      description: "LEGACY: Project session history. Prefer search_knowledge with project.",
       inputSchema: objectSchema({ limit: { type: "number" }, project: { type: "string", minLength: 1 } }, ["project"])
     },
     {
       name: "get_masthead_coverage",
-      description: "Report local Masthead coverage counts by canonical table.",
+      description: "LEGACY session table coverage. Prefer get_corpus_stats for published knowledge counts.",
       inputSchema: objectSchema({})
     }
   ];
