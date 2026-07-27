@@ -4,6 +4,7 @@ import type { StoreRecord } from "../core/store";
 import type {
   AdapterStatus,
   LogbookSort,
+  SessionTranscriptKindFilter,
   SourceStatus
 } from "../app/daemonClient";
 import type { SessionSummaryEnrichment, SessionTitleEnrichment } from "../shared/sessionEnrichment";
@@ -48,8 +49,10 @@ type Props = {
   onRetry?: () => void;
   onSessionSelect?: (sessionId: string) => void;
   onSortChange?: (sort: LogbookSort) => void;
+  onTranscriptFilterChange?: (filter: SessionTranscriptKindFilter) => void;
   pageIndex?: number;
   pageSize?: number;
+  transcriptFilter?: SessionTranscriptKindFilter;
 };
 
 export type LogbookLoadState =
@@ -132,6 +135,7 @@ export function HistoryPanel({
   onRetry,
   onSessionSelect,
   onSortChange,
+  onTranscriptFilterChange,
   pageIndex = 0,
   pageSize = 100,
   query,
@@ -145,7 +149,8 @@ export function HistoryPanel({
   sessions,
   sort = "recent",
   sources = [],
-  total
+  total,
+  transcriptFilter = "all"
 }: Props) {
   const legacyFilters = filtersFromQuery(query);
   const resolvedLoadState =
@@ -268,7 +273,9 @@ export function HistoryPanel({
                 artifact={selectedArtifact}
                 error={detailError}
                 loading={detailLoading}
+                transcriptFilter={transcriptFilter}
                 onClose={onCloseDetail ?? (() => undefined)}
+                onTranscriptFilterChange={onTranscriptFilterChange}
               />
             </div>
           ) : null}

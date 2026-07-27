@@ -726,6 +726,7 @@ export function App() {
             selectedSessionId={logbook.selectedSessionId}
             sort={logbook.sort}
             sources={sources}
+            transcriptFilter={logbook.transcriptFilter}
             onCloseDetail={logbook.closeSession}
             onFilterChange={logbook.changeFilters}
             onImportMetadata={handleImportMetadata}
@@ -736,6 +737,7 @@ export function App() {
             onRetry={logbook.retry}
             onSessionSelect={logbook.selectSession}
             onSortChange={logbook.changeSort}
+            onTranscriptFilterChange={logbook.changeTranscriptFilter}
           />
         </>
       </LogbookSurface>

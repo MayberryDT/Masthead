@@ -1,6 +1,12 @@
+// @vitest-environment happy-dom
+
+import { act } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { LogbookInspector } from "../LogbookInspector";
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 describe("LogbookInspector", () => {
   test("renders canonical dossier artifacts with the original dossier sections", () => {
@@ -31,6 +37,68 @@ describe("LogbookInspector", () => {
     expect(html).not.toContain("Problem</p>");
     expect(html).not.toContain("Approach</p>");
     expect(html).not.toContain("Lessons learned</p>");
+  });
+
+  test("wires transcript kind filter buttons to the caller", async () => {
+    const onTranscriptFilterChange = vi.fn();
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        <LogbookInspector
+          onClose={() => {}}
+          onTranscriptFilterChange={onTranscriptFilterChange}
+          transcriptFilter="all"
+          artifact={{
+            kind: "session_dossier",
+            schemaVersion: "canonical-session-dossier-v1",
+            title: "Repair OAuth callback",
+            body: canonicalDossierBody(),
+            provenanceSessionIds: ["canonical-session-1"],
+            provenanceTranscript: {
+              coverage: canonicalDossierBody().coverage.transcript,
+              items: [],
+              total: 0
+            }
+          }}
+        />
+      );
+    });
+
+    const buttons = [...host.querySelectorAll("button")];
+    const userButton = buttons.find((button) => button.textContent === "User");
+    const assistantButton = buttons.find((button) => button.textContent === "Assistant");
+    const toolsButton = buttons.find((button) => button.textContent === "Tools");
+    const evidenceButton = buttons.find((button) => button.textContent === "Evidence");
+    expect(userButton).toBeTruthy();
+    expect(assistantButton).toBeTruthy();
+    expect(toolsButton).toBeTruthy();
+    expect(evidenceButton).toBeTruthy();
+
+    await act(async () => {
+      userButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(onTranscriptFilterChange).toHaveBeenCalledWith("user");
+
+    await act(async () => {
+      assistantButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(onTranscriptFilterChange).toHaveBeenCalledWith("assistant");
+
+    await act(async () => {
+      toolsButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(onTranscriptFilterChange).toHaveBeenCalledWith("tools");
+
+    await act(async () => {
+      evidenceButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(onTranscriptFilterChange).toHaveBeenCalledWith("all");
+
+    root.unmount();
+    host.remove();
   });
 
   test("renders runbook body and provenance", () => {

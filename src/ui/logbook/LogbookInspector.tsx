@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { SessionTranscriptKindFilter } from "../../app/daemonClient";
 import {
   CANONICAL_SESSION_DOSSIER_SCHEMA,
   isKnownLegacySessionDossierSchema,
@@ -16,10 +17,19 @@ type Props = {
   loading?: boolean;
   error?: string;
   artifact?: LogbookInspectorArtifact;
+  transcriptFilter?: SessionTranscriptKindFilter;
+  onTranscriptFilterChange?: (filter: SessionTranscriptKindFilter) => void;
   onClose: () => void;
 };
 
-export function LogbookInspector({ artifact, error, loading = false, onClose }: Props) {
+export function LogbookInspector({
+  artifact,
+  error,
+  loading = false,
+  onClose,
+  onTranscriptFilterChange,
+  transcriptFilter = "all"
+}: Props) {
   if (!artifact && !loading && !error) return null;
 
   const title = artifact?.title ?? (loading ? "Loading artifact" : error ? "Could not load artifact" : "Artifact detail");
@@ -40,7 +50,9 @@ export function LogbookInspector({ artifact, error, loading = false, onClose }: 
 
       {artifact ? (
         <>
-          <div className="logbook-inspector-body">{renderArtifactBody(artifact)}</div>
+          <div className="logbook-inspector-body">
+            {renderArtifactBody(artifact, { onTranscriptFilterChange, transcriptFilter })}
+          </div>
           <ProvenanceSection joinRationale={artifact.joinRationale} provenanceLabel={artifact.provenanceLabel} provenanceSessionIds={artifact.provenanceSessionIds} />
         </>
       ) : loading ? (
@@ -108,7 +120,13 @@ function ProvenanceSection({ joinRationale, provenanceLabel, provenanceSessionId
   );
 }
 
-function renderArtifactBody(artifact: LogbookInspectorArtifact): ReactNode {
+function renderArtifactBody(
+  artifact: LogbookInspectorArtifact,
+  transcriptControls: {
+    transcriptFilter: SessionTranscriptKindFilter;
+    onTranscriptFilterChange?: (filter: SessionTranscriptKindFilter) => void;
+  }
+): ReactNode {
   const { body, kind, schemaVersion } = artifact;
   if (kind === "session_dossier" && schemaVersion === CANONICAL_SESSION_DOSSIER_SCHEMA) {
     if (!isPublishedSessionDossierV1(body)) {
@@ -120,7 +138,9 @@ function renderArtifactBody(artifact: LogbookInspectorArtifact): ReactNode {
         dossier={body}
         transcript={artifact.provenanceTranscript}
         transcriptError={artifact.provenanceTranscriptError}
+        transcriptFilter={transcriptControls.transcriptFilter}
         transcriptLoading={artifact.provenanceTranscriptLoading}
+        onTranscriptFilterChange={transcriptControls.onTranscriptFilterChange}
       />
     );
   }

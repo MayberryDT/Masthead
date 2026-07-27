@@ -1,7 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { LogbookFilterState, LogbookLoadState } from "../../ui/HistoryPanel";
 import type { AppSurface } from "../../ui/ObservabilitySidebar";
-import { getLogbookArtifact, getSessionTranscript, listProjects, searchLogbook, type AdapterStatus, type LogbookSearchResult, type LogbookSort } from "../daemonClient";
+import {
+  getLogbookArtifact,
+  getSessionTranscript,
+  listProjects,
+  searchLogbook,
+  type AdapterStatus,
+  type LogbookSearchResult,
+  type LogbookSort,
+  type SessionTranscriptKindFilter
+} from "../daemonClient";
 import { logbookPageSearchFilters, readCachedLogbookPage, writeCachedLogbookPage, type LogbookPageCacheRequest } from "../logbookPageCache";
 import { CANONICAL_SESSION_DOSSIER_SCHEMA, isPublishedSessionDossierV1, toLogbookInspectorArtifact, type LogbookInspectorArtifact } from "./logbookInspectorModel";
 import { useMastheadDataRevisions } from "../useMastheadDataRevisions";
@@ -30,6 +39,9 @@ export function useLogbookController({ activeProjectionUrl, activeSurface, adapt
   const [selectedArtifact, setSelectedArtifact] = useState<LogbookInspectorArtifact>();
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string>();
+  const [transcriptFilter, setTranscriptFilter] = useState<SessionTranscriptKindFilter>("all");
+  /** Bound to the Logbook row id so a stale provenance session cannot load after selection changes. */
+  const [provenanceTranscriptTarget, setProvenanceTranscriptTarget] = useState<{ artifactId: string; sessionId: string }>();
   const pageCacheRef = useRef(new Map<string, LogbookSearchResult>());
   const effectiveRetryKey = retryKey + externalRefreshKey;
   const { logbook: logbookRevision } = useMastheadDataRevisions({
@@ -123,21 +135,28 @@ export function useLogbookController({ activeProjectionUrl, activeSurface, adapt
   }, [activeProjectionUrl, activeSurface, effectiveRetryKey]);
 
   useEffect(() => {
+    setTranscriptFilter("all");
+  }, [selectedSessionId]);
+
+  useEffect(() => {
     if (activeSurface !== "logbook" || !selectedSessionId) {
       setSelectedArtifact(undefined);
+      setProvenanceTranscriptTarget(undefined);
       setDetailError(undefined);
       setDetailLoading(false);
       return;
     }
     const controller = new AbortController();
+    const artifactId = selectedSessionId;
     // Clear previous body immediately so the inspector never shows stale content under a new selection.
     setSelectedArtifact(undefined);
+    setProvenanceTranscriptTarget(undefined);
     setDetailError(undefined);
     setDetailLoading(true);
-    void getLogbookArtifact(selectedSessionId, activeProjectionUrl, {
+    void getLogbookArtifact(artifactId, activeProjectionUrl, {
       signal: controller.signal
     })
-      .then(async (detail) => {
+      .then((detail) => {
         if (controller.signal.aborted) return;
         const artifact = toLogbookInspectorArtifact(detail);
         const shouldLoadTranscript =
@@ -146,29 +165,18 @@ export function useLogbookController({ activeProjectionUrl, activeSurface, adapt
           isPublishedSessionDossierV1(artifact.body) &&
           artifact.provenanceSessionIds.length === 1;
         setSelectedArtifact(shouldLoadTranscript ? { ...artifact, provenanceTranscriptLoading: true } : artifact);
+        setProvenanceTranscriptTarget(
+          shouldLoadTranscript
+            ? { artifactId, sessionId: artifact.provenanceSessionIds[0]! }
+            : undefined
+        );
         setDetailError(undefined);
-        if (!shouldLoadTranscript) {
-          return;
-        }
-
-        try {
-          const provenanceTranscript = await loadProvenanceTranscript(artifact.provenanceSessionIds[0], activeProjectionUrl, controller.signal);
-          if (controller.signal.aborted) return;
-          setSelectedArtifact({ ...artifact, provenanceTranscript, provenanceTranscriptLoading: false });
-        } catch (transcriptError: unknown) {
-          if (controller.signal.aborted) return;
-          console.error("[masthead] Logbook provenance transcript failed", transcriptError);
-          setSelectedArtifact({
-            ...artifact,
-            provenanceTranscriptLoading: false,
-            provenanceTranscriptError: "Could not load transcript evidence"
-          });
-        }
       })
       .catch((loadError: unknown) => {
         if (!controller.signal.aborted) {
           console.error("[masthead] Logbook artifact detail failed", loadError);
           setSelectedArtifact(undefined);
+          setProvenanceTranscriptTarget(undefined);
           setDetailError("Could not load artifact");
         }
       })
@@ -177,6 +185,58 @@ export function useLogbookController({ activeProjectionUrl, activeSurface, adapt
       });
     return () => controller.abort();
   }, [activeProjectionUrl, activeSurface, selectedSessionId]);
+
+  useEffect(() => {
+    if (
+      activeSurface !== "logbook" ||
+      !selectedSessionId ||
+      !provenanceTranscriptTarget ||
+      provenanceTranscriptTarget.artifactId !== selectedSessionId
+    ) {
+      return;
+    }
+    const controller = new AbortController();
+    const provenanceSessionId = provenanceTranscriptTarget.sessionId;
+    setSelectedArtifact((current) =>
+      current
+        ? {
+            ...current,
+            provenanceTranscript: undefined,
+            provenanceTranscriptError: undefined,
+            provenanceTranscriptLoading: true
+          }
+        : current
+    );
+    void loadProvenanceTranscript(provenanceSessionId, activeProjectionUrl, controller.signal, transcriptFilter)
+      .then((provenanceTranscript) => {
+        if (controller.signal.aborted) return;
+        setSelectedArtifact((current) =>
+          current
+            ? {
+                ...current,
+                provenanceTranscript,
+                provenanceTranscriptError: undefined,
+                provenanceTranscriptLoading: false
+              }
+            : current
+        );
+      })
+      .catch((transcriptError: unknown) => {
+        if (controller.signal.aborted) return;
+        console.error("[masthead] Logbook provenance transcript failed", transcriptError);
+        setSelectedArtifact((current) =>
+          current
+            ? {
+                ...current,
+                provenanceTranscript: undefined,
+                provenanceTranscriptError: "Could not load transcript evidence",
+                provenanceTranscriptLoading: false
+              }
+            : current
+        );
+      });
+    return () => controller.abort();
+  }, [activeProjectionUrl, activeSurface, provenanceTranscriptTarget, selectedSessionId, transcriptFilter]);
 
   const changeQuery = (nextQuery: string) => {
     setQuery(nextQuery);
@@ -225,6 +285,7 @@ export function useLogbookController({ activeProjectionUrl, activeSurface, adapt
     changePage,
     changeQuery,
     changeSort,
+    changeTranscriptFilter: setTranscriptFilter,
     closeSession: () => setSelectedSessionId(undefined),
     detailError,
     detailLoading,
@@ -239,18 +300,24 @@ export function useLogbookController({ activeProjectionUrl, activeSurface, adapt
     selectSession: setSelectedSessionId,
     selectedArtifact,
     selectedSessionId,
-    sort
+    sort,
+    transcriptFilter
   };
 }
 
-async function loadProvenanceTranscript(sessionId: string, baseUrl: string, signal: AbortSignal) {
+async function loadProvenanceTranscript(
+  sessionId: string,
+  baseUrl: string,
+  signal: AbortSignal,
+  kind: SessionTranscriptKindFilter = "all"
+) {
   let cursor: string | undefined;
   let result: Awaited<ReturnType<typeof getSessionTranscript>> | undefined;
   const items: Awaited<ReturnType<typeof getSessionTranscript>>["items"] = [];
   const seenCursors = new Set<string>();
 
   do {
-    const page = await getSessionTranscript(sessionId, { cursor, limit: 200 }, baseUrl, { signal });
+    const page = await getSessionTranscript(sessionId, { cursor, kind, limit: 200 }, baseUrl, { signal });
     if (!result) result = page;
     items.push(...page.items);
     if (!page.nextCursor || seenCursors.has(page.nextCursor)) {

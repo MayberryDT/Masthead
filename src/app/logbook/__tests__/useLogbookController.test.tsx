@@ -70,10 +70,145 @@ describe("useLogbookController artifact detail", () => {
     await flushAsync();
     await flushAsync();
 
-    expect(getSessionTranscript).toHaveBeenNthCalledWith(1, "canonical-session-1", expect.objectContaining({ cursor: undefined }), baseUrl, expect.objectContaining({ signal: expect.any(AbortSignal) }));
-    expect(getSessionTranscript).toHaveBeenNthCalledWith(2, "canonical-session-1", expect.objectContaining({ cursor: "cursor-2" }), baseUrl, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    expect(getSessionTranscript).toHaveBeenNthCalledWith(
+      1,
+      "canonical-session-1",
+      expect.objectContaining({ cursor: undefined, kind: "all" }),
+      baseUrl,
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
+    expect(getSessionTranscript).toHaveBeenNthCalledWith(
+      2,
+      "canonical-session-1",
+      expect.objectContaining({ cursor: "cursor-2", kind: "all" }),
+      baseUrl,
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
     expect(latestController?.selectedArtifact?.provenanceTranscript?.items.map((item) => item.text)).toEqual(["first", "second"]);
     expect(latestController?.selectedArtifact?.provenanceTranscript?.nextCursor).toBeUndefined();
+  });
+
+  test("transcript kind filters refetch provenance evidence by kind", async () => {
+    mockLogbookSearch([session("artifact-canonical", "Canonical dossier")], 1);
+    vi.mocked(getLogbookArtifact).mockResolvedValueOnce(canonicalArtifactDetail("artifact-canonical", "canonical-session-1"));
+    vi.mocked(getSessionTranscript)
+      .mockResolvedValueOnce(transcriptPage("all-item"))
+      .mockResolvedValueOnce(transcriptPage("user-item"))
+      .mockResolvedValueOnce(transcriptPage("assistant-item"))
+      .mockResolvedValueOnce(transcriptPage("tools-item"))
+      .mockResolvedValueOnce(transcriptPage("all-again"));
+    await renderHarness();
+
+    await act(async () => {
+      latestController?.selectSession("artifact-canonical");
+      await Promise.resolve();
+    });
+    await flushAsync();
+    await flushAsync();
+
+    expect(latestController?.transcriptFilter).toBe("all");
+    expect(latestController?.selectedArtifact?.provenanceTranscript?.items.map((item) => item.text)).toEqual(["all-item"]);
+    expect(getSessionTranscript).toHaveBeenLastCalledWith(
+      "canonical-session-1",
+      expect.objectContaining({ kind: "all" }),
+      baseUrl,
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
+
+    await act(async () => {
+      latestController?.changeTranscriptFilter("user");
+      await Promise.resolve();
+    });
+    await flushAsync();
+    expect(latestController?.transcriptFilter).toBe("user");
+    expect(getSessionTranscript).toHaveBeenLastCalledWith(
+      "canonical-session-1",
+      expect.objectContaining({ kind: "user" }),
+      baseUrl,
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
+    expect(latestController?.selectedArtifact?.provenanceTranscript?.items.map((item) => item.text)).toEqual(["user-item"]);
+
+    await act(async () => {
+      latestController?.changeTranscriptFilter("assistant");
+      await Promise.resolve();
+    });
+    await flushAsync();
+    expect(getSessionTranscript).toHaveBeenLastCalledWith(
+      "canonical-session-1",
+      expect.objectContaining({ kind: "assistant" }),
+      baseUrl,
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
+    expect(latestController?.selectedArtifact?.provenanceTranscript?.items.map((item) => item.text)).toEqual(["assistant-item"]);
+
+    await act(async () => {
+      latestController?.changeTranscriptFilter("tools");
+      await Promise.resolve();
+    });
+    await flushAsync();
+    expect(getSessionTranscript).toHaveBeenLastCalledWith(
+      "canonical-session-1",
+      expect.objectContaining({ kind: "tools" }),
+      baseUrl,
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
+    expect(latestController?.selectedArtifact?.provenanceTranscript?.items.map((item) => item.text)).toEqual(["tools-item"]);
+
+    await act(async () => {
+      latestController?.changeTranscriptFilter("all");
+      await Promise.resolve();
+    });
+    await flushAsync();
+    expect(getSessionTranscript).toHaveBeenLastCalledWith(
+      "canonical-session-1",
+      expect.objectContaining({ kind: "all" }),
+      baseUrl,
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
+    expect(latestController?.selectedArtifact?.provenanceTranscript?.items.map((item) => item.text)).toEqual(["all-again"]);
+    expect(getLogbookArtifact).toHaveBeenCalledTimes(1);
+  });
+
+  test("resets transcript kind filter when selection changes", async () => {
+    mockLogbookSearch(
+      [session("artifact-a", "Canonical A"), session("artifact-b", "Canonical B")],
+      2
+    );
+    vi.mocked(getLogbookArtifact)
+      .mockResolvedValueOnce(canonicalArtifactDetail("artifact-a", "canonical-session-a"))
+      .mockResolvedValueOnce(canonicalArtifactDetail("artifact-b", "canonical-session-b"));
+    vi.mocked(getSessionTranscript).mockResolvedValue(transcriptPage("item"));
+    await renderHarness();
+
+    await act(async () => {
+      latestController?.selectSession("artifact-a");
+      await Promise.resolve();
+    });
+    await flushAsync();
+    await flushAsync();
+
+    await act(async () => {
+      latestController?.changeTranscriptFilter("user");
+      await Promise.resolve();
+    });
+    await flushAsync();
+    expect(latestController?.transcriptFilter).toBe("user");
+
+    await act(async () => {
+      latestController?.selectSession("artifact-b");
+      await Promise.resolve();
+    });
+    await flushAsync();
+    await flushAsync();
+
+    expect(latestController?.transcriptFilter).toBe("all");
+    expect(getSessionTranscript).toHaveBeenLastCalledWith(
+      "canonical-session-b",
+      expect.objectContaining({ kind: "all" }),
+      baseUrl,
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
   });
 
   test("shows transcript loading without claiming evidence is absent", async () => {
@@ -398,7 +533,32 @@ function LogbookHarness() {
   useEffect(() => {
     latestController = logbook;
   });
-  return <HistoryPanel density="compact" detailError={logbook.detailError} detailLoading={logbook.detailLoading} filterOptions={logbook.filterOptions} filters={logbook.filters} loadState={logbook.loadState} pageIndex={logbook.pageIndex} pageSize={logbook.pageSize} query={logbook.query} refreshError={logbook.refreshError} selectedArtifact={logbook.selectedArtifact} selectedSessionId={logbook.selectedSessionId} sort={logbook.sort} onCloseDetail={logbook.closeSession} onFilterChange={logbook.changeFilters} onPageChange={logbook.changePage} onQueryChange={logbook.changeQuery} onRetry={logbook.retry} onSessionSelect={logbook.selectSession} onSortChange={logbook.changeSort} />;
+  return (
+    <HistoryPanel
+      density="compact"
+      detailError={logbook.detailError}
+      detailLoading={logbook.detailLoading}
+      filterOptions={logbook.filterOptions}
+      filters={logbook.filters}
+      loadState={logbook.loadState}
+      pageIndex={logbook.pageIndex}
+      pageSize={logbook.pageSize}
+      query={logbook.query}
+      refreshError={logbook.refreshError}
+      selectedArtifact={logbook.selectedArtifact}
+      selectedSessionId={logbook.selectedSessionId}
+      sort={logbook.sort}
+      transcriptFilter={logbook.transcriptFilter}
+      onCloseDetail={logbook.closeSession}
+      onFilterChange={logbook.changeFilters}
+      onPageChange={logbook.changePage}
+      onQueryChange={logbook.changeQuery}
+      onRetry={logbook.retry}
+      onSessionSelect={logbook.selectSession}
+      onSortChange={logbook.changeSort}
+      onTranscriptFilterChange={logbook.changeTranscriptFilter}
+    />
+  );
 }
 
 function mockLogbookSearch(sessions: LogbookSession[], total: number): void {
