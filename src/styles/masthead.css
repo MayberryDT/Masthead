@@ -2646,7 +2646,8 @@ main {
 
 .workbench-session-table {
   width: 100%;
-  min-width: 1040px;
+  min-width: 720px;
+  table-layout: fixed;
   border-collapse: collapse;
   color: var(--body);
   font-size: 12px;
@@ -2675,10 +2676,27 @@ main {
 }
 
 .workbench-session-table td {
-  max-width: 220px;
   border-bottom: 1px solid rgba(194, 221, 241, 0.09);
   padding: 8px 10px;
   vertical-align: middle;
+}
+
+/* Primary identity column: title, project/runtime/lifecycle, session id */
+.workbench-session-table .workbench-session-col {
+  width: auto;
+  min-width: 0;
+  max-width: none;
+}
+
+/* Compact ops status chips — keep narrow so session identity gets the free width */
+.workbench-session-table .workbench-status-col {
+  width: 7.5rem;
+  max-width: 8.5rem;
+}
+
+.workbench-session-table .workbench-claim-col {
+  width: 9.5rem;
+  max-width: 11rem;
 }
 
 .workbench-session-table tbody tr {
@@ -2848,7 +2866,7 @@ main {
 }
 
 .workbench-session-meta strong,
-.workbench-session-meta span,
+.workbench-session-meta > span,
 .workbench-session-table td {
   min-width: 0;
   overflow: hidden;
@@ -2863,10 +2881,39 @@ main {
   font-weight: 600;
 }
 
-.workbench-session-meta span {
+.workbench-session-meta > span {
   color: var(--mute);
   font-family: var(--font-mono);
   font-size: 11px;
+}
+
+.workbench-session-identity {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35em;
+  min-width: 0;
+}
+
+.workbench-session-identity > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workbench-session-runtime {
+  color: var(--body);
+  font-weight: 500;
+}
+
+.workbench-session-sep {
+  flex: 0 0 auto;
+  opacity: 0.55;
+}
+
+.workbench-session-id {
+  color: var(--mute);
+  letter-spacing: 0.01em;
 }
 
 .workbench-session-empty {
@@ -3422,7 +3469,15 @@ main {
 
 @media (max-width: 920px) {
   .workbench-session-table {
-    min-width: 980px;
+    min-width: 680px;
+  }
+
+  .workbench-session-table .workbench-status-col {
+    width: 6.75rem;
+  }
+
+  .workbench-session-table .workbench-claim-col {
+    width: 8.5rem;
   }
 }
 

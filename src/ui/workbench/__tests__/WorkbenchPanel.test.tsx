@@ -165,11 +165,19 @@ describe("WorkbenchPanel", () => {
     expect(html).toContain("Package path");
     expect(html).toContain("Selected");
     expect(html).toContain("Ready to publish");
-    expect(html).toContain(">package</th>");
-    expect(html).toContain(">runbook</th>");
-    expect(html).toContain(">adr</th>");
-    expect(html).toContain(">timeline</th>");
+    // Primary table keeps actionable ops columns only (no artifact-kind status chips).
+    expect(html).toContain(">session</th>");
+    expect(html).toContain(">next</th>");
+    expect(html).toContain(">transcript</th>");
+    expect(html).toContain(">quality</th>");
     expect(html).toContain(">resolution</th>");
+    expect(html).toContain(">claim</th>");
+    expect(html).not.toContain(">enrichment</th>");
+    expect(html).not.toContain(">dossier</th>");
+    expect(html).not.toContain(">package</th>");
+    expect(html).not.toContain(">runbook</th>");
+    expect(html).not.toContain(">adr</th>");
+    expect(html).not.toContain(">timeline</th>");
     expect(html).not.toContain("Publish package");
     expect(html).toContain("Workbench Activity");
     expect(html).toContain("observability-toolbar");

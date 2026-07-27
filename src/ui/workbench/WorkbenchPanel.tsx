@@ -460,24 +460,18 @@ export function WorkbenchPanel({
                       aria-label="Select all sessions on this page"
                     />
                   </th>
-                  <th scope="col">session</th>
-                  <th scope="col">next</th>
-                  <th scope="col">transcript</th>
-                  <th scope="col">quality</th>
-                  <th scope="col">enrichment</th>
-                  <th scope="col">dossier</th>
-                  <th scope="col">package</th>
-                  <th scope="col">runbook</th>
-                  <th scope="col">adr</th>
-                  <th scope="col">timeline</th>
-                  <th scope="col">resolution</th>
-                  <th scope="col">claim</th>
+                  <th scope="col" className="workbench-session-col">session</th>
+                  <th scope="col" className="workbench-status-col">next</th>
+                  <th scope="col" className="workbench-status-col">transcript</th>
+                  <th scope="col" className="workbench-status-col">quality</th>
+                  <th scope="col" className="workbench-status-col">resolution</th>
+                  <th scope="col" className="workbench-claim-col">claim</th>
                 </tr>
               </thead>
               <tbody>
                 {sessions.length === 0 ? (
                   <tr className="workbench-empty-row">
-                    <td className="workbench-session-empty" colSpan={13}>
+                    <td className="workbench-session-empty" colSpan={7}>
                       <span className="workbench-empty-title">{loading ? "Loading" : "No package-path sessions"}</span>
                       {!loading ? (
                         <span className="workbench-empty-hint">If Now has captures, open Pipeline → Enroll missing</span>
@@ -502,10 +496,6 @@ export function WorkbenchPanel({
                       ? sanitizeWorkbenchVisibleText(session.latestActivity.summary)
                       : safeLastActivity;
                     const claim = session.activeClaim ? sanitizeWorkbenchVisibleText(session.activeClaim.claimedBy) : "-";
-                    const packageStatus = session.sessionPackageStatus ?? "missing";
-                    const runbookStatus = session.runbookStatus ?? session.bugFixTraceStatus;
-                    const adrStatus = session.adrStatus ?? "unknown";
-                    const timelineStatus = session.incidentTimelineStatus ?? "unknown";
                     const resolutionStatus = session.resolutionStatus ?? "in_progress";
 
                     return (
@@ -526,46 +516,38 @@ export function WorkbenchPanel({
                             title="Select this session"
                           />
                         </td>
-                        <td>
+                        <td className="workbench-session-col">
                           <span className="workbench-session-meta">
-                            <strong>{safeTitle}</strong>
-                            <span>
-                              {safeProject} / {safeRuntime} / {safeLifecycle}
+                            <strong title={safeTitle}>{safeTitle}</strong>
+                            <span className="workbench-session-identity" title={`${safeProject} / ${safeRuntime} / ${safeLifecycle}`}>
+                              <span className="workbench-session-project">{safeProject}</span>
+                              <span className="workbench-session-sep" aria-hidden="true">
+                                /
+                              </span>
+                              <span className="workbench-session-runtime">{safeRuntime}</span>
+                              <span className="workbench-session-sep" aria-hidden="true">
+                                /
+                              </span>
+                              <span className="workbench-session-lifecycle">{safeLifecycle}</span>
                             </span>
-                            <span>{safeSessionId}</span>
+                            <span className="workbench-session-id" title={safeSessionId}>
+                              {safeSessionId}
+                            </span>
                           </span>
                         </td>
-                        <td>
+                        <td className="workbench-status-col">
                           <StatusToken value={session.nextAction} tone="next" />
                         </td>
-                        <td>
+                        <td className="workbench-status-col">
                           <StatusToken value={session.transcriptStatus} label={transcriptStatusLabel(session.transcriptStatus)} />
                         </td>
-                        <td>
+                        <td className="workbench-status-col">
                           <StatusToken value={session.qualityStatus} />
                         </td>
-                        <td>
-                          <StatusToken value={session.sessionEnrichmentStatus} />
-                        </td>
-                        <td>
-                          <StatusToken value={session.sessionDossierStatus} />
-                        </td>
-                        <td>
-                          <StatusToken value={packageStatus} />
-                        </td>
-                        <td>
-                          <StatusToken value={runbookStatus} />
-                        </td>
-                        <td>
-                          <StatusToken value={adrStatus} />
-                        </td>
-                        <td>
-                          <StatusToken value={timelineStatus} />
-                        </td>
-                        <td>
+                        <td className="workbench-status-col">
                           <StatusToken value={resolutionStatus} tone="next" />
                         </td>
-                        <td>
+                        <td className="workbench-claim-col">
                           <span className="workbench-claim">{claim}</span>
                           <span className="workbench-latest">{latestSummary}</span>
                         </td>
