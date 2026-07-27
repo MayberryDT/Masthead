@@ -10,11 +10,16 @@ import {
   buildDaemonEnv,
   cliEntryForTarget,
   connectorBaseUrl,
+  connectorStartupPollPolicy,
   parseCompatibleHealth,
   resolveDaemonLaunchTarget,
   startLiveConnector,
   verifyInstanceLauncher
 } from "../daemonLauncher";
+
+test("allows the production startup window for a collector with a large local history", () => {
+  expect(connectorStartupPollPolicy()).toEqual({ intervalMs: 200, timeoutMs: 300_000 });
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -214,8 +219,7 @@ describe("Electron daemon launcher policy", () => {
       "fetch:/health",
       "fetch:/workbench/authoring/capabilities",
       "prepare:http://127.0.0.1:17373:17373",
-      "verify-manifest",
-      "fetch:/projection"
+      "verify-manifest"
     ]);
   });
 
@@ -340,7 +344,7 @@ describe("Electron daemon launcher policy", () => {
     expect(owned.size).toBe(0);
   });
 
-  test.each(["health-timeout", "manifest-mismatch", "warm-failure"])(
+  test.each(["health-timeout", "manifest-mismatch"])(
     "stops and awaits the exact spawned child after %s",
     async (failure) => {
       vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("offline"); }));
@@ -357,9 +361,6 @@ describe("Electron daemon launcher policy", () => {
         },
         verifyAuthoringManifest: async () => {
           if (failure === "manifest-mismatch") throw new Error("manifest mismatch");
-        },
-        warmConnector: async () => {
-          if (failure === "warm-failure") throw new Error("warm failed");
         }
       };
       await expect(startLiveConnector(

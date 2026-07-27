@@ -143,16 +143,12 @@ export function App() {
   const [showDemoData, setShowDemoData] = useState(startsInFixtureMode);
   const [reviewDispositions, setReviewDispositions] = useState<ReviewDisposition[]>([]);
   const [sourceLibraryRefreshKey, setSourceLibraryRefreshKey] = useState(0);
-  const isLiveConnection =
-    connection.state.state !== "offline" &&
-    connection.state.state !== "incompatible" &&
-    connection.state.state !== "probing" &&
-    liveConnection.state === "live";
+  const hasDaemonConnection = connection.state.state === "ready" || connection.state.state === "read_only";
   const handleSourceLibraryChanged = useCallback(() => setSourceLibraryRefreshKey((current) => current + 1), []);
   const sourcesController = useSourcesController({
     activeProjectionUrl,
     activeSurface,
-    isLive: isLiveConnection,
+    isLive: hasDaemonConnection,
     onLibraryChanged: handleSourceLibraryChanged
   });
   const {
@@ -203,7 +199,7 @@ export function App() {
     activeSurface,
     adapters,
     externalRefreshKey: sourceLibraryRefreshKey,
-    isLive: isLiveConnection
+    isLive: hasDaemonConnection
   });
   const [sessionActionStatus, setSessionActionStatus] = useState<{ sessionId: string; message: string }>();
   const searchInputRef = useRef<CollapsibleSearchHandle | null>(null);
@@ -273,13 +269,13 @@ export function App() {
   }, [connection.state, liveConnection]);
   const knowledgeFlow = useKnowledgeFlowSummary({
     activeProjectionUrl,
-    isLive: effectiveLiveConnection.state === "live",
+    isLive: hasDaemonConnection,
     refreshKey: sourceLibraryRefreshKey
   });
   const workbench = useWorkbenchController({
     active: activeSurface === "workbench",
     activeProjectionUrl,
-    isLive: effectiveLiveConnection.state === "live",
+    isLive: hasDaemonConnection,
     refreshKey: sourceLibraryRefreshKey,
     onLibraryChanged: handleSourceLibraryChanged
   });
@@ -325,7 +321,7 @@ export function App() {
   const settingsData = useSettingsDataController({
     activeProjectionUrl,
     connectionState: connection.state,
-    isLive: effectiveLiveConnection.state === "live",
+    isLive: hasDaemonConnection,
     onCanonicalDataDeleted: handleCanonicalDataDeleted,
     onReviewDispositionsChanged: handleReviewDispositionsChanged,
     writable: connection.writable
@@ -333,7 +329,7 @@ export function App() {
   useEffect(() => {
     if (
       sourcesConnectors.onboardingOpen &&
-      effectiveLiveConnection.state === "live" &&
+      hasDaemonConnection &&
       connection.writable
     ) {
       setActiveSurface("sources");

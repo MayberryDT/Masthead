@@ -29,6 +29,39 @@ describe("daemon config", () => {
     expect(config.backgroundHydrationEnabled).toBe(false);
   });
 
+  test("keeps historical recovery work off by default in production", () => {
+    const config = daemonConfigFromEnv({ MASTHEAD_PRODUCTION_ROOT: "/opt/masthead" });
+
+    expect(config.backgroundHydrationEnabled).toBe(false);
+    expect(config.legacyWorkbenchBackfillEnabled).toBe(false);
+    expect(config.gitRefreshMs).toBe(0);
+    expect(config.hookTranscriptCatchupEnabled).toBe(false);
+    expect(config.liveCaptureEnrichmentEnabled).toBe(false);
+    expect(config.liveWorkbenchReconciliationOnEveryEvent).toBe(false);
+    expect(config.liveSearchIndexOnEveryEvent).toBe(false);
+  });
+
+  test("permits an explicit production maintenance run", () => {
+    const config = daemonConfigFromEnv({
+      MASTHEAD_BACKGROUND_HYDRATION: "1",
+      MASTHEAD_GIT_REFRESH_MS: "60000",
+      MASTHEAD_HOOK_TRANSCRIPT_CATCHUP: "1",
+      MASTHEAD_LEGACY_WORKBENCH_BACKFILL: "1",
+      MASTHEAD_LIVE_CAPTURE_ENRICHMENT: "1",
+      MASTHEAD_LIVE_WORKBENCH_RECONCILIATION: "1",
+      MASTHEAD_LIVE_SEARCH_INDEXING: "1",
+      MASTHEAD_PRODUCTION_ROOT: "/opt/masthead"
+    });
+
+    expect(config.backgroundHydrationEnabled).toBe(true);
+    expect(config.gitRefreshMs).toBe(60_000);
+    expect(config.hookTranscriptCatchupEnabled).toBe(true);
+    expect(config.legacyWorkbenchBackfillEnabled).toBe(true);
+    expect(config.liveCaptureEnrichmentEnabled).toBe(true);
+    expect(config.liveWorkbenchReconciliationOnEveryEvent).toBe(true);
+    expect(config.liveSearchIndexOnEveryEvent).toBe(true);
+  });
+
   test("enables hook transcript catch-up by default", () => {
     const config = daemonConfigFromEnv({});
 

@@ -1,10 +1,8 @@
-import type { SessionImportHealthStatus } from "../daemon/db/sessionImportHealthRepository.ts";
 import type { MastheadDatabase } from "../daemon/db/sqlite.ts";
 import {
   enrollWorkbenchSession,
   type WorkbenchActor
 } from "../daemon/db/workbenchPipelineRepository.ts";
-import { reconcileImportedTranscript } from "./transcriptQualityReconciler.ts";
 
 export type MissingImportedWorkbenchReconciliationResult = {
   enrolled: number;
@@ -15,7 +13,6 @@ export type MissingImportedWorkbenchReconciliationResult = {
 };
 
 type MissingSessionRow = {
-  healthStatus: SessionImportHealthStatus | null;
   sessionId: string;
 };
 
@@ -41,16 +38,17 @@ export function reconcileMissingImportedWorkbenchSessions(
   db: MastheadDatabase,
   input: { actor: WorkbenchActor; limit?: number }
 ): MissingImportedWorkbenchReconciliationResult {
-  const limit = Math.max(1, Math.min(Math.trunc(input.limit ?? 500), 2000));
+  // Enrollment is intentionally lightweight. Transcript reconciliation can
+  // read and hash an entire historical session, so it belongs to import and
+  // explicit transcript work, never behind a Workbench toolbar button.
+  const limit = Math.max(1, Math.min(Math.trunc(input.limit ?? 100), 250));
   const skippedExisting = countExistingWorkbenchSessions(db);
   const heldForImportRepair = countMissingSessionsHeldForImportRepair(db);
   const missing = listReconcilableMissingSessions(db, limit);
   const enrolledSessionIds: string[] = [];
 
   for (const row of missing) {
-    const state = row.healthStatus === "complete"
-      ? reconcileImportedTranscript(db, row.sessionId, { actor: input.actor }).state
-      : enrollWorkbenchSession(db, { actor: input.actor, sessionId: row.sessionId }).state;
+    const state = enrollWorkbenchSession(db, { actor: input.actor, sessionId: row.sessionId }).state;
     if (state) enrolledSessionIds.push(row.sessionId);
   }
 
@@ -86,7 +84,7 @@ function countMissingSessionsHeldForImportRepair(db: MastheadDatabase): number {
 function listReconcilableMissingSessions(db: MastheadDatabase, limit: number): MissingSessionRow[] {
   return db.prepare(
     `${LATEST_MISSING_IMPORT_HEALTH_CTE}
-     SELECT sessionId, healthStatus
+     SELECT sessionId
      FROM missing_sessions
      WHERE COALESCE(healthStatus, 'complete') = 'complete'
      ORDER BY COALESCE(lastActivityAt, updatedAt, createdAt) DESC, sessionId DESC

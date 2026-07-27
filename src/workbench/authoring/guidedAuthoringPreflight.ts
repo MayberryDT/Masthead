@@ -13,6 +13,15 @@ import type {
   AuthoringEvidenceSessionSnapshot
 } from "./evidenceCatalog.ts";
 
+
+/**
+ * Small selections keep the detailed evidence snapshot. Large select-all
+ * requests use the canonical revision index so handoff creation never
+ * replays millions of transcript rows while holding the daemon write reservation.
+ */
+export const GUIDED_EAGER_PREFLIGHT_SESSION_LIMIT = 48;
+
+
 export type GuidedCompileReadySession = {
   sessionId: string;
   ordinal: number;
@@ -99,6 +108,9 @@ export function assertGuidedSelectionCompileReady(
     if (seen.has(sessionId)) throw new Error(`authoring_session_id_duplicate:${sessionId}`);
     seen.add(sessionId);
   }
+  if (sessionIds.length > GUIDED_EAGER_PREFLIGHT_SESSION_LIMIT) {
+    return assertLargeGuidedSelectionCompileReady(db, sessionIds);
+  }
   const snapshot = evidenceCatalog.getAuthoringEvidenceSnapshot(db, sessionIds);
   const snapshotById = new Map(snapshot.sessions.map((session) => [session.revisionInput.sessionId, session]));
   const sessions: GuidedCompileReadySession[] = [];
@@ -114,6 +126,106 @@ export function assertGuidedSelectionCompileReady(
   return {
     manifest: snapshot.manifest,
     revisionInputs: sessions.map(({ sessionId }) => snapshotById.get(sessionId)!.revisionInput),
+    selection: {
+      eligibleSessionCount: sessions.length,
+      excludedSessionCount: excludedSessions.length,
+      excludedSessions,
+      requestedSessionCount: sessionIds.length
+    },
+    sessions
+  };
+}
+
+function assertLargeGuidedSelectionCompileReady(
+  db: MastheadDatabase,
+  sessionIds: string[]
+): GuidedSelectionPreflightResult {
+  const placeholders = sessionIds.map(() => "?").join(", ");
+  const rows = db.prepare(
+    `SELECT sessions.session_id AS sessionId,
+            sessions.deleted_at AS deletedAt,
+            state.publication_status AS publicationStatus,
+            state.quality_status AS qualityStatus,
+            state.transcript_status AS transcriptStatus,
+            EXISTS (
+              SELECT 1
+              FROM messages
+              WHERE messages.session_id = sessions.session_id
+                AND messages.role IN ('user', 'assistant')
+                AND trim(COALESCE(messages.text_redacted, '')) <> ''
+                AND lower(trim(messages.text_redacted)) NOT IN ('codex hook event', 'runtime signal', 'unknown', 'shell')
+            ) AS hasNarrativeEvidence
+     FROM sessions
+     LEFT JOIN workbench_session_state state ON state.session_id = sessions.session_id
+     WHERE sessions.session_id IN (${placeholders})`
+  ).all(...sessionIds) as Array<{
+    sessionId: string;
+    deletedAt: string | null;
+    publicationStatus: string | null;
+    qualityStatus: string | null;
+    transcriptStatus: string | null;
+    hasNarrativeEvidence: number;
+  }>;
+  const rowBySessionId = new Map(rows.map((row) => [row.sessionId, row]));
+  const revisionInputs = evidenceCatalog.guidedAuthoringEvidenceRevisionInputs(db, sessionIds);
+  const revisionsBySessionId = new Map(revisionInputs.map((input) => [input.sessionId, input]));
+  const sessions: GuidedCompileReadySession[] = [];
+  const excludedSessions: WorkbenchAuthoringV5SelectionDto["excludedSessions"] = [];
+  for (const [ordinal, sessionId] of sessionIds.entries()) {
+    const row = rowBySessionId.get(sessionId);
+    if (!row || row.deletedAt !== null) {
+      excludedSessions.push({ reason: "session_not_found", sessionId });
+      continue;
+    }
+    const eligiblePublicationStatus = row.publicationStatus === "publish_path";
+    if (row.publicationStatus !== null && !eligiblePublicationStatus) {
+      excludedSessions.push({ reason: "not_on_publish_path", sessionId });
+      continue;
+    }
+    const transcriptReady = row.transcriptStatus === "available" || row.transcriptStatus === "imported";
+    if (row.publicationStatus !== "publish_path" || !transcriptReady || row.qualityStatus !== "passed") {
+      excludedSessions.push({ reason: "not_compile_ready", sessionId });
+      continue;
+    }
+    if (row.hasNarrativeEvidence !== 1) {
+      excludedSessions.push({ reason: "missing_canonical_evidence", sessionId });
+      continue;
+    }
+    const dossier = getSessionDossier(db, sessionId);
+    if (!dossier) {
+      excludedSessions.push({ reason: "session_not_found", sessionId });
+      continue;
+    }
+    sessions.push({
+      dossier,
+      evidence: {
+        coverage: {
+          assistantMessages: 0,
+          checkpoints: 0,
+          fileEffects: 0,
+          messages: 0,
+          runtimeSignals: 0,
+          toolCalls: 0,
+          toolResults: 0,
+          userMessages: 0
+        },
+        kindCounts: [],
+        sessionId,
+        totalItems: 0,
+        warnings: []
+      },
+      ordinal: sessions.length,
+      sessionId
+    });
+  }
+  const selectedIds = sessions.map(({ sessionId }) => sessionId);
+  const selectedRevisionInputs = selectedIds.map((sessionId) => revisionsBySessionId.get(sessionId)!);
+  return {
+    manifest: {
+      evidenceRevision: evidenceCatalog.guidedAuthoringEvidenceRevisionFromInputs(selectedRevisionInputs),
+      sessions: sessions.map(({ evidence }) => evidence)
+    },
+    revisionInputs: selectedRevisionInputs,
     selection: {
       eligibleSessionCount: sessions.length,
       excludedSessionCount: excludedSessions.length,

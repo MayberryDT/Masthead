@@ -16,6 +16,12 @@ export type SessionRepositoryContext = {
   hostname?: string;
   runtimeKind: string;
   runtimeVersion?: string;
+  /**
+   * A live session can emit thousands of events. When false, preserve capture
+   * immediately but defer complete Workbench reconciliation until its terminal
+   * session.completed event.
+   */
+  reconcileLiveEvidenceOnEveryEvent?: boolean;
 };
 
 export type AdapterIngestionContext = SessionRepositoryContext & {
@@ -75,7 +81,9 @@ export function createSessionRepository(db: MastheadDatabase, context: SessionRe
     upsertFileEffect(event, sessionId);
     upsertRuntimeSignal(event, sessionId);
     upsertModelUsage(event, sessionId);
-    afterSessionMaterialized(db, sessionId, "live_ingest");
+    if (context.reconcileLiveEvidenceOnEveryEvent !== false || event.type === "session.completed") {
+      afterSessionMaterialized(db, sessionId, "live_ingest");
+    }
     return sessionId;
   };
 

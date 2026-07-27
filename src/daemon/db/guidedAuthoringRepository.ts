@@ -269,6 +269,20 @@ export function getGuidedAuthoringRequest(
   };
 }
 
+/** Immutable publication receipts are the durable completion record for a guided request. */
+export function listGuidedAuthoringReceipts(
+  db: MastheadDatabase,
+  requestId: string
+): GuidedAuthoringReceiptDto[] {
+  const rows = db.prepare(
+    `SELECT receipt_json AS receiptJson
+     FROM guided_authoring_assignments
+     WHERE request_id = ? AND receipt_json IS NOT NULL
+     ORDER BY ordinal`
+  ).all(requestId) as Array<{ receiptJson: string }>;
+  return rows.map(({ receiptJson }) => parseJson<GuidedAuthoringReceiptDto>(receiptJson));
+}
+
 export function getGuidedAuthoringRequestForAssignment(
   db: MastheadDatabase,
   assignmentId: string
@@ -566,9 +580,7 @@ export function storeGuidedDraftReviewInTransaction(
   if (inactiveMembership) throw new Error("guided_assignment_not_active");
   const revision = assignment.currentDraftRevision + 1;
   const accepted = !input.findings.some(({ severity }) => severity === "error");
-  const status: GuidedAuthoringAssignmentDto["status"] = accepted
-    ? assignment.canary === 1 ? "staged_canary" : "ready_to_finish"
-    : "needs_revision";
+  const status: GuidedAuthoringAssignmentDto["status"] = accepted ? "ready_to_finish" : "needs_revision";
   const now = new Date().toISOString();
   db.prepare(
     `INSERT INTO guided_authoring_draft_reviews
@@ -597,11 +609,6 @@ export function storeGuidedDraftReviewInTransaction(
     assignment.evidenceRevision,
     assignment.currentDraftRevision
   );
-  if (accepted && assignment.canary === 1) {
-    db.prepare(
-      `UPDATE guided_authoring_requests SET status = 'awaiting_canary_approval', updated_at = ? WHERE request_id = ?`
-    ).run(now, assignment.requestId);
-  }
   return requireGuidedAssignment(db, assignment.assignmentId);
 }
 
@@ -813,7 +820,7 @@ export function transitionGuidedAssignmentAfterReceiptInTransaction(
   const request = getGuidedAuthoringRequest(db, assignment.requestId);
   assertGuidedAssignmentReadyForCompletion(db, assignment, request);
   validateGuidedAssignmentReceipt(db, assignment, request, storedReceipt);
-  const expectedRequestStatus = assignment.canary === 1 ? "awaiting_canary_approval" : "active";
+  const expectedRequestStatus = "active";
   const now = storedReceipt.completedAt;
   const completed = db.prepare(
     `UPDATE guided_authoring_assignments
@@ -897,14 +904,7 @@ function assertGuidedAssignmentReadyForCompletion(
     } | undefined;
   const acceptedDraftIsCurrent = acceptedDraft?.accepted === 1 &&
     acceptedDraft.evidenceRevision === assignment.evidenceRevision;
-  const approvedCanaryReview = currentAcceptedCanaryApproval(db, assignment);
-  const ready = (assignment.canary === 0 && assignment.status === "ready_to_finish" && acceptedDraftIsCurrent) || (
-    assignment.canary === 1 &&
-    assignment.status === "staged_canary" &&
-    request?.status === "awaiting_canary_approval" &&
-    acceptedDraftIsCurrent &&
-    Boolean(approvedCanaryReview)
-  );
+  const ready = assignment.status === "ready_to_finish" && acceptedDraftIsCurrent;
   if (!ready) throw new Error("guided_assignment_not_ready");
 }
 

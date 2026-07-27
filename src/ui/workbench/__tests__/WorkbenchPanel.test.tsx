@@ -159,7 +159,7 @@ describe("WorkbenchPanel", () => {
     }
     // Pipeline ops are hidden until the menu is open (client-only); labels not required in static markup
     expect(html).not.toContain("Select Visible");
-    expect(html).not.toContain("Refresh");
+    expect(html).toContain("Refresh");
     expect(html).toContain("workbench-pipeline-rail");
     expect(html).toContain("›");
     expect(html).toContain("Package path");

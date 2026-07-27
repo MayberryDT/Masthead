@@ -11,6 +11,7 @@ import {
   validateArtifactQuality,
   validateClaimSupport
 } from "../artifactQuality.ts";
+import { hasLaterNegativeVerificationOutcome } from "../verificationSemantics.ts";
 
 const MESSAGE = "message:session:a:problem";
 const ACTION = "message:session:a:change";
@@ -282,6 +283,71 @@ describe("artifact claim support", () => {
       evidenceByRef.get(verificationSupport.evidenceRef)!
     )).toBe(true);
     expect(validateClaimSupport(validRunbook(), [verificationSupport], evidenceByRef)).toEqual([]);
+  });
+
+  test("accepts an assistant completion that records npm run verify passed", () => {
+    const text = "Nothing left to do. The worktree was clean and npm run verify passed before push.";
+
+    expect(isPositiveVerificationEvidence({
+      path: "/sessionDossier/verification/summary",
+      supportKind: "verification",
+      evidenceRef: "message:session:a:verify",
+      excerpt: text
+    }, {
+      kind: "message",
+      lowValue: false,
+      observedAt: "2026-06-26T06:31:52.842Z",
+      role: "assistant",
+      sessionId: "session:a",
+      text
+    })).toBe(true);
+  });
+
+  test("accepts a healthy report that explicitly says no empty-state failure remains", () => {
+    const text = "What I verified: the health endpoint returned 200, system health was healthy, and no empty-state failure remained.";
+
+    expect(isPositiveVerificationEvidence({
+      path: "/sessionDossier/verification/summary",
+      supportKind: "verification",
+      evidenceRef: "message:session:a:health",
+      excerpt: text
+    }, {
+      kind: "message",
+      lowValue: false,
+      observedAt: "2026-04-20T05:22:15.439Z",
+      role: "assistant",
+      sessionId: "session:a",
+      text
+    })).toBe(true);
+  });
+
+  test("does not treat a quoted negation of an old failure as a current failed verification", () => {
+    const text = "I verified hermes-agent is running and health is healthy. The issue is not ‘Jarvis failed to restart’; its warning only reads like an error/panic message.";
+
+    expect(isPositiveVerificationEvidence({
+      path: "/sessionDossier/verification/summary",
+      supportKind: "verification",
+      evidenceRef: "message:session:a:restart",
+      excerpt: text
+    }, {
+      kind: "message",
+      lowValue: false,
+      observedAt: "2026-06-26T06:31:52.842Z",
+      role: "assistant",
+      sessionId: "session:a",
+      text
+    })).toBe(true);
+  });
+
+  test("preserves a recorded passing result when a legacy transcript later records a final successful rerun", () => {
+    const excerpt = "Verification in the 3002 checkout: npm run test passed: 12 tests.";
+    const transcript = [
+      "### Session update", "", "**agent**:", excerpt,
+      "Final unit tests: npm run test error (no output).",
+      "Final unit tests: npm run test passed: 12 tests."
+    ].join("\n");
+
+    expect(hasLaterNegativeVerificationOutcome(transcript, excerpt)).toBe(false);
   });
 
   test("rejects a normalized excerpt shorter than 20 characters or absent from cited evidence", () => {

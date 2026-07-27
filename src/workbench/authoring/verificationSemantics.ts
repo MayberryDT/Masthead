@@ -2,7 +2,9 @@ export function hasNegativeVerificationOutcome(value: string): boolean {
   const normalized = value
     .replace(/\b(?:0|zero)\s+(?:errors?|failures?|crashes?)\b/gi, "")
     .replace(/\b(?:errors?|failures?|crashes?)\s*[:=]\s*0\b/gi, "")
-    .replace(/\b(?:no|without)\s+(?:remaining\s+)?(?:errors?|failures?|crashes?)\b/gi, "");
+    .replace(/\b(?:no|without)\s+(?:remaining\s+)?(?:[\w-]+\s+){0,4}(?:errors?|failures?|crashes?)\b/gi, "")
+    .replace(/\b(?:not|isn't|wasn't|didn't)\s+(?:["“'‘]\s*)?(?:[\w-]+\s+){0,4}(?:errors?|failures?|crashes?|failed|failing)\b/gi, "")
+    .replace(/\b(?:reads?|looked?)\s+like\s+an?\s+(?:error\s*\/\s*panic|error|panic)(?:\s+message)?\b/gi, "");
   return (
     /\b(?:0|zero)\s+(?:verification\s+)?(?:tests?|checks?)\s+passed\b/i.test(value) ||
     /\bno\b[^.\n]{0,35}\b(?:test|check|verification)\b[^.\n]{0,25}\bpassed\b/i.test(value) ||
@@ -18,7 +20,7 @@ export function hasNegativeVerificationOutcome(value: string): boolean {
 export function hasPositiveVerificationOutcome(value: string): boolean {
   if (hasNegativeVerificationOutcome(value)) return false;
   return (
-    /\b(?:verification|tests?|checks?|build|health|probe)\b[^.\n]{0,100}\b(?:pass|passed|succeed|succeeded|successful|ok|green|healthy|verified|confirmed)\b/i.test(
+    /\b(?:verif(?:y|ied|ication)|tests?|checks?|build|health|probe)\b[^.\n]{0,100}\b(?:pass|passed|succeed|succeeded|successful|ok|green|healthy|verified|confirmed)\b/i.test(
       value
     ) ||
     /\b(?:verified|confirmed|proved|validated)\b[^.\n]{0,100}\b(?:working|healthy|restored|available|opened|delivered|passed|succeeded|correct|effective)\b/i.test(
@@ -39,9 +41,18 @@ export function hasLaterNegativeVerificationOutcome(value: string, excerpt: stri
   if (!normalizedExcerpt) return false;
   const excerptIndex = normalizedValue.indexOf(normalizedExcerpt);
   if (excerptIndex < 0) return false;
-  return hasNegativeVerificationOutcome(
-    normalizedValue.slice(excerptIndex + normalizedExcerpt.length)
-  );
+  const later = normalizedValue.slice(excerptIndex + normalizedExcerpt.length);
+  if (!hasNegativeVerificationOutcome(later)) return false;
+  // A final report can accurately preserve a failed intermediate step after it
+  // documents that the same step was rerun successfully. That history must not
+  // erase an earlier, independently supported verification result.
+  if (/\b(?:re-?ran|retried|recovered|resolved|fixed)\b[^.]{0,240}\b(?:now\s+shows?|then\s+(?:passed|succeeded)|last\s+run\s*:\s*ok)\b/i.test(later)) {
+    return false;
+  }
+  if (/\bfinal\s+(?:\w+\s+){0,3}(?:test|tests|check|checks|verification)\b[^.]{0,160}\b(?:pass(?:ed)?|succeed(?:ed)?|ok)\b/i.test(later)) {
+    return false;
+  }
+  return true;
 }
 
 export function hasStructuredVerificationReport(value: string): boolean {

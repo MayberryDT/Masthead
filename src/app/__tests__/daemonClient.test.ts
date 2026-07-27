@@ -9,6 +9,7 @@ import {
   getWorkbenchImportHealthSummary,
   getWorkbenchNotAddedSessions,
   getWorkbenchNotAddedSummary,
+  getWorkbenchSelectionSnapshot,
   getWorkbenchSessions,
   getKnowledgeFlowSummary,
   getLiveHookSettings,
@@ -353,6 +354,7 @@ describe("daemon client review dispositions", () => {
     );
 
     await getWorkbenchSessions("http://127.0.0.1:17373/projection", { limit: 25 });
+    await getWorkbenchSelectionSnapshot("http://127.0.0.1:17373/projection");
     await getWorkbenchActivity("http://127.0.0.1:17373/projection", { limit: 10, sessionId: "session:1" });
     await getWorkbenchNotAddedSummary("http://127.0.0.1:17373/projection");
     await getWorkbenchImportHealthSummary("http://127.0.0.1:17373/projection");
@@ -365,21 +367,26 @@ describe("daemon client review dispositions", () => {
     );
     expect(fetch).toHaveBeenNthCalledWith(
       2,
-      "http://127.0.0.1:17373/workbench/activity?limit=10&sessionId=session%3A1",
+      "http://127.0.0.1:17373/workbench/selection-snapshot",
       expect.objectContaining({ headers: { accept: "application/json" } })
     );
     expect(fetch).toHaveBeenNthCalledWith(
       3,
-      "http://127.0.0.1:17373/workbench/not-added-summary",
+      "http://127.0.0.1:17373/workbench/activity?limit=10&sessionId=session%3A1",
       expect.objectContaining({ headers: { accept: "application/json" } })
     );
     expect(fetch).toHaveBeenNthCalledWith(
       4,
-      "http://127.0.0.1:17373/workbench/import-health-summary",
+      "http://127.0.0.1:17373/workbench/not-added-summary",
       expect.objectContaining({ headers: { accept: "application/json" } })
     );
     expect(fetch).toHaveBeenNthCalledWith(
       5,
+      "http://127.0.0.1:17373/workbench/import-health-summary",
+      expect.objectContaining({ headers: { accept: "application/json" } })
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      6,
       "http://127.0.0.1:17373/workbench/not-added?includeDetails=true&limit=10",
       expect.objectContaining({ headers: { accept: "application/json" } })
     );

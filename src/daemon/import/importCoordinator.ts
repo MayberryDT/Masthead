@@ -173,7 +173,7 @@ export function recoverInterruptedImportJobs(db: MastheadDatabase, now = () => n
        finished_at = NULL,
        failure_group_id = NULL
      WHERE import_job_id IN (SELECT import_job_id FROM import_jobs WHERE status IN ('queued', 'running', 'cancelling'))
-       AND status IN ('running', 'failed')`
+       AND status = 'running'`
   ).run();
   db.prepare(
     `UPDATE import_jobs

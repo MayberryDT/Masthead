@@ -9,6 +9,7 @@ import type { DaemonConfig } from "../config.ts";
 import { seedSession } from "../db/__tests__/sessionTestHelpers.ts";
 import { createImportJob } from "../db/importJobRepository.ts";
 import { migrateDatabase } from "../db/schema.ts";
+import { setSourcePolicy } from "../db/sourcePolicyRepository.ts";
 import { createMastheadDaemon, type MastheadDaemon } from "../server.ts";
 import { grokAdapter } from "../../adapters/grok/adapter.ts";
 
@@ -23,6 +24,40 @@ afterEach(async () => {
 });
 
 describe("Masthead daemon startup", () => {
+  test("does not run legacy Workbench backfill when startup recovery is disabled", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-daemon-production-safe-"));
+    tempDirs.push(tempDir);
+    const databasePath = join(tempDir, "masthead.sqlite");
+    const database = new DatabaseSync(databasePath);
+    migrateDatabase(database);
+    seedSession(database, {
+      lifecycle: "completed",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:production-safe-startup",
+      title: "Historical session"
+    });
+    database.close();
+
+    const daemon = await createMastheadDaemon({
+      allowedOrigins: ["http://127.0.0.1:5173"],
+      codexHomeDir: tempDir,
+      databasePath,
+      fixturePath: join(tempDir, "fixture.json"),
+      gitRefreshMs: 0,
+      hookTranscriptCatchupEnabled: false,
+      host: "127.0.0.1",
+      legacyWorkbenchBackfillEnabled: false,
+      llmCopyEnabled: false,
+      port: 0,
+      storePath: join(tempDir, "events.ndjson")
+    });
+    daemons.push(daemon);
+
+    const row = daemon.database.prepare("SELECT count(*) AS count FROM workbench_session_state").get() as CountRow;
+    expect(row.count).toBe(0);
+  });
+
   test("loads a receipt for a generated import job id", async () => {
     const daemon = await createTestDaemon();
     const now = "2026-07-17T12:00:00.000Z";
@@ -124,6 +159,57 @@ describe("Masthead daemon startup", () => {
       job: { importJobId: job.importJobId }
     });
     await waitForImportJobSettled(daemon, job.importJobId);
+  });
+
+  test("queues a persisted source without requiring a fresh full source scan", async () => {
+    const daemon = await createTestDaemon();
+    const now = "2026-07-21T10:55:00.000Z";
+    daemon.database.prepare(
+      `INSERT INTO ingest_sources(source_id, adapter, source_kind, source_path, confidence, discovered_at, last_seen_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run("source:persisted-missing", "grok", "jsonl", "/missing/history.jsonl", "heuristic", now, now);
+    setSourcePolicy(daemon.database, {
+      decidedAt: now,
+      enabled: true,
+      policyKind: "transcript_import",
+      sourceId: "source:persisted-missing"
+    });
+    const baseUrl = await listen(daemon);
+
+    const response = await fetch(`${baseUrl}/imports`, {
+      body: JSON.stringify({ kind: "transcript", sourceId: "source:persisted-missing" }),
+      headers: { "content-type": "application/json" },
+      method: "POST"
+    });
+
+    expect(response.status).toBe(202);
+    const body = await response.json() as { job: { sourceId: string } };
+    expect(body.job).toMatchObject({ sourceId: "source:persisted-missing" });
+  });
+
+  test("starts setup imports from persisted sources after a daemon restart without rescanning history", async () => {
+    const daemon = await createTestDaemon();
+    const now = "2026-07-21T11:15:00.000Z";
+    daemon.database.prepare(
+      `INSERT INTO ingest_sources(source_id, adapter, source_kind, source_path, confidence, discovered_at, last_seen_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run("source:setup-persisted", "grok", "jsonl", "/missing/setup-history.jsonl", "heuristic", now, now);
+    const baseUrl = await listen(daemon);
+
+    const response = await fetch(`${baseUrl}/sources/setup/run`, {
+      body: JSON.stringify({
+        importMetadata: false,
+        importScope: { mode: "transcript_full" },
+        queueEnrichment: false,
+        runtimes: ["grok"]
+      }),
+      headers: { "content-type": "application/json" },
+      method: "POST"
+    });
+
+    expect(response.status).toBe(202);
+    const body = await response.json() as { jobs: Array<{ sourceId: string }> };
+    expect(body.jobs).toEqual([expect.objectContaining({ sourceId: "source:setup-persisted" })]);
   });
 
   test("rejects malformed encoded import job ids consistently", async () => {

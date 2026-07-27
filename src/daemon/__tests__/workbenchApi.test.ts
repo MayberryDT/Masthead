@@ -174,6 +174,7 @@ describe("workbench API", () => {
         },
         latestActivity: expect.objectContaining({ eventType: expect.any(String), sessionId: "session:queue" }),
         nextAction: "check_transcript",
+        canonicalEvidenceReady: false,
         publicationStatus: "publish_path",
         sessionId: "session:queue",
         title: "Queued session"
@@ -181,6 +182,41 @@ describe("workbench API", () => {
     ]);
     expect(JSON.stringify(body)).not.toContain("session:not-added");
     expect(JSON.stringify(body)).not.toContain("session:published");
+  });
+
+  test("returns one full selection snapshot with only canonical-evidence-ready sessions marked compile ready", async () => {
+    const { baseUrl, daemon } = await startTestDaemon();
+    for (const sessionId of ["session:ready", "session:review", "session:hook-only"]) {
+      seedSession(daemon.database, {
+        lifecycle: "ended",
+        model: "gpt-5",
+        project: "Masthead",
+        sessionId,
+        title: sessionId
+      });
+      ensureWorkbenchSessionState(daemon.database, sessionId);
+    }
+    daemon.database.prepare(
+      "UPDATE workbench_session_state SET transcript_status = 'imported', quality_status = 'passed' WHERE session_id IN (?, ?, ?)"
+    ).run("session:ready", "session:review", "session:hook-only");
+    daemon.database.prepare(
+      "INSERT INTO messages (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      "message:ready",
+      "session:ready",
+      "user",
+      "Implement the selection snapshot.",
+      "hash:ready",
+      "2026-07-21T00:00:00.000Z",
+      "{}",
+      "authoritative"
+    );
+
+    const body = await getJson(baseUrl, "/workbench/selection-snapshot");
+
+    expect(body).toMatchObject({ ok: true, total: 3 });
+    expect(body.sessionIds).toEqual(["session:ready", "session:review", "session:hook-only"]);
+    expect(body.compileReadySessionIds).toEqual(["session:ready"]);
   });
 
   test("returns Workbench activity rows", async () => {
@@ -335,7 +371,7 @@ describe("workbench API", () => {
     });
   });
 
-  test("POST /workbench/enroll-missing reconciles complete imports and preserves repair holds", async () => {
+  test("POST /workbench/enroll-missing only enrolls complete imports and preserves repair holds", async () => {
     const { baseUrl, daemon } = await startTestDaemon();
     seedImportHealthUnits(daemon.database, ["unit-complete", "unit-empty", "unit-repair"]);
     for (const [sessionId, title] of [
@@ -388,14 +424,13 @@ describe("workbench API", () => {
     });
     expect(readWorkbenchSessionState(daemon.database, "session:complete")).toMatchObject({
       publicationStatus: "publish_path",
-      qualityStatus: "passed",
-      transcriptStatus: "imported"
+      qualityStatus: "unchecked",
+      transcriptStatus: "unchecked"
     });
     expect(readWorkbenchSessionState(daemon.database, "session:empty")).toMatchObject({
-      nonPublicationReason: "empty",
-      publicationStatus: "not_added_to_logbook",
-      qualityDecisionSource: "automatic",
-      suppressionCategory: "confirmed_noise"
+      publicationStatus: "publish_path",
+      qualityStatus: "unchecked",
+      transcriptStatus: "unchecked"
     });
     expect(readWorkbenchSessionState(daemon.database, "session:repair")).toBeUndefined();
 

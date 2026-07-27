@@ -27,6 +27,7 @@ import {
   finalizeStagedProductionInstallation,
   productionHealthPollPolicy,
   productionMaintenanceTimeoutPolicy,
+  productionRootProcesses,
   runCli,
   readOwnedProcessStrict,
   readProductionProcesses,
@@ -5563,6 +5564,24 @@ describe("production lifecycle launcher", () => {
     }, config)).toBeUndefined();
     expect(classifyProductionProcess({ ...daemon, environ: { ...daemon.environ, MASTHEAD_PORT: "9" } }, config))
       .toMatchObject({ role: "daemon", target });
+  });
+
+  test("excludes the lifecycle runner itself from staged activation's production-process proof", async () => {
+    const { config, target } = await fixture();
+    const lifecycleRunner = processRecord({
+      argv: [join(target, "resources", "daemon", "node"), join(target, "resources", "daemon", "scripts", "masthead-production.js"), "activate"],
+      exe: join(target, "resources", "daemon", "node"),
+      pid: process.pid
+    });
+    const unrelatedProductionNode = processRecord({
+      argv: [join(target, "resources", "daemon", "node"), "unrelated-script.js"],
+      exe: join(target, "resources", "daemon", "node"),
+      pid: 9_999_999
+    });
+
+    await expect(productionRootProcesses(config, {
+      readProcesses: async () => [lifecycleRunner, unrelatedProductionNode]
+    })).resolves.toEqual([expect.objectContaining({ pid: 9_999_999, role: "unknown", target })]);
   });
 
   test("classifies deleted old-target executables only when their exact argv and production identity still match", async () => {

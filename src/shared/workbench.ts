@@ -87,6 +87,8 @@ export type WorkbenchQueueSessionDto = {
   publicationStatus: "publish_path" | "published";
   nextAction: WorkbenchNextAction;
   transcriptStatus: string;
+  /** True only when the session also has usable canonical evidence for guided authoring. */
+  canonicalEvidenceReady?: boolean;
   qualityStatus: string;
   sessionEnrichmentStatus: string;
   sessionDossierStatus: string;
@@ -109,6 +111,15 @@ export type WorkbenchSessionsResponse = {
   total: number;
   scope: "default";
   sessions: WorkbenchQueueSessionDto[];
+};
+
+/** An atomic selection of every current package-path session for Workbench bulk actions. */
+export type WorkbenchSelectionSnapshotResponse = {
+  ok: true;
+  generatedAt: string;
+  total: number;
+  sessionIds: string[];
+  compileReadySessionIds: string[];
 };
 
 export type WorkbenchActivityResponse = {
