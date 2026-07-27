@@ -125,11 +125,16 @@ function cleanTitle(value: string | undefined): string | undefined {
 
 function isUsableLiveTitle(value: string | undefined): value is string {
   if (!value) return false;
-  const normalized = value.toLowerCase();
+  const normalized = value.toLowerCase().replace(/\s+/g, " ").trim();
   if (value.startsWith("{") || value.includes('"event"') || /^https?:\/\//i.test(value)) return false;
   if (["codex session", "untitled session", "new session", "session", "chat session"].includes(normalized)) return false;
   if (/^[\w .-]+\s+codex session$/i.test(value)) return false;
+  if (/^(?:grok build|codex|claude code|cursor|opencode|hermes|oh my pi|pi)\s+(?:hook|plugin|extension)\s+event$/i.test(normalized)) {
+    return false;
+  }
+  if (/\bhook event$/i.test(normalized) && normalized.length <= 40) return false;
   if (/^[0-9a-f]{12,}$/i.test(value) || /^[0-9a-f-]{32,}$/i.test(value)) return false;
   if (/^session[-_:][a-z0-9][a-z0-9_-]{5,}$/i.test(value)) return false;
+  if (/^subagent-[0-9a-f-]+(?:\s+session)?$/i.test(normalized)) return false;
   return /\s/.test(value) || value.length < 24;
 }

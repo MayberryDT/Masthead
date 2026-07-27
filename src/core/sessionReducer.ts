@@ -114,21 +114,21 @@ export function deriveSessions(
     }
 
     const workspaceProject =
-      pathBaseName(workspace?.repoRoot) ??
-      pathBaseName(workspace?.cwd);
+      usefulProjectLabel(workspace?.repoRoot) ??
+      usefulProjectLabel(workspace?.cwd);
     const project =
-      stringPayload(start, "project") ??
-      stringPayload(metadataEvent, "project") ??
+      usefulProjectName(stringPayload(start, "project")) ??
+      usefulProjectName(stringPayload(metadataEvent, "project")) ??
       workspaceProject ??
       "Unknown project";
     const sourceSessionId = stringPayload(metadataEvent, "sourceSessionId") ?? stringPayload(start, "sourceSessionId") ?? sessionId;
     const runtime = stringPayload(metadataEvent, "runtime") ?? stringPayload(start, "runtime") ?? metadataEvent?.source.adapter ?? start?.source.adapter ?? latest?.source.adapter;
     const harness = stringPayload(metadataEvent, "harness") ?? stringPayload(start, "harness") ?? harnessLabel(runtime);
     const title =
-      stringPayload(start, "title") ??
-      stringPayload(start, "objective") ??
-      stringPayload(metadataEvent, "title") ??
-      stringPayload(metadataEvent, "objective") ??
+      usefulSessionTitle(stringPayload(start, "title")) ??
+      usefulSessionTitle(stringPayload(start, "objective")) ??
+      usefulSessionTitle(stringPayload(metadataEvent, "title")) ??
+      usefulSessionTitle(stringPayload(metadataEvent, "objective")) ??
       `${project} session`;
 
     return {
@@ -276,6 +276,45 @@ function latestInstant(...timestamps: Array<string | undefined>): Date | undefin
 
 function pathBaseName(path: string | undefined): string | undefined {
   return path?.split("/").filter(Boolean).at(-1);
+}
+
+/** Prefer repo/project names over opaque Grok subagent worktree folder names. */
+function usefulProjectLabel(path: string | undefined): string | undefined {
+  if (!path) return undefined;
+  const parts = path.split("/").filter(Boolean);
+  for (let index = parts.length - 1; index >= 0; index -= 1) {
+    const part = parts[index]!;
+    if (isOpaquePathSegment(part)) continue;
+    return part;
+  }
+  return undefined;
+}
+
+function usefulProjectName(value: string | undefined): string | undefined {
+  if (!value?.trim()) return undefined;
+  const cleaned = value.replace(/\s+/g, " ").trim();
+  if (isOpaquePathSegment(cleaned)) return undefined;
+  return cleaned;
+}
+
+function usefulSessionTitle(value: string | undefined): string | undefined {
+  if (!value?.trim()) return undefined;
+  const cleaned = value.replace(/\s+/g, " ").trim();
+  if (/^(?:grok build|codex|claude code|cursor|opencode|hermes|oh my pi|pi)\s+(?:hook|plugin|extension)\s+event$/i.test(cleaned)) {
+    return undefined;
+  }
+  if (/\bhook event$/i.test(cleaned) && cleaned.length <= 40) return undefined;
+  if (isOpaquePathSegment(cleaned.replace(/\s+session$/i, ""))) return undefined;
+  return cleaned;
+}
+
+function isOpaquePathSegment(value: string): boolean {
+  const normalized = value.trim();
+  if (!normalized) return true;
+  if (/^subagent-[0-9a-f-]+$/i.test(normalized)) return true;
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(normalized)) return true;
+  if (/^[0-9a-f]{16,}$/i.test(normalized)) return true;
+  return false;
 }
 
 function hasEquivalentRepeatedFailures(events: NormalizedEvent[]): boolean {

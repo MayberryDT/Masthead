@@ -150,8 +150,13 @@ export function buildBoardHeadlineFacts(input: {
 }
 
 export function isLowValueBoardHeadlineText(value: string): boolean {
-  const normalized = value.trim();
-  return /^(live hook event|runtime signal|unknown|shell|approval\.requested|P\d)$/i.test(normalized);
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (/^(live hook event|runtime signal|unknown|shell|approval\.requested|P\d)$/i.test(normalized)) return true;
+  if (/^(?:grok build|codex|claude code|cursor|opencode|hermes|oh my pi|pi)\s+(?:hook|plugin|extension)\s+event$/i.test(normalized)) {
+    return true;
+  }
+  if (/\bhook event$/i.test(normalized) && normalized.length <= 40) return true;
+  return false;
 }
 
 function eventSummary(event: NormalizedEvent): { type: string; summary: string; occurredAt: string } | undefined {

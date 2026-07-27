@@ -548,11 +548,27 @@ function summaryFrom(
   payload: Record<string, unknown>,
   profile: LiveRuntimeProfile
 ): string {
-  return (
+  const explicit =
     firstString(input, ["summary", "title", "objective"]) ??
-    firstString(payload, ["summary", "title", "objective", "command", "normalizedCommand"]) ??
-    `${profile.label} ${profile.surface} event`
-  );
+    firstString(payload, ["summary", "title", "objective", "command", "normalizedCommand"]);
+  if (explicit && !isGenericHookSummary(explicit, profile)) return explicit;
+
+  const toolName = firstString(input, ["toolName", "tool_name"]) ?? firstString(payload, ["toolName", "tool_name"]);
+  if (toolName) return `${profile.label}: ${toolName}`;
+
+  const eventName = firstString(input, profile.eventNameKeys);
+  if (eventName) {
+    const normalized = eventName.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/[_-]+/g, " ").trim();
+    if (normalized) return `${profile.label}: ${normalized}`;
+  }
+
+  return `${profile.label} ${profile.surface} event`;
+}
+
+function isGenericHookSummary(value: string, profile: LiveRuntimeProfile): boolean {
+  const normalized = value.replace(/\s+/g, " ").trim().toLowerCase();
+  const generic = `${profile.label} ${profile.surface} event`.toLowerCase();
+  return normalized === generic || /\bhook event$/i.test(normalized);
 }
 
 function redactValue(value: unknown): Record<string, unknown> {

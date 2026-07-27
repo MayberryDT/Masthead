@@ -218,10 +218,15 @@ function normalizeSubject(value: string | undefined): string | undefined {
 }
 
 function isGenericSubject(value: string): boolean {
-  const normalized = value.toLowerCase();
-  return /^(masthead|ui|changes?|updates?|sessions?|work|recent activity|ui changes?|board headlines?|session narrative(?: work)?|(?:codex|claude code|opencode|hermes|grok build|oh my pi|pi) (?:hook|plugin) event|unknown project)$/.test(
-    normalized
-  );
+  const normalized = value.toLowerCase().replace(/\s+/g, " ").trim();
+  if (/^(masthead|ui|changes?|updates?|sessions?|work|recent activity|ui changes?|board headlines?|session narrative(?: work)?|unknown project)$/.test(normalized)) {
+    return true;
+  }
+  if (/^(?:codex|claude code|cursor|opencode|hermes|grok build|oh my pi|pi)(?:\s+(?:hook|plugin|extension))?(?:\s+event)?$/i.test(normalized)) {
+    return true;
+  }
+  if (/^subagent-[0-9a-f-]+$/i.test(normalized)) return true;
+  return false;
 }
 
 function isOpaqueIdentifier(value: string): boolean {
@@ -344,8 +349,11 @@ function dispositionFromSessionEvidence(input: BoardHeadlineInput): string | und
     return "quiet after UI changes";
   }
 
-  // Primary status nuances
-  if (status === "stalled" || status === "possibly_looping") return "stalled with no new turns";
+  // Primary status nuances — reserve "stalled with no new turns" for true stalled status only.
+  // Idle/paused after a completed turn or recent reading work should not use this copy.
+  if ((status === "stalled" || status === "possibly_looping") && input.stateHint !== "active") {
+    return "stalled with no new turns";
+  }
   if (status.includes("waiting") && input.stateHint !== "active") return "waiting for the next required input";
 
   return undefined;

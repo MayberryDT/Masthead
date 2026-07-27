@@ -50,9 +50,12 @@ export async function parseGrokTranscriptUnit(unit: TranscriptUnitPlan, cursor?:
   const path = unit.source.path;
   if (!conversationId || !path) return emptyParsedUnit(unit, "grok_conversation_identity_missing", "error");
 
+  const conversationDir = dirname(path);
+  const summaryRecord = await grokSummarySessionRecord(conversationDir, conversationId, unit.source);
   const records = await grokRecords(path, conversationId, unit.source, cursor?.sourcePath === path ? cursor : undefined);
-  const auxiliaryDiagnostics = await knownAuxiliaryDiagnostics(dirname(path));
-  const parsed = parsedTranscriptUnit(unit, records);
+  const auxiliaryDiagnostics = await knownAuxiliaryDiagnostics(conversationDir);
+  const allRecords = summaryRecord ? [summaryRecord, ...records] : records;
+  const parsed = parsedTranscriptUnit(unit, allRecords);
   return {
     ...parsed,
     diagnostics: [...parsed.diagnostics, ...auxiliaryDiagnostics]
@@ -68,10 +71,74 @@ export async function* backfillGrokSource(source: DiscoveredSource, cursor?: Ing
   }
 }
 
+async function grokSummarySessionRecord(
+  conversationDir: string,
+  conversationId: string,
+  source: DiscoveredSource
+): Promise<AdapterRecord | undefined> {
+  const summaryPath = join(conversationDir, SUMMARY_FILE);
+  let summary: unknown;
+  try {
+    summary = JSON.parse(await readFile(summaryPath, "utf8"));
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(summary)) return undefined;
+
+  const info = isRecord(summary.info) ? summary.info : undefined;
+  const title =
+    stringValue(summary.generated_title) ??
+    stringValue(summary.session_summary) ??
+    stringValue(summary.title) ??
+    stringValue(info?.title);
+  const cwd = stringValue(info?.cwd) ?? stringValue(summary.cwd);
+  const project = projectLabelFromCwd(cwd);
+  const observedAt =
+    semanticTimestamps(summary).at(-1) ??
+    stringValue(summary.last_active_at) ??
+    stringValue(summary.updated_at) ??
+    stringValue(summary.created_at) ??
+    new Date(0).toISOString();
+  const agentName = stringValue(summary.agent_name) ?? stringValue(info?.agent_name);
+
+  return {
+    diagnostics: [],
+    normalized: adapterPayload("session", confidence(source), source, {
+      agentName,
+      cwd,
+      observedAt,
+      project,
+      sessionId: conversationId,
+      sourceSessionId: conversationId,
+      title: title || (project ? `${project} session` : undefined)
+    }),
+    observedAt,
+    payload: summary,
+    payloadHash: hash(`${summaryPath}\0session-metadata`),
+    source: { ...source, path: summaryPath, sourceSessionId: conversationId },
+    sourceRecordKey: `${summaryPath}:session-metadata`
+  };
+}
+
+function projectLabelFromCwd(cwd: string | undefined): string | undefined {
+  if (!cwd) return undefined;
+  const parts = cwd.split("/").filter(Boolean);
+  for (let index = parts.length - 1; index >= 0; index -= 1) {
+    const part = parts[index]!;
+    if (/^subagent-[0-9a-f-]+$/i.test(part)) continue;
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(part)) continue;
+    return part;
+  }
+  return undefined;
+}
+
 async function grokRecords(path: string, conversationId: string, source: DiscoveredSource, cursor?: IngestCursor): Promise<AdapterRecord[]> {
   const info = await stat(path);
   const contentFingerprint = `${info.size}:${Math.trunc(info.mtimeMs)}`;
   const modifiedAt = info.mtime.toISOString();
+  const conversationDir = dirname(path);
+  const summaryActivityAt = newestTimestamp(await semanticTimestampsFromJson(join(conversationDir, SUMMARY_FILE)));
+  const fallbackObservedAt = summaryActivityAt ?? modifiedAt;
   const resumeOffset = cursor && cursor.byteOffset <= info.size ? cursor.byteOffset : 0;
   const records: AdapterRecord[] = [];
 
@@ -98,7 +165,7 @@ async function grokRecords(path: string, conversationId: string, source: Discove
       continue;
     }
 
-    const rowRecords = recordsFromRow(source, conversationId, line.lineNumber, raw, payload);
+    const rowRecords = recordsFromRow(source, conversationId, line.lineNumber, raw, payload, fallbackObservedAt);
     if (rowRecords.length > 0) rowRecords[rowRecords.length - 1].cursorAfter = cursorAfter;
     records.push(...rowRecords);
   }
@@ -110,10 +177,13 @@ function recordsFromRow(
   conversationId: string,
   lineNumber: number,
   raw: string,
-  row: Record<string, unknown>
+  row: Record<string, unknown>,
+  fallbackObservedAt: string
 ): AdapterRecord[] {
   const type = stringValue(row.type) ?? stringValue(row.role);
-  const observedAt = semanticTimestamps(row).at(-1) ?? new Date(0).toISOString();
+  // Real Grok chat_history rows often omit per-row timestamps; fall back to summary/file activity
+  // so imported sessions are not treated as epoch-0 stalled forever.
+  const observedAt = semanticTimestamps(row).at(-1) ?? fallbackObservedAt;
   switch (type) {
     case "system":
     case "user":

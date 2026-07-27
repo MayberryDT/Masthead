@@ -129,12 +129,14 @@ describe("Grok adapter", () => {
         {
           arguments: { query: "sanitized query", sources: [], type: "search" },
           callId: "ws_fixture_call_1",
-          observedAt: "1970-01-01T00:00:00.000Z",
+          // Grok rows without timestamps fall back to chat-history file mtime (or summary activity).
+          observedAt: expect.any(String),
           sessionId: grokSessionId,
           status: "completed",
           toolName: "web_search"
         }
       ]);
+      expect((parsed.records[0]?.normalized.value as { observedAt?: string }).observedAt).not.toBe("1970-01-01T00:00:00.000Z");
     } finally {
       await rm(root, { force: true, recursive: true });
     }

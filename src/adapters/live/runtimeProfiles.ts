@@ -161,13 +161,14 @@ export const LIVE_RUNTIME_PROFILES: Partial<Record<RuntimeKind, LiveRuntimeProfi
     surface: "hook",
     sourceName: "grok.hook",
     includeRuntimePayloadMetadata: true,
-    sessionIdKeys: ["sessionId", "session_id"],
+    // Prefer stable conversation ids; Grok may also emit sessionId on every hook.
+    sessionIdKeys: ["sessionId", "session_id", "conversation_id", "conversationId", "thread_id", "threadId"],
     eventNameKeys: ["hookEventName", "hook_event_name", "event", "type"],
-    timestampKeys: ["timestamp", "time", "createdAt"],
+    timestampKeys: ["timestamp", "time", "createdAt", "created_at", "occurred_at", "occurredAt"],
     workspaceKeys: {
-      cwd: ["cwd"],
-      repoRoot: ["workspaceRoot", "repoRoot"],
-      branch: ["branch"]
+      cwd: ["cwd", "working_directory", "workingDirectory"],
+      repoRoot: ["workspaceRoot", "repoRoot", "git_root_dir", "gitRootDir"],
+      branch: ["branch", "gitBranch", "head_branch", "headBranch"]
     },
     eventMap: {
       sessionstart: "session.started",

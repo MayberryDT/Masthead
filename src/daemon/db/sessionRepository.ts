@@ -350,7 +350,9 @@ export function createSessionRepository(db: MastheadDatabase, context: SessionRe
   };
 
   const upsertSession = (event: NormalizedEvent, sessionId: string, sourceSessionId: string): void => {
-    const title = stringPayload(event, ["title"]) ?? (event.type === "session.started" ? event.summary : undefined);
+    const title =
+      stringPayload(event, ["title"]) ??
+      (event.type === "session.started" ? usefulSessionTitleFromSummary(event.summary) : undefined);
     const objective = stringPayload(event, ["objective"]);
     const projectLabel = stringPayload(event, ["project"]) ?? (event.type === "session.started" ? projectLabelFromWorkspace(event) : undefined);
     db.prepare(
@@ -764,7 +766,29 @@ function sourceRefJson(event: NormalizedEvent): string {
 }
 
 function projectLabelFromWorkspace(event: NormalizedEvent): string | undefined {
-  return event.workspace?.repoRoot?.split("/").filter(Boolean).at(-1);
+  return usefulProjectLabelFromPath(event.workspace?.repoRoot) ?? usefulProjectLabelFromPath(event.workspace?.cwd);
+}
+
+function usefulSessionTitleFromSummary(summary: string | undefined): string | undefined {
+  if (!summary?.trim()) return undefined;
+  const cleaned = summary.replace(/\s+/g, " ").trim();
+  if (/^(?:grok build|codex|claude code|cursor|opencode|hermes|oh my pi|pi)\s+(?:hook|plugin|extension)\s+event$/i.test(cleaned)) {
+    return undefined;
+  }
+  if (/\bhook event$/i.test(cleaned) && cleaned.length <= 40) return undefined;
+  return cleaned;
+}
+
+function usefulProjectLabelFromPath(path: string | undefined): string | undefined {
+  if (!path) return undefined;
+  const parts = path.split("/").filter(Boolean);
+  for (let index = parts.length - 1; index >= 0; index -= 1) {
+    const part = parts[index]!;
+    if (/^subagent-[0-9a-f-]+$/i.test(part)) continue;
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(part)) continue;
+    return part;
+  }
+  return undefined;
 }
 
 function stringPayload(event: NormalizedEvent, keys: string[]): string | undefined {

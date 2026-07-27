@@ -269,7 +269,10 @@ function toCard(
     eventWorkingGraceMs,
     now
   });
-  const overlaidStatus = statusForEffectiveState(session.primaryStatus, effectiveState.displayState, blockers);
+  const overlaidStatus = statusForEffectiveState(session.primaryStatus, effectiveState.displayState, blockers, {
+    authority: effectiveState.authority,
+    stale: effectiveState.stale
+  });
   const overlaidLifecycle = lifecycleForEffectiveState(session.lifecycle, effectiveState.displayState);
 
   const card: Omit<SessionCardView, "headline"> & { headline?: BoardHeadlineView } = {
@@ -399,7 +402,17 @@ function sanitizeLiveCardTitle(title: string, evidenceTexts: string[], fallbackT
 }
 
 function isLowValueLiveTitle(value: string): boolean {
-  return /^(?:live hook event|desktop transcript activity|runtime signal|unknown|shell|approval\.requested|P\d)$/i.test(value.trim());
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized) return true;
+  if (/^(?:live hook event|desktop transcript activity|runtime signal|unknown|shell|approval\.requested|P\d)$/i.test(normalized)) {
+    return true;
+  }
+  // Default hook summaries must not become permanent card titles.
+  if (/^(?:grok build|codex|claude code|cursor|opencode|hermes|oh my pi|pi)\s+(?:hook|plugin|extension)\s+event$/i.test(normalized)) {
+    return true;
+  }
+  if (/\bhook event$/i.test(normalized) && normalized.length <= 40) return true;
+  return false;
 }
 
 function isSafeFallbackTitle(value: string): boolean {
@@ -659,7 +672,8 @@ function latestStateEvent(events: NormalizedEvent[]): NormalizedEvent | undefine
 function statusForEffectiveState(
   status: SessionStatus,
   displayState: NonNullable<SessionCardView["displayState"]>,
-  _blockers: LiveBlocker[]
+  _blockers: LiveBlocker[],
+  options: { authority?: SessionCardView["stateAuthority"]; stale?: boolean } = {}
 ): SessionStatus {
   if (displayState === "blocked") {
     return "blocked";
@@ -668,7 +682,17 @@ function statusForEffectiveState(
     return status === "stalled" || status === "completed_unreviewed" ? "reading" : status;
   }
   if (displayState === "done") return "completed_unreviewed";
-  if (displayState === "idle" && status !== "completed_unreviewed") return "stalled";
+  // Quiet between turns / after Stop is idle presentation, not stalled. Keep the reducer
+  // status unless it already decided the session timed out into stalled/looping — or the
+  // live grace window expired (stale event-derived activity).
+  if (displayState === "idle") {
+    if (status === "completed_unreviewed") return status;
+    if (status === "stalled" || status === "possibly_looping") return status;
+    if (options.stale || options.authority === "timeout") {
+      return "stalled";
+    }
+    return status;
+  }
   return status;
 }
 
