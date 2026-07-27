@@ -226,6 +226,62 @@ describe("useLogbookController artifact detail", () => {
     expect(latestController).not.toHaveProperty("selectedSessionIds");
     expect(latestController).not.toHaveProperty("summary");
   });
+
+  test("keeps open dossier when changing page; X closes; selecting another artifact switches", async () => {
+    const page0 = [session("session-a", "First artifact")];
+    const page1 = [session("session-b", "Second page artifact")];
+    vi.mocked(searchLogbook)
+      .mockResolvedValueOnce({ nextCursor: "page-1", sessions: page0, total: 2 })
+      .mockResolvedValueOnce({ nextCursor: undefined, sessions: page1, total: 2 });
+    vi.mocked(getLogbookArtifact)
+      .mockResolvedValueOnce(artifactDetail("session-a", "First body"))
+      .mockResolvedValueOnce(artifactDetail("session-b", "Second body"));
+    await renderHarness();
+    await flushAsync();
+
+    await act(async () => {
+      latestController?.selectSession("session-a");
+      await Promise.resolve();
+    });
+    await flushAsync();
+
+    expect(latestController?.selectedSessionId).toBe("session-a");
+    expect(latestController?.selectedArtifact?.title).toBe("First");
+    expect(container?.textContent).toContain("First body");
+    expect(getLogbookArtifact).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      latestController?.changePage(1);
+      await Promise.resolve();
+    });
+    await flushAsync();
+
+    expect(latestController?.pageIndex).toBe(1);
+    expect(latestController?.selectedSessionId).toBe("session-a");
+    expect(latestController?.selectedArtifact?.title).toBe("First");
+    expect(container?.textContent).toContain("First body");
+    expect(getLogbookArtifact).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      latestController?.closeSession();
+      await Promise.resolve();
+    });
+    await flushAsync();
+
+    expect(latestController?.selectedSessionId).toBeUndefined();
+    expect(latestController?.selectedArtifact).toBeUndefined();
+    expect(container?.textContent).not.toContain("First body");
+
+    await act(async () => {
+      latestController?.selectSession("session-b");
+      await Promise.resolve();
+    });
+    await flushAsync();
+
+    expect(latestController?.selectedSessionId).toBe("session-b");
+    expect(latestController?.selectedArtifact?.title).toBe("Second");
+    expect(container?.textContent).toContain("Second body");
+  });
 });
 
 async function renderHarness(): Promise<void> {

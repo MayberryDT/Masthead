@@ -91,9 +91,8 @@ export function useLogbookController({ activeProjectionUrl, activeSurface, adapt
         writeCachedLogbookPage(pageCacheRef.current, pageRequest, nextResult);
         setResult(nextResult);
         setError(undefined);
-        setSelectedSessionId((current) =>
-          current && !nextResult.sessions.some((session) => session.sessionId === current) ? undefined : current
-        );
+        // Keep selectedSessionId even when the open artifact is not on this page.
+        // Inspector stays bound until X (closeSession) or an explicit other-artifact select.
       })
       .catch((searchError: unknown) => {
         if (!controller.signal.aborted) {
@@ -210,7 +209,8 @@ export function useLogbookController({ activeProjectionUrl, activeSurface, adapt
       setLoading(true);
     }
     setError(undefined);
-    setSelectedSessionId(undefined);
+    // Page-only navigation must not clear selection; keep the open dossier/inspector
+    // even when the selected artifact is not on the new page.
   };
 
   const changeSort = (nextSort: LogbookSort) => {
