@@ -11,6 +11,11 @@ import {
   verifyPackagedBundleManifest,
   writePackagedBundleManifest
 } from "./packaged-bundle-manifest.js";
+import {
+  assertChildPrivateDisplayEnvironment,
+  assertPrivateDisplayEnvironment,
+  withPrivateDisplay
+} from "./masthead-private-display.js";
 import { assertPackageBoundCrashBoundary } from "./masthead-production-crash-boundaries.js";
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
@@ -22,6 +27,7 @@ const SYSTEMCTL_PATH = "/usr/bin/systemctl";
 const CGROUP_ROOT = "/sys/fs/cgroup";
 const fixtureScopes = new Map();
 const fixtureExternalClaims = new Map();
+const activePrivateRehearsalTokens = new Set();
 const MATRIX_STAGE_STEPS = [
   "candidate-temp-created",
   "candidate-copy-start",
@@ -114,11 +120,15 @@ export async function runBoundedFixtureSubprocess(executable, args, options) {
     "--user", "--scope", "--quiet", "--collect", `--unit=${scopeUnit}`, "--",
     PIDFD_HELPER_PYTHON, "-I", "-S", WAIT_HELPER_PATH
   ], {
-    env: environment,
+    env: systemdControlEnvironment(process.env),
     stdio: ["pipe", "pipe", "pipe"]
   });
   child.stdin?.on("error", () => undefined);
-  child.stdin?.end(`${JSON.stringify({ argv: [executable, ...args], secret: waitSecret })}\n`);
+  child.stdin?.end(`${JSON.stringify({
+    argv: [executable, ...args],
+    environment: Object.fromEntries(Object.entries(environment).filter(([, value]) => typeof value === "string")),
+    secret: waitSecret
+  })}\n`);
   const stdout = [];
   const stderr = [];
   let collectedOutputBytes = 0;
@@ -260,6 +270,15 @@ export async function runBoundedFixtureSubprocess(executable, args, options) {
   }
   if (result.error) throw result.error;
   return { ...result, allowedLiveIdentities };
+}
+
+function systemdControlEnvironment(environment) {
+  const clean = { ...environment };
+  for (const key of [
+    "DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "SESSION_MANAGER", "DESKTOP_STARTUP_ID",
+    "GDK_BACKEND", "QT_QPA_PLATFORM", "ELECTRON_OZONE_PLATFORM_HINT"
+  ]) delete clean[key];
+  return clean;
 }
 
 function extractAttestedWaitOutcome(stderr, secret) {
@@ -545,11 +564,18 @@ async function claimFixtureExternalScope(fixtureRoot, runToken, input) {
   const deadline = input?.deadline ?? Date.now() + POST_KILL_TIMEOUT_MS;
   const startPid = input?.startPid;
   const daemonPid = input?.daemonPid;
+  const daemonAlreadyContained = input?.daemonAlreadyContained === true;
   if (!Number.isSafeInteger(startPid) || startPid < 1 || !Number.isSafeInteger(daemonPid) || daemonPid < 1) {
     throw new Error("Candidate external cgroup claim requires exact trusted Electron and daemon PIDs.");
   }
   const expectedScopeName = `app-masthead-${startPid}.scope`;
-  const startIdentity = await readTokenBoundClaimIdentity(startPid, runToken, deadline, true, false);
+  const startIdentity = await readTokenBoundClaimIdentity(
+    startPid,
+    runToken,
+    deadline,
+    !daemonAlreadyContained,
+    false
+  );
   const daemonIdentity = daemonPid === startPid
     ? startIdentity
     : await readTokenBoundClaimIdentity(daemonPid, runToken, deadline, false);
@@ -557,12 +583,16 @@ async function claimFixtureExternalScope(fixtureRoot, runToken, input) {
   if (startIdentity && daemonPid !== startPid && daemonIdentity.ppid !== startPid) {
     throw new Error(`Trusted candidate daemon PID ${daemonPid} is not a direct child of Electron PID ${startPid}.`);
   }
-  const liveTrustedIdentities = [startIdentity, daemonIdentity].filter(Boolean);
+  const liveTrustedIdentities = daemonAlreadyContained
+    ? [startIdentity].filter(Boolean)
+    : [startIdentity, daemonIdentity].filter(Boolean);
   const controlGroup = startIdentity?.controlGroup || daemonIdentity.controlGroup;
   const userControlGroupRoot = fixtureUserCgroupRoot().slice(CGROUP_ROOT.length);
   if (
     basename(controlGroup) !== expectedScopeName ||
-    liveTrustedIdentities.some((record) => record.controlGroup !== controlGroup)
+    liveTrustedIdentities.some((record) => record.controlGroup !== controlGroup) ||
+    (!daemonAlreadyContained && daemonIdentity.controlGroup !== controlGroup) ||
+    (daemonAlreadyContained && daemonIdentity.controlGroup === controlGroup)
   ) {
     throw new Error(`Trusted candidate processes did not occupy exact external scope ${expectedScopeName}.`);
   }
@@ -753,6 +783,20 @@ export async function validateRehearsalBundle(argv, environment = process.env) {
 export async function runProductionActivationRehearsal(argv = process.argv.slice(2), environment = process.env) {
   const temporaryParent = await validateRehearsalTemporaryParent(environment);
   const verified = await validateRehearsalBundle(argv, environment);
+  const privateToken = environment.MASTHEAD_PRIVATE_DISPLAY_TOKEN;
+  if (!privateToken || !activePrivateRehearsalTokens.has(privateToken)) {
+    return withPrivateDisplay(
+      async (session) => {
+        activePrivateRehearsalTokens.add(session.runToken);
+        return runProductionActivationRehearsal(argv, session.environment).then(
+          (value) => { activePrivateRehearsalTokens.delete(session.runToken); return value; },
+          (error) => { activePrivateRehearsalTokens.delete(session.runToken); throw error; }
+        );
+      },
+      { environment, temporaryParent }
+    );
+  }
+  assertPrivateDisplayEnvironment(environment);
   await assertIdentityBoundSignalingAvailable();
   await assertFixtureContainmentAvailable();
   let rehearsalRoot;
@@ -814,7 +858,7 @@ export async function runProductionActivationRehearsal(argv = process.argv.slice
     if (await fetch(receipt.baseUrl).catch(() => undefined)) throw new Error("Operational candidate health endpoint remained reachable after stop.");
     await assertPortBindable(port);
     const matrix = await runPackageBoundCrashMatrix(verified, environment, temporaryParent);
-    return { ok: true, bundle: verified.bundle, isolated: true, matrix };
+    return { ok: true, bundle: verified.bundle, headless: true, isolated: true, matrix };
   } catch (error) {
     rehearsalFailure = error;
     throw error;
@@ -913,7 +957,7 @@ export async function runReceiptBoundStopAndStatus(runLifecycleCommand, launcher
 
 async function startInstalledLifecycleWithIdentityCapture(runLifecycleCommand, launcherPath, environment, receipt) {
   return runLifecycleCommand(launcherPath, ["start"], environment, {
-    captureAllowedLiveIdentities: captureProductionCompanionIdentities(receipt)
+    captureAllowedLiveIdentities: captureProductionCompanionIdentities(receipt, environment)
   });
 }
 
@@ -964,7 +1008,7 @@ async function runLifecycleSubprocess(executable, args, environment, supervisorO
   }
 }
 
-function captureProductionCompanionIdentities(receipt) {
+function captureProductionCompanionIdentities(receipt, expectedEnvironment) {
   return async ({ claimExternalScope, inspectProcesses, result }) => {
     if (result.code !== 0 || result.signal) return [];
     const output = result.stdout.trim();
@@ -981,8 +1025,20 @@ function captureProductionCompanionIdentities(receipt) {
         manifest.baseUrl !== receipt.baseUrl || manifest.instanceDir !== receipt.instanceDir || manifest.buildSha !== receipt.buildSha ||
         !Number.isFinite(Date.parse(manifest.updatedAt))
       ) throw new Error("Installed packaged start did not publish an exact startup manifest.");
-      await claimExternalScope({ startPid: started.pid, daemonPid: health.runtime.pid });
-      const processes = await inspectProcesses();
+      await Promise.all([
+        assertPrivateDisplayProcess(started.pid, expectedEnvironment),
+        assertPrivateDisplayProcess(health.runtime.pid, expectedEnvironment)
+      ]);
+      let processes = await inspectProcesses();
+      const topology = selectProductionContainmentTopology(started.pid, health.runtime.pid, processes);
+      if (topology.claimExternalScope) {
+        await claimExternalScope({
+          startPid: started.pid,
+          daemonPid: health.runtime.pid,
+          daemonAlreadyContained: topology.daemonAlreadyContained
+        });
+        processes = await inspectProcesses();
+      }
       try {
         return selectProductionCompanionIdentities(started, health, processes);
       } catch (error) {
@@ -993,6 +1049,30 @@ function captureProductionCompanionIdentities(receipt) {
       }
     });
   };
+}
+
+export function selectProductionContainmentTopology(startPid, daemonPid, processes) {
+  const startOwned = processes.find((record) => record.pid === startPid && record.signalSafe === true);
+  const daemonOwned = processes.find((record) => record.pid === daemonPid && record.signalSafe === true);
+  if (startOwned && !daemonOwned) {
+    throw new Error(`Trusted Electron PID ${startPid} was contained but daemon PID ${daemonPid} was outside its owned scope.`);
+  }
+  if (startOwned && daemonOwned) {
+    if (daemonPid !== startPid && daemonOwned.ppid !== startPid) {
+      throw new Error(`Trusted candidate daemon PID ${daemonPid} is not a direct child of Electron PID ${startPid}.`);
+    }
+    return { claimExternalScope: false, daemonAlreadyContained: true };
+  }
+  return { claimExternalScope: true, daemonAlreadyContained: Boolean(daemonOwned) };
+}
+
+async function assertPrivateDisplayProcess(pid, expectedEnvironment) {
+  const body = await readFile(join("/proc", String(pid), "environ"));
+  const childEnvironment = Object.fromEntries(body.toString("utf8").split("\0").flatMap((entry) => {
+    const separator = entry.indexOf("=");
+    return separator > 0 ? [[entry.slice(0, separator), entry.slice(separator + 1)]] : [];
+  }));
+  assertChildPrivateDisplayEnvironment(childEnvironment, expectedEnvironment);
 }
 
 export function selectProductionCompanionIdentities(started, health, processes) {
@@ -1102,6 +1182,7 @@ export function assertPackageBoundMatrixCoverage(executedCaseIds, expectedCaseId
 }
 
 export async function runPackageBoundCrashMatrix(verified, environment = process.env, temporaryParent) {
+  assertPrivateDisplayEnvironment(environment);
   const definedCaseIds = PACKAGE_BOUND_MATRIX_CASES.map(({ id }) => id);
   assertPackageBoundMatrixCoverage(definedCaseIds, PACKAGE_BOUND_MATRIX_REQUIRED_IDS);
   if (PACKAGE_BOUND_MATRIX_REQUIRED_IDS.length !== PACKAGE_BOUND_MATRIX_MINIMUM_CASES) {
@@ -1173,7 +1254,7 @@ async function createPackageBoundMatrixFixture(root, definition, context) {
     baseline,
     candidateSource: context.verified.bundle,
     definition,
-    environment: isolatedEnvironment(context.environment, homeDir),
+    environment: rehearsalIsolatedEnvironment(context.environment, homeDir),
     input: {
       bundleDigest: context.verified.manifest.bundleDigest,
       dataDirectory,
@@ -1208,7 +1289,7 @@ async function createSyntheticMatrixBaseline(bundleRoot, release) {
     writeFile(join(bundleRoot, "resources", "masthead-logo-sail.png"), MATRIX_PNG),
     writeFile(join(daemonRoot, process.platform === "win32" ? "node.exe" : "node"), "matrix node\n", { mode: 0o755 }),
     writeFile(join(daemonRoot, "release.json"), `${JSON.stringify(release)}\n`),
-    ...["packaged-bundle-manifest.js", "masthead-production-cold-activation.js", "masthead-production.js", "masthead-hook.js", "resolve-hook-runtime.js"]
+    ...["packaged-bundle-manifest.js", "masthead-production-cold-activation.js", "masthead-production.js", "masthead-private-display.js", "masthead-hook.js", "resolve-hook-runtime.js"]
       .map((name) => writeFile(join(scriptsRoot, name), "export {};\n")),
     writeFile(join(distRoot, "daemon", "main.js"), "export {};\n"),
     writeFile(join(distRoot, "daemon", "productionTransitionMaintenance.js"), "export {};\n"),
@@ -1442,7 +1523,7 @@ function liveProductionPaths(environment) {
 
 function productionEnvironment(environment, homeDir, config) {
   return {
-    ...isolatedEnvironment(environment, homeDir),
+    ...rehearsalIsolatedEnvironment(environment, homeDir),
     MASTHEAD_ALLOWED_ORIGINS: `http://127.0.0.1:${config.port}`,
     MASTHEAD_BUILD_SHA: config.gitSha,
     MASTHEAD_BUILD_VERSION: config.version,
@@ -1465,15 +1546,26 @@ function fixtureRootFromEnvironment(environment) {
   return dirname(resolve(productionRoot));
 }
 
-function isolatedEnvironment(environment, homeDir) {
-  const clean = Object.fromEntries(Object.entries(environment).filter(([key]) => !key.startsWith("MASTHEAD_")));
-  return {
+export function rehearsalIsolatedEnvironment(environment, homeDir) {
+  const preservedHeadlessKeys = new Set([
+    "MASTHEAD_HEADLESS",
+    "MASTHEAD_PRIVATE_DISPLAY",
+    "MASTHEAD_PRIVATE_DISPLAY_AUTHORITY",
+    "MASTHEAD_PRIVATE_DISPLAY_RUNTIME",
+    "MASTHEAD_PRIVATE_DISPLAY_TOKEN"
+  ]);
+  const clean = Object.fromEntries(Object.entries(environment).filter(([key]) =>
+    !key.startsWith("MASTHEAD_") || preservedHeadlessKeys.has(key)
+  ));
+  const isolated = {
     ...clean,
     HOME: homeDir,
     XDG_CONFIG_HOME: join(homeDir, ".config"),
     XDG_DATA_HOME: join(homeDir, ".local", "share"),
     XDG_STATE_HOME: join(homeDir, ".local", "state")
   };
+  if (environment.MASTHEAD_HEADLESS === "1") assertPrivateDisplayEnvironment(isolated);
+  return isolated;
 }
 
 function within(root, path) {

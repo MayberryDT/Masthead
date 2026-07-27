@@ -1,6 +1,6 @@
 {
   "name": "masthead",
-  "version": "0.1.13",
+  "version": "0.1.15",
   "description": "Local-first session data layer and session manager.",
   "private": true,
   "license": "MIT",
@@ -39,6 +39,7 @@
     "typecheck": "tsc --noEmit",
     "test": "npm run build:daemon && NODE_OPTIONS=--max-old-space-size=4096 vitest",
     "rehearse:production-activation": "node scripts/masthead-production-activation-rehearsal.js",
+    "test:headless-isolation": "MASTHEAD_HEADLESS_XVFB_TEST=1 vitest --run src/electron/__tests__/headlessIsolation.test.ts",
     "check:product-contract": "node scripts/masthead-product-contract.js",
     "check:surface-contract": "node scripts/masthead-surface-contract.js",
     "check:endpoint-matrix": "npm run build:daemon && node scripts/masthead-endpoint-matrix-smoke.js",
@@ -58,8 +59,6 @@
     "dogfood": "node scripts/masthead-dogfood.js",
     "dogfood:fixture": "node scripts/masthead-dogfood.js",
     "dogfood:live": "node scripts/masthead-dogfood.js --live",
-    "dogfood:durable-artifacts": "npm run build:daemon && node scripts/dogfood-durable-artifacts.js",
-    "canary:guided-agent": "npm run build:daemon && node scripts/masthead-guided-agent-canary.js",
     "ingest": "npm run build:daemon && node dist/daemon/src/daemon/main.js",
     "mcp": "npm run build:daemon && node dist/daemon/src/mcp/server.js",
     "demo:hook": "node scripts/masthead-demo.js"

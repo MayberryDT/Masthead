@@ -3337,6 +3337,18 @@ main {
   overflow: hidden;
 }
 
+.workbench-activity-reason {
+  margin: 3px 0 0;
+  color: var(--yellow);
+  font-size: 11px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.workbench-activity-item.is-bad .workbench-activity-reason {
+  color: var(--red);
+}
+
 .workbench-reason-list span {
   min-width: 0;
   overflow: hidden;

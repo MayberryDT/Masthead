@@ -15,12 +15,13 @@ import {
 import {
   isAbsoluteAuthoringCommand
 } from "../shared/workbenchAuthoring";
-import { isGuidedAuthoringCapabilitiesDto } from "../shared/guidedAuthoring";
+import { isWorkbenchAuthoringV5CapabilitiesDto } from "../shared/workbenchAuthoringV5";
 import { packagedDaemonPaths } from "./pathPolicy";
 import { renderLiveDevInstanceLauncher } from "../core/liveDevLauncher";
 import { classifyDaemonHealth } from "../shared/protocol";
 
 const DEFAULT_CONNECTOR_PORT = 17373;
+export const DAEMON_STARTUP_HEALTH_TIMEOUT_MS = 300_000;
 const execFileAsync = promisify(execFile);
 const REQUIRED_CAPABILITIES = [
   "live_projection",
@@ -409,7 +410,7 @@ async function probeCollector(
       signal: AbortSignal.timeout(500)
     });
     const capabilities = capabilitiesResponse.ok ? await capabilitiesResponse.json() : undefined;
-    if (!isGuidedAuthoringCapabilitiesDto(capabilities, { expectedCommand: expectedCliCommand })) {
+    if (!isWorkbenchAuthoringV5CapabilitiesDto(capabilities) || capabilities.command !== expectedCliCommand) {
       return { state: "same_database_authoring_incompatible" };
     }
     const healthIdentity = identityFromHealth(healthBody);
@@ -570,7 +571,7 @@ async function waitForCompatibleCollector(
   expectedDatabasePath: string,
   expectedCliCommand: string
 ): Promise<MastheadHealthSummary> {
-  const deadline = Date.now() + 8_000;
+  const deadline = Date.now() + DAEMON_STARTUP_HEALTH_TIMEOUT_MS;
   while (Date.now() < deadline) {
     const probe = await probeCollector(port, expectedDataDirectory, expectedDatabasePath, expectedCliCommand);
     if (probe.state === "compatible") return probe.health;

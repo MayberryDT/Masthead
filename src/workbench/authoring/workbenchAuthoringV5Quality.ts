@@ -1,0 +1,244 @@
+import type {
+  WorkbenchAuthoringV5Draft,
+  WorkbenchAuthoringV5SessionOutcome
+} from "../../shared/workbenchAuthoringV5.ts";
+import { WORKBENCH_AUTHORING_V5_HARD_REJECT_CODES } from "../../shared/workbenchAuthoringV5.ts";
+
+const HARD_FINDING_CODES = new Set<string>(WORKBENCH_AUTHORING_V5_HARD_REJECT_CODES);
+
+const GENERIC_TITLES = new Set([
+  "codex session", "current work", "done", "masthead session", "new session", "recent activity", "selected session evidence review",
+  "session", "session narrative", "session work", "untitled session", "work completed"
+]);
+
+const GENERIC_DESCRIPTIONS = new Set([
+  "changes made", "implemented changes", "session completed", "task completed", "updated code", "work completed"
+]);
+
+const GENERIC_DESCRIPTION_TOKENS = new Set([
+  "change", "changed", "changes", "code", "complete", "completed", "did", "done", "implemented", "made",
+  "request", "requested", "session", "some", "task", "the", "update", "updated", "updates", "work"
+]);
+
+const PURPOSE_DOMAINS = {
+  authentication: ["auth", "authentication", "callback", "login", "nonce", "oauth", "redirect", "session", "token"],
+  billing: ["billing", "checkout", "invoice", "payment", "stripe", "subscription"],
+  database: ["backup", "database", "migration", "postgres", "postgresql", "query", "recovery", "replication", "schema", "sql", "sqlite"],
+  deployment: ["container", "deploy", "deployment", "docker", "kubernetes", "release", "rollout"],
+  documentation: ["article", "copy", "docs", "documentation", "guide", "prose", "readme", "writing"],
+  interface: ["button", "component", "css", "interface", "layout", "react", "responsive", "ui"],
+  networking: ["certificate", "dns", "http", "network", "proxy", "tls"],
+  performance: ["benchmark", "latency", "memory", "performance", "profile", "slow", "throughput"],
+  sourceControl: ["branch", "commit", "git", "merge", "rebase", "repository", "worktree"],
+  testing: ["assertion", "coverage", "fixture", "spec", "test", "testing", "vitest"]
+} as const;
+
+export function classifyWorkbenchAuthoringV5Session(
+  session: WorkbenchAuthoringV5Draft["sessions"][number]
+): WorkbenchAuthoringV5SessionOutcome {
+  const findings: WorkbenchAuthoringV5SessionOutcome["findings"] = [];
+  if (isEmptyOrGenericTitle(session.fields.title, session.sessionId)) {
+    findings.push({
+      code: "empty_or_generic_title",
+      message: "Title must name the session's specific user work."
+    });
+  }
+  if (isContextOrMetadataTitle(session.fields.title)) {
+    findings.push({
+      code: "context_or_metadata_title",
+      message: "Title must name the substantive work, not a path, timestamp, timezone, or session context."
+    });
+  }
+  if (isConversationalFillerTitle(session.fields.title)) {
+    findings.push({
+      code: "conversational_filler_title",
+      message: "Title must name the substantive work rather than conversational filler."
+    });
+  }
+  if (isEmptyOrGenericDescription(session.fields.description)) {
+    findings.push({
+      code: "empty_or_generic_description",
+      message: "Description must summarize the session's specific user work."
+    });
+  }
+  const proseFields = [session.fields.title, session.fields.description, session.fields.purpose];
+  if (proseFields.some(isProtocolOrCompactionBoilerplate)) {
+    findings.push({
+      code: "protocol_or_compaction_boilerplate",
+      message: "Summary and purpose must describe the user's work, not authoring protocol, compaction, or pack mechanics."
+    });
+  }
+  if ([session.fields.description, session.fields.purpose].some(isTemplatedRequestEcho)) {
+    findings.push({
+      code: "templated_request_echo",
+      message: "Description and purpose must synthesize the substantive request and outcome, not echo a request template."
+    });
+  }
+  const keywordCount = new Set(session.fields.keywords.map((keyword) => keyword.trim().toLowerCase()).filter(Boolean)).size;
+  if (keywordCount === 0) {
+    findings.push({
+      code: "empty_keywords",
+      message: "At least three specific search keywords are required."
+    });
+  } else if (keywordCount < 3) {
+    findings.push({
+      code: "insufficient_keywords",
+      message: "At least three distinct search keywords are required."
+    });
+  }
+  if (hasMetadataOrToolDominatedKeywords(session.fields.keywords, session.fields.title)) {
+    findings.push({
+      code: "metadata_or_tool_keywords",
+      message: "Keywords must describe the substantive work rather than paths, timestamps, tool operations, or title filler."
+    });
+  }
+  if (purposeClearlyMissesUserAsk(session)) {
+    findings.push({
+      code: "purpose_not_user_ask",
+      message: "Purpose clearly describes different work from the user's request in canonical evidence."
+    });
+  }
+  const ungrounded = ungroundedCoreFields(session);
+  if (ungrounded.length > 0) {
+    findings.push({
+      code: "missing_core_field_grounding",
+      message: `Core fields require canonical evidence references: ${ungrounded.join(", ")}.`
+    });
+  }
+  if (isWeakVerification(session.fields.verification)) {
+    findings.push({
+      code: "weak_verification",
+      message: "Verification wording is weak or does not state an honest result or boundary."
+    });
+  }
+  if (isThinKeyWork(session.fields.keyWork)) {
+    findings.push({
+      code: "thin_key_work",
+      message: "Key work is too thin to explain the concrete change or investigation."
+    });
+  }
+  return {
+    disposition: findings.some(({ code }) => HARD_FINDING_CODES.has(code))
+      ? "hard_reject"
+      : findings.length > 0 ? "soft_flag" : "publishable",
+    findings,
+    sessionId: session.sessionId
+  };
+}
+
+function isProtocolOrCompactionBoilerplate(value: string): boolean {
+  const normalized = value.replace(/\s+/g, " ").trim().toLowerCase();
+  return (
+    /^<recommended_plugins\b/.test(normalized) ||
+    /<\/?compaction(?:_summary)?>/.test(normalized) ||
+    /\b(?:context|conversation|transcript) (?:was )?compacted\b/.test(normalized) ||
+    /\bcompaction (?:banner|checkpoint|summary)\b/.test(normalized) ||
+    /\bcanonical evidence (?:records|shows|was reviewed)\b/.test(normalized) ||
+    /\b(?:follow|followed|following) (?:the )?(?:guided )?authoring protocol\b/.test(normalized) ||
+    /\b(?:current|next) authoring pack\b/.test(normalized) ||
+    /\bworkbench author (?:bootstrap|inspect|scaffold|save|finish)\b/.test(normalized) ||
+    /\b(?:scheduled )?cron (?:job|run|task) (?:completed|queued|ran|started|triggered)\b/.test(normalized)
+  );
+}
+
+function purposeClearlyMissesUserAsk(session: WorkbenchAuthoringV5Draft["sessions"][number]): boolean {
+  const userAsk = session.evidenceCatalog
+    .filter(({ role }) => role === "user")
+    .map(({ text }) => text)
+    .join(" ");
+  const purposeDomains = domainsForText(session.fields.purpose);
+  const userAskDomains = domainsForText(userAsk);
+  return purposeDomains.size > 0 && userAskDomains.size > 0 &&
+    [...purposeDomains].every((domain) => !userAskDomains.has(domain));
+}
+
+function domainsForText(value: string): Set<keyof typeof PURPOSE_DOMAINS> {
+  const tokens = new Set(value.toLowerCase().match(/[a-z0-9]+/g) ?? []);
+  return new Set((Object.entries(PURPOSE_DOMAINS) as Array<[
+    keyof typeof PURPOSE_DOMAINS,
+    readonly string[]
+  ]>).flatMap(([domain, domainTokens]) => domainTokens.some((token) => tokens.has(token)) ? [domain] : []));
+}
+
+function ungroundedCoreFields(
+  session: WorkbenchAuthoringV5Draft["sessions"][number]
+): string[] {
+  const refs = session.fields.evidenceRefs;
+  return (Object.entries(refs) as Array<[keyof typeof refs, string[]]>)
+    .filter(([field, evidenceRefs]) => evidenceRefs.length === 0 &&
+      !(field === "keyWork" && session.fields.keyWork.length === 0) &&
+      !(field === "verification" && !session.fields.verification.summary.trim() &&
+        (session.fields.verification.status === "missing" || session.fields.verification.status === "unknown")))
+    .map(([field]) => field);
+}
+
+function isWeakVerification(verification: WorkbenchAuthoringV5Draft["sessions"][number]["fields"]["verification"]): boolean {
+  const summary = verification.summary.replace(/\s+/g, " ").trim();
+  if (!summary || /\b(?:looks|seems|appears) (?:okay|ok|good|fine)\b/i.test(summary)) return true;
+  const statesHonestBoundary = /\b(?:not run|not verified|no (?:tests?|verification)|static (?:analysis|review)|unable to verify|verification (?:was )?unavailable|status was not available)\b/i.test(summary);
+  if (verification.status === "missing" || verification.status === "unknown") return !statesHonestBoundary;
+  return verification.status === "passed" && statesHonestBoundary;
+}
+
+function isThinKeyWork(keyWork: string[]): boolean {
+  return keyWork.length === 0 || keyWork.every((item) => {
+    const normalized = item.replace(/\s+/g, " ").trim();
+    return normalized.length < 20 || /^(?:updated|changed|fixed|worked on|handled)(?: it| code| files?)?\.?$/i.test(normalized);
+  });
+}
+
+function isEmptyOrGenericTitle(value: string, sessionId: string): boolean {
+  const normalized = value.replace(/\s+/g, " ").trim().toLowerCase().replace(/[.!?]+$/g, "");
+  return !/[a-z0-9]/i.test(normalized) || normalized === sessionId.toLowerCase() || GENERIC_TITLES.has(normalized) ||
+    /^(?:codex|claude|cursor|masthead)?\s*(?:work\s*)?session\s*\d*$/i.test(normalized);
+}
+
+function isContextOrMetadataTitle(value: string): boolean {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  const tokens = normalized.toLowerCase().match(/[a-z0-9]+/g) ?? [];
+  const metadataTokens = tokens.filter((token) => (
+    ["home", "asia", "tokyo", "utc", "timezone"].includes(token) ||
+    /^\d{4}$/.test(token) || /^\d{1,2}$/.test(token)
+  ));
+  return /(?:^|\s)[/~]|\b\w+\/\w+\b/.test(normalized) ||
+    /\b\d{4}-\d{2}-\d{2}\b/.test(normalized) ||
+    /\b(?:utc|gmt|asia\/[a-z_]+)\b/i.test(normalized) ||
+    (tokens.length > 0 && metadataTokens.length / tokens.length >= 0.5);
+}
+
+function isConversationalFillerTitle(value: string): boolean {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return (
+    /^(?:this is )?(?:pretty |really )?(?:good|nice)(?:,? but (?:i )?(?:think|feel) we can make (?:it )?better)?[.!?]*$/i.test(normalized) ||
+    /^(?:okay|ok|sure),? (?:that|this|it) (?:sounds|looks|feels) (?:better|good|great|right)[.!?]*$/i.test(normalized) ||
+    /^(?:(?:okay|ok|sure),? )?(?:please )?(?:go ahead and )?(?:implement|apply|make|do|complete|finish)(?: (?:it|this|that|the (?:change|changes|implementation|plan|request|requested changes)))?[.!?]*$/i.test(normalized)
+  );
+}
+
+function isTemplatedRequestEcho(value: string): boolean {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return /^(?:(?:worked on|complete) (?:the )?(?:user'?s )?request to|addressed the recorded request\b)/i.test(normalized);
+}
+
+function hasMetadataOrToolDominatedKeywords(keywords: string[], title: string): boolean {
+  const titleTokens = new Set(title.toLowerCase().match(/[a-z0-9]+/g) ?? []);
+  const titleFillerTokens = new Set(["better", "good", "nice", "pretty", "really", "think", "this"]);
+  const metadataTitle = isContextOrMetadataTitle(title) || /\bagents\.md\b|\bskills?\b/i.test(title);
+  const noise = keywords.filter((keyword) => {
+    const normalized = keyword.trim().toLowerCase();
+    const tokens = normalized.match(/[a-z0-9]+/g) ?? [];
+    return /(?:^|\s)[/~]|\b\d{4}-\d{2}-\d{2}\b|\b(?:utc|gmt|asia\/|tokyo)\b/.test(normalized) ||
+      /^(?:home|asia|shell investigation|update plan|write stdin)$/i.test(normalized) ||
+      (metadataTitle && tokens.length > 0 && tokens.every((token) => titleTokens.has(token))) ||
+      (tokens.length > 0 && tokens.every((token) => titleTokens.has(token) && titleFillerTokens.has(token)));
+  });
+  return keywords.length > 0 && noise.length / keywords.length >= 0.5;
+}
+
+function isEmptyOrGenericDescription(value: string): boolean {
+  const normalized = value.replace(/\s+/g, " ").trim().toLowerCase().replace(/[.!?]+$/g, "");
+  if (!/[a-z0-9]/i.test(normalized) || GENERIC_DESCRIPTIONS.has(normalized)) return true;
+  const specificTokens = (normalized.match(/[a-z0-9]+/g) ?? [])
+    .filter((token) => !GENERIC_DESCRIPTION_TOKENS.has(token) && !/^\d+$/.test(token));
+  return new Set(specificTokens).size < 2;
+}

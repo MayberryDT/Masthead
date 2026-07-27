@@ -20,6 +20,7 @@ import type {
   GuidedArtifactDraft,
   GuidedPublishedArtifactDto
 } from "../../shared/guidedAuthoring.ts";
+import type { WorkbenchAuthoringV5OptionalArtifactDraft } from "../../shared/workbenchAuthoringV5.ts";
 import type { EvidenceKind, EvidenceRef } from "../../core/types.ts";
 import { hasSemanticRedactedText } from "../../core/redaction.ts";
 import type { SessionArtifactRecord } from "../../daemon/db/sessionArtifactRepository.ts";
@@ -273,6 +274,32 @@ export function stageGuidedCanonicalDossiersInTransaction(
   );
 }
 
+/** Stages canonical dossiers for a V5 pack after its service has verified durable membership. */
+export function stageWorkbenchAuthoringV5CanonicalDossiersInTransaction(
+  db: MastheadDatabase,
+  input: {
+    actorId: string;
+    evidenceRevision: string;
+    sessionIds: string[];
+  }
+): SessionArtifactRecord[] {
+  const actor = { id: input.actorId, kind: "agent" } as const;
+  for (const sessionId of input.sessionIds) {
+    markWorkbenchArtifactAppliedInTransaction(db, { actor, artifactKind: "session_dossier", sessionId });
+    markWorkbenchPublishedInTransaction(db, {
+      actor,
+      publishedVia: "workbench_authoring_v5_dossier_staging",
+      sessionId
+    });
+  }
+  return input.sessionIds.map((sessionId) =>
+    applyCanonicalDossierSnapshotInTransaction(db, sessionId, input.actorId, {
+      contract: "workbench-authoring-v5",
+      evidenceRevision: input.evidenceRevision
+    })
+  );
+}
+
 /** Stages validated optional artifacts and their Workbench satisfaction state. */
 export function stageGuidedOptionalArtifactsInTransaction(
   db: MastheadDatabase,
@@ -285,25 +312,49 @@ export function stageGuidedOptionalArtifactsInTransaction(
 ): StagedGuidedOptionalArtifact[] {
   assertPersistedGuidedAssignmentMembership(db, input.assignmentId, input.actorId, input.sessionIds);
   assertGuidedArtifactMembership(input.artifacts, input.sessionIds);
-  const actor = { id: input.actorId, kind: "agent" } as const;
-  return input.artifacts.map((draft) => {
-    const artifact = applyGuidedArtifactInTransaction(db, input.actorId, draft);
-    markWorkbenchArtifactAppliedInTransaction(db, { actor, artifactKind: draft.kind, sessionId: draft.seedSessionId });
-    markWorkbenchArtifactPublishedInTransaction(db, {
-      actor,
-      artifactId: artifact.artifactId,
-      artifactKind: draft.kind,
-      sessionId: draft.seedSessionId
-    });
-    markContributionSatisfactionForProvenanceInTransaction(db, {
-      actor,
-      artifactKind: draft.kind,
-      provenanceSessionIds: draft.provenanceSessionIds,
-      publishedArtifactId: artifact.artifactId,
-      seedSessionId: draft.seedSessionId
-    });
-    return { artifact, draftId: draft.draftId, kind: draft.kind };
+  return input.artifacts.map((draft) => stageOptionalArtifactInTransaction(
+    db, input.actorId, draft, "workbench-authoring-v4"
+  ));
+}
+
+/** Stages optional artifacts selected by the V5 pack-level consider decision. */
+export function stageWorkbenchAuthoringV5OptionalArtifactsInTransaction(
+  db: MastheadDatabase,
+  input: {
+    actorId: string;
+    artifacts: WorkbenchAuthoringV5OptionalArtifactDraft[];
+    sessionIds: string[];
+  }
+): StagedGuidedOptionalArtifact[] {
+  assertGuidedArtifactMembership(input.artifacts, input.sessionIds);
+  return input.artifacts.map((draft) => stageOptionalArtifactInTransaction(
+    db, input.actorId, draft, "workbench-authoring-v5"
+  ));
+}
+
+function stageOptionalArtifactInTransaction(
+  db: MastheadDatabase,
+  actorId: string,
+  draft: GuidedArtifactDraft,
+  contractVersion: "workbench-authoring-v4" | "workbench-authoring-v5"
+): StagedGuidedOptionalArtifact {
+  const actor = { id: actorId, kind: "agent" } as const;
+  const artifact = applyGuidedArtifactInTransaction(db, actorId, draft, contractVersion);
+  markWorkbenchArtifactAppliedInTransaction(db, { actor, artifactKind: draft.kind, sessionId: draft.seedSessionId });
+  markWorkbenchArtifactPublishedInTransaction(db, {
+    actor,
+    artifactId: artifact.artifactId,
+    artifactKind: draft.kind,
+    sessionId: draft.seedSessionId
   });
+  markContributionSatisfactionForProvenanceInTransaction(db, {
+    actor,
+    artifactKind: draft.kind,
+    provenanceSessionIds: draft.provenanceSessionIds,
+    publishedArtifactId: artifact.artifactId,
+    seedSessionId: draft.seedSessionId
+  });
+  return { artifact, draftId: draft.draftId, kind: draft.kind };
 }
 
 /** Publishes and indexes artifacts already staged by the caller's transaction. */
@@ -1611,7 +1662,7 @@ function applyCanonicalDossierSnapshotInTransaction(
   sessionId: string,
   actorId: string,
   options: {
-    contract: "workbench-authoring-v3" | "workbench-authoring-v4";
+    contract: "workbench-authoring-v3" | "workbench-authoring-v4" | "workbench-authoring-v5";
     evidenceRevision?: string;
   } = { contract: "workbench-authoring-v3" }
 ): SessionArtifactRecord {
@@ -1620,7 +1671,7 @@ function applyCanonicalDossierSnapshotInTransaction(
   const snapshot = buildPublishedEnrichedDossierSnapshot(canonical);
   const capsule = canonicalDossierCapsule(snapshot);
   const snapshotFingerprint = dossierSnapshotFingerprint(snapshot);
-  const contentFingerprint = options.contract === "workbench-authoring-v4"
+  const contentFingerprint = options.contract === "workbench-authoring-v4" || options.contract === "workbench-authoring-v5"
     ? fingerprintWorkbenchOutput({
         contract: options.contract,
         evidenceRevision: options.evidenceRevision,
@@ -1634,6 +1685,8 @@ function applyCanonicalDossierSnapshotInTransaction(
     contentFingerprint,
     createdBy: options.contract === "workbench-authoring-v4"
       ? `guided_authoring:${actorId}`
+      : options.contract === "workbench-authoring-v5"
+        ? `workbench_authoring_v5:${actorId}`
       : `workbench_authoring_v3:${actorId}`,
     evidenceRefs: dossierEvidenceRefs(snapshot),
     highlight: capsule.highlight,
@@ -1689,7 +1742,12 @@ function applyDurableSessionEnrichmentInTransaction(
   const contents = {
     live_summary: { text: canonicalEnrichment.sessionSummary.text },
     search_projection: {
-      searchText: `${canonicalEnrichment.sessionTitle.text}\n${canonicalEnrichment.sessionSummary.text}`,
+      keywords: canonicalEnrichment.keywords,
+      searchText: [
+        canonicalEnrichment.sessionTitle.text,
+        canonicalEnrichment.sessionSummary.text,
+        ...canonicalEnrichment.keywords
+      ].join("\n"),
       title: canonicalEnrichment.sessionTitle.text
     },
     session_capsule: capsule
@@ -1789,7 +1847,8 @@ function applyAgentLedArtifactInTransaction(
 function applyGuidedArtifactInTransaction(
   db: MastheadDatabase,
   actorId: string,
-  draft: GuidedArtifactDraft
+  draft: GuidedArtifactDraft,
+  contractVersion: "workbench-authoring-v4" | "workbench-authoring-v5" = "workbench-authoring-v4"
 ): SessionArtifactRecord {
   return applySessionArtifactInTransaction(db, {
     artifactKind: draft.kind,
@@ -1802,7 +1861,9 @@ function applyGuidedArtifactInTransaction(
       seedSessionId: draft.seedSessionId,
       signatureKey: normalizeSessionArtifactSignatureKey(draft.output.signatureKey)
     }),
-    createdBy: `guided_authoring:${actorId}`,
+    createdBy: contractVersion === "workbench-authoring-v5"
+      ? `workbench_authoring_v5:${actorId}`
+      : `guided_authoring:${actorId}`,
     evidenceRefs: stringArrayFromOutput(draft.output.evidenceRefs),
     joinRationale: stringFromOutput(draft.output.joinRationale),
     projectLabel: projectLabelForSession(db, draft.seedSessionId),
@@ -1811,7 +1872,7 @@ function applyGuidedArtifactInTransaction(
     sessionId: draft.seedSessionId,
     signatureKey: normalizeSessionArtifactSignatureKey(draft.output.signatureKey),
     title: stringFromOutput(draft.output.title),
-    validation: { contract: "workbench-authoring-v4", ok: true, schemaVersion: `${draft.kind}-v2` }
+    validation: { contract: contractVersion, ok: true, schemaVersion: `${draft.kind}-v2` }
   });
 }
 

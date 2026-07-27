@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { stableRecordId } from "../identity.ts";
 import type { PublishedSessionDossierV1 } from "../../shared/sessionDossier.ts";
+import { readableSessionEnrichmentKeywords } from "../../shared/sessionEnrichment.ts";
 import { type MastheadDatabase, withImmediateTransaction } from "./sqlite.ts";
 import { listCompletedV1AuthoringRunsForRecovery } from "./workbenchAuthoringRepository.ts";
 import {
@@ -209,28 +210,28 @@ type SessionArtifactRow = {
 };
 
 const ARTIFACT_SELECT = `SELECT
-  artifact_id AS artifactId,
-  session_id AS sessionId,
-  artifact_kind AS artifactKind,
-  status,
-  publication_status AS publicationStatus,
-  content_fingerprint AS contentFingerprint,
-  created_at AS createdAt,
-  updated_at AS updatedAt,
-  created_by AS createdBy,
-  schema_version AS schemaVersion,
-  title,
-  summary,
-  highlight,
-  confidence,
-  project_label AS projectLabel,
-  signature_key AS signatureKey,
-  lineage_id AS lineageId,
-  join_rationale AS joinRationale,
-  published_at AS publishedAt,
-  content_json AS contentJson,
-  evidence_refs_json AS evidenceRefsJson,
-  validation_json AS validationJson
+  session_artifacts.artifact_id AS artifactId,
+  session_artifacts.session_id AS sessionId,
+  session_artifacts.artifact_kind AS artifactKind,
+  session_artifacts.status,
+  session_artifacts.publication_status AS publicationStatus,
+  session_artifacts.content_fingerprint AS contentFingerprint,
+  session_artifacts.created_at AS createdAt,
+  session_artifacts.updated_at AS updatedAt,
+  session_artifacts.created_by AS createdBy,
+  session_artifacts.schema_version AS schemaVersion,
+  session_artifacts.title,
+  session_artifacts.summary,
+  session_artifacts.highlight,
+  session_artifacts.confidence,
+  session_artifacts.project_label AS projectLabel,
+  session_artifacts.signature_key AS signatureKey,
+  session_artifacts.lineage_id AS lineageId,
+  session_artifacts.join_rationale AS joinRationale,
+  session_artifacts.published_at AS publishedAt,
+  session_artifacts.content_json AS contentJson,
+  session_artifacts.evidence_refs_json AS evidenceRefsJson,
+  session_artifacts.validation_json AS validationJson
 FROM session_artifacts`;
 
 export function applySessionArtifact(db: MastheadDatabase, input: SessionArtifactInput): SessionArtifactRecord {
@@ -368,17 +369,26 @@ export function indexSessionArtifactSearch(db: MastheadDatabase, artifactId: str
     artifact.schemaVersion === "canonical-session-dossier-v1"
       ? canonicalDossierSearchText(artifact.content as PublishedSessionDossierV1)
       : JSON.stringify(artifact.content);
+  const keywords = artifact.schemaVersion === "canonical-session-dossier-v1"
+    ? canonicalDossierKeywords(artifact.content as PublishedSessionDossierV1).join(" ")
+    : "";
   db.prepare(
-    `INSERT INTO session_artifact_search (artifact_id, title, summary, highlight, project, body)
-     VALUES (?, ?, ?, ?, ?, ?)`
+    `INSERT INTO session_artifact_search (artifact_id, title, summary, keywords, highlight, project, body)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
   ).run(
     artifact.artifactId,
     artifact.title ?? "",
     artifact.summary ?? "",
+    keywords,
     artifact.highlight ?? "",
     artifact.projectLabel ?? "",
     body
   );
+}
+
+export function canonicalDossierKeywords(snapshot: PublishedSessionDossierV1): string[] {
+  const keywords = (snapshot.durableEnrichment as { keywords?: unknown } | undefined)?.keywords;
+  return readableSessionEnrichmentKeywords(keywords).map((keyword) => keyword.trim()).filter(Boolean);
 }
 
 export function canonicalDossierSearchText(snapshot: PublishedSessionDossierV1): string {
@@ -395,6 +405,7 @@ export function canonicalDossierSearchText(snapshot: PublishedSessionDossierV1):
     snapshot.narrative.outcome,
     durable?.sessionTitle.text,
     durable?.sessionSummary.text,
+    ...canonicalDossierKeywords(snapshot),
     durable?.sessionDossier.purpose,
     durable?.sessionDossier.outcome,
     ...(durable?.sessionDossier.keyWork ?? []),
@@ -464,8 +475,9 @@ export function searchPublishedArtifactCapsules(
 ): { artifacts: ArtifactCapsule[]; total: number } {
   const limit = Math.max(1, Math.min(Math.trunc(query.limit ?? 50), 100));
   const offset = Math.max(0, Math.trunc(query.offset ?? 0));
-  const clauses = [`publication_status = 'published'`, `status = 'current'`];
+  const clauses = [`session_artifacts.publication_status = 'published'`, `session_artifacts.status = 'current'`];
   const params: Array<string | number> = [];
+  let searchJoin = "";
 
   if (query.kind) {
     clauses.push("artifact_kind = ?");
@@ -477,13 +489,8 @@ export function searchPublishedArtifactCapsules(
   }
   const searchQuery = sanitizeArtifactSearchQuery(query.q);
   if (searchQuery) {
-    clauses.push(
-      `artifact_id IN (
-        SELECT artifact_id
-        FROM session_artifact_search
-        WHERE session_artifact_search MATCH ?
-      )`
-    );
+    searchJoin = "JOIN session_artifact_search ON session_artifact_search.artifact_id = session_artifacts.artifact_id";
+    clauses.push("session_artifact_search MATCH ?");
     params.push(searchQuery);
   }
   const dateFrom = normalizeDateLowerBound(query.dateFrom);
@@ -499,14 +506,20 @@ export function searchPublishedArtifactCapsules(
 
   const where = `WHERE ${clauses.join(" AND ")}`;
   const total = (
-    db.prepare(`SELECT COUNT(*) AS count FROM session_artifacts ${where}`).get(...params) as { count: number }
+    db.prepare(`SELECT COUNT(*) AS count FROM session_artifacts ${searchJoin} ${where}`).get(...params) as { count: number }
   ).count;
+
+  const ordering = searchQuery
+    ? `bm25(session_artifact_search, 0.0, 12.0, 10.0, 12.0, 1.0, 1.0, 1.0) ASC,
+         session_artifacts.published_at DESC, session_artifacts.updated_at DESC, session_artifacts.artifact_id DESC`
+    : `session_artifacts.published_at DESC, session_artifacts.updated_at DESC, session_artifacts.artifact_id DESC`;
 
   const rows = db
     .prepare(
       `${ARTIFACT_SELECT}
+      ${searchJoin}
       ${where}
-      ORDER BY published_at DESC, updated_at DESC, artifact_id DESC
+      ORDER BY ${ordering}
       LIMIT ? OFFSET ?`
     )
     .all(...params, limit, offset) as SessionArtifactRow[];

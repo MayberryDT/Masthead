@@ -408,7 +408,7 @@ describe("WorkbenchPanel", () => {
     );
   });
 
-  test("activity rail renders console rows with tone gutters and sanitized text", () => {
+  test("activity rail renders clear V5 labels, tones, and editorial reasons", () => {
     const eventAt = "2026-07-08T12:34:56.000Z";
     const items: WorkbenchActivityDto[] = [
       {
@@ -424,11 +424,13 @@ describe("WorkbenchPanel", () => {
       {
         activityId: "act-bad",
         actorKind: "system",
-        details: {},
+        details: {
+          findings: [{ code: "generic_title", message: "The title is too generic to publish." }]
+        },
         eventAt,
-        eventType: "publication_gate_failed",
+        eventType: "authoring_session_rejected",
         sessionId: "session:abc",
-        summary: "Gate blocked publication"
+        summary: "V5 session rejected"
       }
     ];
     const html = renderToStaticMarkup(
@@ -449,9 +451,12 @@ describe("WorkbenchPanel", () => {
     expect(html).toContain("workbench-activity-type");
     expect(html).toContain("workbench-activity-summary");
     expect(html).toContain("quality_passed");
-    expect(html).toContain("publication_gate_failed");
+    expect(html).toContain("Session rejected");
+    expect(html).not.toContain("authoring_session_rejected");
     expect(html).toContain("Quality accepted for session");
-    expect(html).toContain("Gate blocked publication");
+    expect(html).toContain("V5 session rejected");
+    expect(html).toContain("The title is too generic to publish.");
+    expect(html).toContain("workbench-activity-reason");
     expect(html).toContain("agent-1");
     expect(html).toContain(`dateTime="${eventAt}"`);
     expect(html).toContain(formatWorkbenchActivityTime(eventAt));
@@ -589,6 +594,7 @@ describe("WorkbenchPanel", () => {
 
 function session(overrides: Partial<WorkbenchQueueSessionDto> = {}): WorkbenchQueueSessionDto {
   return {
+    compileReady: true,
     activeClaim: undefined,
     adrStatus: "unknown",
     bugFixTraceStatus: "unknown",

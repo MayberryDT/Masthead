@@ -135,6 +135,7 @@ function stagedReview(): GuidedAuthoringReviewDto {
       sessionEnrichments: [{
         claimSupport: [],
         enrichment: {
+          keywords: ["authoring daemon", "safe restart", "health check"],
           sessionDossier: {
             blockers: [],
             continuation: { constraints: [], openQuestions: [] },

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type {
   GuidedAuthoringAssignmentDto,
   GuidedAuthoringBundleV4,
+  GuidedAuthoringContractVersion,
   GuidedAuthoringOperatorReviewDto,
   GuidedAuthoringReceiptDto,
   GuidedAuthoringRequestDto
@@ -42,12 +43,13 @@ export type GuidedDraftReviewRecord = {
 
 export type GuidedAuthoringStableRequestBinding = Pick<
   GuidedAuthoringRequestDto,
-  "baseUrl" | "databaseId" | "buildSha" | "instanceManifest" | "creationInstanceId"
+  "baseUrl" | "databaseId" | "buildSha" | "instanceManifest" | "creationInstanceId" | "contractVersion"
 >;
 
 export type CreateGuidedAuthoringRequestInput = {
   requestId: string;
   actorId: string;
+  contractVersion: GuidedAuthoringContractVersion;
   policyVersion: "guided-authoring-v1";
   identity: {
     creationInstanceId: string;
@@ -79,6 +81,7 @@ export type CreateGuidedAuthoringRequestInput = {
 type RequestRow = {
   requestId: string;
   actorId: string;
+  contractVersion: GuidedAuthoringContractVersion;
   creationInstanceId: string;
   instanceManifest: string;
   baseUrl: string;
@@ -112,6 +115,7 @@ export function createGuidedAuthoringRequest(
   db: MastheadDatabase,
   input: CreateGuidedAuthoringRequestInput
 ): GuidedAuthoringRequestDto {
+  assertLegacyGuidedContract(input.contractVersion);
   validateRequestPlan(db, input);
   return withImmediateTransaction(db, () => createGuidedAuthoringRequestInTransaction(db, input));
 }
@@ -120,13 +124,14 @@ export function createGuidedAuthoringRequestInTransaction(
   db: MastheadDatabase,
   input: CreateGuidedAuthoringRequestInput
 ): GuidedAuthoringRequestDto {
+  assertLegacyGuidedContract(input.contractVersion);
   validateRequestPlan(db, input);
   const now = new Date().toISOString();
   db.prepare(
     `INSERT INTO guided_authoring_requests (
       request_id, actor_id, creation_instance_id, instance_manifest, base_url, database_id,
-      build_sha, policy_version, status, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)`
+      build_sha, policy_version, contract_version, status, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     input.requestId,
     input.actorId,
@@ -136,11 +141,13 @@ export function createGuidedAuthoringRequestInTransaction(
     input.identity.databaseId,
     input.identity.buildSha,
     input.policyVersion,
+    input.contractVersion,
+    input.contractVersion === "workbench-authoring-v5" ? "active" : "open",
     now,
     now
   );
 
-  const canarySessionIds = new Set(input.assignments.find(({ canary }) => canary)!.sessionIds);
+  const firstAssignmentSessionIds = new Set(input.assignments.find(({ ordinal }) => ordinal === 0)!.sessionIds);
   const insertSession = db.prepare(
     `INSERT INTO guided_authoring_request_sessions
      (request_id, session_id, ordinal, group_key, state) VALUES (?, ?, ?, ?, ?)`
@@ -151,7 +158,7 @@ export function createGuidedAuthoringRequestInTransaction(
       session.sessionId,
       session.ordinal,
       session.groupKey ?? null,
-      canarySessionIds.has(session.sessionId) ? "assigned" : "pending"
+      firstAssignmentSessionIds.has(session.sessionId) ? "assigned" : "pending"
     );
   }
 
@@ -208,6 +215,10 @@ export function createGuidedAuthoringRequestInTransaction(
   return requireGuidedRequest(db, input.requestId);
 }
 
+function assertLegacyGuidedContract(contractVersion: GuidedAuthoringContractVersion): void {
+  if (contractVersion !== "workbench-authoring-v4") throw new Error("authoring_contract_retired");
+}
+
 export function getGuidedAuthoringRequest(
   db: MastheadDatabase,
   requestId: string
@@ -215,7 +226,7 @@ export function getGuidedAuthoringRequest(
   const row = db.prepare(
     `SELECT request_id AS requestId, actor_id AS actorId, creation_instance_id AS creationInstanceId,
             instance_manifest AS instanceManifest, base_url AS baseUrl, database_id AS databaseId,
-            build_sha AS buildSha, policy_version AS policyVersion, status,
+            build_sha AS buildSha, policy_version AS policyVersion, contract_version AS contractVersion, status,
             canary_approved_at AS canaryApprovedAt, canary_approved_by AS canaryApprovedBy,
             created_at AS createdAt, updated_at AS updatedAt, completed_at AS completedAt
      FROM guided_authoring_requests WHERE request_id = ?`
@@ -232,10 +243,12 @@ export function getGuidedAuthoringRequest(
   ).all(requestId) as Array<{ assignmentId: string; canary: number; status: string }>;
   const current = assignments.find(({ status }) => status !== "completed");
   const canary = assignments.find(({ canary: isCanary }) => isCanary === 1);
-  if (!canary) throw new Error("guided_request_missing_canary");
+  if (row.contractVersion === "workbench-authoring-v4" && !canary) throw new Error("guided_request_missing_canary");
+  if (row.contractVersion === "workbench-authoring-v5" && canary) throw new Error("guided_v5_request_has_canary");
   return {
     requestId: row.requestId,
     actorId: row.actorId,
+    contractVersion: row.contractVersion,
     policyVersion: row.policyVersion,
     status: row.status,
     baseUrl: row.baseUrl,
@@ -247,7 +260,7 @@ export function getGuidedAuthoringRequest(
     completedSessionCount: Number(counts.completedSessionCount ?? 0),
     assignmentCount: assignments.length,
     ...(current ? { currentAssignmentId: current.assignmentId } : {}),
-    canaryAssignmentId: canary.assignmentId,
+    ...(canary ? { canaryAssignmentId: canary.assignmentId } : {}),
     ...(row.canaryApprovedAt ? { canaryApprovedAt: row.canaryApprovedAt } : {}),
     ...(row.canaryApprovedBy ? { canaryApprovedBy: row.canaryApprovedBy } : {}),
     createdAt: row.createdAt,
@@ -265,7 +278,8 @@ export function getGuidedAuthoringRequestForAssignment(
             request.database_id AS databaseId,
             request.build_sha AS buildSha,
             request.instance_manifest AS instanceManifest,
-            request.creation_instance_id AS creationInstanceId
+            request.creation_instance_id AS creationInstanceId,
+            request.contract_version AS contractVersion
      FROM guided_authoring_assignments AS assignment
      JOIN guided_authoring_requests AS request
        ON request.request_id = assignment.request_id
@@ -317,6 +331,7 @@ export function listPendingGuidedCanaryAssignments(
        AND assignment.accepted_draft_revision IS NOT NULL
        AND assignment.receipt_json IS NULL
        AND request.status = 'awaiting_canary_approval'
+       AND request.contract_version = 'workbench-authoring-v4'
        AND NOT EXISTS (
          SELECT 1 FROM guided_authoring_operator_reviews AS operator_review
          WHERE operator_review.assignment_id = assignment.assignment_id
@@ -1019,7 +1034,11 @@ function validateRequestPlan(db: MastheadDatabase, input: CreateGuidedAuthoringR
     const opportunityIds = new Set(input.opportunities.map(({ opportunityId }) => opportunityId));
     if (opportunityIds.size !== input.opportunities.length) fail();
     const canaries = input.assignments.filter(({ canary }) => canary);
-    if (canaries.length !== 1 || canaries[0]?.ordinal !== 0 || canaries[0].sessionIds.length > 3) fail();
+    if (input.contractVersion === "workbench-authoring-v4") {
+      if (canaries.length !== 1 || canaries[0]?.ordinal !== 0 || canaries[0].sessionIds.length > 3) fail();
+    } else if (input.contractVersion === "workbench-authoring-v5") {
+      if (canaries.length !== 0) fail();
+    } else fail();
     const assignedSessions: string[] = [];
     const assignedOpportunities: string[] = [];
     for (const assignment of input.assignments) {

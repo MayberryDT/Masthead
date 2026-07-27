@@ -93,6 +93,15 @@ async function buildPayload(layout) {
   const distPath = join(daemonPath, "dist");
   const distFiles = await listRegularFiles(distPath);
   if (distFiles.length === 0) throw new Error("Packaged daemon dist tree is empty.");
+  const release = await readReleaseIdentity(layout);
+  const privateDisplayPath = join(daemonPath, "scripts", "masthead-private-display.js");
+  let includesPrivateDisplay = true;
+  try {
+    await lstat(privateDisplayPath);
+  } catch (error) {
+    if (error?.code === "ENOENT" && release.version === "0.1.13") includesPrivateDisplay = false;
+    else throw error;
+  }
 
   const absoluteFiles = [
     layout.executablePath,
@@ -103,6 +112,7 @@ async function buildPayload(layout) {
     join(daemonPath, "scripts", "packaged-bundle-manifest.js"),
     join(daemonPath, "scripts", "masthead-production-cold-activation.js"),
     join(daemonPath, "scripts", "masthead-production.js"),
+    ...(includesPrivateDisplay ? [privateDisplayPath] : []),
     join(daemonPath, "scripts", "masthead-hook.js"),
     join(daemonPath, "scripts", "resolve-hook-runtime.js")
   ];
@@ -120,7 +130,7 @@ async function buildPayload(layout) {
   return {
     schemaVersion: SCHEMA_VERSION,
     algorithm: HASH_ALGORITHM,
-    release: await readReleaseIdentity(layout),
+    release,
     files
   };
 }

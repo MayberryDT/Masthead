@@ -453,6 +453,7 @@ function canonicalDossierShape(): SessionDossierDto {
     attention: [],
     coverage: { level: "metadata_only", transcript: { assistantMessages: 0, checkpoints: 0, fileEffects: 0, hasUsableTranscript: false, lowValueItems: 0, messages: 0, runtimeSignals: 0, toolCalls: 0, toolResults: 0, userMessages: 0 }, warnings: [] },
     durableEnrichment: {
+      keywords: [],
       sessionDossier: {
         blockers: [],
         continuation: { constraints: [], openQuestions: [] },

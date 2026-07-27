@@ -162,6 +162,11 @@ describe("Masthead worktree connector planning", () => {
     "/workbench/authoring/canaries/pending",
     "/workbench/authoring/assignments/assignment%3Aone/review",
     "/workbench/authoring/assignments/assignment%3Aone/scaffold",
+    "/workbench/authoring/assignments/assignment%3Aone/receipt",
+    "/workbench/authoring/v5/requests/authoring-v5-request%3Aone",
+    "/workbench/authoring/v5/requests/authoring-v5-request%3Aone/bootstrap",
+    "/workbench/authoring/v5/requests/authoring-v5-request%3Aone/receipt",
+    "/workbench/authoring/v5/packs/authoring-v5-pack%3Aone/scaffold",
     "/workbench/authoring/runs/authoring%3Arun",
     "/workbench/authoring/runs/authoring%3Arun/evidence",
     "/workbench/authoring/runs/authoring%3Arun/context"
@@ -197,12 +202,17 @@ describe("Masthead worktree connector planning", () => {
     expect(isAllowedReadOnlyBridgeRequest("POST", "/data/delete")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/capabilities")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("GET", "/workbench/authoring/assignments/assignment%3Aone/inspect")).toBe(false);
+    expect(isAllowedReadOnlyBridgeRequest("GET", "/workbench/authoring/v5/packs/authoring-v5-pack%3Aone/inspect")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/suggestions")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/requests")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/requests/request%3Aone/start")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/assignments/assignment%3Aone/draft")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/requests/request%3Aone/canary-decision")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/assignments/assignment%3Aone/finish")).toBe(false);
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/v5/requests")).toBe(false);
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/v5/requests/authoring-v5-request%3Aone/start")).toBe(false);
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/v5/packs/authoring-v5-pack%3Aone/draft")).toBe(false);
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/v5/packs/authoring-v5-pack%3Aone/finish")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/runs")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/runs/authoring%3Arun/submit")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/runs/authoring%3Arun/finish")).toBe(false);

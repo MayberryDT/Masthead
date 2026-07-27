@@ -52,6 +52,7 @@ describe("buildMastheadHealth", () => {
     );
 
     expect(health.runtime.hookTranscriptCatchupEnabled).toBe(false);
+    expect(health.runtime.authoringContractVersion).toBe("workbench-authoring-v5");
     expect(health.capabilities).toContain("artifact_authoring");
     expect(health.data.sessions).toBe(3);
     expect(health.data.sources).toBe(0);

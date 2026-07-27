@@ -128,7 +128,12 @@ export function coldActivateProduction(input: {
   port?: number;
   productionRoot?: string;
 }, dependencies?: Record<string, unknown>): Promise<Record<string, unknown>>;
-export function startProduction(config: ProductionConfig, dependencies?: Record<string, unknown>): Promise<Record<string, unknown>>;
+export function startProduction(
+  config: ProductionConfig,
+  dependencies?: Record<string, unknown>,
+  environment?: NodeJS.ProcessEnv
+): Promise<Record<string, unknown>>;
+export function productionElectronEnvironment(environment?: NodeJS.ProcessEnv): NodeJS.ProcessEnv;
 export function stopProduction(config: ProductionConfig, dependencies?: Record<string, unknown>): Promise<{
   stopped: boolean;
   stoppedPids: number[];
@@ -151,6 +156,11 @@ export type StagedProductionInstallationReceipt = {
   launched: false;
   databaseOpened: false;
   activatedAt?: string;
+  databaseId?: string;
+  sourceSchemaVersion?: number;
+  targetSchemaVersion?: number;
+  transitionNonce?: string;
+  cancellationDatabaseRestored?: boolean;
   stagingNonce: string;
   sourceDigest: string;
   buildSha: string;
@@ -189,6 +199,10 @@ export function stageProductionInstallation(input: {
   onStageStep?: (step: string) => void | Promise<void>;
 }, dependencies?: Record<string, unknown>): Promise<StagedProductionInstallationReceipt>;
 export function activateStagedProductionInstallation(
+  receipt: StagedProductionInstallationReceipt | string,
+  dependencies?: Record<string, unknown>
+): Promise<Record<string, unknown>>;
+export function abortStagedProductionInstallation(
   receipt: StagedProductionInstallationReceipt | string,
   dependencies?: Record<string, unknown>
 ): Promise<Record<string, unknown>>;

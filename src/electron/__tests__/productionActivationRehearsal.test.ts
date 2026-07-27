@@ -19,8 +19,10 @@ import {
   runInstalledStartAndFinalizeProof,
   runPackageBoundCrashMatrix,
   runProductionActivationRehearsal,
+  rehearsalIsolatedEnvironment,
   retryTransientProcessScan,
   selectProductionCompanionIdentities,
+  selectProductionContainmentTopology,
   signalFixtureProcessIdentity,
   validateRehearsalBundle,
   waitForExactReadyHealth
@@ -42,6 +44,27 @@ const VALID_TEST_PNG = Buffer.from(
   "base64"
 );
 const cleanup: string[] = [];
+
+function provedHeadlessEnvironment(environment: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return {
+    ...environment,
+    DBUS_SESSION_BUS_ADDRESS: undefined,
+    DISPLAY: ":1947",
+    ELECTRON_OZONE_PLATFORM_HINT: "x11",
+    GDK_BACKEND: "x11",
+    MASTHEAD_HEADLESS: "1",
+    MASTHEAD_PRIVATE_DISPLAY: ":1947",
+    MASTHEAD_PRIVATE_DISPLAY_AUTHORITY: "/tmp/masthead-private-display/Xauthority",
+    MASTHEAD_PRIVATE_DISPLAY_RUNTIME: "/tmp/masthead-private-display/runtime",
+    MASTHEAD_PRIVATE_DISPLAY_TOKEN: "a".repeat(64),
+    QT_QPA_PLATFORM: "xcb",
+    SESSION_MANAGER: undefined,
+    WAYLAND_DISPLAY: undefined,
+    XAUTHORITY: "/tmp/masthead-private-display/Xauthority",
+    XDG_RUNTIME_DIR: "/tmp/masthead-private-display/runtime",
+    XDG_SESSION_TYPE: "x11"
+  };
+}
 
 type ClaimedExternalControlGroup = {
   controlGroup: string;
@@ -136,6 +159,7 @@ async function validSuppliedLifecycleBundle(root: string, lifecycleSource: strin
     writeFile(join(scriptsRoot, "masthead-production.js"), lifecycleSource),
     cp(join(PROJECT_ROOT, "scripts", "packaged-bundle-manifest.js"), join(scriptsRoot, "packaged-bundle-manifest.js")),
     cp(join(PROJECT_ROOT, "scripts", "masthead-production-cold-activation.js"), join(scriptsRoot, "masthead-production-cold-activation.js")),
+    cp(join(PROJECT_ROOT, "scripts", "masthead-private-display.js"), join(scriptsRoot, "masthead-private-display.js")),
     ...["masthead-hook.js", "resolve-hook-runtime.js"].map((name) => writeFile(join(scriptsRoot, name), "export {};\n")),
     writeFile(join(distRoot, "daemon", "main.js"), "export {};\n"),
     writeFile(join(distRoot, "daemon", "productionTransitionMaintenance.js"), "export {};\n"),
@@ -150,6 +174,25 @@ async function validSuppliedLifecycleBundle(root: string, lifecycleSource: strin
 }
 
 describe("production activation rehearsal CLI", () => {
+  test("keeps only private display routes in every isolated lifecycle and matrix environment", () => {
+    const isolated = rehearsalIsolatedEnvironment(provedHeadlessEnvironment({
+      DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/1000/bus",
+      DISPLAY: ":0",
+      HOME: "/home/visible",
+      WAYLAND_DISPLAY: "wayland-0",
+      XAUTHORITY: "/home/visible/.Xauthority",
+      XDG_RUNTIME_DIR: "/run/user/1000"
+    }), "/tmp/isolated-home");
+    expect(isolated).toMatchObject({
+      DISPLAY: ":1947",
+      HOME: "/tmp/isolated-home",
+      MASTHEAD_HEADLESS: "1",
+      XAUTHORITY: "/tmp/masthead-private-display/Xauthority",
+      XDG_RUNTIME_DIR: "/tmp/masthead-private-display/runtime"
+    });
+    expect(isolated.WAYLAND_DISPLAY).toBeUndefined();
+    expect(isolated.DBUS_SESSION_BUS_ADDRESS).toBeUndefined();
+  });
   test("requires exactly one absolute bundle argument", async () => {
     await expect(validateRehearsalBundle([])).rejects.toThrow("requires --bundle <absolute-path>");
     await expect(validateRehearsalBundle(["--bundle", "relative-bundle"])).rejects.toThrow("must be absolute");
@@ -796,6 +839,7 @@ describe("production activation rehearsal CLI", () => {
     expect(source).not.toContain("fetchHealth: async");
     expect(source).toContain("captureProductionCompanionIdentities");
     expect(source).toContain("startInstalledLifecycleWithIdentityCapture");
+    expect(source).toContain("selectProductionContainmentTopology");
     expect(source).toMatch(/runReceiptBoundStopAndStatus\(\s+runInstalledLifecycleCommand,\s+receipt\.stagedSurface\.launcherPath/u);
     expect(source).not.toContain("startMatrixLiveProofDaemon");
   });
@@ -887,6 +931,42 @@ describe("production activation rehearsal CLI", () => {
       { runtime: { pid: 202 } },
       observed
     )).toEqual(observed);
+  });
+
+  test("accepts a contained daemon alongside an independently claimed Electron scope", () => {
+    const electronControlGroup = "/user.slice/user-1000.slice/user@1000.service/app.slice/app-masthead-101.scope";
+    const observed = [
+      { controlGroup: electronControlGroup, pid: 101, ppid: 1, signalSafe: false, starttime: "electron" },
+      { pid: 202, ppid: 101, signalSafe: true, starttime: "daemon" },
+      { controlGroup: electronControlGroup, pid: 303, ppid: 101, signalSafe: false, starttime: "chromium-child" },
+      { pid: 404, ppid: 202, signalSafe: true, starttime: "daemon-child" }
+    ];
+
+    expect(selectProductionCompanionIdentities(
+      { started: true, pid: 101 },
+      { runtime: { pid: 202 } },
+      observed
+    )).toEqual(observed);
+  });
+
+  test("proves an all-owned Electron and daemon topology without an external claim", () => {
+    expect(selectProductionContainmentTopology(101, 202, [
+      { pid: 101, ppid: 1, signalSafe: true, starttime: "electron" },
+      { pid: 202, ppid: 101, signalSafe: true, starttime: "daemon" }
+    ])).toEqual({ claimExternalScope: false, daemonAlreadyContained: true });
+  });
+
+  test("requires an external Electron claim when only the daemon is already contained", () => {
+    expect(selectProductionContainmentTopology(101, 202, [
+      { pid: 202, ppid: 101, signalSafe: true, starttime: "daemon" }
+    ])).toEqual({ claimExternalScope: true, daemonAlreadyContained: true });
+  });
+
+  test("rejects an all-owned topology without direct Electron to daemon parentage", () => {
+    expect(() => selectProductionContainmentTopology(101, 202, [
+      { pid: 101, ppid: 1, signalSafe: true, starttime: "electron" },
+      { pid: 202, ppid: 999, signalSafe: true, starttime: "daemon" }
+    ])).toThrow("not a direct child");
   });
 
   test("accepts a live daemon whose trusted Electron bootstrap exited after spawning it", () => {
@@ -1400,7 +1480,7 @@ describe("production activation rehearsal CLI", () => {
       ""
     ].join("\n"));
 
-    await expect(runPackageBoundCrashMatrix(verified, process.env)).rejects.toThrow(
+    await expect(runPackageBoundCrashMatrix(verified, provedHeadlessEnvironment())).rejects.toThrow(
       "stage:candidate-temp-created:SIGKILL"
     );
   });
@@ -1422,7 +1502,7 @@ describe("production activation rehearsal CLI", () => {
 
     let failure: unknown;
     try {
-      await runPackageBoundCrashMatrix(verified, process.env);
+      await runPackageBoundCrashMatrix(verified, provedHeadlessEnvironment());
     } catch (error) {
       failure = error;
     }

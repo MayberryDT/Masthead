@@ -568,13 +568,7 @@ function validateOpportunitiesAndArtifacts(input: GuidedAuthoringValidationInput
   input.assignment.opportunityIds.forEach((opportunityId, opportunityOrdinal) => {
     const opportunity = opportunities.get(opportunityId);
     const submitted = dispositions.get(opportunityId);
-    if (!submitted) {
-      add(2, {
-        ...finding("missing_opportunity_disposition", "Persisted opportunity is missing its disposition.", `/opportunityDispositions/${opportunityOrdinal}`),
-        opportunityId
-      }, { opportunityOrdinal });
-      return;
-    }
+    if (!submitted) return;
     if (!opportunity) {
       add(2, {
         ...finding("invalid_opportunity_evidence", "Persisted assignment opportunity definition is missing.", `/opportunityDispositions/${submitted.index}/evidenceRefs`),

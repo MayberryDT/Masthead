@@ -6,9 +6,14 @@ import type {
   WorkbenchClaimSupport
 } from "./workbenchAuthoring.ts";
 import { isAbsoluteAuthoringCommand } from "./workbenchAuthoring.ts";
+import {
+  isWorkbenchAuthoringV5CapabilitiesDto,
+  type WorkbenchAuthoringV5CapabilitiesDto
+} from "./workbenchAuthoringV5.ts";
 export type { GuidedAuthoringExpectedIdentity } from "./instanceIdentity.ts";
 
 export const GUIDED_AUTHORING_POLICY_VERSION = "guided-authoring-v1" as const;
+export type GuidedAuthoringContractVersion = "workbench-authoring-v4" | "workbench-authoring-v5";
 export const GUIDED_AUTHORING_OPERATIONS = ["start", "inspect", "scaffold", "save", "review", "finish"] as const;
 export const GUIDED_AUTHORING_IDENTITY_HEADERS = {
   baseUrl: "x-masthead-authoring-base-url",
@@ -90,7 +95,7 @@ export type GuidedAuthoringBundleV4 = {
   artifacts: GuidedArtifactDraft[];
 };
 
-export type GuidedAuthoringCapabilitiesDto = {
+export type GuidedAuthoringCapabilitiesV4Dto = {
   capability: "artifact_authoring";
   protocol: "masthead.workbench.authoring/v1";
   bundleVersion: "workbench-authoring-v4";
@@ -106,10 +111,16 @@ export type GuidedAuthoringCapabilitiesDto = {
   operations: ["start", "inspect", "scaffold", "save", "review", "finish"];
 };
 
+export type GuidedAuthoringCapabilitiesDto = GuidedAuthoringCapabilitiesV4Dto | WorkbenchAuthoringV5CapabilitiesDto;
+
 export function isGuidedAuthoringCapabilitiesDto(
   value: unknown,
   options: { expectedCommand?: string } = {}
 ): value is GuidedAuthoringCapabilitiesDto {
+  if (isWorkbenchAuthoringV5CapabilitiesDto(value)) {
+    return isAbsoluteAuthoringCommand(value.command) &&
+      (!options.expectedCommand || value.command === options.expectedCommand);
+  }
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const capabilities = value as Record<string, unknown>;
   const command = typeof capabilities.command === "string" ? capabilities.command.trim() : "";
@@ -186,6 +197,7 @@ function isCanonicalAbsoluteAuthoringPath(value: string): boolean {
 export type GuidedAuthoringRequestDto = {
   requestId: string;
   actorId: string;
+  contractVersion: GuidedAuthoringContractVersion;
   policyVersion: "guided-authoring-v1";
   status: GuidedAuthoringRequestStatus;
   baseUrl: string;
@@ -197,7 +209,7 @@ export type GuidedAuthoringRequestDto = {
   completedSessionCount: number;
   assignmentCount: number;
   currentAssignmentId?: string;
-  canaryAssignmentId: string;
+  canaryAssignmentId?: string;
   canaryApprovedAt?: string;
   canaryApprovedBy?: string;
   createdAt: string;

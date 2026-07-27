@@ -1,6 +1,6 @@
 # Logbook and Workbench (artifact-first)
 
-**Decisions:** [ADR 0011](../docs/adr/0011-artifact-first-logbook.md) (Logbook unit), [ADR 0012](../docs/adr/0012-daemon-owned-artifact-authoring.md) (daemon seam), [ADR 0013](../docs/adr/0013-canonical-dossier-and-candidate-authoring.md) (preserved rendering/evidence findings), [ADR 0014](../docs/adr/0014-agent-led-enriched-artifact-authoring.md) (superseded V3 audit history), [ADR 0015](../docs/adr/0015-guided-authoring-campaigns.md) (current implemented V4 contract), [ADR 0009](../docs/adr/0009-logbook-only-shows-published-sessions.md) (Workbench pipeline ownership).
+**Decisions:** [ADR 0011](../docs/adr/0011-artifact-first-logbook.md) (Logbook unit), [ADR 0012](../docs/adr/0012-daemon-owned-artifact-authoring.md) (daemon seam), [ADR 0013](../docs/adr/0013-canonical-dossier-and-candidate-authoring.md) (preserved rendering/evidence findings), [ADR 0014](../docs/adr/0014-agent-led-enriched-artifact-authoring.md) (superseded V3 audit history), [ADR 0015](../docs/adr/0015-guided-authoring-campaigns.md) (superseded V4 audit contract), [ADR 0016](../docs/adr/0016-agent-led-v5-pack-authoring.md) (current V5 contract), [ADR 0009](../docs/adr/0009-logbook-only-shows-published-sessions.md) (Workbench pipeline ownership).
 
 **Language:** `CONTEXT.md`.
 
@@ -69,16 +69,16 @@ a manual exclusion remains sticky.
 
 ## Workbench (guided enriched artifact authoring)
 
-This section defines the current V4 runtime. Selection-scoped V3 records remain readable for audit,
-but their mutation routes are retired and cannot run a new enrichment campaign.
+New work uses the V5 runtime. V1–V4 records remain readable for audit, but their mutation routes are
+retired and cannot run or resume an enrichment campaign. See the
+[V5 migration note](../docs/reference/workbench-authoring-v5-migration.md).
 
-One durable `workbench-authoring-v4` request produces enriched dossiers and any useful optional artifacts:
+One durable `workbench-authoring-v5` request produces enriched dossiers and any useful optional artifacts:
 
 1. **Enriched dossier** — the agent writes current durable enrichment for every selected session;
    the daemon then renders the original canonical dossier structure.
 2. **Runbook**, **ADR**, **incident timeline** — the agent may create zero or more optional artifacts
-   from assignment evidence. A knowledge opportunity is nonbinding, but every high-signal opportunity
-   requires an evidence-backed authored, dismissed, merged, or changed-kind disposition.
+   from assignment evidence. Knowledge opportunities are nonbinding and require no disposition.
 
 ### Daemon-owned guided authoring
 
@@ -88,39 +88,37 @@ daemon-owned authoring module then enforces the same quality behavior:
 
 1. persist the compile-ready selection and campaign policy through **Copy Agent Prompt** while
    disclosing any review-needed sessions left out;
-2. group assignments of at most 12 sessions using strong opportunity joins before dossier-only groups;
+2. create fixed packs of 5–12 sessions, except the final remainder;
 3. return one required next action and record traversal of every canonical evidence page;
-4. review grounded enrichment, optional-artifact claims, and opportunity dispositions progressively;
-5. stage the first accepted assignment as a three-session canary for operator approval; and
-6. atomically publish one accepted assignment before releasing the next.
+4. review grounded enrichment and any optional-artifact claims progressively; and
+5. atomically publish accepted pack sessions before releasing the next pack.
 
-Masthead never splits a strong opportunity merely to manufacture the canary. It uses a complete
-strong group of at most three sessions or diverse dossier-only sessions; if neither exists, request
-creation returns `guided_canary_not_constructible` and persists nothing. The immutable assignment
-receipt is the proof of success, and a finish retry returns the same receipt. V1, V2, and V3 remain
-audit-only; their mutation routes return `authoring_contract_retired`.
+The immutable pack receipt is the proof of success, and a finish retry returns the same
+receipt. V1–V4 remain audit-only; their mutation routes return `authoring_contract_retired`.
 
 ### Locked UI vocabulary
 
 - Columns include enrichment, dossier publication, and optional-artifact state.
 - Copy Agent Prompt persists the selection and copies one instance-bound start command, no session list or multi-step recipe.
-- The agent enriches assignment sessions and exercises optional-artifact judgment; opportunities are nonbinding but require disposition when high signal.
-- Canary drafts remain staged until an operator approves or rejects them from Workbench Activity.
+- The agent enriches assignment sessions and exercises optional-artifact judgment; opportunities are nonbinding.
+- Workbench Activity observes normal publication; it does not approve V5 packs.
 - Apply ≠ publish.
 
 ### Guided authoring vocabulary
 
 Guided authoring request = the durable Workbench selection and campaign policy.
 
-Assignment = one daemon-grouped authoring unit containing at most 12 sessions.
+Pack = one fixed V5 authoring unit containing 5–12 sessions, except the final remainder.
+
+Assignment = historical V4 campaign unit retained for audit.
 
 Knowledge opportunity = nonbinding evidence that may support a runbook, ADR, or incident timeline.
 
-Opportunity disposition = authored, dismissed, merged, or changed kind, with evidence-backed rationale.
+Opportunity disposition = historical V4 resolution state; V5 opportunities are nonbinding.
 
-Canary = the first staged assignment of at most 3 sessions, reviewed by an operator before publication.
+Canary = historical V4 approval state; V5 has no canary.
 
-Next action = the single command Masthead requires from the agent at the current assignment state.
+Next action = the single command Masthead requires from the agent at the current pack state.
 
 ### Code map
 
@@ -131,7 +129,7 @@ Next action = the single command Masthead requires from the agent at the current
 | Controller | `src/app/workbench/useWorkbenchController.ts` |
 | Pipeline | `src/workbench/` |
 | Authoring module | `src/workbench/authoring/` |
-| Durable runs | `src/daemon/db/workbenchAuthoringRepository.ts` |
+| Durable V5 requests and packs | `src/daemon/db/workbenchAuthoringV5Repository.ts` |
 | HTTP | `src/daemon/workbenchAuthoringApi.ts` |
 | Thin CLI adapter | `src/cli/workbenchAuthoring.ts`, `src/cli/authoringClient.ts` |
 
@@ -144,10 +142,8 @@ Prefer for reuse:
 
 Session tools (`search_sessions`, `get_session`, transcript/excerpts) remain for compile evidence, not the primary memory API. See `docs/reference/mcp-tools.md`.
 
-MCP has no authoring mutations. The V4 bridge policy allows capabilities, guided-request
-status, pending-canary discovery, and assignment review. It blocks guided-request creation,
-assignment start/claim, progress-recording assignment inspect, draft save, canary decisions, and
-assignment finish. Legacy V3 status and receipt reads remain audit-only; V3 mutations return
+MCP has no authoring mutations. Guided-request status and assignment review remain read-only. V1–V4
+status, reviews, and receipts remain audit history; their mutations return
 `authoring_contract_retired`.
 
 ## Anti-patterns for agents

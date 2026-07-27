@@ -21,7 +21,7 @@ export function validateRehearsalBundle(
 export function runProductionActivationRehearsal(
   argv?: string[],
   environment?: NodeJS.ProcessEnv
-): Promise<{ ok: true; bundle: string; isolated: true; matrix: PackageBoundMatrixResult }>;
+): Promise<{ ok: true; bundle: string; headless: true; isolated: true; matrix: PackageBoundMatrixResult }>;
 
 export interface PackageBoundMatrixResult {
   source: "supplied-package";
@@ -57,7 +57,12 @@ export type FixtureSignalResult =
 export interface BoundedFixtureSubprocessOptions {
   allowedLiveIdentities?: FixtureProcessRecord[];
   captureAllowedLiveIdentities?: (input: {
-    claimExternalScope: (claim: { startPid: number; daemonPid: number; deadline?: number }) => Promise<ClaimedExternalControlGroup>;
+    claimExternalScope: (claim: {
+      startPid: number;
+      daemonPid: number;
+      daemonAlreadyContained?: boolean;
+      deadline?: number;
+    }) => Promise<ClaimedExternalControlGroup>;
     fixtureRoot: string;
     inspectProcesses: () => Promise<FixtureProcessRecord[]>;
     result: { code: number | null; signal: NodeJS.Signals | null; stdout: string; stderr: string };
@@ -155,6 +160,12 @@ export function selectProductionCompanionIdentities(
   processes: ObservedFixtureProcessRecord[]
 ): ObservedFixtureProcessRecord[];
 
+export function selectProductionContainmentTopology(
+  startPid: number,
+  daemonPid: number,
+  processes: ObservedFixtureProcessRecord[]
+): { claimExternalScope: boolean; daemonAlreadyContained: boolean };
+
 export interface InstalledStartAndFinalizeReceipt {
   receiptPath: string;
   baseUrl: string;
@@ -210,3 +221,7 @@ export function runPackageBoundCrashMatrix(
   environment?: NodeJS.ProcessEnv,
   temporaryParent?: string
 ): Promise<PackageBoundMatrixResult>;
+export function rehearsalIsolatedEnvironment(
+  environment: NodeJS.ProcessEnv,
+  homeDir: string
+): NodeJS.ProcessEnv;

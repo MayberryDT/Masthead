@@ -147,6 +147,7 @@ describe("WorkbenchPanel live update motion", () => {
 
 function session(id: string): WorkbenchQueueSessionDto {
   return {
+    compileReady: true,
     activeClaim: undefined,
     adrStatus: "unknown",
     bugFixTraceStatus: "unknown",

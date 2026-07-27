@@ -21,7 +21,7 @@ import {
   startGuidedAssignment
 } from "../workbench/authoring/guidedAuthoringService.ts";
 import { parseGuidedAuthoringBundleV4 } from "../workbench/authoring/authoringSchemas.ts";
-import { getGuidedAuthoringRequest } from "./db/guidedAuthoringRepository.ts";
+import { getGuidedAssignmentReceipt, getGuidedAuthoringRequest } from "./db/guidedAuthoringRepository.ts";
 import type { SessionTranscriptKindFilter } from "./db/sessionTranscriptRepository.ts";
 import type { MastheadDatabase } from "./db/sqlite.ts";
 
@@ -135,7 +135,7 @@ export function routeGuidedAuthoringRequest(
       };
     }
 
-    const assignmentMatch = pathname.match(/^\/workbench\/authoring\/assignments\/([^/]+)\/(inspect|scaffold|draft|review|finish)$/);
+    const assignmentMatch = pathname.match(/^\/workbench\/authoring\/assignments\/([^/]+)\/(inspect|scaffold|draft|review|receipt|finish)$/);
     if (!assignmentMatch?.[1] || !assignmentMatch[2]) return undefined;
     const assignmentId = decodeSegment(assignmentMatch[1], "assignmentId");
     const operation = assignmentMatch[2];
@@ -149,6 +149,12 @@ export function routeGuidedAuthoringRequest(
     if (operation === "scaffold") {
       if (request.method !== "GET") return methodNotAllowed();
       return { body: buildGuidedDraftScaffold(context.db, { assignmentId, command: context.authoringCommand }), status: 200 };
+    }
+    if (operation === "receipt") {
+      if (request.method !== "GET") return methodNotAllowed();
+      const receipt = getGuidedAssignmentReceipt(context.db, assignmentId);
+      if (!receipt) throw new Error("guided_assignment_receipt_not_found");
+      return { body: receipt, status: 200 };
     }
     if (operation === "inspect") {
       if (request.method !== "GET") return methodNotAllowed();
@@ -201,7 +207,7 @@ export function isGuidedAuthoringPath(pathname: string): boolean {
   return pathname === "/workbench/authoring/requests" ||
     pathname === "/workbench/authoring/canaries/pending" ||
     /^\/workbench\/authoring\/requests\/[^/]+(?:\/(?:start|canary-decision))?$/.test(pathname) ||
-    /^\/workbench\/authoring\/assignments\/[^/]+\/(?:inspect|scaffold|draft|review|finish)$/.test(pathname);
+    /^\/workbench\/authoring\/assignments\/[^/]+\/(?:inspect|scaffold|draft|review|receipt|finish)$/.test(pathname);
 }
 
 export function getGuidedAuthoringBodyLimit(pathname: string, defaultLimitBytes: number): number {
@@ -218,7 +224,7 @@ export function guidedAuthoringErrorResult(error: unknown): GuidedAuthoringHttpR
       code.startsWith("invalid_guided_authoring_bundle_") || code.startsWith("unexpected_guided_authoring_bundle_property")) {
     return failure(400, code, message);
   }
-  if (["guided_request_not_found", "guided_assignment_not_found", "session_not_found"].includes(code)) {
+  if (["guided_request_not_found", "guided_assignment_not_found", "guided_assignment_receipt_not_found", "session_not_found"].includes(code)) {
     return failure(404, code, message);
   }
   if (code.endsWith("_identity_mismatch") || code.startsWith("guided_") ||
@@ -358,6 +364,7 @@ const guidedBadRequestCodes = new Set([
 ]);
 
 const guidedConflictCodes = new Set([
+  "authoring_contract_retired",
   "authoring_session_not_compile_ready",
   "authoring_session_not_on_publish_path",
   "missing_canonical_evidence"

@@ -17,7 +17,7 @@ MASTHEAD_DB_PATH=/path/to/masthead.sqlite node dist/daemon/src/mcp/server.js
 
 | Tool | Arguments | Returns |
 | --- | --- | --- |
-| `search_artifacts` | optional `query`, `kind` (`session_dossier` \| `runbook` \| `adr` \| `incident_timeline`), `project`, `limit`, `offset` | Published artifact capsules matched across capsule fields and complete first-class body fields |
+| `search_artifacts` | optional `query`, `kind` (`session_dossier` \| `runbook` \| `adr` \| `incident_timeline`), `project`, `limit`, `offset` | Published artifact capsules; title, summary, and agent-authored dossier keywords rank ahead of full-body-only matches |
 | `get_artifact` | `artifactId` | One current published artifact with its complete body, provenance session ids, join rationale, evidence refs, lineage, and publication metadata |
 
 For `session_dossier`, `get_artifact` returns the immutable

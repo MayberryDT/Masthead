@@ -4,10 +4,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { WorkbenchEnrollMissingResponse, WorkbenchQueueSessionDto } from "../../../shared/workbench";
-import type {
-  GuidedAuthoringCapabilitiesDto,
-  GuidedAuthoringReviewDto
-} from "../../../shared/guidedAuthoring";
+import type { GuidedAuthoringReviewDto } from "../../../shared/guidedAuthoring";
+import type { WorkbenchAuthoringV5CapabilitiesDto } from "../../../shared/workbenchAuthoringV5";
 import {
   useWorkbenchController,
   type UseWorkbenchControllerResult,
@@ -21,7 +19,6 @@ import {
   getWorkbenchNotAddedSummary,
   getWorkbenchSessions,
   getDataRevisions,
-  approveGuidedAuthoringCanary,
   createGuidedAuthoringRequest,
   listPendingGuidedCanaries,
   postWorkbenchCheckTranscript,
@@ -29,8 +26,7 @@ import {
   postWorkbenchEnrollMissing,
   postWorkbenchImportTranscript,
   postWorkbenchQuality,
-  postWorkbenchReleaseClaim,
-  rejectGuidedAuthoringCanary
+  postWorkbenchReleaseClaim
 } from "../../daemonClient";
 
 const daemonClientMocks = vi.hoisted(() => ({
@@ -41,7 +37,6 @@ const daemonClientMocks = vi.hoisted(() => ({
   getWorkbenchNotAddedSessions: vi.fn(),
   getWorkbenchNotAddedSummary: vi.fn(),
   getWorkbenchSessions: vi.fn(),
-  approveGuidedAuthoringCanary: vi.fn(),
   createGuidedAuthoringRequest: vi.fn(),
   listPendingGuidedCanaries: vi.fn().mockResolvedValue([]),
   postWorkbenchCheckTranscript: vi.fn(),
@@ -49,8 +44,7 @@ const daemonClientMocks = vi.hoisted(() => ({
   postWorkbenchEnrollMissing: vi.fn(),
   postWorkbenchImportTranscript: vi.fn(),
   postWorkbenchQuality: vi.fn(),
-  postWorkbenchReleaseClaim: vi.fn(),
-  rejectGuidedAuthoringCanary: vi.fn()
+  postWorkbenchReleaseClaim: vi.fn()
 }));
 
 vi.mock("../../daemonClient", async () => {
@@ -123,6 +117,7 @@ describe("useWorkbenchController", () => {
     expect(createGuidedAuthoringRequest).toHaveBeenCalledWith(baseUrl, {
       buildSha: "build:test",
       databaseId: "database:test",
+      creationToken: expect.any(String),
       expectedIdentity: {
         baseUrl: "http://127.0.0.1:17373",
         buildSha: "build:test",
@@ -133,7 +128,7 @@ describe("useWorkbenchController", () => {
       sessionIds: ["session:a", "session:b"]
     });
     expect(prompt).toContain("request:one");
-    expect(prompt).toContain("workbench author start --request request:one --json");
+    expect(prompt).toContain("workbench author bootstrap --request 'request:one' --json");
     expect(prompt).not.toContain("session:a");
     expect(prompt).not.toContain("session:b");
     expect(prompt).not.toContain("partition");
@@ -160,119 +155,56 @@ describe("useWorkbenchController", () => {
     })).rejects.toThrow("guided request unavailable");
     await waitFor(() => latest().actionError === "guided request unavailable");
     expect(latest().actionError).toBe("guided request unavailable");
+    expect(latest().activity).toEqual([]);
     expect(createGuidedAuthoringRequest).toHaveBeenCalledTimes(2);
   });
 
-  test("rediscovers pending canaries on mount and activity refresh", async () => {
-    mockWorkbenchResponse([]);
-    vi.mocked(listPendingGuidedCanaries)
-      .mockResolvedValueOnce([stagedReview("assignment:canary")])
-      .mockResolvedValueOnce([stagedReview("assignment:refreshed")]);
+  test("reuses the creation token when the same failed selection is retried", async () => {
+    mockWorkbenchResponse([session("session:a", "First session")]);
+    vi.mocked(createGuidedAuthoringRequest).mockRejectedValue(new Error("response_lost"));
 
     await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
-    await waitFor(() => latest().pendingCanaryReviews[0]?.assignmentId === "assignment:canary");
+    await waitFor(() => latest().sessions.length === 1);
+    await select("session:a");
 
-    await rerenderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 2 });
-    await waitFor(() => latest().pendingCanaryReviews[0]?.assignmentId === "assignment:refreshed");
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await expect(act(async () => {
+        await latest().copyAgentPrompt();
+      })).rejects.toThrow("response_lost");
+    }
 
-    expect(listPendingGuidedCanaries).toHaveBeenCalledTimes(2);
-    expect(listPendingGuidedCanaries).toHaveBeenLastCalledWith(baseUrl, expect.objectContaining({
-      signal: expect.any(AbortSignal)
-    }));
+    const tokens = vi.mocked(createGuidedAuthoringRequest).mock.calls.map(([, input]) => input.creationToken);
+    expect(tokens).toEqual([expect.any(String), tokens[0]]);
   });
 
-  test("keeps the core Workbench loaded when pending canary discovery fails", async () => {
-    const queuedSession = session("session:queued", "Queued session");
-    const activity = {
-      activityId: "activity:loaded",
-      sessionId: queuedSession.sessionId,
-      eventType: "session_enrolled",
-      eventAt: "2026-07-07T12:00:00.000Z",
-      actorKind: "system",
-      summary: "Session enrolled",
-      details: {}
-    };
-    mockWorkbenchResponse([queuedSession]);
-    vi.mocked(getWorkbenchActivity).mockResolvedValue({
-      ...activityResponse(),
-      activity: [activity]
-    });
-    vi.mocked(listPendingGuidedCanaries).mockRejectedValue(new Error("canary endpoint unavailable"));
+  test("keeps instance identity failures in transient action feedback without inventing Activity", async () => {
+    mockWorkbenchResponse([session("session:a", "First session")]);
+    vi.mocked(createGuidedAuthoringRequest).mockRejectedValue(new Error("database_identity_mismatch"));
+
+    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
+    await waitFor(() => latest().sessions.length === 1);
+    await select("session:a");
+
+    await expect(act(async () => {
+      await latest().copyAgentPrompt();
+    })).rejects.toThrow("database_identity_mismatch");
+    await waitFor(() => latest().actionError === "database_identity_mismatch");
+    expect(latest().activity).toEqual([]);
+    expect(latest()).not.toHaveProperty("approveCanary");
+    expect(latest()).not.toHaveProperty("rejectCanary");
+  });
+
+  test("does not poll or expose retired operator canary controls", async () => {
+    mockWorkbenchResponse([]);
+    vi.mocked(listPendingGuidedCanaries).mockResolvedValue([stagedReview("assignment:retired")]);
 
     await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
     await waitFor(() => latest().loading === false);
 
-    expect(latest().sessions).toEqual([queuedSession]);
-    expect(latest().activity).toEqual([activity]);
-    expect(latest().notAddedSummary).toEqual(notAddedSummary());
-    expect(latest().pendingCanaryReviews).toEqual([]);
-    expect(latest().error).toBeUndefined();
-  });
-
-  test("approves a pending canary with its exact identity and draft envelope", async () => {
-    const review = stagedReview("assignment:canary");
-    mockWorkbenchResponse([]);
-    vi.mocked(listPendingGuidedCanaries)
-      .mockResolvedValueOnce([review])
-      .mockResolvedValueOnce([]);
-    vi.mocked(approveGuidedAuthoringCanary).mockResolvedValue({ ...review, status: "ready_to_finish" });
-
-    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
-    await waitFor(() => latest().pendingCanaryReviews.length === 1);
-    await act(async () => {
-      await latest().approveCanary(review, "  operator:tyler  ");
-    });
-
-    expect(approveGuidedAuthoringCanary).toHaveBeenCalledWith(baseUrl, {
-      assignmentId: "assignment:canary",
-      draftRevision: 4,
-      evidenceRevision: "evidence:four",
-      expectedIdentity: guidedIdentity(),
-      notes: "Approved from Workbench canary review.",
-      requestId: "request:canary",
-      reviewedBy: "operator:tyler"
-    });
-    expect(latest().pendingCanaryReviews).toEqual([]);
-  });
-
-  test("rejects a pending canary with operator notes and its exact identity envelope", async () => {
-    const review = stagedReview("assignment:canary");
-    mockWorkbenchResponse([]);
-    vi.mocked(listPendingGuidedCanaries)
-      .mockResolvedValueOnce([review])
-      .mockResolvedValueOnce([]);
-    vi.mocked(rejectGuidedAuthoringCanary).mockResolvedValue({ ...review, status: "needs_revision" });
-
-    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
-    await waitFor(() => latest().pendingCanaryReviews.length === 1);
-    await act(async () => {
-      await latest().rejectCanary(review, "The dossier is still generic.", "operator:tyler");
-    });
-
-    expect(rejectGuidedAuthoringCanary).toHaveBeenCalledWith(baseUrl, {
-      assignmentId: "assignment:canary",
-      draftRevision: 4,
-      evidenceRevision: "evidence:four",
-      expectedIdentity: guidedIdentity(),
-      notes: "The dossier is still generic.",
-      requestId: "request:canary",
-      reviewedBy: "operator:tyler"
-    });
-    expect(latest().pendingCanaryReviews).toEqual([]);
-  });
-
-  test("refuses a canary decision without an operator identifier", async () => {
-    const review = stagedReview("assignment:canary");
-    mockWorkbenchResponse([]);
-    vi.mocked(listPendingGuidedCanaries).mockResolvedValue([review]);
-
-    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
-    await waitFor(() => latest().pendingCanaryReviews.length === 1);
-
-    await expect(latest().approveCanary(review, "   ")).rejects.toThrow(
-      "Canary review operator identifier is required"
-    );
-    expect(approveGuidedAuthoringCanary).not.toHaveBeenCalled();
+    expect(listPendingGuidedCanaries).not.toHaveBeenCalled();
+    expect(latest()).not.toHaveProperty("pendingCanaryReviews");
+    expect(latest()).not.toHaveProperty("approveCanary");
+    expect(latest()).not.toHaveProperty("rejectCanary");
   });
 
   test("does not fetch hidden import-repair diagnostics for the human Workbench", async () => {
@@ -773,7 +705,8 @@ describe("useWorkbenchController", () => {
     await act(async () => {
       firstPrompt = await latest().copyAgentPrompt();
     });
-    expect(firstPrompt).toContain("database:first");
+    expect(firstPrompt).toContain("request:first");
+    expect(firstPrompt).not.toContain("database:first");
 
     await rerenderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 2 });
     await waitFor(() => latest().loading === false && latest().canRun("copy_agent_prompt"));
@@ -782,8 +715,8 @@ describe("useWorkbenchController", () => {
       secondPrompt = await latest().copyAgentPrompt();
     });
 
-    expect(secondPrompt).toContain("database:second");
-    expect(secondPrompt).not.toContain("database:first");
+    expect(secondPrompt).toContain("request:second");
+    expect(secondPrompt).not.toContain("request:first");
     expect(vi.mocked(createGuidedAuthoringRequest).mock.calls.at(-1)?.[1]).toMatchObject({
       databaseId: "database:second",
       expectedIdentity: { databaseId: "database:second" }
@@ -1149,15 +1082,20 @@ async function select(sessionId: string): Promise<void> {
 }
 
 function session(sessionId: string, title: string, overrides: Partial<WorkbenchQueueSessionDto> = {}): WorkbenchQueueSessionDto {
+  const transcriptStatus = overrides.transcriptStatus ?? "imported";
   return {
     bugFixTraceStatus: "unknown",
+    compileReady: overrides.compileReady ?? (
+      (transcriptStatus === "available" || transcriptStatus === "imported") &&
+      (overrides.qualityStatus ?? "passed") === "passed"
+    ),
     latestActivity: undefined,
     nextAction: "check_transcript",
     publicationStatus: "publish_path",
     qualityStatus: "passed",
     sessionDossierStatus: "missing",
     sessionEnrichmentStatus: "missing",
-    transcriptStatus: "imported",
+    transcriptStatus,
     lastActivityAt: "2026-07-07T12:00:00.000Z",
     lifecycle: "ended",
     project: "Masthead",
@@ -1199,20 +1137,20 @@ function mockWorkbenchResponse(sessions: WorkbenchQueueSessionDto[]): void {
   vi.mocked(getWorkbenchImportHealthSummary).mockResolvedValue({ ok: true, importJobIds: [], reasons: [], repairRequired: 0 });
 }
 
-function authoringCapabilities(databaseId: string, command: string): GuidedAuthoringCapabilitiesDto {
+function authoringCapabilities(databaseId: string, command: string): WorkbenchAuthoringV5CapabilitiesDto {
   return {
-    bundleVersion: "workbench-authoring-v4",
+    bundleVersion: "workbench-authoring-v5",
     capability: "artifact_authoring",
     baseUrl: "http://127.0.0.1:17373",
     buildSha: "build:test",
-    canarySessions: 3,
     command,
     databaseId,
     instanceId: "instance:test",
     instanceManifest: "/tmp/masthead/masthead-instance.json",
-    maxSessionsPerAssignment: 12,
-    operations: ["start", "inspect", "scaffold", "save", "review", "finish"],
-    policyVersion: "guided-authoring-v1",
+    maximumSessionsPerPack: 12,
+    minimumSessionsPerPack: 5,
+    operations: ["bootstrap", "start", "claim", "inspect", "scaffold", "save", "finish", "status", "receipt"],
+    policyVersion: "workbench-authoring-v5",
     protocol: "masthead.workbench.authoring/v1",
   };
 }
@@ -1229,28 +1167,41 @@ function guidedIdentity() {
 
 function guidedRequestResult(requestId: string) {
   return {
+    handoff: {
+      requestId,
+      startCommand: `/home/test/.local/bin/mastheadctl workbench author bootstrap --request '${requestId}' --json`
+    },
     request: {
       requestId,
       actorId: "workbench",
-      policyVersion: "guided-authoring-v1" as const,
-      status: "open" as const,
+      contractVersion: "workbench-authoring-v5" as const,
+      status: "active" as const,
       baseUrl: "http://127.0.0.1:17373",
       databaseId: "database:test",
       buildSha: "build:test",
       instanceManifest: "/tmp/masthead/masthead-instance.json",
       creationInstanceId: "instance:test",
       sessionCount: 2,
-      completedSessionCount: 0,
-      assignmentCount: 1,
-      currentAssignmentId: "assignment:canary",
-      canaryAssignmentId: "assignment:canary",
+      attemptedSessionCount: 0,
+      publishedSessionCount: 0,
+      softFlaggedSessionCount: 0,
+      rejectedSessionCount: 0,
+      packCount: 1,
+      packSizes: [2],
+      currentPackId: "authoring-v5-pack:one",
       createdAt: "2026-07-20T12:00:00.000Z",
       updatedAt: "2026-07-20T12:00:00.000Z"
     },
     nextAction: {
-      command: `/home/test/.local/bin/mastheadctl workbench author start --request ${requestId} --json`,
-      kind: "claim_next" as const,
-      reason: "The canary assignment is ready to start."
+      command: `/home/test/.local/bin/mastheadctl workbench author start --request '${requestId}' --json`,
+      kind: "start" as const,
+      reason: "Start or resume the next fixed pack."
+    },
+    selection: {
+      eligibleSessionCount: 2,
+      excludedSessionCount: 0,
+      excludedSessions: [],
+      requestedSessionCount: 2
     }
   };
 }

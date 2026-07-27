@@ -1,9 +1,13 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { AuthoringCanaryReview } from "../../app/workbench/AuthoringCanaryReview";
 import type { WorkbenchActionKind, UseWorkbenchControllerResult } from "../../app/workbench/useWorkbenchController";
 import { AppButton } from "../primitives/AppButton";
 import { useNewItemIds } from "../motion/useNewItemIds";
-import { formatWorkbenchActivityTime, workbenchActivityTone } from "./workbenchActivity";
+import {
+  formatWorkbenchActivityTime,
+  workbenchActivityLabel,
+  workbenchActivityReason,
+  workbenchActivityTone
+} from "./workbenchActivity";
 import { sanitizeWorkbenchVisibleText } from "./workbenchHandoff";
 
 type WorkbenchPanelProps = Partial<
@@ -23,9 +27,6 @@ type WorkbenchPanelProps = Partial<
     | "notAddedOpen"
     | "notAddedSessions"
     | "notAddedSummary"
-    | "pendingCanaryReviews"
-    | "approveCanary"
-    | "rejectCanary"
     | "page"
     | "pageSize"
     | "runAction"
@@ -97,7 +98,6 @@ export function WorkbenchPanel({
   activity = EMPTY_ACTIVITY,
   agentPromptExcludedCount = 0,
   agentPromptSessionCount = 0,
-  approveCanary,
   canRun = defaultCanRun,
   clearActionFeedback,
   copyAgentPrompt,
@@ -107,7 +107,6 @@ export function WorkbenchPanel({
   notAddedOpen = false,
   notAddedSessions = EMPTY_NOT_ADDED,
   notAddedSummary,
-  pendingCanaryReviews = [],
   onClearSelection,
   onRetry,
   onSelectAll,
@@ -116,7 +115,6 @@ export function WorkbenchPanel({
   page = 0,
   pageSize = 100,
   runAction,
-  rejectCanary,
   selectedSessionIds = EMPTY_SELECTION,
   sessions = EMPTY_SESSIONS,
   setNotAddedOpen,
@@ -600,39 +598,36 @@ export function WorkbenchPanel({
           <div className="workbench-rail-block workbench-activity-block">
             <p className="mono-label">Workbench Activity</p>
             <div className="workbench-activity-scroll">
-              {pendingCanaryReviews.map((review) => (
-                <AuthoringCanaryReview
-                  key={review.assignmentId}
-                  busy={actionBusy}
-                  review={review}
-                  onApprove={(item, reviewedBy) => approveCanary?.(item, reviewedBy)}
-                  onReject={(item, notes, reviewedBy) => rejectCanary?.(item, notes, reviewedBy)}
-                />
-              ))}
               {activity.length === 0 ? (
-                pendingCanaryReviews.length === 0 ? <p className="workbench-muted">No activity yet</p> : null
+                <p className="workbench-muted">No activity yet</p>
               ) : (
                 <ol className="workbench-activity-list">
-                  {activity.map((item) => (
-                    <li
-                      key={item.activityId}
-                      className={`workbench-activity-item is-${workbenchActivityTone(item.eventType)} ${newActivityIds.has(item.activityId) ? "is-new" : ""}`.trim()}
-                    >
-                      <span className="workbench-activity-gutter" aria-hidden="true" />
-                      <div className="workbench-activity-body">
-                        <div className="workbench-activity-meta">
-                          <time dateTime={item.eventAt}>{formatWorkbenchActivityTime(item.eventAt)}</time>
-                          <span className="workbench-activity-type">
-                            {sanitizeWorkbenchVisibleText(item.eventType)}
-                          </span>
-                          <span className="workbench-activity-actor">
-                            {sanitizeWorkbenchVisibleText(item.actorId ?? item.actorKind)}
-                          </span>
+                  {activity.map((item) => {
+                    const reason = workbenchActivityReason(item);
+                    return (
+                      <li
+                        key={item.activityId}
+                        className={`workbench-activity-item is-${workbenchActivityTone(item.eventType)} ${newActivityIds.has(item.activityId) ? "is-new" : ""}`.trim()}
+                      >
+                        <span className="workbench-activity-gutter" aria-hidden="true" />
+                        <div className="workbench-activity-body">
+                          <div className="workbench-activity-meta">
+                            <time dateTime={item.eventAt}>{formatWorkbenchActivityTime(item.eventAt)}</time>
+                            <span className="workbench-activity-type">
+                              {sanitizeWorkbenchVisibleText(workbenchActivityLabel(item.eventType))}
+                            </span>
+                            <span className="workbench-activity-actor">
+                              {sanitizeWorkbenchVisibleText(item.actorId ?? item.actorKind)}
+                            </span>
+                          </div>
+                          <p className="workbench-activity-summary">{sanitizeWorkbenchVisibleText(item.summary)}</p>
+                          {reason ? (
+                            <p className="workbench-activity-reason">{sanitizeWorkbenchVisibleText(reason)}</p>
+                          ) : null}
                         </div>
-                        <p className="workbench-activity-summary">{sanitizeWorkbenchVisibleText(item.summary)}</p>
-                      </div>
-                    </li>
-                  ))}
+                      </li>
+                    );
+                  })}
                 </ol>
               )}
             </div>

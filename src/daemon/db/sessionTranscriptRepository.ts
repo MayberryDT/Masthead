@@ -10,6 +10,14 @@ import type {
 import type { MastheadDatabase } from "./sqlite.ts";
 
 export type SessionTranscriptKindFilter = "all" | "user" | "assistant" | "tools" | "checkpoints" | "files" | "signals";
+export type SessionTranscriptRowIdCutoffs = {
+  messages: number;
+  toolCalls: number;
+  toolResults: number;
+  checkpoints: number;
+  runtimeSignals: number;
+  fileEffects: number;
+};
 
 export type SessionTranscriptQuery = {
   sessionId: string;
@@ -18,6 +26,7 @@ export type SessionTranscriptQuery = {
   kind?: SessionTranscriptKindFilter;
   order?: SessionTranscriptOrder;
   q?: string;
+  rowIdCutoffs?: SessionTranscriptRowIdCutoffs;
 };
 
 type TranscriptRow = {
@@ -126,7 +135,7 @@ export function getTranscriptCoverage(db: MastheadDatabase, sessionId: string): 
 
 export function* iterateSessionTranscriptItems(
   db: MastheadDatabase,
-  query: Pick<SessionTranscriptQuery, "order" | "sessionId">
+  query: Pick<SessionTranscriptQuery, "order" | "rowIdCutoffs" | "sessionId">
 ): Generator<SessionTranscriptItem> {
   const runtimeKind = sessionRuntimeKind(db, query.sessionId);
   const parts = transcriptSelectParts(query, true);
@@ -174,19 +183,19 @@ function countTranscriptItems(db: MastheadDatabase, query: Pick<SessionTranscrip
 }
 
 function transcriptSelectParts(
-  query: Pick<SessionTranscriptQuery, "kind" | "q" | "sessionId">,
+  query: Pick<SessionTranscriptQuery, "kind" | "q" | "rowIdCutoffs" | "sessionId">,
   preserveFullText = false
 ): TranscriptSelectPart[] {
   const kind = query.kind ?? "all";
   const parts: TranscriptSelectPart[] = [];
-  if (["all", "user", "assistant"].includes(kind)) parts.push(messageSelectPart(query.sessionId, kind, query.q));
+  if (["all", "user", "assistant"].includes(kind)) parts.push(messageSelectPart(query.sessionId, kind, query.q, query.rowIdCutoffs?.messages));
   if (["all", "tools"].includes(kind)) {
-    parts.push(toolCallSelectPart(query.sessionId, query.q));
-    parts.push(toolResultSelectPart(query.sessionId, query.q, preserveFullText));
+    parts.push(toolCallSelectPart(query.sessionId, query.q, query.rowIdCutoffs?.toolCalls));
+    parts.push(toolResultSelectPart(query.sessionId, query.q, preserveFullText, query.rowIdCutoffs?.toolResults));
   }
-  if (["all", "checkpoints"].includes(kind)) parts.push(checkpointSelectPart(query.sessionId, query.q));
-  if (["all", "signals"].includes(kind)) parts.push(runtimeSignalSelectPart(query.sessionId, query.q));
-  if (["all", "files"].includes(kind)) parts.push(fileEffectSelectPart(query.sessionId, query.q));
+  if (["all", "checkpoints"].includes(kind)) parts.push(checkpointSelectPart(query.sessionId, query.q, query.rowIdCutoffs?.checkpoints));
+  if (["all", "signals"].includes(kind)) parts.push(runtimeSignalSelectPart(query.sessionId, query.q, query.rowIdCutoffs?.runtimeSignals));
+  if (["all", "files"].includes(kind)) parts.push(fileEffectSelectPart(query.sessionId, query.q, query.rowIdCutoffs?.fileEffects));
   return parts;
 }
 
@@ -197,13 +206,14 @@ function transcriptCountParts(query: Pick<SessionTranscriptQuery, "kind" | "q" |
   }));
 }
 
-function messageSelectPart(sessionId: string, kind: string, query?: string): TranscriptSelectPart {
+function messageSelectPart(sessionId: string, kind: string, query?: string, cutoff?: number): TranscriptSelectPart {
   const clauses = ["session_id = ?"];
   const params: Array<number | string> = [sessionId];
   if (kind === "user" || kind === "assistant") {
     clauses.push("role = ?");
     params.push(kind);
   }
+  addRowIdCutoff(clauses, params, cutoff, "rowid");
   addTextQuery(clauses, params, query, "text_redacted");
   return {
     params,
@@ -228,9 +238,10 @@ function messageSelectPart(sessionId: string, kind: string, query?: string): Tra
   };
 }
 
-function toolCallSelectPart(sessionId: string, query?: string): TranscriptSelectPart {
+function toolCallSelectPart(sessionId: string, query?: string, cutoff?: number): TranscriptSelectPart {
   const clauses = ["session_id = ?"];
   const params: Array<number | string> = [sessionId];
+  addRowIdCutoff(clauses, params, cutoff, "rowid");
   addTextQuery(clauses, params, query, "COALESCE(tool_name, '') || ' ' || COALESCE(arguments_redacted_json, '')");
   return {
     params,
@@ -255,9 +266,10 @@ function toolCallSelectPart(sessionId: string, query?: string): TranscriptSelect
   };
 }
 
-function toolResultSelectPart(sessionId: string, query?: string, preserveFullText = false): TranscriptSelectPart {
+function toolResultSelectPart(sessionId: string, query?: string, preserveFullText = false, cutoff?: number): TranscriptSelectPart {
   const clauses = ["tool_results.session_id = ?"];
   const params: Array<number | string> = [sessionId];
+  addRowIdCutoff(clauses, params, cutoff, "tool_results.rowid");
   addTextQuery(clauses, params, query, "COALESCE(tool_results.output_redacted, tool_results.status)");
   return {
     params,
@@ -283,9 +295,10 @@ function toolResultSelectPart(sessionId: string, query?: string, preserveFullTex
   };
 }
 
-function checkpointSelectPart(sessionId: string, query?: string): TranscriptSelectPart {
+function checkpointSelectPart(sessionId: string, query?: string, cutoff?: number): TranscriptSelectPart {
   const clauses = ["session_id = ?"];
   const params: Array<number | string> = [sessionId];
+  addRowIdCutoff(clauses, params, cutoff, "rowid");
   addTextQuery(clauses, params, query, "summary");
   return {
     params,
@@ -310,9 +323,10 @@ function checkpointSelectPart(sessionId: string, query?: string): TranscriptSele
   };
 }
 
-function runtimeSignalSelectPart(sessionId: string, query?: string): TranscriptSelectPart {
+function runtimeSignalSelectPart(sessionId: string, query?: string, cutoff?: number): TranscriptSelectPart {
   const clauses = ["session_id = ?"];
   const params: Array<number | string> = [sessionId];
+  addRowIdCutoff(clauses, params, cutoff, "rowid");
   addTextQuery(clauses, params, query, "COALESCE(title, '') || ' ' || COALESCE(details_json, '')");
   return {
     params,
@@ -337,9 +351,10 @@ function runtimeSignalSelectPart(sessionId: string, query?: string): TranscriptS
   };
 }
 
-function fileEffectSelectPart(sessionId: string, query?: string): TranscriptSelectPart {
+function fileEffectSelectPart(sessionId: string, query?: string, cutoff?: number): TranscriptSelectPart {
   const clauses = ["session_id = ?"];
   const params: Array<number | string> = [sessionId];
+  addRowIdCutoff(clauses, params, cutoff, "rowid");
   addTextQuery(
     clauses,
     params,
@@ -437,6 +452,17 @@ function addTextQuery(clauses: string[], params: Array<number | string>, query: 
   if (!normalized) return;
   clauses.push(`lower(${column}) LIKE ?`);
   params.push(`%${normalized}%`);
+}
+
+function addRowIdCutoff(
+  clauses: string[],
+  params: Array<number | string>,
+  cutoff: number | undefined,
+  column: string
+): void {
+  if (cutoff === undefined) return;
+  clauses.push(`${column} <= ?`);
+  params.push(cutoff);
 }
 
 function countLowValueTranscriptItems(

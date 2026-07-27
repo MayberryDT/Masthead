@@ -32,6 +32,7 @@ describe("Masthead health API", () => {
       buildVersion: expect.any(String),
       capabilities: expect.arrayContaining(REQUIRED_CLIENT_CAPABILITIES),
       runtime: {
+        authoringContractVersion: "workbench-authoring-v5",
         daemonInstanceId: expect.any(String),
         mode: "primary",
         writable: true,

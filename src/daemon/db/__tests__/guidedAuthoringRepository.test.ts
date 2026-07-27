@@ -45,6 +45,18 @@ afterEach(async () => {
 });
 
 describe("guided authoring repository", () => {
+  test("rejects V5 creation in the retired guided-authoring tables", async () => {
+    const db = await testDb(1);
+    const input = requestInput(1);
+
+    expect(() => createGuidedAuthoringRequest(db, {
+      ...input,
+      contractVersion: "workbench-authoring-v5"
+    })).toThrow("authoring_contract_retired");
+    expect(db.prepare("SELECT COUNT(*) AS count FROM guided_authoring_requests").get()).toEqual({ count: 0 });
+    db.close();
+  });
+
   test("migrates a schema-30 database and leaves composite foreign keys valid", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-guided-schema-30-"));
     tempDirs.push(tempDir);
@@ -54,8 +66,8 @@ describe("guided authoring repository", () => {
     migrateDatabase(db);
 
     expect(db.prepare("SELECT version, name FROM schema_migrations ORDER BY version DESC LIMIT 1").get()).toEqual({
-      name: "034_artifact_first_summary",
-      version: 34
+      name: "039_workbench_authoring_v5_preparation",
+      version: 39
     });
     expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });
@@ -87,6 +99,7 @@ describe("guided authoring repository", () => {
     expect(getGuidedAuthoringRequestForAssignment(db, "assignment:one:0")).toEqual({
       baseUrl: "http://127.0.0.1:17373",
       buildSha: "build:test",
+      contractVersion: "workbench-authoring-v4",
       creationInstanceId: "instance:creation-only",
       databaseId: "database:test",
       instanceManifest: "manifest:test"
@@ -755,6 +768,7 @@ function requestInput(sessionCount: number, suffix = "one"): CreateGuidedAuthori
   const split = Math.min(3, sessionCount);
   return {
     actorId: "codex",
+    contractVersion: "workbench-authoring-v4",
     assignments: [
       {
         assignmentId: `assignment:${suffix}:0`,

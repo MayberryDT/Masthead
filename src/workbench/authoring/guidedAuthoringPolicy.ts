@@ -35,6 +35,8 @@ export type GuidedAssignmentPlan = {
   canary: GuidedAssignmentGroup;
 };
 
+export type GuidedAssignmentPlanV5 = Omit<GuidedAssignmentPlan, "canary">;
+
 export const GUIDED_EVIDENCE_QUESTIONS = [
   "What did the user actually ask for?",
   "What concrete work was performed?",
@@ -63,6 +65,21 @@ export function planGuidedAssignments(
   sessionsInput: GuidedPlanningSession[],
   suggestions: WorkbenchArtifactSuggestionDto[]
 ): GuidedAssignmentPlan {
+  return planGuidedAssignmentsInternal(sessionsInput, suggestions, "workbench-authoring-v4") as GuidedAssignmentPlan;
+}
+
+export function planGuidedAssignmentsV5(
+  sessionsInput: GuidedPlanningSession[],
+  suggestions: WorkbenchArtifactSuggestionDto[]
+): GuidedAssignmentPlanV5 {
+  return planGuidedAssignmentsInternal(sessionsInput, suggestions, "workbench-authoring-v5");
+}
+
+function planGuidedAssignmentsInternal(
+  sessionsInput: GuidedPlanningSession[],
+  suggestions: WorkbenchArtifactSuggestionDto[],
+  contractVersion: "workbench-authoring-v4" | "workbench-authoring-v5"
+): GuidedAssignmentPlan | GuidedAssignmentPlanV5 {
   const sessions = validatedPlanningSessions(sessionsInput);
   const byId = new Map(sessions.map((session) => [session.sessionId, session]));
   const opportunities = normalizeOpportunities(suggestions, byId);
@@ -129,6 +146,15 @@ export function planGuidedAssignments(
     .map((members) => group(members, true))
     .sort((left, right) => lowestOrdinal(left, byId) - lowestOrdinal(right, byId));
   const fallback = sessions.filter(({ sessionId }) => !strongMemberIds.has(sessionId));
+  if (contractVersion === "workbench-authoring-v5") {
+    const groups = [...strongGroups];
+    for (let index = 0; index < fallback.length; index += 12) {
+      groups.push(group(fallback.slice(index, index + 12), false));
+    }
+    groups.sort((left, right) => lowestOrdinal(left, byId) - lowestOrdinal(right, byId));
+    assertCompletePlan(sessions, opportunities, groups, contractVersion);
+    return { groups, opportunities };
+  }
   let canary = strongGroups.find(({ sessionIds }) => sessionIds.length <= 3);
   let fallbackCanaryIds = new Set<string>();
   if (!canary) {
@@ -162,7 +188,7 @@ export function planGuidedAssignments(
   }
   remainingGroups.sort((left, right) => lowestOrdinal(left, byId) - lowestOrdinal(right, byId));
   const groups = [canary, ...remainingGroups];
-  assertCompletePlan(sessions, opportunities, groups);
+  assertCompletePlan(sessions, opportunities, groups, contractVersion);
   return { canary, groups, opportunities };
 }
 
@@ -227,12 +253,13 @@ function lowestOrdinal(group: GuidedAssignmentGroup, sessions: Map<string, Guide
 function assertCompletePlan(
   sessions: GuidedPlanningSession[],
   opportunities: NormalizedGuidedOpportunity[],
-  groups: GuidedAssignmentGroup[]
+  groups: GuidedAssignmentGroup[],
+  contractVersion: "workbench-authoring-v4" | "workbench-authoring-v5"
 ): void {
   const assignedSessions = groups.flatMap(({ sessionIds }) => sessionIds);
   const assignedOpportunities = groups.flatMap(({ opportunityIds }) => opportunityIds);
   if (
-    groups.length === 0 || groups[0]!.sessionIds.length > 3 || groups.some(({ sessionIds }) => sessionIds.length > 12) ||
+    groups.length === 0 || (contractVersion === "workbench-authoring-v4" && groups[0]!.sessionIds.length > 3) || groups.some(({ sessionIds }) => sessionIds.length > 12) ||
     assignedSessions.length !== sessions.length || new Set(assignedSessions).size !== sessions.length ||
     sessions.some(({ sessionId }) => !assignedSessions.includes(sessionId)) ||
     assignedOpportunities.length !== opportunities.length || new Set(assignedOpportunities).size !== opportunities.length ||

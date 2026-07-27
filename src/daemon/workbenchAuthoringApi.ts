@@ -9,11 +9,16 @@ import type { MastheadDatabase } from "./db/sqlite.ts";
 import type { GuidedAuthoringExpectedIdentity } from "../shared/instanceIdentity.ts";
 import {
   getGuidedAuthoringBodyLimit,
-  guidedAuthoringCapabilities,
   isGuidedAuthoringPath,
   routeGuidedAuthoringRequest,
   type GuidedAuthoringHttpHeaders
 } from "./guidedAuthoringApi.ts";
+import {
+  getWorkbenchAuthoringV5BodyLimit,
+  isWorkbenchAuthoringV5Path,
+  routeWorkbenchAuthoringV5Request,
+  workbenchAuthoringV5Capabilities
+} from "./workbenchAuthoringV5Api.ts";
 
 const SUBMIT_BODY_LIMIT_BYTES = 5 * 1024 * 1024;
 const evidenceKinds = new Set<SessionTranscriptKindFilter>([
@@ -32,7 +37,12 @@ export type WorkbenchAuthoringHttpResult = {
 };
 
 export async function routeWorkbenchAuthoringRequest(
-  context: { authoringCommand: string; db: MastheadDatabase; identity?: GuidedAuthoringExpectedIdentity },
+  context: {
+    authoringCommand: string;
+    db: MastheadDatabase;
+    identity?: GuidedAuthoringExpectedIdentity;
+    schedulePreparation?: (requestId: string) => void;
+  },
   request: { method: string; url: URL; body?: unknown; headers?: GuidedAuthoringHttpHeaders }
 ): Promise<WorkbenchAuthoringHttpResult | undefined> {
   const { pathname } = request.url;
@@ -42,11 +52,19 @@ export async function routeWorkbenchAuthoringRequest(
     if (pathname === "/workbench/authoring/capabilities") {
       if (request.method !== "GET") return methodNotAllowed();
       if (!context.identity) throw new Error("authoring_identity_unavailable");
-      return { body: guidedAuthoringCapabilities({ ...context, identity: context.identity }), status: 200 };
+      return { body: workbenchAuthoringV5Capabilities({ ...context, identity: context.identity }), status: 200 };
+    }
+
+    if (isWorkbenchAuthoringV5Path(pathname)) {
+      if (!context.identity) throw new Error("authoring_identity_unavailable");
+      const schedulePreparation = context.schedulePreparation;
+      if (!schedulePreparation) throw new Error("authoring_v5_preparation_unavailable");
+      return routeWorkbenchAuthoringV5Request({ ...context, identity: context.identity, schedulePreparation }, request);
     }
 
     if (isGuidedAuthoringPath(pathname)) {
       if (!context.identity) throw new Error("authoring_identity_unavailable");
+      if (isRetiredGuidedMutation(request.method, pathname)) return retiredContract();
       return routeGuidedAuthoringRequest({ ...context, identity: context.identity }, request);
     }
 
@@ -111,6 +129,7 @@ export async function routeWorkbenchAuthoringRequest(
 export function isWorkbenchAuthoringPath(pathname: string): boolean {
   return (
     pathname === "/workbench/authoring/capabilities" ||
+    isWorkbenchAuthoringV5Path(pathname) ||
     isGuidedAuthoringPath(pathname) ||
     pathname === "/workbench/authoring/suggestions" ||
     pathname === "/workbench/authoring/runs" ||
@@ -119,6 +138,7 @@ export function isWorkbenchAuthoringPath(pathname: string): boolean {
 }
 
 export function getWorkbenchAuthoringBodyLimit(pathname: string, defaultLimitBytes: number): number {
+  if (isWorkbenchAuthoringV5Path(pathname)) return getWorkbenchAuthoringV5BodyLimit(pathname, defaultLimitBytes);
   if (isGuidedAuthoringPath(pathname)) return getGuidedAuthoringBodyLimit(pathname, defaultLimitBytes);
   return /^\/workbench\/authoring\/runs\/[^/]+\/submit$/.test(pathname)
     ? SUBMIT_BODY_LIMIT_BYTES
@@ -190,12 +210,21 @@ function retiredContract(): WorkbenchAuthoringHttpResult {
     body: {
       error: {
         code: "authoring_contract_retired",
-        message: "Legacy Workbench authoring mutations are retired; use guided authoring V4."
+        message: "Legacy Workbench authoring mutations are retired; use workbench-authoring-v5."
       },
       ok: false
     },
     status: 409
   };
+}
+
+function isRetiredGuidedMutation(method: string, pathname: string): boolean {
+  return (method === "POST" && pathname === "/workbench/authoring/requests") ||
+    /\/start$/u.test(pathname) ||
+    /\/inspect$/u.test(pathname) ||
+    /\/draft$/u.test(pathname) ||
+    /\/canary-decision$/u.test(pathname) ||
+    /\/finish$/u.test(pathname);
 }
 
 function methodNotAllowed(): WorkbenchAuthoringHttpResult {

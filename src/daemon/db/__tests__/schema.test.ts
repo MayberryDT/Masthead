@@ -25,6 +25,23 @@ afterEach(async () => {
 });
 
 describe("daemon database schema", () => {
+  test("fails closed when an applied migration version has a different name", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-db-conflicting-ledger-"));
+    tempDirs.push(tempDir);
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+    migrateTestDatabaseThrough(db, 34);
+    db.prepare("INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)")
+      .run(35, "035_competing_branch_migration", "2026-07-23T00:00:00.000Z");
+
+    expect(() => migrateDatabase(db)).toThrow(
+      "schema_migration_ledger_mismatch:35:035_competing_branch_migration"
+    );
+    expect(db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 35 });
+    expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workbench_authoring_v5_requests'").get())
+      .toBeUndefined();
+    db.close();
+  });
+
   test("applies pending migrations inside the caller transaction and rolls them back together", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-db-transactional-migrations-"));
     tempDirs.push(tempDir);
@@ -230,7 +247,7 @@ describe("daemon database schema", () => {
     migrateDatabase(db);
     migrateDatabase(db);
 
-    expect(CURRENT_SCHEMA_VERSION).toBe(34);
+    expect(CURRENT_SCHEMA_VERSION).toBe(39);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'virtual') ORDER BY name").all() as Array<{ name: string }>;
     expect(tables.map((row) => row.name)).toEqual(
@@ -303,6 +320,12 @@ describe("daemon database schema", () => {
         "guided_authoring_draft_reviews",
         "guided_authoring_operator_reviews",
         "guided_authoring_enrichment_provenance",
+        "workbench_authoring_v5_requests",
+        "workbench_authoring_v5_request_sessions",
+        "workbench_authoring_v5_packs",
+        "workbench_authoring_v5_pack_sessions",
+        "workbench_authoring_v5_evidence_access",
+        "workbench_authoring_v5_evidence_snapshots",
         "masthead_data_revisions"
       ])
     );
@@ -341,7 +364,12 @@ describe("daemon database schema", () => {
       { version: 31, name: "031_guided_authoring" },
       { version: 32, name: "032_guided_enrichment_provenance" },
       { version: 33, name: "033_data_revisions" },
-      { version: 34, name: "034_artifact_first_summary" }
+      { version: 34, name: "034_artifact_first_summary" },
+      { version: 35, name: "035_artifact_skill_search" },
+      { version: 36, name: "036_workbench_authoring_v5" },
+      { version: 37, name: "037_guided_authoring_v5_contract" },
+      { version: 38, name: "038_workbench_authoring_v5_evidence_snapshots" },
+      { version: 39, name: "039_workbench_authoring_v5_preparation" }
     ]);
     expect(
       (db.prepare("PRAGMA table_info(workbench_artifact_candidate_scans)").all() as Array<{ name: string }>).map(
@@ -619,7 +647,7 @@ describe("daemon database schema", () => {
       "2026-07-15T00:00:00.000Z"
     );
 
-    expect(CURRENT_SCHEMA_VERSION).toBe(34);
+    expect(CURRENT_SCHEMA_VERSION).toBe(39);
     expect(db.prepare("SELECT version, name FROM schema_migrations ORDER BY version DESC LIMIT 1").get()).toEqual({
       name: "024_artifact_candidate_detector_revision",
       version: 24
@@ -772,6 +800,84 @@ describe("daemon database schema", () => {
         )
         .all('"orphaned" "descriptor"')
     ).toEqual([{ artifactId: artifact.artifactId }]);
+    db.close();
+  });
+
+  test("migrations 035 through 037 preserve keyword search, V5 storage, and retired V4 audit identity", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-db-v34-artifact-keywords-"));
+    tempDirs.push(tempDir);
+    const db = await openMastheadDatabase(join(tempDir, "masthead.sqlite"));
+    migrateTestDatabaseThrough(db, 34);
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:keyword-backfill",
+      title: "Keyword backfill"
+    });
+    db.prepare(
+      `INSERT INTO session_artifacts (
+         artifact_id, session_id, artifact_kind, status, content_fingerprint, created_at, updated_at,
+         created_by, schema_version, title, summary, content_json, evidence_refs_json, validation_json,
+         publication_status, lineage_id, published_at
+       ) VALUES (?, ?, 'session_dossier', 'current', ?, ?, ?, ?, 'canonical-session-dossier-v1', ?, ?, ?, '[]', '{}',
+         'published', ?, ?)`
+    ).run(
+      "artifact:keyword-backfill",
+      "session:keyword-backfill",
+      "fingerprint:keyword-backfill",
+      "2026-07-20T12:00:00.000Z",
+      "2026-07-20T12:00:00.000Z",
+      "guided_authoring:test",
+      "Backfill durable keywords",
+      "Store retrieval terms",
+      JSON.stringify({
+        durableEnrichment: { keywords: ["quartzharbor", "skill-primary search"] },
+        snapshotVersion: "canonical-session-dossier-v1"
+      }),
+      "artifact:keyword-backfill",
+      "2026-07-20T12:00:00.000Z"
+    );
+    db.prepare(
+      `INSERT INTO session_artifact_search (artifact_id, title, summary, highlight, project, body)
+       VALUES (?, ?, ?, '', '', ?)`
+    ).run(
+      "artifact:keyword-backfill",
+      "Backfill durable keywords",
+      "Store retrieval terms",
+      "legacy body"
+    );
+
+    migrateDatabase(db);
+
+    expect(db.prepare("SELECT version, name FROM schema_migrations WHERE version = 35").get()).toEqual({
+      name: "035_artifact_skill_search",
+      version: 35
+    });
+    expect(db.prepare("SELECT version, name FROM schema_migrations WHERE version >= 35 ORDER BY version").all())
+      .toEqual([
+        { name: "035_artifact_skill_search", version: 35 },
+        { name: "036_workbench_authoring_v5", version: 36 },
+        { name: "037_guided_authoring_v5_contract", version: 37 },
+        { name: "038_workbench_authoring_v5_evidence_snapshots", version: 38 },
+        { name: "039_workbench_authoring_v5_preparation", version: 39 }
+      ]);
+    expect(db.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workbench_authoring_v5_requests'"
+    ).get()).toEqual({ name: "workbench_authoring_v5_requests" });
+    expect((db.prepare("PRAGMA table_info(guided_authoring_requests)").all() as Array<{
+      dflt_value: string | null;
+      name: string;
+      notnull: number;
+    }>).find(({ name }) => name === "contract_version")).toMatchObject({
+      dflt_value: "'workbench-authoring-v4'",
+      name: "contract_version",
+      notnull: 1
+    });
+    expect(
+      db.prepare("SELECT keywords FROM session_artifact_search WHERE artifact_id = ?")
+        .get("artifact:keyword-backfill")
+    ).toEqual({ keywords: "quartzharbor skill-primary search" });
     db.close();
   });
 

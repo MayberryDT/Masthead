@@ -44,15 +44,15 @@ Important contracts:
 - `GET /sources/connectors` and hook routes support Sources V2 live connect.
 - Write endpoints (`/ingest`, Workbench mutations, `/data/delete`, etc.) stay local to the daemon and are not exposed through MCP.
 
-### Current V4 authoring runtime
+### V5 authoring boundary
 
-The daemon advertises `workbench-authoring-v4`. Durable request and assignment reads expose the
-campaign, complete evidence coverage, review state, and one required next action. Request creation,
-assignment start, inspection progress, draft save, canary decision, and finish verify instance
-identity before writing.
+New durable requests record `workbench-authoring-v5` and contain fixed packs rather than canary
+assignments. V5 request, pack, evidence-coverage, status, and receipt reads expose one required next
+action. Normal publication has no operator approval mutation.
 
-V1, V2, and V3 status and receipt reads remain available for audit. Legacy mutations return
-`authoring_contract_retired` before writing.
+V1–V4 status, reviews, and receipts remain available for audit. Legacy start, progress-recording
+inspect, save, canary decision, and finish mutations return `authoring_contract_retired` before
+writing. See `docs/reference/workbench-authoring-v5-migration.md`.
 
 `POST /ingest` uses the runtime query parameter or `x-masthead-runtime` header. Connector tests use a validation-only ingest variant so installer/test flows can verify the hook path without mutating the store when appropriate.
 
@@ -65,16 +65,15 @@ exercise repair against a disposable database copy before authorizing work on an
 
 Workbench enrichment and optional-artifact authoring stay behind daemon HTTP with receipts.
 `mastheadctl workbench author` uses an instance-bound launcher, and the daemon splits each request
-into assignments of at most 12 sessions. The agent traverses complete evidence, enriches every
-assignment session, and may submit zero or more grounded optional artifacts. There is **no
+into fixed packs of 5–12 sessions, except the final remainder. The agent traverses complete evidence,
+enriches every pack session, and may submit zero or more grounded optional artifacts. There is **no
 Logbook bulk-enrich UI or primary bulk-enrich product path**.
 
 The original dossier is different: the daemon snapshots `SessionDossierDto` as
 `canonical-session-dossier-v1`, and Logbook renders that immutable body through
 the original dossier presentation. An authoring agent has no dossier-body write
-path. Knowledge opportunities for `runbook`, `adr`, and `incident_timeline` are nonbinding. High-signal
-opportunities require an evidence-backed disposition; low-signal or unsupported kinds create no
-artifact and no blanket N/A prose.
+path. Knowledge opportunities for `runbook`, `adr`, and `incident_timeline` are nonbinding; the V5
+agent considers optional artifacts without any disposition blocking dossier publication.
 
 ## MCP
 
@@ -98,16 +97,10 @@ Session/transcript tools remain for compile-time evidence. Full list: `docs/refe
 
 `src/enrichment/enrichmentCoordinator.ts` turns session facts into durable derived records (capsules, live summaries, search projections). The pipeline is evidence-sensitive: it fingerprints facts and avoids rewriting a current result when the fingerprint and provider match.
 
-Published knowledge reaches Logbook through accepted V4 assignments. The daemon rebuilds canonical
+Published knowledge reaches Logbook through completed V5 packs. The daemon rebuilds canonical
 dossier snapshots from grounded enrichment and atomically publishes them with any supported runbook,
-ADR, or incident timeline. Enrichment or a saved draft alone does not put a row in Logbook. The first
-accepted assignment is a three-session canary capped at three sessions and remains staged until
-operator approval.
-
-The planner chooses a complete strong opportunity group of at most three sessions or diverse
-dossier-only sessions for that canary. It never breaks a larger strong opportunity to fill the
-canary; if no legal canary exists, request creation returns `guided_canary_not_constructible` and
-persists nothing.
+ADR, or incident timeline. Enrichment or a saved draft alone does not put a row in Logbook. Accepted
+packs finish directly, without canary staging or operator approval.
 
 ## Failed V1 recovery
 

@@ -8,11 +8,11 @@ This wiki is the fastest map for both humans and coding agents. Start here, then
 
 ## Authoring runtime boundary
 
-ADR 0015 is the current implemented V4 product contract. The daemon exposes durable guided requests,
-assignment planning, complete-evidence inspection, instance-bound CLI mutations, Workbench canary
-review, and atomic publication. V1, V2, and V3 records remain readable for audit, but their mutation
-routes are retired. Production rollout remains subject to the acceptance evidence in
-`docs/acceptance/product-release-gate.md`.
+New guided requests use the V5 authoring boundary: durable packs publish without a canary or
+operator approval gate, and knowledge opportunities do not require dispositions. V1–V4 records
+remain readable for audit, but their mutation routes are retired. Open V4 campaigns must be
+abandoned or retained as read-only history; see
+[`workbench-authoring-v5-migration.md`](../docs/reference/workbench-authoring-v5-migration.md).
 
 ## What Masthead is
 
@@ -62,7 +62,8 @@ These are the main existing docs this wiki synthesizes:
 - `docs/adr/0011-artifact-first-logbook.md` — Logbook is an artifact book.
 - `docs/adr/0013-canonical-dossier-and-candidate-authoring.md` — preserved original-rendering and evidence findings; its V2 authoring flow is superseded.
 - `docs/adr/0014-agent-led-enriched-artifact-authoring.md` — superseded V3 decision and immutable audit history.
-- `docs/adr/0015-guided-authoring-campaigns.md` — current implemented V4 guided-authoring contract.
+- `docs/adr/0015-guided-authoring-campaigns.md` — superseded V4 audit contract.
+- `docs/adr/0016-agent-led-v5-pack-authoring.md` — current V5 authoring decision.
 - `docs/adr/0009-logbook-only-shows-published-sessions.md` — Workbench pipeline ownership (Logbook unit refined by 0011).
 - `docs/architecture/data-paths.md` — runtime data directory and store ownership.
 - `docs/reference/daemon-api.md` — daemon HTTP API.
@@ -89,7 +90,7 @@ Useful scripts from `package.json`:
 `npm run install:electron-dev-launcher` **must be run from the checkout you intend to run**. The desktop entry and systemd unit hardwire that path. After switching branches/worktrees/main, reinstall the launcher or Masthead Dev will keep serving a stale tree.
 
 Dogfood Logbook may be **empty after artifact cutover**. It remains empty until Workbench completes
-guided enrichment and publication; historical V3 records are audit-only and cannot rebuild it.
+guided enrichment and publication; historical V1–V4 records are audit-only and cannot rebuild it.
 
 ## Where to go next
 
@@ -107,25 +108,23 @@ guided enrichment and publication; historical V3 records are audit-only and cann
 - Keep the `src/core`/`src/daemon` boundary clear: core is transformation logic; daemon owns runtime state and persistence.
 - Logbook has **no** bulk enrich UI; bulk/session-library chrome is deleted. Workbench owns compile and publish.
 - An enriched dossier means the original canonical dossier structure rendered after current durable enrichment; agents never author its body.
-- The current `workbench-authoring-v4` runtime uses durable requests and daemon-grouped
-  assignments. The agent follows one next action at a time; the first accepted assignment remains
-  staged for operator approval.
+- New requests are `workbench-authoring-v5` and use daemon-grouped packs without canary
+  staging. V4 requests and operator reviews remain audit-only.
 
 ## Guided authoring vocabulary
 
 Guided authoring request = the durable Workbench selection and campaign policy.
 
-Assignment = one daemon-grouped authoring unit containing at most 12 sessions.
+Pack = one fixed V5 authoring unit containing 5–12 sessions, except the final remainder.
+
+Assignment = historical V4 campaign unit retained for audit.
 
 Knowledge opportunity = nonbinding evidence that may support a runbook, ADR, or incident timeline.
 
-Opportunity disposition = authored, dismissed, merged, or changed kind, with evidence-backed rationale.
+Opportunity disposition = historical V4 resolution state; V5 opportunities are nonbinding.
 
-Canary = the first staged assignment of at most 3 sessions, reviewed by an operator before publication.
+Canary = historical V4 approval state; V5 has no canary.
 
-Next action = the single command Masthead requires from the agent at the current assignment state.
+Next action = the single command Masthead requires from the agent at the current pack state.
 
-The three-session canary uses a complete strong opportunity group of at most three sessions or
-diverse dossier-only sessions. Masthead never splits a larger strong opportunity merely to make the
-canary; request creation returns `guided_canary_not_constructible` and persists nothing instead.
 - For new source or setup behavior, check both `src/daemon/sources/` and renderer Sources controllers; onboarding spans both layers.

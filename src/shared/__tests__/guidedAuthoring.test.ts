@@ -22,6 +22,26 @@ const capabilities = () => ({
 });
 
 describe("guided authoring capabilities", () => {
+  test("enforces the instance-bound V5 command", () => {
+    const v5 = {
+      baseUrl: "http://127.0.0.1:17373",
+      buildSha: "build:test",
+      bundleVersion: "workbench-authoring-v5",
+      capability: "artifact_authoring",
+      command: "/opt/masthead/bin/mastheadctl",
+      databaseId: "database:test",
+      instanceId: "instance:test",
+      instanceManifest: "/tmp/masthead-instance.json",
+      maximumSessionsPerPack: 12,
+      minimumSessionsPerPack: 5,
+      operations: ["bootstrap", "start", "claim", "inspect", "scaffold", "save", "finish", "status", "receipt"],
+      policyVersion: "workbench-authoring-v5",
+      protocol: "masthead.workbench.authoring/v1"
+    };
+    expect(isGuidedAuthoringCapabilitiesDto(v5, { expectedCommand: v5.command })).toBe(true);
+    expect(isGuidedAuthoringCapabilitiesDto(v5, { expectedCommand: "/wrong/mastheadctl" })).toBe(false);
+  });
+
   test("publishes one canonical ordered operation contract", () => {
     expect(GUIDED_AUTHORING_OPERATIONS).toEqual(["start", "inspect", "scaffold", "save", "review", "finish"]);
     expect(isGuidedAuthoringCapabilitiesDto(capabilities(), {

@@ -3,7 +3,10 @@ import { isHighRiskPath } from "../../core/risk.ts";
 import type { EvidenceRef } from "../../core/types.ts";
 import { SESSION_CAPSULE_PROMPT_VERSION } from "../../enrichment/sessionCompiler.ts";
 import type { SessionCapsule } from "../../enrichment/types.ts";
-import type { DurableSessionEnrichment } from "../../shared/sessionEnrichment.ts";
+import {
+  normalizeDurableSessionEnrichment,
+  type DurableSessionEnrichment
+} from "../../shared/sessionEnrichment.ts";
 import type {
   SessionDossierAttention,
   SessionDossierArtifact,
@@ -568,10 +571,11 @@ function getDurableEnrichment(db: MastheadDatabase, sessionId: string): DurableS
   const enrichment = readCurrentSessionEnrichment(db, sessionId, "session_capsule", SESSION_CAPSULE_PROMPT_VERSION);
   const capsule = enrichment?.content as SessionCapsule | undefined;
   if (!enrichment || !capsule) return undefined;
-  if (capsule.durableEnrichment) return capsule.durableEnrichment;
+  if (capsule.durableEnrichment) return normalizeDurableSessionEnrichment(capsule.durableEnrichment);
   if (capsule.sessionTitle && capsule.sessionSummary && capsule.sessionDossier) {
     return {
       generatedAt: enrichment.generatedAt,
+      keywords: [],
       model: enrichment.model,
       promptVersion: enrichment.promptVersion,
       sessionDossier: capsule.sessionDossier,

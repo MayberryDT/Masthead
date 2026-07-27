@@ -640,9 +640,12 @@ async function writeOpenCodeDatabase(root: string, rows: unknown[]): Promise<str
   const sessions = db.prepare("INSERT OR IGNORE INTO session (id, directory, title, time_created) VALUES (?, ?, ?, ?)");
   const messages = db.prepare("INSERT INTO message (id, session_id, time_created, data) VALUES (?, ?, ?, ?)");
   const parts = db.prepare("INSERT INTO part (id, message_id, session_id, time_created, data) VALUES (?, ?, ?, ?, ?)");
+  const fixtureEpoch = Date.parse("2026-06-25T12:00:00.000Z");
+  const recentEpoch = Date.now() - 24 * 60 * 60 * 1_000;
   for (const row of rows as Array<Record<string, any>>) {
     const payload = row.payload && typeof row.payload === "object" ? row.payload : {};
-    const at = Date.parse(row.timestamp ?? "2026-06-25T12:00:00.000Z");
+    const fixtureAt = Date.parse(row.timestamp ?? "2026-06-25T12:00:00.000Z");
+    const at = recentEpoch + (fixtureAt - fixtureEpoch);
     if (row.type === "session_meta" || row.session_id || row.sessionId) {
       const discoveredSessionId = payload.session_id ?? payload.sessionId ?? row.session_id ?? row.sessionId;
       if (typeof discoveredSessionId !== "string") continue;

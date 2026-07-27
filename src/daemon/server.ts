@@ -114,6 +114,7 @@ import { migrateLegacyJournalOnce } from "./legacyJournalMigration.ts";
 import { runLegacyWorkbenchPublicationBackfill } from "../workbench/legacyPublicationBackfill.ts";
 import { runCaptureQualityPrecheck } from "../workbench/qualityPrecheck.ts";
 import { authoringEvidenceRevision } from "../workbench/authoring/evidenceCatalog.ts";
+import { isWorkbenchAuthoringV5CompileReady } from "../workbench/authoring/guidedAuthoringPreflight.ts";
 import { addSourceExclusion, sourceIsExcluded, sourceRecordIsExcluded } from "./db/sourceRepository.ts";
 import { setSourcePolicy, sourcePolicyExplicitlyEnabled, type SourcePolicyKind } from "./db/sourcePolicyRepository.ts";
 import {
@@ -184,6 +185,7 @@ import {
   isWorkbenchAuthoringPath,
   routeWorkbenchAuthoringRequest
 } from "./workbenchAuthoringApi.ts";
+import { createWorkbenchAuthoringV5PreparationCoordinator } from "./workbenchAuthoringV5PreparationCoordinator.ts";
 
 export type MastheadDaemon = {
   server: Server;
@@ -221,7 +223,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
   const disabledHookTranscriptCatchupDiagnostics = new Set<string>();
 
   try {
-    legacyDataDirectoryGuard = await acquireLegacyDataDirectoryGuard(writableDataDirectory);
+    legacyDataDirectoryGuard = await acquireLegacyDataDirectoryGuard(writableDataDirectory, writerLock);
     // Legacy compatibility store. Do not add new product writes here.
     // Canonical session data must be written to SQLite/raw_events/session graph.
     const store = await createFileBackedStore(config.storePath);
@@ -250,6 +252,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       runLegacyWorkbenchPublicationBackfill(database);
       const databaseIdentity = getOrCreateDatabaseIdentity(database);
       const interruptedImportJobIds = recoverInterruptedImportJobs(database);
+      const authoringV5PreparationCoordinator = createWorkbenchAuthoringV5PreparationCoordinator(database);
+      authoringV5PreparationCoordinator.resume();
 
     const defaultLiveRuntime: RuntimeKind = "claude_code";
     const defaultLiveSource = liveHookSourceForRuntime(defaultLiveRuntime);
@@ -2697,7 +2701,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         {
           authoringCommand,
           identity: guidedIdentity(),
-          db: database
+          db: database,
+          schedulePreparation: authoringV5PreparationCoordinator.schedule
         },
         { body, headers: request.headers, method: request.method ?? "GET", url }
       );
@@ -3857,6 +3862,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
         try {
           await immediateLiveIngestPersistence;
           await deferredLiveIngestQueue.close();
+          await authoringV5PreparationCoordinator.close();
         } catch (error) {
           deferredQueueError = error;
         } finally {
@@ -4776,6 +4782,7 @@ function workbenchQueueSessionDtos(database: MastheadDatabase, states: Workbench
               expiresAt: state.activeClaim.expiresAt
             }
           : undefined,
+        compileReady: isWorkbenchAuthoringV5CompileReady(database, state),
         adrStatus: state.adrStatus,
         bugFixTraceStatus: state.runbookStatus,
         incidentTimelineStatus: state.incidentTimelineStatus,

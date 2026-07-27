@@ -10,7 +10,10 @@ http://127.0.0.1:17373
 
 ## Compatibility
 
-- `GET /health` returns product identity, API version, schema version, build info, capabilities, runtime identity, writable/read-only state, data directory, database path, database ID, migration state, live counts, and compatibility URLs.
+- `GET /health` returns product identity, API version, schema version, build info, capabilities,
+  runtime identity, `authoringContractVersion: "workbench-authoring-v5"` on the writable daemon,
+  writable/read-only state, data directory, database path, database ID, migration state, live counts,
+  and compatibility URLs.
 
 Clients should reject a daemon that does not identify `product: "masthead"` with a supported API version and required capabilities.
 
@@ -22,7 +25,7 @@ Clients should reject a daemon that does not identify `product: "masthead"` with
 - `GET /sources/connectors` returns the Sources V2 harness-connector snapshot: eight live targets with `presence` (`not_found` | `found`), `live` (`not_installed` | `needs_action` | `ready` | `error`), optional activation fields, config/endpoints, and a `summary` of ready / needsAction / notInstalled / notFound / error counts. Read-only and safe through a worktree bridge.
 - `GET /sources/scan/latest` returns the latest multi-adapter scan result, or runs a bounded scan if none is cached.
 - `GET /diagnostics/runtime` returns runtime diagnostics, import queue state, and a small active import page for Advanced diagnostics.
-- `GET /logbook/artifacts` searches **published Logbook artifacts** (primary Logbook path). Query `q` searches capsule fields plus the complete first-class artifact body. Other params include `kind` (`session_dossier` \| `runbook` \| `adr` \| `incident_timeline`), `project`, `dateFrom`, `dateTo`, `limit`, `offset`. Bridge-safe read.
+- `GET /logbook/artifacts` searches **published Logbook artifacts** (primary Logbook path). Query `q` ranks title, summary, and agent-authored dossier keywords ahead of matches found only in the complete first-class artifact body. Other params include `kind` (`session_dossier` \| `runbook` \| `adr` \| `incident_timeline`), `project`, `dateFrom`, `dateTo`, `limit`, `offset`. Bridge-safe read.
 - `GET /logbook/artifacts/:artifactId` returns one published artifact detail: body, provenance session ids, join rationale, confidence, evidence refs. Bridge-safe read.
 - `GET /logbook/search` is a compatibility alias for artifact capsule search. It returns the same `artifacts` shape as `/logbook/artifacts`, never session rows. New clients should use `/logbook/artifacts`.
 - `GET /sessions` searches canonical sessions (evidence / Workbench / compile — not the primary Logbook listing). Query params include `q`, `project`, `runtime`, `host`, `model`, `state`, date filters, and `limit`.
@@ -37,12 +40,23 @@ Clients should reject a daemon that does not identify `product: "masthead"` with
 - `GET /workbench/not-added?includeDetails=true&limit=...` explicitly inspects Not Added to Logbook sessions.
 - `GET /workbench/missing-sessions?limit=...` remains a compatibility read endpoint backed by the Workbench pipeline queue.
 
-### Current V4 authoring runtime
+### Authoring runtime
 
 - `GET /workbench/authoring/capabilities` returns the stable daemon transport protocol
   `masthead.workbench.authoring/v1`, instance-bound CLI command, database/build/manifest identity,
-  `workbench-authoring-v4`, policy `guided-authoring-v1`, assignment limits, and guided operations.
+  the live `workbench-authoring-v5` bundle, fixed pack bounds, and V5 operations.
   Bridge-safe read.
+- `GET /workbench/authoring/v5/requests/:requestId/bootstrap` returns the thick skill contract,
+  pack policy, reject/flag policy, optional-artifact consider policy, stable instance identity,
+  request state, and one next action. Every pack requires one to three unique per-kind grounded
+  `optionalConsiderations` entries with `decision: "yes" | "no"`; `evidenceRef` is optional, a valid
+  `no` never blocks dossier publication, and optional artifact drafts are allowed only for a
+  matching `yes` consideration.
+  Request status at `GET /workbench/authoring/v5/requests/:requestId`, immutable completion receipts
+  at `/receipt`, and blank evidence-catalog scaffolds at
+  `GET /workbench/authoring/v5/packs/:packId/scaffold` are bridge-safe reads.
+- `GET /workbench/authoring/v5/packs/:packId/inspect` returns canonical evidence and records coverage,
+  so it is primary-only and never forwarded by the read-only worktree bridge.
 - `GET /workbench/authoring/runs/:runId` returns one historical V3 run, selected sessions and claims,
   evidence revision state, findings, accepted bundle, and completion report. Historical V1 and V2
   runs are audit-only. Bridge-safe read.
@@ -50,12 +64,12 @@ Clients should reject a daemon that does not identify `product: "masthead"` with
   `GET /workbench/authoring/runs/:runId/evidence?sessionId=...` expose historical V3 canonical context,
   advisory suggestions, and cursor-paginated evidence. Bridge-safe audit reads.
 - `GET /workbench/authoring/requests/:requestId` returns one durable guided authoring request, its
-  assignments, campaign state, and single required next action. Bridge-safe read.
-- `GET /workbench/authoring/canaries/pending` returns staged V4 canary drafts awaiting operator review.
-  Bridge-safe read.
-- `GET /workbench/authoring/assignments/:assignmentId/inspect` returns the next canonical evidence
-  page and records returned refs as evidence-coverage progress. Primary-only
-  and never forwarded by the read-only worktree bridge.
+  assignments, historical campaign state, and last next action for V4 audit. Bridge-safe read.
+- `GET /workbench/authoring/canaries/pending` is a compatibility read that returns an empty list;
+  Workbench does not expose an operator canary queue.
+- `GET /workbench/authoring/assignments/:assignmentId/scaffold`, `/review`, and `/receipt` retain
+  historical V4 audit detail. The progress-recording `/inspect` route is retired because it mutates
+  evidence coverage.
 - `GET /workbench/authoring/assignments/:assignmentId/review` returns structured editorial findings
   and the next required action. Bridge-safe read.
 - Legacy `GET /workbench/authoring/runs/:runId`, context, evidence, status, and completion-receipt reads
@@ -107,26 +121,37 @@ Write endpoints are local daemon operations. They are not exposed through MCP.
 - `POST /workbench/claims/:claimId/release` releases an active claim. Optional body: `{ "reason"?: string }` (default `released`). Returns `{ ok: true, claim }` or `404` when the claim is missing. Primary-only; not bridge-safe.
 - `POST /workbench/sessions/:sessionId/quality` marks capture quality. Body is either `{ "status": "passed" | "failed", "reason"?: string, "actorId"?: string }` or `{ "mode": "precheck", "actorId"?: string }`. Precheck runs capture quality heuristics then marks pass/fail. Actor defaults to user `workbench_ui`. Failing quality on an already published session returns `409` with `cannot_fail_quality_on_published_session`. Primary-only; not bridge-safe.
 
-### Current V4 authoring runtime
+### Authoring mutations
 
-- `POST /workbench/authoring/suggestions` returns advisory suggestions for 1–12 selected sessions and
-  is allowed through the read-only bridge.
+- `POST /workbench/authoring/v5/requests` creates one durable V5 request and fixed packs of 5–12
+  sessions without opportunity-join packing. The thin handoff contains only the request ID and the
+  instance-bound `mastheadctl workbench author bootstrap --request <id> --json` command.
+- `POST /workbench/authoring/v5/requests/:requestId/start` starts or crash-resumes the current pack.
+  `POST /workbench/authoring/v5/packs/:packId/draft` saves per-session
+  `publishable | soft_flag | hard_reject` outcomes without freezing the request. Hard rejects cover
+  empty/generic titles or descriptions, protocol/compaction/cron boilerplate, fewer than three
+  distinct keywords, a clearly unrelated purpose, missing core-field grounding, and unknown
+  canonical refs. Weak verification wording and thin key work are soft flags; honest
+  unrun-verification boundaries remain publishable. Grounding
+  refs apply only to title, description, purpose, outcome, key work, and verification—not every
+  nested field. The draft request is a `WorkbenchAuthoringV5AuthoredDraft` capped at 1 MiB for the
+  maximum 12-session pack: it includes authored fields and evidence IDs but excludes the scaffold's
+  immutable `evidenceCatalog`. The daemon rehydrates and validates that catalog from its request
+  snapshot at save and finish. `POST /workbench/authoring/v5/packs/:packId/finish` atomically publishes passers,
+  records rejects, publishes any attached optional artifacts, releases the next pack, and returns
+  idempotent pack/request receipts with dossier, reject, soft-flag, considered-no, and optional
+  publication counts. All are primary-only.
+- The V5 CLI loop is `bootstrap` → `start`/`claim` → `inspect` → `scaffold --file` → `save --file` →
+  `finish`, with `status` and `receipt` reads by request ID. The scaffold file remains evidence-rich
+  locally; `save --file` sends only its bounded authored projection.
 
-- `POST /workbench/authoring/requests` creates one durable V4 request from the Workbench selection and
-  campaign policy. The daemon plans assignments and a legal canary before committing anything. If it
-  cannot choose a complete strong group of at most three sessions or diverse dossier-only sessions,
-  returns `guided_canary_not_constructible` and persists nothing. Primary daemon only.
-- `POST /workbench/authoring/requests/:requestId/start` claims and starts the released assignment.
-- `POST /workbench/authoring/assignments/:assignmentId/draft` validates and saves one grounded
-  `workbench-authoring-v4` draft after complete evidence traversal. It creates no Logbook rows.
-- `POST /workbench/authoring/requests/:requestId/canary-decision` records operator approval or rejection
-  of the staged three-session canary.
-- `POST /workbench/authoring/assignments/:assignmentId/finish` atomically applies enrichment, rebuilds
-  canonical dossiers, publishes accepted optional artifacts, records revisions and Activity, releases
-  claims, stores an idempotent receipt, and releases the next assignment. All V4 mutations verify
-  daemon URL, database ID, build SHA, canonical manifest path, and instance identity immediately before
-  calling the service. Primary-only and blocked by the read-only bridge.
-- Legacy V3 `POST /workbench/authoring/runs`, submit, and finish mutations are retired. They return
+### Retired authoring mutations
+
+- V4 `POST /workbench/authoring/requests`, start, progress-recording inspect, draft, canary decision,
+  and finish routes return HTTP 409 `authoring_contract_retired` before calling the historical V4
+  service or writing request state. V4 request, scaffold, review, operator-review, and receipt reads
+  remain audit-only.
+- Legacy suggestions and V1–V3 `POST /workbench/authoring/runs`, submit, and finish mutations are retired. They return
   HTTP 409 with `{ "code": "authoring_contract_retired" }` before
   opening claims or writing enrichment, drafts, artifacts, or receipts. V1 and V2 mutations remain
   retired on the same boundary.

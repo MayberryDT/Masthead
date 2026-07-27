@@ -29,6 +29,7 @@ async function packagedFixture() {
   await writeFile(join(daemonPath, "dist", "src", "cli", "mastheadctl.js"), "cli main");
   await writeFile(join(daemonPath, "scripts", "packaged-bundle-manifest.js"), "manifest verifier");
   await writeFile(join(daemonPath, "scripts", "masthead-production.js"), "lifecycle");
+  await writeFile(join(daemonPath, "scripts", "masthead-private-display.js"), "private display");
   await writeFile(join(daemonPath, "scripts", "masthead-production-cold-activation.js"), "cold activation");
   await writeFile(join(daemonPath, "scripts", "masthead-hook.js"), "evidence hook");
   await writeFile(join(daemonPath, "scripts", "resolve-hook-runtime.js"), "hook resolver");
@@ -79,6 +80,7 @@ describe("packaged bundle manifest", () => {
       "resources/daemon/node",
       "resources/daemon/release.json",
       "resources/daemon/scripts/masthead-hook.js",
+      "resources/daemon/scripts/masthead-private-display.js",
       "resources/daemon/scripts/masthead-production-cold-activation.js",
       "resources/daemon/scripts/masthead-production.js",
       "resources/daemon/scripts/packaged-bundle-manifest.js",
@@ -92,6 +94,45 @@ describe("packaged bundle manifest", () => {
       executablePath: join(fixture.bundleRoot, "masthead"),
       resourcesPath: fixture.resourcesPath
     })).resolves.toEqual(first);
+  });
+
+  test("verifies the pinned 0.1.13 payload before the private display guard existed", async () => {
+    const fixture = await packagedFixture();
+    await writeFile(join(fixture.daemonPath, "release.json"), `${JSON.stringify({
+      gitSha: "b".repeat(40),
+      version: "0.1.13"
+    }, null, 2)}\n`);
+    await rm(join(fixture.daemonPath, "scripts", "masthead-private-display.js"));
+
+    const manifest = await writePackagedBundleManifest({
+      bundleRoot: fixture.bundleRoot,
+      executablePath: join(fixture.bundleRoot, "masthead"),
+      resourcesPath: fixture.resourcesPath
+    });
+
+    expect(manifest.files.map((entry: { path: string }) => entry.path)).not.toContain(
+      "resources/daemon/scripts/masthead-private-display.js"
+    );
+    await expect(verifyPackagedBundleManifest({
+      bundleRoot: fixture.bundleRoot,
+      executablePath: join(fixture.bundleRoot, "masthead"),
+      resourcesPath: fixture.resourcesPath
+    })).resolves.toEqual(manifest);
+  });
+
+  test("rejects a 0.1.14 payload without the private display guard", async () => {
+    const fixture = await packagedFixture();
+    await writeFile(join(fixture.daemonPath, "release.json"), `${JSON.stringify({
+      gitSha: "c".repeat(40),
+      version: "0.1.14"
+    }, null, 2)}\n`);
+    await rm(join(fixture.daemonPath, "scripts", "masthead-private-display.js"));
+
+    await expect(writePackagedBundleManifest({
+      bundleRoot: fixture.bundleRoot,
+      executablePath: join(fixture.bundleRoot, "masthead"),
+      resourcesPath: fixture.resourcesPath
+    })).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   test.each(["masthead-hook.js", "resolve-hook-runtime.js"])("rejects tampered executable hook helper %s", async (script) => {

@@ -69,6 +69,12 @@ export const READ_ONLY_ENDPOINTS = [
     label: "guided authoring assignment scaffold",
     allowNotFound: true
   },
+  {
+    method: "GET",
+    path: "/workbench/authoring/assignments/assignment%3Aone/receipt",
+    label: "guided authoring assignment receipt",
+    allowNotFound: true
+  },
   { method: "GET", path: "/workbench/authoring/runs/run-1", label: "authoring run status", allowNotFound: true },
   {
     method: "GET",

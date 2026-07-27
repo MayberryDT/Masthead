@@ -4,15 +4,17 @@ import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { PassThrough } from "node:stream";
-import { chmod, lstat, mkdir, mkdtemp, open as openFile, readFile, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, copyFile, lstat, mkdir, mkdtemp, open as openFile, readFile, readdir, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, test } from "vitest";
 import { writePackagedBundleManifest } from "../../../scripts/packaged-bundle-manifest.js";
 import {
   acquireLifecycleLease,
   activateStagedProductionInstallation,
+  abortStagedProductionInstallation,
   assertColdProductionOffline,
   captureMaintenanceSentinel,
   captureLegacyTargetIdentity,
@@ -37,6 +39,13 @@ import {
   transitionProduction,
   waitForMaintenanceChild
 } from "../../../scripts/masthead-production.js";
+import {
+  cancelProductionTransition,
+  completeProductionTransition,
+  prepareProductionTransition,
+  restoreProductionTransition
+} from "../../daemon/productionTransitionMaintenance.ts";
+import { CURRENT_SCHEMA_VERSION, getOrCreateDatabaseIdentity } from "../../daemon/db/schema.ts";
 
 const cleanup: string[] = [];
 const VALID_PNG = Buffer.from(
@@ -71,6 +80,7 @@ async function fixture({ includeIcon = true, iconContents = VALID_PNG } = {}) {
   await writeFile(join(target, "masthead"), "binary", { mode: 0o755 });
   await writeFile(join(daemonRoot, "node"), "node", { mode: 0o755 });
   await writeFile(join(daemonRoot, "scripts", "masthead-production.js"), "script");
+  await writeFile(join(daemonRoot, "scripts", "masthead-private-display.js"), "private display");
   await writeFile(join(daemonRoot, "scripts", "masthead-production-cold-activation.js"), "cold activation");
   await writeFile(join(daemonRoot, "scripts", "packaged-bundle-manifest.js"), "verifier");
   await writeFile(join(daemonRoot, "scripts", "masthead-hook.js"), "hook");
@@ -130,15 +140,22 @@ async function fixture({ includeIcon = true, iconContents = VALID_PNG } = {}) {
   };
 }
 
-async function secondBundle(productionRoot: string, sourceTarget: string) {
+async function secondBundle(
+  productionRoot: string,
+  sourceTarget: string,
+  identity: { shaCharacter?: string; version?: string } = {}
+) {
   const { cp, rm } = await import("node:fs/promises");
-  const target = join(productionRoot, "Masthead-linux-x64-0.2.0-candidate");
+  const version = identity.version ?? "0.2.0";
+  const shaCharacter = identity.shaCharacter ?? "b";
+  const gitSha = shaCharacter.repeat(40);
+  const target = join(productionRoot, `Masthead-linux-x64-${version}-candidate`);
   await cp(sourceTarget, target, { recursive: true });
   await writeFile(join(target, "masthead"), "candidate-binary", { mode: 0o755 });
   await writeFile(join(target, "resources", "app.asar"), "candidate-app");
   await writeFile(join(target, "resources", "daemon", "release.json"), JSON.stringify({
-    gitSha: "b".repeat(40),
-    version: "0.2.0"
+    gitSha,
+    version
   }));
   await rm(join(target, "resources", "release-manifest.json"), { force: true });
   const manifest = await writePackagedBundleManifest({
@@ -148,9 +165,9 @@ async function secondBundle(productionRoot: string, sourceTarget: string) {
   });
   return {
     bundleDigest: manifest.bundleDigest,
-    gitSha: "b".repeat(40),
+    gitSha,
     target,
-    version: "0.2.0"
+    version
   };
 }
 
@@ -199,6 +216,23 @@ async function publishStartupManifest(receipt: any) {
   }));
 }
 
+async function createDatabaseThroughVersion(databasePath: string, throughVersion: number) {
+  await mkdir(dirname(databasePath), { recursive: true });
+  const migrationsDirectory = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "daemon", "db", "migrations");
+  const database = new DatabaseSync(databasePath);
+  database.exec("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY NOT NULL, name TEXT NOT NULL, applied_at TEXT NOT NULL);");
+  for (const filename of (await readdir(migrationsDirectory)).filter((name) => /^\d{3}_.+\.sql$/u.test(name)).sort()) {
+    const version = Number(filename.slice(0, 3));
+    if (version > throughVersion) break;
+    database.exec(readFileSync(join(migrationsDirectory, filename), "utf8"));
+    database.prepare("INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)")
+      .run(version, filename.slice(0, -4), "2026-07-24T12:00:00.000Z");
+  }
+  const databaseId = getOrCreateDatabaseIdentity(database);
+  database.close();
+  return databaseId;
+}
+
 describe("production lifecycle launcher", () => {
   test("stages and activates an instance-bound production installation without runtime or database side effects", async () => {
     const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
@@ -245,6 +279,340 @@ describe("production lifecycle launcher", () => {
     expect(await readFile(activeInstanceLauncherPath, "utf8")).toContain("MASTHEAD_INSTANCE_MANIFEST");
     await expect(lstat(receipt.instanceManifestPath)).rejects.toMatchObject({ code: "ENOENT" });
     expect(await realpath(oldTarget)).toBe(oldTarget);
+  });
+
+  test("prepares a candidate schema offline before activation so large migration work cannot consume the startup health budget", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const databaseId = await createDatabaseThroughVersion(config.databasePath, 37);
+    const receipt = await stageProductionInstallation({
+      bundleDigest: candidate.bundleDigest,
+      dataDirectory: config.dataDirectory,
+      databasePath: config.databasePath,
+      homeDir,
+      productionRoot,
+      sourceBundlePath: candidate.target
+    });
+
+    const activated = await activateStagedProductionInstallation(receipt.receiptPath, {
+      assertOffline: async () => undefined,
+      prepareMaintenance: (request: any) => prepareProductionTransition(request),
+      runDesktopDatabaseCommand: () => undefined
+    });
+
+    let daemonMigrationStarted = false;
+    let scans = 0;
+    const electron = processRecord({
+      argv: [join(candidate.target, "masthead"), `--user-data-dir=${config.dataDirectory}`],
+      environ: { MASTHEAD_DATA_DIR: config.dataDirectory, MASTHEAD_DB_PATH: config.databasePath },
+      exe: join(candidate.target, "masthead")
+    });
+    const daemon = processRecord({
+      argv: [
+        join(candidate.target, "resources", "daemon", "node"),
+        join(candidate.target, "resources", "daemon", "dist", "src", "daemon", "main.js")
+      ],
+      environ: { MASTHEAD_DATA_DIR: config.dataDirectory, MASTHEAD_DB_PATH: config.databasePath },
+      exe: join(candidate.target, "resources", "daemon", "node"), pid: 43, starttime: "daemon"
+    });
+    const health = {
+      buildSha: candidate.gitSha,
+      buildVersion: candidate.version,
+      data: { dataDirectory: config.dataDirectory, databaseId, databasePath: config.databasePath },
+      ok: true,
+      product: "masthead",
+      runtime: { port: config.port, writable: true },
+      schemaVersion: CURRENT_SCHEMA_VERSION
+    };
+    const started = await startProduction({
+      ...config,
+      bundleDigest: candidate.bundleDigest,
+      gitSha: candidate.gitSha,
+      target: candidate.target,
+      version: candidate.version
+    }, {
+      acquireLease: async () => ({ release: async () => undefined }),
+      captureSpawned: async () => undefined,
+      cleanupSpawned: async () => ({ stopped: true }),
+      completePreparedActivation: (request: any) => completeProductionTransition(request),
+      currentTarget: async () => candidate.target,
+      fetchHealth: async () => undefined,
+      ownershipProbe: async () => undefined,
+      portBindable: async () => true,
+      readProcesses: async () => (++scans === 1 ? [] : [electron, daemon]),
+      spawnElectron: async () => {
+        const database = new DatabaseSync(config.databasePath, { readOnly: true });
+        const schemaVersion = Number(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version ?? 0);
+        database.close();
+        if (schemaVersion < CURRENT_SCHEMA_VERSION) {
+          daemonMigrationStarted = true;
+          await writeFile(join(config.dataDirectory, ".masthead.sqlite.migration-backup-stage-11gb-equivalent"), "staging");
+        }
+        return 90;
+      },
+      waitForHealth: async () => {
+        if (daemonMigrationStarted) throw new Error("Pinned Masthead production health did not become available within 5 minutes.");
+        return health;
+      }
+    });
+
+    expect(started).toMatchObject({
+      pid: 90,
+      started: true,
+      maintenanceCompletion: {
+        completed: true,
+        owner: "staged_start",
+        request: { nonce: receipt.stagingNonce }
+      }
+    });
+    expect(daemonMigrationStarted).toBe(false);
+    expect(activated).toMatchObject({
+      databaseId,
+      sourceSchemaVersion: 37,
+      targetSchemaVersion: CURRENT_SCHEMA_VERSION
+    });
+    expect(await loadStagedProductionInstallation(receipt.receiptPath)).toMatchObject({
+      databaseId,
+      sourceSchemaVersion: 37,
+      targetSchemaVersion: CURRENT_SCHEMA_VERSION,
+      transitionNonce: receipt.stagingNonce
+    });
+  });
+
+  test("resumes activation after prepared-database process death without another backup or stale migration stages", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    await createDatabaseThroughVersion(config.databasePath, 37);
+    const receipt = await stageProductionInstallation({
+      bundleDigest: candidate.bundleDigest,
+      dataDirectory: config.dataDirectory,
+      databasePath: config.databasePath,
+      homeDir,
+      productionRoot,
+      sourceBundlePath: candidate.target
+    });
+    const prepareMaintenance = (request: any) => prepareProductionTransition(request);
+
+    await expect(activateStagedProductionInstallation(receipt.receiptPath, {
+      assertOffline: async () => undefined,
+      prepareMaintenance,
+      runDesktopDatabaseCommand: () => undefined,
+      simulateProcessDeathAfterStep: "database-prepared"
+    })).rejects.toMatchObject({ code: "simulated_activation_process_death" });
+    expect(await realpath(join(productionRoot, "current"))).toBe(oldTarget);
+    const preparedReceipt = await loadStagedProductionInstallation(receipt.receiptPath);
+    const backupPath = join(config.dataDirectory, "masthead.sqlite.backup-current");
+    const backupBefore = await stat(backupPath, { bigint: true });
+    const abandonedStage = join(config.dataDirectory, ".masthead.sqlite.migration-backup-stage-11gb-equivalent");
+    await writeFile(abandonedStage, "interrupted migration stage");
+
+    await expect(activateStagedProductionInstallation(receipt.receiptPath, {
+      assertOffline: async () => undefined,
+      prepareMaintenance,
+      runDesktopDatabaseCommand: () => undefined
+    })).resolves.toMatchObject({
+      activated: true,
+      databaseId: preparedReceipt.databaseId,
+      sourceSchemaVersion: 37,
+      targetSchemaVersion: CURRENT_SCHEMA_VERSION
+    });
+
+    const backupAfter = await stat(backupPath, { bigint: true });
+    expect(backupAfter.ino).toBe(backupBefore.ino);
+    expect((await readdir(config.dataDirectory)).filter((name) => name.startsWith("masthead.sqlite.backup-")))
+      .toEqual(["masthead.sqlite.backup-current"]);
+    await expect(readFile(abandonedStage)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await realpath(join(productionRoot, "current"))).toBe(candidate.target);
+  });
+
+  test("fails closed when a prepared staged receipt is retried with a different maintenance authority", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    await mkdir(config.dataDirectory, { recursive: true });
+    await writeFile(config.databasePath, "prepared database bytes");
+    const staged = await stageProductionInstallation({
+      bundleDigest: candidate.bundleDigest,
+      dataDirectory: config.dataDirectory,
+      databasePath: config.databasePath,
+      homeDir,
+      productionRoot,
+      sourceBundlePath: candidate.target
+    });
+    const authority = (nonce: string) => {
+      const request = {
+        databasePath: config.databasePath,
+        newBundle: {
+          bundleDigest: staged.sourceDigest,
+          gitSha: staged.buildSha,
+          target: staged.target,
+          version: staged.buildVersion
+        },
+        nonce,
+        oldBundle: {
+          bundleDigest: staged.rollbackBundle.bundleDigest,
+          gitSha: staged.rollbackBundle.buildSha,
+          target: staged.rollbackBundle.path,
+          version: staged.rollbackBundle.version
+        }
+      };
+      return {
+        request,
+        receipt: {
+          ...request,
+          databaseId: "database:prepared",
+          schemaVersion: 1,
+          sourceSchemaVersion: 37,
+          state: "ready_to_activate",
+          targetSchemaVersion: CURRENT_SCHEMA_VERSION
+        }
+      };
+    };
+    const originalAuthority = authority("31313131-3131-4131-8131-313131313131");
+    const substitutedAuthority = authority("32323232-3232-4232-8232-323232323232");
+
+    await expect(activateStagedProductionInstallation(staged.receiptPath, {
+      assertOffline: async () => undefined,
+      preparedMaintenanceAuthority: originalAuthority,
+      runDesktopDatabaseCommand: () => undefined,
+      simulateProcessDeathAfterStep: "database-prepared"
+    })).rejects.toMatchObject({ code: "simulated_activation_process_death" });
+    await expect(activateStagedProductionInstallation(staged.receiptPath, {
+      assertOffline: async () => undefined,
+      preparedMaintenanceAuthority: substitutedAuthority,
+      runDesktopDatabaseCommand: () => undefined
+    })).rejects.toThrow("already bound to a different maintenance authority");
+
+    expect(await realpath(join(productionRoot, "current"))).toBe(oldTarget);
+    expect(await loadStagedProductionInstallation(staged.receiptPath)).toMatchObject({
+      databaseId: "database:prepared",
+      transitionNonce: originalAuthority.request.nonce
+    });
+    await expect(lstat(join(productionRoot, ".masthead-install-activation.journal.json")))
+      .rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("restarts and finalizes an activated staged receipt with its externally prepared authority", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const databaseId = await createDatabaseThroughVersion(config.databasePath, 37);
+    const staged = await stageProductionInstallation({
+      bundleDigest: candidate.bundleDigest,
+      dataDirectory: config.dataDirectory,
+      databasePath: config.databasePath,
+      homeDir,
+      productionRoot,
+      sourceBundlePath: candidate.target
+    });
+    const request = {
+      databasePath: config.databasePath,
+      newBundle: candidate,
+      nonce: "33333333-3333-4333-8333-333333333333",
+      oldBundle: {
+        bundleDigest: config.bundleDigest,
+        gitSha: "a".repeat(40),
+        target: oldTarget,
+        version: "0.1.0"
+      }
+    };
+    const maintenanceReceipt = await prepareProductionTransition(request);
+    await activateStagedProductionInstallation(staged.receiptPath, {
+      assertOffline: async () => undefined,
+      preparedMaintenanceAuthority: { request, receipt: maintenanceReceipt },
+      runDesktopDatabaseCommand: () => undefined
+    });
+    await publishStartupManifest(staged);
+
+    const electron = processRecord({
+      argv: [join(candidate.target, "masthead"), `--user-data-dir=${config.dataDirectory}`],
+      environ: { MASTHEAD_DATA_DIR: config.dataDirectory, MASTHEAD_DB_PATH: config.databasePath },
+      exe: join(candidate.target, "masthead")
+    });
+    const daemon = processRecord({
+      argv: [
+        join(candidate.target, "resources", "daemon", "node"),
+        join(candidate.target, "resources", "daemon", "dist", "src", "daemon", "main.js")
+      ],
+      environ: { MASTHEAD_DATA_DIR: config.dataDirectory, MASTHEAD_DB_PATH: config.databasePath },
+      exe: join(candidate.target, "resources", "daemon", "node"),
+      pid: 43,
+      starttime: "daemon"
+    });
+    const health = {
+      buildSha: candidate.gitSha,
+      buildVersion: candidate.version,
+      data: { dataDirectory: config.dataDirectory, databaseId, databasePath: config.databasePath },
+      ok: true,
+      product: "masthead",
+      runtime: { port: config.port, writable: true },
+      schemaVersion: CURRENT_SCHEMA_VERSION
+    };
+    let completedNonce: string | undefined;
+    const started = await startProduction({
+      ...config,
+      bundleDigest: candidate.bundleDigest,
+      gitSha: candidate.gitSha,
+      target: candidate.target,
+      version: candidate.version
+    }, {
+      acquireLease: async () => ({ release: async () => undefined }),
+      completePreparedActivation: async (completedRequest: any) => {
+        completedNonce = completedRequest.nonce;
+        await completeProductionTransition(completedRequest);
+      },
+      currentTarget: async () => candidate.target,
+      fetchHealth: async () => health,
+      readProcesses: async () => [electron, daemon],
+      transitionGuard: async () => undefined
+    });
+    expect(started).toMatchObject({
+      alreadyRunning: true,
+      started: false,
+      maintenanceCompletion: {
+        completed: true,
+        owner: "staged_start",
+        request: { nonce: request.nonce }
+      }
+    });
+    expect(completedNonce).toBe(request.nonce);
+    await expect(finalizeStagedProductionInstallation(staged.receiptPath, {
+      verifyLiveProof: async () => undefined
+    })).resolves.toMatchObject({ finalized: true, receiptRemoved: true });
+  });
+
+  test("bounds full-database reads when preparation resumes after a verified backup", async () => {
+    const { config, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    await createDatabaseThroughVersion(config.databasePath, 37);
+    const phases: string[] = [];
+    const input = {
+      databasePath: config.databasePath,
+      newBundle: candidate,
+      nonce: "11111111-1111-4111-8111-111111111111",
+      oldBundle: {
+        bundleDigest: config.bundleDigest,
+        gitSha: "a".repeat(40),
+        target: oldTarget,
+        version: "0.1.0"
+      }
+    };
+
+    await expect(prepareProductionTransition(input, {
+      onBoundary(phase) {
+        phases.push(phase);
+        if (phase === "backup_finalized") throw new Error("simulated_sigterm_after_verified_backup");
+      }
+    })).rejects.toThrow("simulated_sigterm_after_verified_backup");
+    await prepareProductionTransition(input, { onBoundary: (phase) => phases.push(phase) });
+
+    const databaseSizedReads = phases.filter((phase) => [
+      "backup_copy_started",
+      "backup_verified",
+      "snapshot_hashed",
+      "after_migrate",
+      "post_migration_verified"
+    ].includes(phase));
+    expect(phases.filter((phase) => phase === "backup_copy_started")).toHaveLength(1);
+    expect(databaseSizedReads.length).toBeLessThanOrEqual(5);
   });
 
   test("rehydrates the staged receipt and rejects staged bytes or path substitution before activation", async () => {
@@ -529,7 +897,7 @@ describe("production lifecycle launcher", () => {
     }
   );
 
-  test("uses the same crash-safe lifecycle lease for stage, activate, and finalize", async () => {
+  test("uses the same crash-safe lifecycle lease for stage, activate, finalize, and abort", async () => {
     const { config, homeDir, productionRoot, target } = await fixture();
     const lifecycleLeasePath = join(homeDir, ".local", "state", "masthead-production", "launcher.lease.sqlite");
     const heldForStage = await acquireLifecycleLease(lifecycleLeasePath);
@@ -553,6 +921,7 @@ describe("production lifecycle launcher", () => {
     const held = await acquireLifecycleLease(lifecycleLeasePath);
     await expect(activateStagedProductionInstallation(receipt.receiptPath)).rejects.toThrow("already running");
     await expect(finalizeStagedProductionInstallation(receipt.receiptPath)).rejects.toThrow("already running");
+    await expect(abortStagedProductionInstallation(receipt.receiptPath)).rejects.toThrow("already running");
     await held.release();
   });
 
@@ -593,7 +962,7 @@ describe("production lifecycle launcher", () => {
         sourceBundlePath: target,
         target
       };
-      const commands = ["stage", "activate", "finalize", "start", "stop", "install"] as const;
+      const commands = ["stage", "activate", "finalize", "abort", "start", "stop", "install"] as const;
       const environment = {
         HOME: homeDir,
         MASTHEAD_BUILD_SHA: "a".repeat(40),
@@ -631,7 +1000,7 @@ describe("production lifecycle launcher", () => {
         "try {",
         "  const common = ['--bundle', input.bundlePath, '--bundle-digest', input.bundleDigest, '--data-dir', input.dataDirectory, '--db-path', input.databasePath, '--port', String(input.port), '--production-root', input.productionRoot];",
         "  const argv = command === 'stage' ? ['stage', ...common]",
-        "    : command === 'activate' || command === 'finalize' ? [command, '--receipt', receiptPath]",
+        "    : command === 'activate' || command === 'finalize' || command === 'abort' ? [command, '--receipt', receiptPath]",
         "    : command === 'install' ? ['install', ...(installMode === 'cold' ? ['--cold-activate'] : []), ...common]",
         "    : [command];",
         "  await runCli(argv, environment, { onLifecycleLeaseAcquired });",
@@ -673,7 +1042,7 @@ describe("production lifecycle launcher", () => {
         for (let attempt = 0; attempt < 500; attempt += 1) {
           const completed = await Promise.all(workers.map(({ resultPath }) => lstat(resultPath).then(() => true).catch(() => false)));
           if (completed.filter(Boolean).length === commands.length - 1) break;
-          if (attempt === 499) throw new Error("Timed out waiting for five lifecycle lease refusals.");
+          if (attempt === 499) throw new Error("Timed out waiting for lifecycle lease refusals.");
           await new Promise((resolve) => setTimeout(resolve, 10));
         }
         await writeFile(winnerReleasePath, "release");
@@ -1540,6 +1909,8 @@ describe("production lifecycle launcher", () => {
     await expect(finalizeStagedProductionInstallation(receipt.receiptPath, { verifyLiveProof: async () => undefined })).resolves.toMatchObject({ finalized: true, receiptRemoved: true });
     expect((await readdir(productionRoot)).filter((name) => name.startsWith("Masthead-linux-x64-"))).toEqual([candidate.target.split("/").at(-1)]);
     await expect(lstat(receipt.receiptPath)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(abortStagedProductionInstallation(receipt.receiptPath)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await realpath(join(productionRoot, "current"))).toBe(candidate.target);
   });
 
   test("keeps completion proof owned by each sibling production root with a different lifecycle lease", async () => {
@@ -1954,6 +2325,590 @@ describe("production lifecycle launcher", () => {
     await expect(runCli(["finalize", "--receipt", receiptPath], { HOME: homeDir }, { verifyLiveProof: async () => undefined })).resolves.toMatchObject({ finalized: true });
   });
 
+  test("public abort cancels an unactivated candidate after backup_copied so a newer candidate can stage", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const databaseId = await createDatabaseThroughVersion(config.databasePath, 37);
+    const backupPath = `${config.databasePath}.backup-current`;
+    await copyFile(config.databasePath, backupPath);
+    const backupBefore = await stat(backupPath, { bigint: true });
+    const staged = await runCli([
+      "stage", "--bundle", candidate.target, "--bundle-digest", candidate.bundleDigest,
+      "--data-dir", config.dataDirectory, "--production-root", productionRoot
+    ], { HOME: homeDir });
+    const receiptPath = staged.receiptPath as string;
+
+    await expect(runCli(["activate", "--receipt", receiptPath], { HOME: homeDir }, {
+      assertOffline: async () => undefined,
+      prepareMaintenance: (request: any) => prepareProductionTransition(request, {
+        simulateProcessDeathAfterPhase: "backup_copied"
+      }),
+      runDesktopDatabaseCommand: () => undefined
+    })).rejects.toMatchObject({ code: "simulated_production_transition_process_death" });
+    expect(await loadStagedProductionInstallation(receiptPath)).not.toHaveProperty("activatedAt");
+    expect(JSON.parse(await readFile(`${config.databasePath}.production-transition.json`, "utf8")))
+      .toMatchObject({ preparePhase: "backup_copied", state: "snapshot_ready" });
+
+    await expect(runCli(["abort", "--receipt", receiptPath], { HOME: homeDir }, {
+      assertOffline: async () => undefined,
+      cancelMaintenance: (request: any) => cancelProductionTransition(request),
+      runDesktopDatabaseCommand: () => undefined,
+      simulateAbortProcessDeathAfterStep: "database-cancelled"
+    })).rejects.toMatchObject({ code: "simulated_abort_process_death" });
+    await expect(lstat(receiptPath)).resolves.toBeDefined();
+    await expect(lstat(candidate.target)).resolves.toBeDefined();
+    await expect(lstat(`${config.databasePath}.production-transition.json`)).rejects.toMatchObject({ code: "ENOENT" });
+
+    await expect(runCli(["abort", "--receipt", receiptPath], { HOME: homeDir }, {
+      assertOffline: async () => undefined,
+      runDesktopDatabaseCommand: () => undefined
+    })).resolves.toMatchObject({
+      aborted: true,
+      cancelled: true,
+      databaseId,
+      databaseRestored: false,
+      recovered: true,
+      target: oldTarget
+    });
+    expect(await realpath(join(productionRoot, "current"))).toBe(oldTarget);
+    for (const path of [receiptPath, candidate.target, staged.stagedInstanceLauncherPath as string]) {
+      await expect(lstat(path)).rejects.toMatchObject({ code: "ENOENT" });
+    }
+    await expect(lstat(`${config.databasePath}.production-transition.json`)).rejects.toMatchObject({ code: "ENOENT" });
+    const active = new DatabaseSync(config.databasePath, { readOnly: true });
+    expect(getOrCreateDatabaseIdentity(active)).toBe(databaseId);
+    expect(Number(active.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version)).toBe(37);
+    active.close();
+    expect(await stat(backupPath, { bigint: true })).toMatchObject({
+      dev: backupBefore.dev,
+      ino: backupBefore.ino,
+      mtimeNs: backupBefore.mtimeNs,
+      size: backupBefore.size
+    });
+    await expect(runCli(["abort", "--receipt", receiptPath], { HOME: homeDir }))
+      .resolves.toMatchObject({ aborted: true, cancelled: true, recovered: true, target: oldTarget });
+
+    const newer = await secondBundle(productionRoot, oldTarget, { shaCharacter: "c", version: "0.3.0" });
+    await expect(runCli([
+      "stage", "--bundle", newer.target, "--bundle-digest", newer.bundleDigest,
+      "--data-dir", config.dataDirectory, "--production-root", productionRoot
+    ], { HOME: homeDir })).resolves.toMatchObject({ staged: true });
+  });
+
+  test("cancels an older unactivated receipt through the currently trusted lifecycle maintenance runtime", async () => {
+    const { config, homeDir, productionRoot, target: trustedRuntimeTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, trustedRuntimeTarget);
+    await createDatabaseThroughVersion(config.databasePath, 37);
+    const staged = await runCli([
+      "stage", "--bundle", candidate.target, "--bundle-digest", candidate.bundleDigest,
+      "--data-dir", config.dataDirectory, "--production-root", productionRoot
+    ], { HOME: homeDir });
+    const receiptPath = staged.receiptPath as string;
+
+    await expect(runCli(["activate", "--receipt", receiptPath], { HOME: homeDir }, {
+      assertOffline: async () => undefined,
+      prepareMaintenance: (request: any) => prepareProductionTransition(request, {
+        simulateProcessDeathAfterPhase: "backup_copied"
+      }),
+      runDesktopDatabaseCommand: () => undefined
+    })).rejects.toMatchObject({ code: "simulated_production_transition_process_death" });
+
+    let selectedRuntimeTarget: string | undefined;
+    await expect(runCli(["abort", "--receipt", receiptPath], { HOME: homeDir }, {
+      assertOffline: async () => undefined,
+      cancellationMaintenanceTarget: trustedRuntimeTarget,
+      runCancellationMaintenance: async (maintenanceConfig: any, action: string, request: any) => {
+        selectedRuntimeTarget = maintenanceConfig.target;
+        expect(action).toBe("cancel");
+        return cancelProductionTransition(request);
+      },
+      runDesktopDatabaseCommand: () => undefined
+    })).resolves.toMatchObject({ aborted: true, cancelled: true, target: trustedRuntimeTarget });
+    expect(selectedRuntimeTarget).toBe(trustedRuntimeTarget);
+    expect(selectedRuntimeTarget).not.toBe(candidate.target);
+  });
+
+  test("cancels multiple stale unactivated receipts one at a time without deleting unrelated candidates or stages", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    await createDatabaseThroughVersion(config.databasePath, 37);
+    const backupPath = `${config.databasePath}.backup-current`;
+    await copyFile(config.databasePath, backupPath);
+    const backupBefore = await stat(backupPath, { bigint: true });
+    const firstCandidate = await secondBundle(productionRoot, oldTarget, { shaCharacter: "b", version: "0.2.0" });
+    const first = await runCli([
+      "stage", "--bundle", firstCandidate.target, "--bundle-digest", firstCandidate.bundleDigest,
+      "--data-dir", config.dataDirectory, "--production-root", productionRoot
+    ], { HOME: homeDir });
+    const secondCandidate = await secondBundle(productionRoot, oldTarget, { shaCharacter: "c", version: "0.3.0" });
+    const second = await runCli([
+      "stage", "--bundle", secondCandidate.target, "--bundle-digest", secondCandidate.bundleDigest,
+      "--data-dir", config.dataDirectory, "--production-root", productionRoot
+    ], { HOME: homeDir });
+    await expect(runCli(["activate", "--receipt", second.receiptPath as string], { HOME: homeDir }, {
+      assertOffline: async () => undefined,
+      prepareMaintenance: (request: any) => prepareProductionTransition(request, {
+        simulateProcessDeathAfterPhase: "backup_copied"
+      }),
+      runDesktopDatabaseCommand: () => undefined
+    })).rejects.toMatchObject({ code: "simulated_production_transition_process_death" });
+
+    await expect(runCli(["abort", "--receipt", second.receiptPath as string], { HOME: homeDir }, {
+      assertOffline: async () => undefined,
+      cancelMaintenance: (request: any) => cancelProductionTransition(request),
+      runDesktopDatabaseCommand: () => undefined
+    })).resolves.toMatchObject({ aborted: true, cancelled: true, target: oldTarget });
+    for (const path of [first.receiptPath as string, firstCandidate.target, first.stagedInstanceLauncherPath as string]) {
+      await expect(lstat(path)).resolves.toBeDefined();
+    }
+    await expect(lstat(secondCandidate.target)).rejects.toMatchObject({ code: "ENOENT" });
+
+    await expect(runCli(["abort", "--receipt", first.receiptPath as string], { HOME: homeDir }, {
+      assertOffline: async () => undefined,
+      runDesktopDatabaseCommand: () => undefined
+    })).resolves.toMatchObject({ aborted: true, cancelled: true, target: oldTarget });
+    await expect(lstat(firstCandidate.target)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(runCli(["abort", "--receipt", second.receiptPath as string], { HOME: homeDir }))
+      .resolves.toMatchObject({ aborted: true, cancelled: true, recovered: true, target: oldTarget });
+    expect(await stat(backupPath, { bigint: true })).toMatchObject({
+      dev: backupBefore.dev,
+      ino: backupBefore.ino,
+      mtimeNs: backupBefore.mtimeNs,
+      size: backupBefore.size
+    });
+
+    const newer = await secondBundle(productionRoot, oldTarget, { shaCharacter: "d", version: "0.4.0" });
+    await expect(runCli([
+      "stage", "--bundle", newer.target, "--bundle-digest", newer.bundleDigest,
+      "--data-dir", config.dataDirectory, "--production-root", productionRoot
+    ], { HOME: homeDir })).resolves.toMatchObject({ staged: true });
+  });
+
+  test("retains a candidate bundle shared by another unactivated receipt until the final owner cancels", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const stage = () => runCli([
+      "stage", "--bundle", candidate.target, "--bundle-digest", candidate.bundleDigest,
+      "--data-dir", config.dataDirectory, "--production-root", productionRoot
+    ], { HOME: homeDir });
+    const first = await stage();
+    const second = await stage();
+
+    await expect(runCli(["abort", "--receipt", first.receiptPath as string], { HOME: homeDir }, {
+      assertOffline: async () => undefined
+    })).resolves.toMatchObject({ aborted: true, cancelled: true, target: oldTarget });
+    await expect(lstat(candidate.target)).resolves.toBeDefined();
+    await expect(lstat(second.receiptPath as string)).resolves.toBeDefined();
+
+    await expect(runCli(["abort", "--receipt", second.receiptPath as string], { HOME: homeDir }, {
+      assertOffline: async () => undefined
+    })).resolves.toMatchObject({ aborted: true, cancelled: true, target: oldTarget });
+    await expect(lstat(candidate.target)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("resumes an interrupted unactivated cancellation and keeps its public result idempotent", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const receipt = await runCli([
+      "stage", "--bundle", candidate.target, "--bundle-digest", candidate.bundleDigest,
+      "--data-dir", config.dataDirectory, "--production-root", productionRoot
+    ], { HOME: homeDir });
+
+    await expect(runCli(["abort", "--receipt", receipt.receiptPath as string], { HOME: homeDir }, {
+      assertOffline: async () => undefined,
+      simulateAbortProcessDeathAfterStep: "staged-0-removed"
+    })).rejects.toMatchObject({ code: "simulated_abort_process_death" });
+    await expect(lstat(receipt.receiptPath as string)).resolves.toBeDefined();
+    await expect(lstat(receipt.stagedInstanceLauncherPath as string)).rejects.toMatchObject({ code: "ENOENT" });
+
+    await expect(runCli(["abort", "--receipt", receipt.receiptPath as string], { HOME: homeDir }, {
+      assertOffline: async () => undefined
+    })).resolves.toMatchObject({ aborted: true, cancelled: true, recovered: true, target: oldTarget });
+    await expect(runCli(["abort", "--receipt", receipt.receiptPath as string], { HOME: homeDir }))
+      .resolves.toMatchObject({ aborted: true, cancelled: true, recovered: true, target: oldTarget });
+  });
+
+  test("refuses unactivated cancellation for a running candidate, current bundle, or changed bundle identity", async () => {
+    const runningFixture = await fixture();
+    const runningCandidate = await secondBundle(runningFixture.productionRoot, runningFixture.target);
+    const runningReceipt = await stageProductionInstallation({
+      bundleDigest: runningCandidate.bundleDigest,
+      sourceBundlePath: runningCandidate.target,
+      dataDirectory: runningFixture.config.dataDirectory,
+      homeDir: runningFixture.homeDir,
+      productionRoot: runningFixture.productionRoot
+    });
+    const electron = processRecord({
+      argv: [join(runningCandidate.target, "masthead"), `--user-data-dir=${runningFixture.config.dataDirectory}`],
+      environ: { MASTHEAD_DATA_DIR: runningFixture.config.dataDirectory, MASTHEAD_DB_PATH: runningFixture.config.databasePath },
+      exe: join(runningCandidate.target, "masthead"),
+      pid: 7331,
+      starttime: "unactivated-candidate-live"
+    });
+    await expect(runCli(["abort", "--receipt", runningReceipt.receiptPath], { HOME: runningFixture.homeDir }, {
+      fetchHealth: async () => undefined,
+      ownershipProbe: async () => undefined,
+      portBindable: async () => true,
+      readProcesses: async () => [electron]
+    })).rejects.toThrow("empty production process set");
+    await expect(lstat(runningReceipt.receiptPath)).resolves.toBeDefined();
+
+    const currentFixture = await fixture();
+    const currentReceipt = await runCli([
+      "stage", "--bundle", currentFixture.target, "--bundle-digest", currentFixture.config.bundleDigest,
+      "--data-dir", currentFixture.config.dataDirectory, "--production-root", currentFixture.productionRoot
+    ], { HOME: currentFixture.homeDir });
+    await expect(runCli(["abort", "--receipt", currentReceipt.receiptPath as string], { HOME: currentFixture.homeDir }, {
+      assertOffline: async () => undefined
+    })).rejects.toThrow("current or finalized production bundle");
+    expect(await realpath(join(currentFixture.productionRoot, "current"))).toBe(currentFixture.target);
+
+    const changedFixture = await fixture();
+    const changedCandidate = await secondBundle(changedFixture.productionRoot, changedFixture.target);
+    const changedReceipt = await stageProductionInstallation({
+      bundleDigest: changedCandidate.bundleDigest,
+      sourceBundlePath: changedCandidate.target,
+      dataDirectory: changedFixture.config.dataDirectory,
+      homeDir: changedFixture.homeDir,
+      productionRoot: changedFixture.productionRoot
+    });
+    await writeFile(join(changedCandidate.target, "masthead"), "changed-after-stage", { mode: 0o755 });
+    await expect(runCli(["abort", "--receipt", changedReceipt.receiptPath], { HOME: changedFixture.homeDir }, {
+      assertOffline: async () => undefined
+    })).rejects.toThrow();
+    await expect(lstat(changedReceipt.receiptPath)).resolves.toBeDefined();
+    expect(await realpath(join(changedFixture.productionRoot, "current"))).toBe(changedFixture.target);
+  });
+
+  test("refuses unactivated cancellation when the prepared database identity no longer matches its receipt", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    await createDatabaseThroughVersion(config.databasePath, 37);
+    const receipt = await runCli([
+      "stage", "--bundle", candidate.target, "--bundle-digest", candidate.bundleDigest,
+      "--data-dir", config.dataDirectory, "--production-root", productionRoot
+    ], { HOME: homeDir });
+    await expect(runCli(["activate", "--receipt", receipt.receiptPath as string], { HOME: homeDir }, {
+      assertOffline: async () => undefined,
+      prepareMaintenance: (request: any) => prepareProductionTransition(request, {
+        simulateProcessDeathAfterPhase: "backup_copied"
+      }),
+      runDesktopDatabaseCommand: () => undefined
+    })).rejects.toMatchObject({ code: "simulated_production_transition_process_death" });
+    const database = new DatabaseSync(config.databasePath);
+    database.prepare("UPDATE app_settings SET setting_json = ? WHERE setting_key = 'database_identity'")
+      .run(JSON.stringify({ databaseId: "database:changed" }));
+    database.close();
+
+    await expect(runCli(["abort", "--receipt", receipt.receiptPath as string], { HOME: homeDir }, {
+      assertOffline: async () => undefined,
+      cancelMaintenance: (request: any) => cancelProductionTransition(request)
+    })).rejects.toThrow("transition_cancel_database_mismatch");
+    await expect(lstat(receipt.receiptPath as string)).resolves.toBeDefined();
+    await expect(lstat(candidate.target)).resolves.toBeDefined();
+    expect(await realpath(join(productionRoot, "current"))).toBe(oldTarget);
+  });
+
+  test("public abort restores an activated candidate that never produced healthy startup proof", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const staged = await runCli([
+      "stage", "--bundle", candidate.target, "--bundle-digest", candidate.bundleDigest,
+      "--data-dir", config.dataDirectory, "--production-root", productionRoot
+    ], { HOME: homeDir });
+    const receiptPath = staged.receiptPath as string;
+    await runCli(["activate", "--receipt", receiptPath], { HOME: homeDir }, {
+      assertOffline: async () => undefined,
+      runDesktopDatabaseCommand: () => undefined
+    });
+
+    await expect(stageProductionInstallation({
+      bundleDigest: candidate.bundleDigest,
+      sourceBundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot
+    })).rejects.toThrow("Pending activation must be finalized before stage");
+
+    await expect(runCli(["abort", "--receipt", receiptPath], { HOME: homeDir }, {
+      assertOffline: async () => undefined,
+      runDesktopDatabaseCommand: () => undefined
+    })).resolves.toMatchObject({ aborted: true, recovered: false, target: oldTarget });
+    expect(await realpath(join(productionRoot, "current"))).toBe(oldTarget);
+    await expect(lstat(receiptPath)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(lstat(join(productionRoot, ".masthead-install-activation.journal.json"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(lstat(candidate.target)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(runCli(["abort", "--receipt", receiptPath], { HOME: homeDir }, {
+      assertOffline: async () => undefined,
+      runDesktopDatabaseCommand: () => undefined
+    })).resolves.toMatchObject({ aborted: true, recovered: true, target: oldTarget });
+  });
+
+  test("resumes an interrupted public abort from its receipt-bound journal", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const receipt = await stageProductionInstallation({
+      bundleDigest: candidate.bundleDigest,
+      sourceBundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot
+    });
+    await activateStagedProductionInstallation(receipt.receiptPath, {
+      assertOffline: async () => undefined,
+      runDesktopDatabaseCommand: () => undefined
+    });
+
+    await expect(abortStagedProductionInstallation(receipt.receiptPath, {
+      assertOffline: async () => undefined,
+      runDesktopDatabaseCommand: () => undefined,
+      simulateAbortProcessDeathAfterStep: "surface-restored"
+    })).rejects.toMatchObject({ code: "simulated_abort_process_death" });
+    expect(await realpath(join(productionRoot, "current"))).toBe(oldTarget);
+    await expect(lstat(receipt.receiptPath)).resolves.toBeDefined();
+    await expect(lstat(join(productionRoot, ".masthead-install-activation.journal.json"))).resolves.toBeDefined();
+
+    await expect(abortStagedProductionInstallation(receipt.receiptPath, {
+      assertOffline: async () => undefined,
+      runDesktopDatabaseCommand: () => undefined
+    })).resolves.toMatchObject({ aborted: true, recovered: true, target: oldTarget });
+    await expect(lstat(candidate.target)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("resumes abort after an owned staged file was durably selected and removed", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const receipt = await stageProductionInstallation({
+      bundleDigest: candidate.bundleDigest,
+      sourceBundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot
+    });
+    await activateStagedProductionInstallation(receipt.receiptPath, {
+      assertOffline: async () => undefined,
+      runDesktopDatabaseCommand: () => undefined
+    });
+
+    await expect(abortStagedProductionInstallation(receipt.receiptPath, {
+      assertOffline: async () => undefined,
+      runDesktopDatabaseCommand: () => undefined,
+      simulateAbortProcessDeathAfterStep: "staged-0-removed"
+    })).rejects.toMatchObject({ code: "simulated_abort_process_death" });
+    await expect(lstat(receipt.stagedInstanceLauncherPath)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(lstat(receipt.stagedSurface.launcherStage as string)).resolves.toBeDefined();
+
+    await expect(abortStagedProductionInstallation(receipt.receiptPath, {
+      assertOffline: async () => undefined,
+      runDesktopDatabaseCommand: () => undefined
+    })).resolves.toMatchObject({ aborted: true, recovered: true, target: oldTarget });
+    await expect(lstat(candidate.target)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("fails closed for the wrong receipt and for a candidate with matching healthy startup proof", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const receipt = await stageProductionInstallation({
+      bundleDigest: candidate.bundleDigest,
+      sourceBundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot
+    });
+    await activateStagedProductionInstallation(receipt.receiptPath, {
+      assertOffline: async () => undefined,
+      runDesktopDatabaseCommand: () => undefined
+    });
+    const wrongReceiptPath = join(productionRoot, ".masthead-install-11111111-1111-4111-8111-111111111111.receipt.json");
+    const wrongReceipt = JSON.parse(await readFile(receipt.receiptPath, "utf8"));
+    wrongReceipt.receiptPath = wrongReceiptPath;
+    await writeFile(wrongReceiptPath, `${JSON.stringify(wrongReceipt)}\n`);
+    await expect(abortStagedProductionInstallation(wrongReceiptPath, {
+      assertOffline: async () => undefined
+    })).rejects.toThrow("different staged receipt");
+    expect(await realpath(join(productionRoot, "current"))).toBe(candidate.target);
+
+    await publishStartupManifest(receipt);
+    const runtimeNode = join(receipt.target, "resources", "daemon", "node");
+    const daemonEntry = join(receipt.target, "resources", "daemon", "dist", "src", "daemon", "main.js");
+    const daemonProcess = processRecord({
+      argv: [runtimeNode, daemonEntry],
+      environ: { MASTHEAD_DATA_DIR: receipt.dataDirectory, MASTHEAD_DB_PATH: receipt.databasePath },
+      exe: runtimeNode,
+      pid: 12345,
+      starttime: "healthy-daemon"
+    });
+    const healthy = {
+      ok: true,
+      product: "masthead",
+      apiVersion: 1,
+      capabilities: [],
+      buildSha: receipt.buildSha,
+      data: {
+        dataDirectory: receipt.dataDirectory,
+        databasePath: receipt.databasePath,
+        databaseId: "database:test",
+        migrationState: "ready"
+      },
+      runtime: {
+        mode: "primary",
+        writable: true,
+        pid: 12345,
+        daemonInstanceId: "instance:test",
+        host: "127.0.0.1",
+        port: receipt.port,
+        baseUrl: receipt.baseUrl,
+        instanceDir: receipt.instanceDir,
+        instanceManifest: receipt.instanceManifestPath,
+        authoringCommand: receipt.activeInstanceLauncherPath
+      }
+    };
+    await expect(abortStagedProductionInstallation(receipt.receiptPath, {
+      assertManifestWriterGuard: async () => undefined,
+      fetchHealth: async () => healthy,
+      readProcess: async () => daemonProcess
+    })).rejects.toThrow("matching healthy startup proof");
+    expect(await realpath(join(productionRoot, "current"))).toBe(candidate.target);
+    await expect(lstat(receipt.receiptPath)).resolves.toBeDefined();
+    await expect(lstat(oldTarget)).resolves.toBeDefined();
+  });
+
+  test("refuses abort while an exact receipt candidate process is still running", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const receipt = await stageProductionInstallation({
+      bundleDigest: candidate.bundleDigest,
+      sourceBundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot
+    });
+    await activateStagedProductionInstallation(receipt.receiptPath, {
+      assertOffline: async () => undefined,
+      runDesktopDatabaseCommand: () => undefined
+    });
+    const electron = processRecord({
+      argv: [join(candidate.target, "masthead"), `--user-data-dir=${config.dataDirectory}`],
+      environ: { MASTHEAD_DATA_DIR: config.dataDirectory, MASTHEAD_DB_PATH: config.databasePath },
+      exe: join(candidate.target, "masthead"),
+      pid: 7331,
+      starttime: "candidate-live"
+    });
+
+    await expect(abortStagedProductionInstallation(receipt.receiptPath, {
+      fetchHealth: async () => undefined,
+      ownershipProbe: async () => undefined,
+      portBindable: async () => true,
+      readProcesses: async () => [electron]
+    })).rejects.toThrow("empty production process set");
+    expect(await realpath(join(productionRoot, "current"))).toBe(candidate.target);
+    await expect(lstat(receipt.receiptPath)).resolves.toBeDefined();
+    await expect(lstat(oldTarget)).resolves.toBeDefined();
+  });
+
+  test("restores a receipt-bound prepared database once and resumes abort after the restore boundary", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const databaseId = await createDatabaseThroughVersion(config.databasePath, 37);
+    const receipt = await stageProductionInstallation({
+      bundleDigest: candidate.bundleDigest,
+      sourceBundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      databasePath: config.databasePath,
+      homeDir,
+      productionRoot
+    });
+    await activateStagedProductionInstallation(receipt.receiptPath, {
+      assertOffline: async () => undefined,
+      prepareMaintenance: (request: any) => prepareProductionTransition(request),
+      runDesktopDatabaseCommand: () => undefined
+    });
+    const abandonedStages = [
+      join(config.dataDirectory, ".masthead.sqlite.migration-backup-stage-first"),
+      join(config.dataDirectory, ".masthead.sqlite.migration-backup-stage-second"),
+      join(config.dataDirectory, ".masthead.sqlite.recovery-stage-third")
+    ];
+    await Promise.all(abandonedStages.map((path) => writeFile(path, "abandoned")));
+    let restorePromotions = 0;
+    const restoreMaintenance = (request: any) => restoreProductionTransition(request, {
+      onBoundary(boundary) {
+        if (boundary === "after_restore_promotion") restorePromotions += 1;
+      }
+    });
+
+    await expect(abortStagedProductionInstallation(receipt.receiptPath, {
+      assertOffline: async () => undefined,
+      completeMaintenance: (request: any) => completeProductionTransition(request),
+      restoreMaintenance,
+      runDesktopDatabaseCommand: () => undefined,
+      simulateAbortProcessDeathAfterStep: "database-restored"
+    })).rejects.toMatchObject({ code: "simulated_abort_process_death" });
+    const restoredDatabase = new DatabaseSync(config.databasePath, { readOnly: true });
+    expect(getOrCreateDatabaseIdentity(restoredDatabase)).toBe(databaseId);
+    expect(Number(restoredDatabase.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version)).toBe(37);
+    restoredDatabase.close();
+
+    await expect(abortStagedProductionInstallation(receipt.receiptPath, {
+      assertOffline: async () => undefined,
+      completeMaintenance: (request: any) => completeProductionTransition(request),
+      restoreMaintenance,
+      runDesktopDatabaseCommand: () => undefined
+    })).resolves.toMatchObject({ aborted: true, databaseRestored: true, recovered: true, target: oldTarget });
+    expect(restorePromotions).toBe(1);
+    await expect(lstat(`${config.databasePath}.production-transition.json`)).rejects.toMatchObject({ code: "ENOENT" });
+    expect((await readdir(config.dataDirectory)).filter((name) => name.startsWith("masthead.sqlite.backup-")))
+      .toEqual(["masthead.sqlite.backup-current"]);
+    for (const path of abandonedStages) await expect(lstat(path)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("cleans duplicate abandoned migration stages for a legacy activated receipt and permits a newer stage", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const receipt = await stageProductionInstallation({
+      bundleDigest: candidate.bundleDigest,
+      sourceBundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      homeDir,
+      productionRoot
+    });
+    await activateStagedProductionInstallation(receipt.receiptPath, {
+      assertOffline: async () => undefined,
+      runDesktopDatabaseCommand: () => undefined
+    });
+    const databaseId = await createDatabaseThroughVersion(config.databasePath, 37);
+    const abandonedStages = [
+      join(config.dataDirectory, ".masthead.sqlite.migration-backup-stage-first"),
+      join(config.dataDirectory, ".masthead.sqlite.migration-backup-stage-second"),
+      join(config.dataDirectory, ".masthead.sqlite.recovery-stage-third")
+    ];
+    await Promise.all(abandonedStages.map((path) => writeFile(path, "abandoned")));
+    const { cp } = await import("node:fs/promises");
+    await cp(config.databasePath, join(config.dataDirectory, "masthead.sqlite.backup-current"));
+    await cp(config.databasePath, join(config.dataDirectory, "masthead.sqlite.backup-obsolete"));
+
+    await expect(abortStagedProductionInstallation(receipt.receiptPath, {
+      assertOffline: async () => undefined,
+      runDesktopDatabaseCommand: () => undefined
+    })).resolves.toMatchObject({ aborted: true, databaseRestored: false, target: oldTarget });
+    for (const path of abandonedStages) await expect(lstat(path)).rejects.toMatchObject({ code: "ENOENT" });
+    expect((await readdir(config.dataDirectory)).filter((name) => name.startsWith("masthead.sqlite.backup-")))
+      .toEqual(["masthead.sqlite.backup-current"]);
+    const active = new DatabaseSync(config.databasePath, { readOnly: true });
+    expect(getOrCreateDatabaseIdentity(active)).toBe(databaseId);
+    active.close();
+
+    const newer = await secondBundle(productionRoot, oldTarget);
+    const newerStage = await runCli([
+      "stage", "--bundle", newer.target, "--bundle-digest", newer.bundleDigest,
+      "--data-dir", config.dataDirectory, "--production-root", productionRoot
+    ], { HOME: homeDir });
+    expect(newerStage).toMatchObject({ staged: true });
+    await expect(runCli(["activate", "--receipt", newerStage.receiptPath as string], { HOME: homeDir }, {
+      assertOffline: async () => undefined,
+      prepareMaintenance: (request: any) => prepareProductionTransition(request),
+      runDesktopDatabaseCommand: () => undefined
+    })).resolves.toMatchObject({ activated: true, databaseId });
+  });
+
   test("allows five bounded minutes for activation health without extending for maintenance", () => {
     expect(productionHealthPollPolicy()).toEqual({
       intervalMs: 250,
@@ -2285,31 +3240,19 @@ describe("production lifecycle launcher", () => {
     }, null, 2)}\n`;
     await mkdir(runtimeDirectory, { recursive: true });
     await writeFile(databasePath, "database", "utf8");
-    await writeFile(lockPath, body, "utf8");
+    await writeFile(lockPath, body, { encoding: "utf8", mode: 0o600 });
     const evidence = await captureMaintenanceSentinel({ dataDirectory }, identity);
     const calls: string[] = [];
     await clearExactMaintenanceSentinel({ dataDirectory, databasePath }, identity, evidence, {
       assertFullyOffline: async () => { calls.push("fully-offline"); },
       assertRuntimeOffline: async () => { calls.push("runtime-offline"); },
       statProcess: async () => { throw Object.assign(new Error("child absent"), { code: "ENOENT" }); },
-      remove: async (path: string) => {
-        for (const leasePath of [
-          `${databasePath}.lease.sqlite`,
-          join(runtimeDirectory, "database.lease.sqlite")
-        ]) {
-          const contender = new DatabaseSync(leasePath);
-          try {
-            expect(() => contender.exec("PRAGMA busy_timeout = 0; BEGIN EXCLUSIVE;")).toThrow(/locked|busy/iu);
-          } finally {
-            contender.close();
-          }
-        }
-        calls.push("leases-held");
-        await rm(path);
-      }
     });
     await expect(lstat(lockPath)).rejects.toMatchObject({ code: "ENOENT" });
-    expect(calls).toEqual(["runtime-offline", "leases-held", "runtime-offline", "fully-offline"]);
+    expect(calls).toEqual(["runtime-offline", "runtime-offline", "fully-offline"]);
+    const quarantines = (await readdir(runtimeDirectory)).filter((name) => name.includes("maintenance-cleanup"));
+    expect(quarantines).toHaveLength(1);
+    await expect(readFile(join(runtimeDirectory, quarantines[0]!), "utf8")).resolves.toBe(body);
   });
 
   test("refuses stale-sentinel cleanup after replacement, content drift, live PID reuse, or offline failure", async () => {
@@ -2342,16 +3285,16 @@ describe("production lifecycle launcher", () => {
       statProcess: async () => { throw Object.assign(new Error("child absent"), { code: "ENOENT" }); }
     };
 
-    await writeFile(lockPath, exact, "utf8");
+    await writeFile(lockPath, exact, { encoding: "utf8", mode: 0o600 });
     const replacedEvidence = await captureMaintenanceSentinel({ dataDirectory }, identity);
-    await writeFile(replacementPath, replacement, "utf8");
+    await writeFile(replacementPath, replacement, { encoding: "utf8", mode: 0o600 });
     await rename(replacementPath, lockPath);
     await expect(clearExactMaintenanceSentinel(
       { dataDirectory, databasePath }, identity, replacedEvidence, adapters
     )).rejects.toThrow("sentinel identity changed");
     await expect(readFile(lockPath, "utf8")).resolves.toBe(replacement);
 
-    await writeFile(lockPath, exact, "utf8");
+    await writeFile(lockPath, exact, { encoding: "utf8", mode: 0o600 });
     const driftEvidence = await captureMaintenanceSentinel({ dataDirectory }, identity);
     const sameInodeTokenDrift = exact.replace(
       "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
@@ -2363,7 +3306,7 @@ describe("production lifecycle launcher", () => {
     )).rejects.toThrow("sentinel identity changed");
     await expect(readFile(lockPath, "utf8")).resolves.toBe(sameInodeTokenDrift);
 
-    await writeFile(lockPath, exact, "utf8");
+    await writeFile(lockPath, exact, { encoding: "utf8", mode: 0o600 });
     const liveEvidence = await captureMaintenanceSentinel({ dataDirectory }, identity);
     await expect(clearExactMaintenanceSentinel(
       { dataDirectory, databasePath }, identity, liveEvidence,
@@ -2397,9 +3340,9 @@ describe("production lifecycle launcher", () => {
     const replacement = sentinel(9999, "ffffffff-ffff-4fff-8fff-ffffffffffff");
     await mkdir(runtimeDirectory, { recursive: true });
     await writeFile(databasePath, "database", "utf8");
-    await writeFile(lockPath, exact, "utf8");
+    await writeFile(lockPath, exact, { encoding: "utf8", mode: 0o600 });
     const evidence = await captureMaintenanceSentinel({ dataDirectory }, identity);
-    await writeFile(replacementPath, replacement, "utf8");
+    await writeFile(replacementPath, replacement, { encoding: "utf8", mode: 0o600 });
     await expect(clearExactMaintenanceSentinel({ dataDirectory, databasePath }, identity, evidence, {
       acquireLeases: async () => ({ release: async () => undefined }),
       assertFullyOffline: async () => undefined,
@@ -2411,11 +3354,14 @@ describe("production lifecycle launcher", () => {
       statProcess: async () => { throw Object.assign(new Error("child absent"), { code: "ENOENT" }); }
     })).rejects.toThrow("atomic quarantine");
     await expect(readFile(lockPath, "utf8")).resolves.toBe(replacement);
-    expect((await readdir(runtimeDirectory)).filter((name) => name.includes("maintenance-cleanup"))).toEqual([]);
+    const firstQuarantines = (await readdir(runtimeDirectory)).filter((name) => name.includes("maintenance-cleanup"));
+    expect(firstQuarantines).toHaveLength(1);
+    await expect(readFile(join(runtimeDirectory, firstQuarantines[0]!), "utf8")).resolves.toBe(replacement);
 
-    await writeFile(lockPath, exact, "utf8");
+    await rm(lockPath);
+    await writeFile(lockPath, exact, { encoding: "utf8", mode: 0o600 });
     const secondEvidence = await captureMaintenanceSentinel({ dataDirectory }, identity);
-    await writeFile(replacementPath, replacement, "utf8");
+    await writeFile(replacementPath, replacement, { encoding: "utf8", mode: 0o600 });
     const newer = sentinel(10_000, "11111111-1111-4111-8111-111111111111");
     await expect(clearExactMaintenanceSentinel({ dataDirectory, databasePath }, identity, secondEvidence, {
       acquireLeases: async () => ({ release: async () => undefined }),
@@ -2424,14 +3370,16 @@ describe("production lifecycle launcher", () => {
       rename: async (source: string, destination: string) => {
         await rename(replacementPath, source);
         await rename(source, destination);
-        await writeFile(source, newer, "utf8");
+        await writeFile(source, newer, { encoding: "utf8", mode: 0o600 });
       },
       statProcess: async () => { throw Object.assign(new Error("child absent"), { code: "ENOENT" }); }
     })).rejects.toThrow("replacement was preserved");
     await expect(readFile(lockPath, "utf8")).resolves.toBe(newer);
     const quarantines = (await readdir(runtimeDirectory)).filter((name) => name.includes("maintenance-cleanup"));
-    expect(quarantines).toHaveLength(1);
-    await expect(readFile(join(runtimeDirectory, quarantines[0]), "utf8")).resolves.toBe(replacement);
+    expect(quarantines).toHaveLength(2);
+    for (const quarantine of quarantines) {
+      await expect(readFile(join(runtimeDirectory, quarantine), "utf8")).resolves.toBe(replacement);
+    }
   });
 
   test("binds sentinel bytes to an O_NOFOLLOW file descriptor", async () => {
@@ -2450,7 +3398,7 @@ describe("production lifecycle launcher", () => {
       token: "22222222-2222-4222-8222-222222222222"
     });
     await mkdir(runtimeDirectory, { recursive: true });
-    await writeFile(lockPath, body, "utf8");
+    await writeFile(lockPath, body, { encoding: "utf8", mode: 0o600 });
     await writeFile(targetPath, body, "utf8");
     await expect(captureMaintenanceSentinel({ dataDirectory }, identity, {
       open: async (path: string, flags: number) => {
@@ -3226,8 +4174,396 @@ describe("production lifecycle launcher", () => {
     await expect(access(staleBundle)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  test("public install carries one prepared maintenance authority through default staged activation", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const maintenanceProbePath = join(config.dataDirectory, "second-maintenance-authority.json");
+    const candidateNodePath = join(candidate.target, "resources", "daemon", "node");
+    const candidateMaintenancePath = join(
+      candidate.target,
+      "resources",
+      "daemon",
+      "dist",
+      "src",
+      "daemon",
+      "productionTransitionMaintenance.js"
+    );
+    await writeFile(candidateNodePath, [
+      "#!/usr/bin/env bash",
+      `exec '${process.execPath}' "$@"`,
+      ""
+    ].join("\n"), { mode: 0o755 });
+    await writeFile(candidateMaintenancePath, [
+      'const fs = require("node:fs");',
+      "const request = JSON.parse(process.argv[process.argv.indexOf('--request') + 1]);",
+      `fs.writeFileSync(${JSON.stringify(maintenanceProbePath)}, JSON.stringify(request));`,
+      "const journal = JSON.parse(fs.readFileSync(`${request.databasePath}.production-transition.json`, 'utf8'));",
+      "if (journal.nonce !== request.nonce) { fs.writeSync(2, 'transition_receipt_mismatch\\n'); process.exitCode = 1; }",
+      "else { process.stdout.write(JSON.stringify(journal)); }",
+      ""
+    ].join("\n"));
+    const manifest = await writePackagedBundleManifest({
+      bundleRoot: candidate.target,
+      executablePath: join(candidate.target, "masthead"),
+      resourcesPath: join(candidate.target, "resources")
+    });
+    candidate.bundleDigest = manifest.bundleDigest;
+    await createDatabaseThroughVersion(config.databasePath, 37);
+    const launcherPath = join(homeDir, ".local", "bin", "masthead-production");
+    const desktopPath = join(homeDir, ".local", "share", "applications", "ai.animas.masthead.desktop");
+    await writeFile(launcherPath, `MASTHEAD_BUNDLE_DIGEST='${config.bundleDigest}'\n`, { mode: 0o755 });
+    await writeFile(desktopPath, "previous desktop entry\n");
+
+    const calls: string[] = [];
+    const preparedNonces: string[] = [];
+    const result = await transitionProduction({
+      bundleDigest: candidate.bundleDigest,
+      bundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      databasePath: config.databasePath,
+      homeDir,
+      port: config.port,
+      productionRoot
+    }, {
+      acquireLease: async () => ({ release: async () => calls.push("release") }),
+      assertOffline: async () => calls.push("offline"),
+      cleanupCandidate: async () => calls.push("cleanup-candidate"),
+      completeMaintenance: async (request: any) => {
+        calls.push(`complete:${request.nonce}`);
+        await completeProductionTransition(request);
+      },
+      prepareMaintenance: async (request: any) => {
+        calls.push(`prepare:${request.nonce}`);
+        preparedNonces.push(request.nonce);
+        return prepareProductionTransition(request);
+      },
+      restoreMaintenance: (request: any) => restoreProductionTransition(request),
+      runDesktopDatabaseCommand: () => undefined,
+      start: async (startConfig: any) => {
+        calls.push(`start:${startConfig.transitionNonce}`);
+        if (startConfig.target === candidate.target) {
+          const receiptName = (await readdir(productionRoot)).find((entry) => entry.endsWith(".receipt.json"));
+          if (!receiptName) throw new Error("missing staged receipt");
+          const receipt = await loadStagedProductionInstallation(join(productionRoot, receiptName));
+          expect(receipt.transitionNonce).toBe(startConfig.transitionNonce);
+          await publishStartupManifest(receipt);
+        }
+        return { started: true };
+      },
+      stop: async () => { calls.push("stop"); return { stopped: true }; },
+      verifyLiveProof: async () => calls.push("finalize-proof")
+    });
+
+    expect(result).toMatchObject({ activated: true, target: candidate.target });
+    expect(preparedNonces).toHaveLength(1);
+    await expect(lstat(maintenanceProbePath)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(calls).toEqual([
+      "stop",
+      `prepare:${preparedNonces[0]}`,
+      "offline",
+      `start:${preparedNonces[0]}`,
+      `complete:${preparedNonces[0]}`,
+      "finalize-proof",
+      "finalize-proof",
+      "release"
+    ]);
+  });
+
+  test("public install completes its prepared maintenance authority exactly once during staged start", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    const databaseId = await createDatabaseThroughVersion(config.databasePath, 37);
+    const launcherPath = join(homeDir, ".local", "bin", "masthead-production");
+    const desktopPath = join(homeDir, ".local", "share", "applications", "ai.animas.masthead.desktop");
+    await writeFile(launcherPath, `MASTHEAD_BUNDLE_DIGEST='${config.bundleDigest}'\n`, { mode: 0o755 });
+    await writeFile(desktopPath, "previous desktop entry\n");
+    const electron = processRecord({
+      argv: [join(candidate.target, "masthead"), `--user-data-dir=${config.dataDirectory}`],
+      environ: { MASTHEAD_DATA_DIR: config.dataDirectory, MASTHEAD_DB_PATH: config.databasePath },
+      exe: join(candidate.target, "masthead")
+    });
+    const daemon = processRecord({
+      argv: [
+        join(candidate.target, "resources", "daemon", "node"),
+        join(candidate.target, "resources", "daemon", "dist", "src", "daemon", "main.js")
+      ],
+      environ: { MASTHEAD_DATA_DIR: config.dataDirectory, MASTHEAD_DB_PATH: config.databasePath },
+      exe: join(candidate.target, "resources", "daemon", "node"),
+      pid: 43,
+      starttime: "daemon"
+    });
+    const health = {
+      buildSha: candidate.gitSha,
+      buildVersion: candidate.version,
+      data: { dataDirectory: config.dataDirectory, databaseId, databasePath: config.databasePath },
+      ok: true,
+      product: "masthead",
+      runtime: { port: config.port, writable: true },
+      schemaVersion: CURRENT_SCHEMA_VERSION
+    };
+    const calls: string[] = [];
+    let startCompletionCalls = 0;
+    let outerCompletionCalls = 0;
+
+    const result = await transitionProduction({
+      bundleDigest: candidate.bundleDigest,
+      bundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      databasePath: config.databasePath,
+      homeDir,
+      port: config.port,
+      productionRoot
+    }, {
+      acquireLease: async () => ({ release: async () => calls.push("release") }),
+      assertOffline: async () => calls.push("offline"),
+      cleanupCandidate: async () => calls.push("cleanup-candidate"),
+      completeMaintenance: async (request: any) => {
+        outerCompletionCalls += 1;
+        calls.push(`outer-complete:${request.nonce}`);
+        try {
+          await completeProductionTransition(request);
+        } catch (error) {
+          throw new Error(`Production maintenance complete failed (code=1, signal=none): ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+        }
+      },
+      prepareMaintenance: async (request: any) => {
+        calls.push(`prepare:${request.nonce}`);
+        return prepareProductionTransition(request);
+      },
+      restoreMaintenance: (request: any) => restoreProductionTransition(request),
+      runDesktopDatabaseCommand: () => undefined,
+      start: async (startConfig: any) => {
+        const receiptName = (await readdir(productionRoot)).find((entry) => entry.endsWith(".receipt.json"));
+        if (!receiptName) throw new Error("missing staged receipt");
+        await publishStartupManifest(join(productionRoot, receiptName));
+        return startProduction(startConfig, {
+          acquireLease: async () => ({ release: async () => undefined }),
+          completePreparedActivation: async (request: any) => {
+            startCompletionCalls += 1;
+            calls.push(`start-complete:${request.nonce}`);
+            await completeProductionTransition(request);
+          },
+          currentTarget: async () => candidate.target,
+          fetchHealth: async () => health,
+          readProcesses: async () => [electron, daemon],
+          transitionGuard: async () => undefined
+        });
+      },
+      stop: async () => { calls.push("stop"); return { stopped: true }; },
+      verifyLiveProof: async () => calls.push("finalize-proof")
+    });
+
+    expect(result).toMatchObject({ activated: true, target: candidate.target });
+    expect(startCompletionCalls).toBe(1);
+    expect(outerCompletionCalls).toBe(0);
+    expect(calls.filter((call) => call.includes("complete:"))).toHaveLength(1);
+  });
+
+  test("public install does not restore an already-completed transition when start completion proof mismatches", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    await createDatabaseThroughVersion(config.databasePath, 37);
+    const launcherPath = join(homeDir, ".local", "bin", "masthead-production");
+    const desktopPath = join(homeDir, ".local", "share", "applications", "ai.animas.masthead.desktop");
+    await writeFile(launcherPath, `MASTHEAD_BUNDLE_DIGEST='${config.bundleDigest}'\n`, { mode: 0o755 });
+    await writeFile(desktopPath, "previous desktop entry\n");
+    let preparedRequest: any;
+    let preparedReceipt: any;
+    let fallbackCompleted = false;
+    let restored = false;
+    const calls: string[] = [];
+
+    await expect(transitionProduction({
+      bundleDigest: candidate.bundleDigest,
+      bundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      databasePath: config.databasePath,
+      homeDir,
+      port: config.port,
+      productionRoot
+    }, {
+      acquireLease: async () => ({ release: async () => calls.push("release") }),
+      assertOffline: async () => undefined,
+      cleanupCandidate: async () => calls.push("cleanup-candidate"),
+      completeMaintenance: async () => { fallbackCompleted = true; },
+      prepareMaintenance: async (request: any) => {
+        preparedRequest = request;
+        preparedReceipt = await prepareProductionTransition(request);
+        return preparedReceipt;
+      },
+      restoreMaintenance: async () => { restored = true; throw new Error("must not restore completed transition"); },
+      runDesktopDatabaseCommand: () => undefined,
+      start: async () => {
+        await completeProductionTransition(preparedRequest);
+        return {
+          started: true,
+          maintenanceCompletion: {
+            schemaVersion: 1,
+            owner: "staged_start",
+            completed: true,
+            request: {
+              ...preparedRequest,
+              nonce: "35353535-3535-4535-8535-353535353535"
+            },
+            databaseId: preparedReceipt.databaseId,
+            sourceSchemaVersion: preparedReceipt.sourceSchemaVersion,
+            targetSchemaVersion: preparedReceipt.targetSchemaVersion
+          }
+        };
+      },
+      stop: async () => ({ stopped: true })
+    })).rejects.toThrow(
+      "Started production maintenance completion does not match the prepared transition authority.; rollback skipped; maintenance completion outcome unproven"
+    );
+
+    expect(calls).toEqual(["cleanup-candidate", "release"]);
+    expect(fallbackCompleted).toBe(false);
+    expect(restored).toBe(false);
+    expect(await realpath(join(productionRoot, "current"))).toBe(candidate.target);
+    await expect(lstat(`${config.databasePath}.production-transition.json`))
+      .rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("public install rollback preserves one authority and leaves its staged receipt abortable", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    await createDatabaseThroughVersion(config.databasePath, 37);
+    const launcherPath = join(homeDir, ".local", "bin", "masthead-production");
+    const desktopPath = join(homeDir, ".local", "share", "applications", "ai.animas.masthead.desktop");
+    const oldLauncher = `MASTHEAD_BUNDLE_DIGEST='${config.bundleDigest}'\n`;
+    const oldDesktop = "previous desktop entry\n";
+    await writeFile(launcherPath, oldLauncher, { mode: 0o755 });
+    await writeFile(desktopPath, oldDesktop);
+    const calls: string[] = [];
+    let transitionNonce: string | undefined;
+
+    await expect(transitionProduction({
+      bundleDigest: candidate.bundleDigest,
+      bundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      databasePath: config.databasePath,
+      homeDir,
+      port: config.port,
+      productionRoot
+    }, {
+      acquireLease: async () => ({ release: async () => calls.push("release") }),
+      assertOffline: async () => calls.push("offline"),
+      cleanupCandidate: async () => calls.push("cleanup-candidate"),
+      completeMaintenance: async (request: any) => {
+        calls.push(`complete:${request.nonce}`);
+        await completeProductionTransition(request);
+      },
+      prepareMaintenance: async (request: any) => {
+        transitionNonce = request.nonce;
+        calls.push(`prepare:${request.nonce}`);
+        return prepareProductionTransition(request);
+      },
+      restoreMaintenance: async (request: any) => {
+        calls.push(`restore:${request.nonce}`);
+        return restoreProductionTransition(request);
+      },
+      runDesktopDatabaseCommand: () => undefined,
+      start: async (startConfig: any) => {
+        if (startConfig.target === candidate.target) {
+          calls.push(`start-candidate:${startConfig.transitionNonce}`);
+          throw new Error("candidate health failed");
+        }
+        calls.push(`start-rollback:${startConfig.transitionNonce}`);
+        return { started: true };
+      },
+      stop: async () => { calls.push("stop"); return { stopped: true }; }
+    })).rejects.toThrow("candidate health failed; rollback restarted=true");
+
+    expect(await realpath(join(productionRoot, "current"))).toBe(oldTarget);
+    expect(await readFile(launcherPath, "utf8")).toBe(oldLauncher);
+    expect(await readFile(desktopPath, "utf8")).toBe(oldDesktop);
+    await expect(lstat(`${config.databasePath}.production-transition.json`))
+      .rejects.toMatchObject({ code: "ENOENT" });
+    await expect(lstat(join(productionRoot, ".masthead-install-activation.journal.json")))
+      .rejects.toMatchObject({ code: "ENOENT" });
+    const receiptName = (await readdir(productionRoot)).find((entry) => entry.endsWith(".receipt.json"));
+    if (!receiptName) throw new Error("missing rolled-back staged receipt");
+    const rolledBackReceiptPath = join(productionRoot, receiptName);
+    const rolledBackReceipt = await loadStagedProductionInstallation(rolledBackReceiptPath);
+    expect(rolledBackReceipt).not.toHaveProperty("activatedAt");
+    expect(rolledBackReceipt).toMatchObject({
+      target: candidate.target,
+      transitionNonce
+    });
+    expect(calls).toEqual([
+      "stop",
+      `prepare:${transitionNonce}`,
+      "offline",
+      `start-candidate:${transitionNonce}`,
+      "cleanup-candidate",
+      `restore:${transitionNonce}`,
+      `start-rollback:${transitionNonce}`,
+      `complete:${transitionNonce}`,
+      "release"
+    ]);
+    await expect(abortStagedProductionInstallation(rolledBackReceiptPath, {
+      assertOffline: async () => undefined
+    })).resolves.toMatchObject({ aborted: true, cancelled: true, databaseRestored: false });
+  });
+
+  test("public install rejects a mismatched prepared receipt before surface activation and restarts rollback", async () => {
+    const { config, homeDir, productionRoot, target: oldTarget } = await fixture();
+    const candidate = await secondBundle(productionRoot, oldTarget);
+    await mkdir(config.dataDirectory, { recursive: true });
+    await writeFile(config.databasePath, "database exists");
+    const launcherPath = join(homeDir, ".local", "bin", "masthead-production");
+    const desktopPath = join(homeDir, ".local", "share", "applications", "ai.animas.masthead.desktop");
+    const oldLauncher = `MASTHEAD_BUNDLE_DIGEST='${config.bundleDigest}'\n`;
+    await writeFile(launcherPath, oldLauncher, { mode: 0o755 });
+    await writeFile(desktopPath, "previous desktop entry\n");
+    let rollbackStarted = false;
+
+    await expect(transitionProduction({
+      bundleDigest: candidate.bundleDigest,
+      bundlePath: candidate.target,
+      dataDirectory: config.dataDirectory,
+      databasePath: config.databasePath,
+      homeDir,
+      port: config.port,
+      productionRoot
+    }, {
+      acquireLease: async () => ({ release: async () => undefined }),
+      assertOffline: async () => undefined,
+      cleanupCandidate: async () => undefined,
+      completeMaintenance: async () => undefined,
+      prepareMaintenance: async (request: any) => ({
+        ...request,
+        databaseId: "database:prepared",
+        nonce: "34343434-3434-4434-8434-343434343434",
+        schemaVersion: 1,
+        sourceSchemaVersion: 37,
+        state: "ready_to_activate",
+        targetSchemaVersion: CURRENT_SCHEMA_VERSION
+      }),
+      restoreMaintenance: async (request: any) => ({
+        ...request,
+        databaseId: "database:prepared",
+        sourceSchemaVersion: 37,
+        state: "restored"
+      }),
+      runDesktopDatabaseCommand: () => undefined,
+      start: async (startConfig: any) => {
+        rollbackStarted = startConfig.target === oldTarget;
+        return { started: true };
+      },
+      stop: async () => ({ stopped: true })
+    })).rejects.toThrow("Staged production maintenance receipt does not match the activation authority.; rollback restarted=true");
+
+    expect(rollbackStarted).toBe(true);
+    expect(await realpath(join(productionRoot, "current"))).toBe(oldTarget);
+    expect(await readFile(launcherPath, "utf8")).toBe(oldLauncher);
+    await expect(lstat(join(productionRoot, ".masthead-install-activation.journal.json")))
+      .rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   test("activates a staged desktop identity before refreshing the Linux desktop database", async () => {
     const { config, homeDir, productionRoot, target } = await fixture();
+    await createDatabaseThroughVersion(config.databasePath, 37);
     const launcherPath = join(homeDir, ".local", "bin", "masthead-production");
     const desktopPath = join(homeDir, ".local", "share", "applications", "ai.animas.masthead.desktop");
     await writeFile(launcherPath, `MASTHEAD_BUNDLE_DIGEST='${config.bundleDigest}'\n`, { mode: 0o755 });
@@ -3244,9 +4580,9 @@ describe("production lifecycle launcher", () => {
     }, {
       acquireLease: async () => ({ release: async () => undefined }),
       assertOffline: async () => undefined,
-      completeMaintenance: async () => undefined,
+      completeMaintenance: (request: any) => completeProductionTransition(request),
       currentTarget: async () => target,
-      prepareMaintenance: async () => ({ databaseId: "database:test", targetSchemaVersion: 1 }),
+      prepareMaintenance: (request: any) => prepareProductionTransition(request),
       readMaintenanceJournal: async () => undefined,
       runDesktopDatabaseCommand: (command: string) => {
         expect(readFileSync(desktopPath, "utf8")).toContain("StartupWMClass=masthead");
@@ -4427,6 +5763,83 @@ describe("production lifecycle launcher", () => {
       }),
       executable: join(target, "masthead")
     });
+  });
+
+  test("headless start uses only the explicitly proved private display environment", async () => {
+    const { config, root, target } = await fixture();
+    const authPath = join(root, "private-display", "Xauthority");
+    const runtimeDir = join(root, "private-display", "runtime");
+    const privateEnvironment = {
+      ...process.env,
+      DBUS_SESSION_BUS_ADDRESS: undefined,
+      DISPLAY: ":1947",
+      ELECTRON_OZONE_PLATFORM_HINT: "x11",
+      GDK_BACKEND: "x11",
+      MASTHEAD_HEADLESS: "1",
+      MASTHEAD_PRIVATE_DISPLAY: ":1947",
+      MASTHEAD_PRIVATE_DISPLAY_AUTHORITY: authPath,
+      MASTHEAD_PRIVATE_DISPLAY_RUNTIME: runtimeDir,
+      MASTHEAD_PRIVATE_DISPLAY_TOKEN: "a".repeat(64),
+      QT_QPA_PLATFORM: "xcb",
+      SESSION_MANAGER: undefined,
+      WAYLAND_DISPLAY: undefined,
+      XAUTHORITY: authPath,
+      XDG_RUNTIME_DIR: runtimeDir,
+      XDG_SESSION_TYPE: "x11"
+    };
+    const electron = processRecord({
+      argv: [join(target, "masthead"), `--user-data-dir=${config.dataDirectory}`],
+      environ: { MASTHEAD_DATA_DIR: config.dataDirectory, MASTHEAD_DB_PATH: config.databasePath },
+      exe: join(target, "masthead")
+    });
+    const daemon = processRecord({
+      argv: [join(target, "resources", "daemon", "node"), join(target, "resources", "daemon", "dist", "src", "daemon", "main.js")],
+      environ: { MASTHEAD_DATA_DIR: config.dataDirectory, MASTHEAD_DB_PATH: config.databasePath },
+      exe: join(target, "resources", "daemon", "node"), pid: 43, starttime: "daemon"
+    });
+    let scans = 0;
+    let launch: any;
+
+    await startProduction({ ...config, gitSha: "a".repeat(40), version: "0.1.0" }, {
+      acquireLease: async () => ({ release: async () => undefined }),
+      captureSpawned: async () => electron,
+      currentTarget: async () => target,
+      fetchHealth: async () => undefined,
+      ownershipProbe: async () => undefined,
+      portBindable: async () => true,
+      readProcesses: async () => (++scans === 1 ? [] : [electron, daemon]),
+      spawnElectron: async (input: unknown) => { launch = input; return 42; },
+      waitForHealth: async () => ({
+        buildSha: "a".repeat(40), buildVersion: "0.1.0",
+        data: { dataDirectory: config.dataDirectory, databasePath: config.databasePath },
+        ok: true, product: "masthead", runtime: { port: config.port, writable: true }
+      })
+    }, privateEnvironment);
+
+    expect(launch.env).toMatchObject({
+      DISPLAY: ":1947",
+      MASTHEAD_HEADLESS: "1",
+      MASTHEAD_PRIVATE_DISPLAY: ":1947",
+      XAUTHORITY: authPath,
+      XDG_RUNTIME_DIR: runtimeDir
+    });
+    expect(launch.env.WAYLAND_DISPLAY).toBeUndefined();
+    expect(launch.env.DBUS_SESSION_BUS_ADDRESS).toBeUndefined();
+  });
+
+  test("headless start refuses before Electron spawn when private display proof is incomplete", async () => {
+    const { config, target } = await fixture();
+    let spawned = false;
+    await expect(startProduction({ ...config, gitSha: "a".repeat(40), version: "0.1.0" }, {
+      acquireLease: async () => ({ release: async () => undefined }),
+      currentTarget: async () => target,
+      fetchHealth: async () => undefined,
+      ownershipProbe: async () => undefined,
+      portBindable: async () => true,
+      readProcesses: async () => [],
+      spawnElectron: async () => { spawned = true; return 42; }
+    }, { ...process.env, DISPLAY: ":0", MASTHEAD_HEADLESS: "1" })).rejects.toThrow("private display");
+    expect(spawned).toBe(false);
   });
 
   test("start reaches Electron when the first-run database does not exist", async () => {

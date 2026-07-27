@@ -920,6 +920,7 @@ function validV3Bundle(
     runId,
     sessionEnrichments: [{
       enrichment: {
+        keywords: ["canonical dossier", "atomic publication"],
         sessionDossier: {
           blockers: [],
           continuation: { constraints: [], openQuestions: [] },

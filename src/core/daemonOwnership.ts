@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { lstat, mkdir, open, readFile, readlink, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { link, lstat, mkdir, open, readFile, readlink, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
@@ -56,15 +57,20 @@ export async function readDaemonOwnershipMetadata(dataDirectory: string): Promis
 export type DatabaseWriterLock = {
   lockPath: string;
   release: () => Promise<void>;
+  readonly [writerLeaseBrand]: true;
+  isHeld: () => boolean;
 };
+
+const writerLeaseBrand: unique symbol = Symbol("masthead-database-writer-lease");
 
 export async function acquireDatabaseWriterLock(databasePath: string): Promise<DatabaseWriterLock> {
   const canonicalDatabasePath = await canonicalWriterDatabasePath(databasePath);
   const lockPath = `${canonicalDatabasePath}.lease.sqlite`;
-  return acquireSqliteLease(
+  const lease = acquireSqliteLease(
     lockPath,
     `Masthead database is already leased by another writable daemon at ${lockPath}; the lease protects the same canonical database.`
   );
+  return { ...lease, [writerLeaseBrand]: true };
 }
 
 export async function assertWritableDatabaseLocation(databasePath: string, dataDirectory: string): Promise<void> {
@@ -82,7 +88,10 @@ export type LegacyDataDirectoryGuard = {
   release: () => Promise<void>;
 };
 
-export async function acquireLegacyDataDirectoryGuard(dataDirectory: string): Promise<LegacyDataDirectoryGuard> {
+export async function acquireLegacyDataDirectoryGuard(
+  dataDirectory: string,
+  writerLease?: DatabaseWriterLock
+): Promise<LegacyDataDirectoryGuard> {
   const runtimeDirectory = join(dataDirectory, "runtime");
   await mkdir(runtimeDirectory, { recursive: true });
   const lockPath = join(runtimeDirectory, "database.lock");
@@ -92,7 +101,11 @@ export async function acquireLegacyDataDirectoryGuard(dataDirectory: string): Pr
     `A writable daemon already owns canonical data directory ${dataDirectory} through ${leasePath}.`
   );
   try {
-    const sentinel = await acquireCompatibilitySentinel(lockPath, dataDirectory);
+    const sentinel = await acquireCompatibilitySentinel(
+      lockPath,
+      dataDirectory,
+      writerLeaseMatchesDataDirectory(writerLease, dataDirectory)
+    );
     return {
       lockPath,
       release: async () => {
@@ -118,7 +131,7 @@ export async function probeExclusiveDatabaseStartupOwnership(
   const writerLease = await acquireDatabaseWriterLock(databasePath);
   let legacyGuard: LegacyDataDirectoryGuard | undefined;
   try {
-    legacyGuard = await acquireLegacyDataDirectoryGuard(dataDirectory);
+    legacyGuard = await acquireLegacyDataDirectoryGuard(dataDirectory, writerLease);
   } finally {
     try {
       await legacyGuard?.release();
@@ -157,6 +170,7 @@ async function canonicalPathReadOnly(path: string, seen = new Set<string>()): Pr
 type Lease = {
   lockPath: string;
   release: () => Promise<void>;
+  isHeld: () => boolean;
 };
 
 function acquireSqliteLease(lockPath: string, busyMessage: string): Lease {
@@ -171,6 +185,7 @@ function acquireSqliteLease(lockPath: string, busyMessage: string): Lease {
   let released = false;
   return {
     lockPath,
+    isHeld: () => !released,
     release: async () => {
       if (released) return;
       released = true;
@@ -187,19 +202,35 @@ type CompatibilitySentinel = {
   release: () => Promise<void>;
 };
 
-async function acquireCompatibilitySentinel(lockPath: string, dataDirectory: string): Promise<CompatibilitySentinel> {
+async function acquireCompatibilitySentinel(
+  lockPath: string,
+  dataDirectory: string,
+  staleCleanupAllowed: boolean
+): Promise<CompatibilitySentinel> {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     const token = randomUUID();
     try {
-      const handle = await open(lockPath, "wx");
+      const handle = await open(lockPath, "wx", 0o600);
       try {
+        await handle.chmod(0o600);
+        const created = await handle.stat();
+        const currentUid = typeof process.getuid === "function" ? process.getuid() : created.uid;
+        if (
+          !created.isFile() || created.nlink !== 1 || created.uid !== currentUid ||
+          (created.mode & 0o777) !== 0o600
+        ) throw new Error("Compatibility sentinel creation did not establish exact private file ownership.");
         await handle.writeFile(JSON.stringify({
           createdAt: new Date().toISOString(),
           pid: process.pid,
           protocol: "canonical-data-directory-lock-v4",
           token
         }, null, 2), "utf8");
+        await handle.sync();
         const identity = await handle.stat();
+        if (
+          !sameFileIdentity(created, identity) || !identity.isFile() || identity.nlink !== 1 ||
+          identity.uid !== currentUid || (identity.mode & 0o777) !== 0o600
+        ) throw new Error("Compatibility sentinel identity changed during exact creation.");
         return {
           release: () => releaseCompatibilitySentinel(lockPath, token, identity.dev, identity.ino)
         };
@@ -208,7 +239,8 @@ async function acquireCompatibilitySentinel(lockPath: string, dataDirectory: str
       }
     } catch (error) {
       if (!isErrno(error, "EEXIST")) throw error;
-      const [existing, identity] = await Promise.all([readLockJson(lockPath), stat(lockPath).catch(() => undefined)]);
+      if (staleCleanupAllowed && await clearProvenStaleCompatibilitySentinel(lockPath)) continue;
+      const [existing, identity] = await Promise.all([readLockJson(lockPath), lstat(lockPath).catch(() => undefined)]);
       if (!identity) continue;
       const pid = numberField(existing?.pid);
       if (pid && processIsAlive(pid)) {
@@ -222,6 +254,80 @@ async function acquireCompatibilitySentinel(lockPath: string, dataDirectory: str
     }
   }
   throw new Error(`Timed out acquiring compatibility sentinel at ${lockPath}.`);
+}
+
+async function clearProvenStaleCompatibilitySentinel(lockPath: string): Promise<boolean> {
+  const noFollow = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    handle = await open(lockPath, constants.O_RDONLY | noFollow);
+    const before = await handle.stat();
+    if (!before.isFile() || before.nlink !== 1 || before.size < 2 || before.size > 4_096) return false;
+    if ((before.mode & 0o022) !== 0) return false;
+    if (typeof process.getuid === "function" && before.uid !== process.getuid()) return false;
+    const bytes = await handle.readFile();
+    const after = await handle.stat();
+    if (!sameFileIdentity(before, after) || bytes.byteLength !== before.size) return false;
+    const record = parseCanonicalCompatibilitySentinel(bytes.toString("utf8"));
+    if (!record || processIsAlive(record.pid)) return false;
+
+    const quarantinePath = `${lockPath}.stale-${process.pid}-${randomUUID()}`;
+    await rename(lockPath, quarantinePath);
+    const moved = await lstat(quarantinePath);
+    if (!sameFileIdentity(before, moved)) {
+      await restoreQuarantinedReplacement(lockPath, quarantinePath);
+      throw new Error("Compatibility sentinel identity changed during stale cleanup; replacement preserved.");
+    }
+    if (processIsAlive(record.pid)) {
+      await restoreQuarantinedReplacement(lockPath, quarantinePath);
+      throw new Error("Compatibility sentinel PID became live during stale cleanup; sentinel preserved.");
+    }
+    await handle.close();
+    handle = undefined;
+    return true;
+  } catch (error) {
+    if (isErrno(error, "ENOENT")) return true;
+    if (isErrno(error, "ELOOP")) return false;
+    throw error;
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+}
+
+function parseCanonicalCompatibilitySentinel(value: string): { pid: number } | undefined {
+  try {
+    const record = JSON.parse(value) as Record<string, unknown>;
+    const pid = numberField(record.pid);
+    const keys = Object.keys(record).sort();
+    const createdAt = typeof record.createdAt === "string" ? record.createdAt : "";
+    const parsedCreatedAt = Date.parse(createdAt);
+    if (
+      keys.join("\0") !== ["createdAt", "pid", "protocol", "token"].join("\0") ||
+      !pid ||
+      record.protocol !== "canonical-data-directory-lock-v4" ||
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(createdAt) ||
+      !Number.isFinite(parsedCreatedAt) ||
+      new Date(parsedCreatedAt).toISOString() !== createdAt ||
+      parsedCreatedAt > Date.now() ||
+      typeof record.token !== "string" ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(record.token)
+    ) return undefined;
+    return { pid };
+  } catch {
+    return undefined;
+  }
+}
+
+async function restoreQuarantinedReplacement(lockPath: string, quarantinePath: string): Promise<void> {
+  try {
+    await link(quarantinePath, lockPath);
+  } catch (error) {
+    if (!isErrno(error, "EEXIST")) throw error;
+  }
+}
+
+function sameFileIdentity(left: { dev: number | bigint; ino: number | bigint }, right: { dev: number | bigint; ino: number | bigint }): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
 }
 
 async function releaseCompatibilitySentinel(
@@ -267,9 +373,19 @@ function processIsAlive(pid: number): boolean {
     process.kill(pid, 0);
     return true;
   } catch (error) {
-    if (isErrno(error, "EPERM")) return true;
-    return false;
+    return !isErrno(error, "ESRCH");
   }
+}
+
+function writerLeaseMatchesDataDirectory(
+  writerLease: DatabaseWriterLock | undefined,
+  dataDirectory: string
+): boolean {
+  return Boolean(
+    writerLease?.[writerLeaseBrand] === true &&
+    writerLease.isHeld() &&
+    dirname(writerLease.lockPath) === resolve(dataDirectory)
+  );
 }
 
 function isErrno(error: unknown, code: string): boolean {

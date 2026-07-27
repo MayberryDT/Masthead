@@ -42,6 +42,7 @@ async function main() {
   await access(join(resources, "dist", "src", "cli", "mastheadctl.js"), constants.R_OK);
   await access(join(resources, "scripts", "masthead-hook.js"), constants.R_OK);
   await access(join(resources, "scripts", "masthead-production.js"), constants.R_OK);
+  await access(join(resources, "scripts", "masthead-private-display.js"), constants.R_OK);
   await access(join(resources, "scripts", "masthead-production-cold-activation.js"), constants.R_OK);
   await access(join(resourceRoot, "release-manifest.json"), constants.R_OK);
   const release = JSON.parse(await readFile(join(resources, "release.json"), "utf8"));

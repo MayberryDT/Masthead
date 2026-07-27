@@ -46,6 +46,7 @@ export type MastheadHealthDto = {
     instanceDir?: string;
     instanceManifest?: string;
     authoringCommand?: string;
+    authoringContractVersion?: "workbench-authoring-v5";
     startedAt: string;
     mode: MastheadRuntimeMode;
     writable: boolean;

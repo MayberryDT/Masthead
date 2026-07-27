@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
+  createGuidedAuthoringRequest,
   getWorkbenchMissingSessions,
   getWorkbenchAuthoringCapabilities,
   getWorkbenchActivity,
@@ -388,16 +389,16 @@ describe("daemon client review dispositions", () => {
     const capabilities = {
       baseUrl: "http://127.0.0.1:17374",
       buildSha: "build:test",
-      bundleVersion: "workbench-authoring-v4",
-      canarySessions: 3,
+      bundleVersion: "workbench-authoring-v5",
       capability: "artifact_authoring",
       command: "/home/test/.local/bin/mastheadctl",
       databaseId: "database:test",
       instanceId: "instance:test",
       instanceManifest: "/home/test/.local/share/masthead/instance.json",
-      maxSessionsPerAssignment: 12,
-      operations: ["start", "inspect", "scaffold", "save", "review", "finish"],
-      policyVersion: "guided-authoring-v1",
+      maximumSessionsPerPack: 12,
+      minimumSessionsPerPack: 5,
+      operations: ["bootstrap", "start", "claim", "inspect", "scaffold", "save", "finish", "status", "receipt"],
+      policyVersion: "workbench-authoring-v5",
       protocol: "masthead.workbench.authoring/v1",
     };
     vi.stubGlobal("fetch", vi.fn(async () => response(capabilities)));
@@ -409,6 +410,56 @@ describe("daemon client review dispositions", () => {
       "http://127.0.0.1:17374/workbench/authoring/capabilities",
       expect.objectContaining({ headers: { accept: "application/json" } })
     );
+  });
+
+  test("creates Workbench requests through the S2 V5 route", async () => {
+    const created = {
+      handoff: {
+        requestId: "authoring-v5-request:one",
+        startCommand: "/home/test/.local/bin/mastheadctl workbench author bootstrap --request 'authoring-v5-request:one' --json"
+      },
+      nextAction: { command: "start", kind: "start", reason: "Start." },
+      request: { requestId: "authoring-v5-request:one" }
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => response(created)));
+
+    await expect(createGuidedAuthoringRequest("http://127.0.0.1:17374/projection", {
+      buildSha: "build:test",
+      databaseId: "database:test",
+      expectedIdentity: {
+        baseUrl: "http://127.0.0.1:17373",
+        buildSha: "build:test",
+        databaseId: "database:test",
+        instanceId: "instance:test",
+        instanceManifest: "/home/test/.local/share/masthead/instance.json"
+      },
+      sessionIds: ["session:one"]
+    })).resolves.toEqual(created);
+    expect(fetch).toHaveBeenCalledWith(
+      "http://127.0.0.1:17374/workbench/authoring/v5/requests",
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+
+  test("rejects a complete retired V4 capability document", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => response({
+      baseUrl: "http://127.0.0.1:17373",
+      buildSha: "build:test",
+      bundleVersion: "workbench-authoring-v4",
+      canarySessions: 3,
+      capability: "artifact_authoring",
+      command: "/home/test/.local/bin/mastheadctl",
+      databaseId: "database:test",
+      instanceId: "instance:test",
+      instanceManifest: "/home/test/.local/share/masthead/instance.json",
+      maxSessionsPerAssignment: 12,
+      operations: ["start", "inspect", "scaffold", "save", "review", "finish"],
+      policyVersion: "guided-authoring-v1",
+      protocol: "masthead.workbench.authoring/v1"
+    })));
+
+    await expect(getWorkbenchAuthoringCapabilities("http://127.0.0.1:17373/projection"))
+      .rejects.toThrow("complete V5 contract");
   });
 
   test("rejects authoring capabilities that do not identify an absolute installed command", async () => {
@@ -475,7 +526,7 @@ describe("daemon client review dispositions", () => {
 
     await expect(
       getWorkbenchAuthoringCapabilities("http://127.0.0.1:17373/projection")
-    ).rejects.toThrow("complete guided V4 contract");
+    ).rejects.toThrow("complete V5 contract");
   });
 
   test("posts Workbench pipeline write actions to the daemon", async () => {
