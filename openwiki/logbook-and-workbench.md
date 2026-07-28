@@ -44,10 +44,45 @@ time, or an unknown timestamp basis.
 
 Import health and Workbench quality answer different questions. Partial, unrecognized, or
 identity-ambiguous units need **Import repair** and do not enter Not Added. Complete sessions then
-follow the Workbench quality path: meaningful or ambiguous short conversations stay on the package
-path for review; only empty, hook-only, diagnostic-only, exact-duplicate, or manually excluded
-sessions enter Not Added. An automatic suppression is reversible when its evidence revision changes;
-a manual exclusion remains sticky.
+follow the Workbench quality path described below.
+
+## Workbench quality exits (three-way)
+
+After complete import evidence exists, capture quality precheck returns one of three dispositions.
+They are not the same bucket:
+
+| Disposition | Operator name | Where the session sits | Authoring? |
+|-------------|---------------|------------------------|------------|
+| **keep** | Ready (compile-ready) | Package path, quality passed | Eligible for **Copy Agent Prompt** |
+| **review** | Quality review / review hold | Package path, still needs a quality decision | **Not** included in handoff |
+| **suppress** | Not Added to Logbook | Not Added bucket (reason visible) | Never in default agent selection |
+
+**Ready** means the session passed the quality floor and can enter a V5 request. **Review hold**
+means the precheck could not confidently keep or suppress (for example insufficient evidence or an
+ambiguous short transcript). Those rows stay on the package path until an operator disposes them;
+they do **not** move to Not Added by default. **Not Added** is only for confirmed non-publication
+noise (empty, hook-only, diagnostic-only, exact-duplicate) or an explicit operator fail/exclusion.
+
+### Why Not Added can be 0 while half the queue will not author
+
+Not Added and quality review are independent. A large import corpus can show **Not Added = 0** while
+hundreds of sessions sit in **quality review** on the package path. Select-all and package-path
+counts include those review rows; **Copy Agent Prompt** still uses **compile-ready only** and
+discloses how many review-needed sessions were left out. That is intentional: Masthead does not
+silently force review sessions into authoring without a quality decision.
+
+### Operator disposition (intended)
+
+Operators drain review hold without one-by-one Pipeline clicks:
+
+- **Accept** (bulk or selected review) → quality passed → compile-ready for the next handoff.
+- **Fail** (bulk or selected review) → Not Added with an explicit operator reason (for example
+  `operator_rejected` or `insufficient_evidence_confirmed`).
+
+Passed, already-published, and true Not Added rows are unaffected. Review hold does not auto-age
+into Not Added unless a separate aging policy is enabled later; until then the queue only shrinks
+through accept, fail, or evidence revision that re-runs precheck. Automatic suppressions remain
+reversible when evidence revision changes; manual exclusion stays sticky.
 
 ## Logbook (locked UI)
 
@@ -93,8 +128,36 @@ daemon-owned authoring module then enforces the same quality behavior:
 4. review grounded enrichment and any optional-artifact claims progressively; and
 5. atomically publish accepted pack sessions before releasing the next pack.
 
-The immutable pack receipt is the proof of success, and a finish retry returns the same
-receipt. V1–V4 remain audit-only; their mutation routes return `authoring_contract_retired`.
+Each pack finish stores an immutable **pack** receipt and may release the next pack. The
+**request** is complete only when the daemon returns `nextAction.kind === "complete"` and the
+immutable **request** receipt exists. A finish retry returns the same pack receipt without
+duplicate publication. V1–V4 remain audit-only; their mutation routes return
+`authoring_contract_retired`.
+
+### Agent stop rule (full-request obligation)
+
+Finishing one pack is not finishing the request.
+
+- **Stop only** when `nextAction.kind` is `"complete"` **and** a request-level receipt exists.
+- After a non-final pack finish, `nextAction.kind` is typically `"claim_next"` (or an equivalent
+  continue action). The agent must immediately run `nextAction.command`. Do not report the job done.
+- Soft language such as “remaining packs” or a pack-scoped loop is not a completion signal.
+- Masthead never writes enrichment prose; the agent still owns every pack until the request receipt.
+
+Handoff clipboard and bootstrap responses restate this stop rule so a thin start payload cannot be
+mistaken for a one-pack milestone.
+
+### Resume incomplete requests
+
+If the agent process stops mid-request (crash, context limit, or early stop):
+
+1. Keep the **same request id** (do not create a second request for the remaining packs).
+2. Run the instance-bound **bootstrap** (or start) command for that request.
+3. Follow the returned `nextAction` only. Completed packs stay published; the daemon does not
+   re-open them or shrink the original selection.
+4. Continue until the request receipt exists.
+
+Resume is recovery, not optional follow-up. Packs already finished remain part of the audit trail.
 
 ### Locked UI vocabulary
 
@@ -153,4 +216,7 @@ status, reviews, and receipts remain audit history; their mutations return
 - Do not treat “published session” as a Logbook search hit.
 - Do not document Logbook as a session library or dual session/artifact browser.
 - Do not put Workbench process tracking into Logbook.
+- Do not equate Not Added count with “how many sessions need quality attention”; review hold is separate.
+- Do not treat pack finish, pack receipt, or “remaining packs acknowledged” as request completion.
+- Do not open a new V5 request to finish packs that already belong to an incomplete request; resume via bootstrap.
 - Plans under `docs/superpowers/plans/` are history, not the live product contract.
