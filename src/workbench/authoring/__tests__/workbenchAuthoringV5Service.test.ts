@@ -7,6 +7,10 @@ import { migrateDatabase } from "../../../daemon/db/schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../../../daemon/db/sqlite.ts";
 import { getLogbookArtifactDetail } from "../../../daemon/db/logbookArtifactRepository.ts";
 import { readCurrentSessionEnrichment } from "../../../daemon/db/enrichmentRepository.ts";
+import {
+  countWorkbenchQueue,
+  readWorkbenchSessionState
+} from "../../../daemon/db/workbenchPipelineRepository.ts";
 import type { DurableSessionEnrichment } from "../../../shared/sessionEnrichment.ts";
 import {
   WORKBENCH_AUTHORING_V5_COMPLETE_STOP_RULE,
@@ -25,6 +29,7 @@ import {
   saveWorkbenchAuthoringV5Draft,
   startWorkbenchAuthoringV5Pack
 } from "../workbenchAuthoringV5Service.ts";
+import { isWorkbenchAuthoringV5CompileReady } from "../guidedAuthoringPreflight.ts";
 import {
   COMPACTION_BANNER_FIXTURE,
   CRON_BOILERPLATE_FIXTURE,
@@ -201,8 +206,7 @@ describe("workbench-authoring-v5 loop", () => {
       skillContract: {
         owner: "agent",
         scaffoldWritesProse: false,
-        loop: ["start", "inspect", "scaffold", "save", "finish", "claim_next_or_complete"],
-        obligation: "Continue until the immutable request-complete receipt is returned. Resume is only crash recovery."
+        loop: ["start", "inspect", "scaffold", "save", "finish", "claim_next_or_complete"]
       },
       nextAction: {
         kind: "start",
@@ -217,6 +221,17 @@ describe("workbench-authoring-v5 loop", () => {
       }
     });
     expect(bootstrap.skillContract.loop).toContain("claim_next_or_complete");
+    expect(bootstrap.skillContract.scaffoldWritesProse).toBe(false);
+    expect(bootstrap.skillContract.synthesisRule).toMatch(/AGENTS\.md/i);
+    expect(bootstrap.skillContract.synthesisRule).toMatch(/system-reminder/i);
+    expect(bootstrap.skillContract.synthesisRule).toMatch(/MCP connection prose/i);
+    expect(bootstrap.skillContract.synthesisRule).toMatch(/approval JSON/i);
+    expect(bootstrap.skillContract.synthesisRule).toMatch(/risk_level/i);
+    expect(bootstrap.skillContract.synthesisRule).toMatch(/last substantive user ask/i);
+    expect(bootstrap.skillContract.synthesisRule).toMatch(/prose-free/i);
+    expect(bootstrap.skillContract.objective).toMatch(/last substantive user ask/i);
+    expect(bootstrap.skillContract.obligation).toMatch(/request-complete receipt/i);
+    expect(bootstrap.skillContract.obligation).toMatch(/approval-JSON/i);
     expect(bootstrap.nextAction.stopRule).toContain('nextAction.kind === "complete"');
     expect(bootstrap.nextAction.stopRule).toMatch(/request receipt/i);
     expect(bootstrap.nextAction.stopRule).toMatch(/Pack finish is not request completion/i);
@@ -761,6 +776,118 @@ describe("workbench-authoring-v5 loop", () => {
     db.close();
   });
 
+  test("finish hard_reject leaves package path (Not Added) while soft_flag and publishable stay published", async () => {
+    const db = await testDatabase();
+    const sessionIds = Array.from({ length: 5 }, (_, index) => `session:v5:w1-hard-reject:${index + 1}`);
+    for (const sessionId of sessionIds) seedCompileReadySession(db, sessionId);
+    const created = createWorkbenchAuthoringV5Request(db, {
+      actorId: "agent:test",
+      command,
+      currentIdentity: identity,
+      expectedIdentity: identity,
+      sessionIds
+    });
+    const started = startWorkbenchAuthoringV5Pack(db, {
+      command,
+      currentIdentity: identity,
+      expectedIdentity: identity,
+      requestId: created.request.requestId
+    });
+    if (!("pack" in started)) throw new Error("expected_active_pack");
+    const packId = started.pack.packId;
+    await inspectWholePack(db, packId);
+    const authored = authorDraft(buildWorkbenchAuthoringV5Scaffold(db, { command, packId }).draft);
+    authored.sessions[3]!.fields.verification = {
+      status: "unknown",
+      summary: "Verification looks okay."
+    };
+    authored.sessions[4]!.fields = {
+      ...authored.sessions[4]!.fields,
+      ...UNSUPPORTED_COMPLETION_THRASH_FIXTURE
+    };
+    const rejectedSessionId = authored.sessions[4]!.sessionId;
+    const softSessionId = authored.sessions[3]!.sessionId;
+    const publishableSessionIds = authored.sessions.slice(0, 3).map(({ sessionId }) => sessionId);
+
+    const saved = saveWorkbenchAuthoringV5Draft(db, {
+      command,
+      currentIdentity: identity,
+      draft: authored,
+      expectedIdentity: identity,
+      packId
+    });
+    expect(saved.outcomes.map(({ disposition }) => disposition)).toEqual([
+      "publishable",
+      "publishable",
+      "publishable",
+      "soft_flag",
+      "hard_reject"
+    ]);
+    const rejectFindings = saved.outcomes.find(({ sessionId }) => sessionId === rejectedSessionId)?.findings ?? [];
+    expect(rejectFindings.length).toBeGreaterThan(0);
+
+    const finished = finishWorkbenchAuthoringV5Pack(db, {
+      command,
+      currentIdentity: identity,
+      expectedIdentity: identity,
+      packId
+    });
+    expect(finished.receipt.counts).toEqual({
+      attempted: 5,
+      consideredNo: 1,
+      optionalPublished: 0,
+      published: 4,
+      rejected: 1,
+      softFlagged: 1
+    });
+
+    const rejectedState = readWorkbenchSessionState(db, rejectedSessionId);
+    expect(rejectedState).toMatchObject({
+      publicationStatus: "not_added_to_logbook",
+      qualityStatus: "failed",
+      nextAction: "none",
+      nonPublicationReason: "authoring_hard_reject"
+    });
+    expect(isWorkbenchAuthoringV5CompileReady(db, rejectedState!)).toBe(false);
+
+    for (const sessionId of [...publishableSessionIds, softSessionId]) {
+      expect(readWorkbenchSessionState(db, sessionId)).toMatchObject({
+        publicationStatus: "published"
+      });
+    }
+
+    // Hard-reject is off package path; published sessions leave the queue too.
+    expect(countWorkbenchQueue(db)).toBe(0);
+    expect(countWorkbenchQueue(db, { publicationStatus: "not_added_to_logbook" })).toBe(1);
+
+    const rejectActivity = db.prepare(
+      `SELECT details_json AS detailsJson FROM workbench_activity
+       WHERE session_id = ? AND event_type = 'authoring_session_rejected'
+       ORDER BY event_at DESC LIMIT 1`
+    ).get(rejectedSessionId) as { detailsJson: string } | undefined;
+    expect(rejectActivity).toBeTruthy();
+    const rejectDetails = JSON.parse(rejectActivity!.detailsJson) as { findings: Array<{ code: string }> };
+    expect(rejectDetails.findings.map(({ code }) => code)).toEqual(
+      expect.arrayContaining(rejectFindings.map(({ code }) => code))
+    );
+
+    // Idempotent re-finish must not error or re-mutate.
+    const refinis = finishWorkbenchAuthoringV5Pack(db, {
+      command,
+      currentIdentity: identity,
+      expectedIdentity: identity,
+      packId
+    });
+    expect(refinis.receipt.packId).toBe(packId);
+    expect(readWorkbenchSessionState(db, rejectedSessionId)).toMatchObject({
+      publicationStatus: "not_added_to_logbook",
+      qualityStatus: "failed",
+      nextAction: "none",
+      nonPublicationReason: "authoring_hard_reject"
+    });
+    db.close();
+  });
+
   test("hard-rejects the frozen quality failures and grounds only the six core fields", async () => {
     const db = await testDatabase();
     const sessionIds = Array.from({ length: 10 }, (_, index) => `session:v5:hard-gates:${index + 1}`);
@@ -968,6 +1095,84 @@ describe("workbench-authoring-v5 loop", () => {
       "SELECT draft_json AS draftJson FROM workbench_authoring_v5_packs WHERE pack_id = ?"
     ).get(started.pack.packId) as { draftJson: string };
     expect(JSON.parse(stored.draftJson).sessions[0]).not.toHaveProperty("evidenceCatalog");
+    db.close();
+  });
+
+  test("scaffold catalog ranks a real user ask before AGENTS dumps without dropping inspect coverage", async () => {
+    const db = await testDatabase();
+    const sessionId = "session:v5:catalog-rank:1";
+    seedCompileReadySession(db, sessionId);
+    // Chronological noise first, then the substantive ask (agents title from [0] without ranking).
+    db.prepare("DELETE FROM messages WHERE session_id = ?").run(sessionId);
+    db.prepare(
+      `INSERT INTO messages (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      `${sessionId}:agents`,
+      sessionId,
+      "user",
+      "# AGENTS.md instructions for /home/tyler\n<INSTRUCTIONS>policy</INSTRUCTIONS>\n<environment_context><cwd>/tmp</cwd></environment_context>",
+      `${sessionId}:agents-hash`,
+      "2026-06-25T12:00:00.000Z",
+      "{}",
+      "authoritative"
+    );
+    db.prepare(
+      `INSERT INTO messages (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      `${sessionId}:ask`,
+      sessionId,
+      "user",
+      "Please harden OAuth callback state validation before publishing.",
+      `${sessionId}:ask-hash`,
+      "2026-06-25T12:01:00.000Z",
+      "{}",
+      "authoritative"
+    );
+    db.prepare(
+      `INSERT INTO messages (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      `${sessionId}:allow`,
+      sessionId,
+      "assistant",
+      JSON.stringify({ risk_level: "low", outcome: "allow" }),
+      `${sessionId}:allow-hash`,
+      "2026-06-25T12:02:00.000Z",
+      "{}",
+      "authoritative"
+    );
+
+    const created = createWorkbenchAuthoringV5Request(db, {
+      actorId: "agent:test", command, currentIdentity: identity, expectedIdentity: identity, sessionIds: [sessionId]
+    });
+    const started = startWorkbenchAuthoringV5Pack(db, {
+      command, currentIdentity: identity, expectedIdentity: identity, requestId: created.request.requestId
+    });
+    if (!("pack" in started)) throw new Error("expected_active_pack");
+
+    const firstInspect = inspectWorkbenchAuthoringV5Pack(db, {
+      command, currentIdentity: identity, expectedIdentity: identity, packId: started.pack.packId, sessionId, limit: 250
+    });
+    expect(firstInspect.evidence.total).toBeGreaterThanOrEqual(3);
+    // Inspect remains chronological: AGENTS envelope still appears first.
+    expect(firstInspect.evidence.items[0]?.text).toMatch(/# AGENTS\.md instructions/i);
+    await inspectWholePack(db, started.pack.packId);
+    expect(
+      inspectWorkbenchAuthoringV5Pack(db, {
+        command, currentIdentity: identity, expectedIdentity: identity, packId: started.pack.packId, sessionId, limit: 1
+      }).coverage.every(({ complete }) => complete)
+    ).toBe(true);
+
+    const scaffold = buildWorkbenchAuthoringV5Scaffold(db, { command, packId: started.pack.packId });
+    const catalog = scaffold.draft.sessions[0]!.evidenceCatalog;
+    expect(catalog[0]?.text).toContain("Please harden OAuth callback state validation");
+    expect(catalog.some((item) => /# AGENTS\.md instructions/i.test(item.text))).toBe(true);
+    expect(catalog.some((item) => item.text.includes('"outcome":"allow"') || item.text.includes('"outcome": "allow"'))).toBe(true);
+    expect(catalog.map((item) => item.id).sort()).toEqual(
+      firstInspect.evidence.items.map((item) => item.itemId).sort()
+    );
     db.close();
   });
 

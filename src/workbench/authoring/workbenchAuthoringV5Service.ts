@@ -40,7 +40,10 @@ import {
   iterateSessionTranscriptItems,
   type SessionTranscriptRowIdCutoffs
 } from "../../daemon/db/sessionTranscriptRepository.ts";
-import { recordWorkbenchActivity } from "../../daemon/db/workbenchPipelineRepository.ts";
+import {
+  markWorkbenchQuality,
+  recordWorkbenchActivity
+} from "../../daemon/db/workbenchPipelineRepository.ts";
 import type { EvidenceRef } from "../../core/types.ts";
 import type { DurableSessionEnrichment } from "../../shared/sessionEnrichment.ts";
 import {
@@ -325,12 +328,20 @@ export function bootstrapWorkbenchAuthoringV5Request(
     },
     skillContract: {
       owner: "agent" as const,
-      objective: "Author specific, evidence-grounded session knowledge for every session in the request.",
+      objective:
+        "Author specific, evidence-grounded session knowledge for every session in the request. Prefer the last substantive user ask and the retained outcome of assistant work—not AGENTS.md, skill dumps, system-reminder, MCP connection prose, or first-row metadata.",
       scaffoldWritesProse: false as const,
       authoredFields: ["title", "description", "keywords", "purpose", "outcome", "keyWork", "decisions", "verification"],
-      synthesisRule: "Synthesize each dossier from the substantive user ask and retained outcome. Do not treat environment, AGENTS/skill, monitor, protocol, path, timestamp, timezone, or tool rows as the primary ask, and do not extract first-message text, paths, timestamps, or tool tokens deterministically.",
+      synthesisRule:
+        "Synthesize each dossier from the last substantive user ask and the retained outcome of assistant work. " +
+        "Never use AGENTS.md, skill dumps, system-reminder text, or MCP connection prose as the title or primary ask. " +
+        "Never paste approval JSON (risk_level, outcome allow/deny, or similar gate payloads) into description or other authored fields. " +
+        "Do not treat environment, monitor, protocol, path, timestamp, timezone, or tool rows as the primary ask, and do not extract first-message text, paths, timestamps, or tool tokens deterministically. " +
+        "Masthead scaffold remains prose-free: blank skill fields only—agents write all enrichment.",
       loop: ["start", "inspect", "scaffold", "save", "finish", "claim_next_or_complete"],
-      obligation: "Continue until the immutable request-complete receipt is returned. Resume is only crash recovery."
+      obligation:
+        "Continue until the immutable request-complete receipt is returned. Resume is only crash recovery. " +
+        "Do not stop after pack finish. Reject instruction-file titles, system-reminder titles, MCP boilerplate as title/ask, and approval-JSON descriptions before save."
     },
     packPolicy: {
       minimumSessions: MINIMUM_PACK_SIZE,
@@ -494,7 +505,12 @@ export function buildWorkbenchAuthoringV5Scaffold(
     optionalConsiderations: [],
     packId: pack.packId,
     sessions: pack.sessionIds.map((sessionId) => ({
-      evidenceCatalog: evidenceForPackSession(db, pack, sessionId).map(catalogItem),
+      // Rank for authoring: substantive user/assistant first; demote AGENTS/skill/
+      // sandbox/approval/JSON-allow noise. Membership is unchanged (inspect still
+      // requires every item via chronological coverage accounting).
+      evidenceCatalog: evidenceCatalog.rankScaffoldEvidenceCatalogItems(
+        evidenceForPackSession(db, pack, sessionId)
+      ).map(catalogItem),
       fields: blankFields(),
       sessionId
     }))
@@ -554,6 +570,18 @@ export function finishWorkbenchAuthoringV5Pack(
     const publishable = draft.sessions.filter(({ sessionId }) => (
       saved.outcomes.find((outcome) => outcome.sessionId === sessionId)?.disposition !== "hard_reject"
     ));
+    const hardRejected = saved.outcomes.filter(({ disposition }) => disposition === "hard_reject");
+    // D1 / ISSUE-W1: hard-reject leaves the package path (Not Added), not enrich.
+    for (const outcome of hardRejected) {
+      markWorkbenchQuality(db, {
+        actor: { id: request.actorId, kind: "agent" },
+        qualityDecisionSource: "automatic",
+        reason: "authoring_hard_reject",
+        sessionId: outcome.sessionId,
+        status: "failed",
+        suppressionCategory: "confirmed_noise"
+      });
+    }
     for (const session of publishable) {
       applyGuidedSessionEnrichmentInTransaction(db, {
         actorId: request.actorId,

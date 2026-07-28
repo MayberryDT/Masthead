@@ -60,16 +60,18 @@ They are not the same bucket:
 **Ready** means the session passed the quality floor and can enter a V5 request. **Review hold**
 means the precheck could not confidently keep or suppress (for example insufficient evidence or an
 ambiguous short transcript). Those rows stay on the package path until an operator disposes them;
-they do **not** move to Not Added by default. **Not Added** is only for confirmed non-publication
-noise (empty, hook-only, diagnostic-only, exact-duplicate) or an explicit operator fail/exclusion.
+they do **not** move to Not Added by default. **Not Added** is for confirmed non-publication
+noise (empty, hook-only, diagnostic-only, exact-duplicate), an explicit operator fail/exclusion, or
+a V5 save **hard reject** (reason `authoring_hard_reject` — see clearance below).
 
 ### Why Not Added can be 0 while half the queue will not author
 
 Not Added and quality review are independent. A large import corpus can show **Not Added = 0** while
-hundreds of sessions sit in **quality review** on the package path. Select-all and package-path
-counts include those review rows; **Copy Agent Prompt** still uses **compile-ready only** and
-discloses how many review-needed sessions were left out. That is intentional: Masthead does not
-silently force review sessions into authoring without a quality decision.
+hundreds of sessions sit in **quality review** on the package path. Package-path counts include
+those review rows. **Select-all for authoring** (and **Copy Agent Prompt**) uses **compile-ready
+only** and discloses how many review-needed sessions were left out — review-only rows never join
+the V5 request. That is intentional: Masthead does not silently force review sessions into
+authoring without a quality decision.
 
 ### Operator disposition (intended)
 
@@ -83,6 +85,26 @@ Passed, already-published, and true Not Added rows are unaffected. Review hold d
 into Not Added unless a separate aging policy is enabled later; until then the queue only shrinks
 through accept, fail, or evidence revision that re-runs precheck. Automatic suppressions remain
 reversible when evidence revision changes; manual exclusion stays sticky.
+
+### After V5 finish: package-path clearance
+
+A finished pack (and a completed request) does **not** mean “Workbench is empty.”
+
+| Outcome on finish | Package path | Where it goes |
+|-------------------|--------------|---------------|
+| **publishable** / **soft_flag** | Leaves | Published (Logbook artifact); soft flags may carry Activity warnings |
+| **hard_reject** | Leaves | **Not Added** with reason `authoring_hard_reject` (Activity: session rejected; not still “enrich”) |
+| Sessions never in the request (review hold, unselected ready) | Stay | Still need operator disposition or a later request |
+| New sessions that arrive during/after the campaign | May appear | Independent of the finished request |
+
+After every pack of a request has finished, **only unfinished ready work** that was never part of
+that request (or newly arrived compile-ready sessions) remains authorable on the package path.
+Hard-rejected sessions no longer sit as `enrich` / package-path leftovers — they are cleared to Not
+Added so the next select-all does not re-offer them.
+
+**Request complete ≠ empty Workbench.** `nextAction.kind === "complete"` plus the request receipt
+means the **selected** campaign is done. Review-hold rows, other ready sessions not in that
+selection, and any new imports can still fill Workbench.
 
 ## Logbook (locked UI)
 
@@ -219,4 +241,7 @@ status, reviews, and receipts remain audit history; their mutations return
 - Do not equate Not Added count with “how many sessions need quality attention”; review hold is separate.
 - Do not treat pack finish, pack receipt, or “remaining packs acknowledged” as request completion.
 - Do not open a new V5 request to finish packs that already belong to an incomplete request; resume via bootstrap.
+- Do not treat “request complete” as “Workbench package path is empty” — new sessions and review hold can remain.
+- Do not treat hard-rejected sessions as still on the package path for re-authoring; they are Not Added (`authoring_hard_reject`) until an explicit re-enroll/quality path.
+- Do not include review-only rows in the V5 authoring selection; select-all handoff is compile-ready only.
 - Plans under `docs/superpowers/plans/` are history, not the live product contract.

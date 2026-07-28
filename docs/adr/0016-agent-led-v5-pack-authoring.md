@@ -50,9 +50,17 @@ durable infrastructure and evidence checks while leaving all enrichment meaning 
   packs stay published; resume does not shrink the selection or open a second request for remaining
   packs.
 - **Selection quality boundary:** capture quality is three-way — ready (`keep`), review hold
-  (`review` on package path), Not Added (`suppress`). Copy Agent Prompt includes compile-ready only
-  and discloses review-left-out counts. Review hold is not Not Added; operators accept or fail
-  review rows (including bulk disposition) rather than authoring around an unexplained purgatory.
+  (`review` on package path), Not Added (`suppress`). Copy Agent Prompt / select-all handoff
+  includes compile-ready only and discloses review-left-out counts; review-only rows never join the
+  V5 request. Review hold is not Not Added; operators accept or fail review rows (including bulk
+  disposition) rather than authoring around an unexplained purgatory.
+- **Hard-reject clearance:** on V5 pack finish, `hard_reject` sessions leave the package path and
+  become Not Added with reason `authoring_hard_reject` (Activity rejects them; they do not stay as
+  enrich leftovers). Soft-flag and publishable sessions leave as published. After a completed
+  request, only unfinished ready work (unselected or newly arrived) remains authorable on the
+  package path.
+- **Request complete ≠ empty Workbench:** a finished request clears its selected sessions to
+  published or Not Added; review hold and later imports can still populate Workbench independently.
 - Release proof proceeds through 10-session, 50-session, and full-selection gates. These validate
   quality and autonomy without reintroducing a canary or operator checkpoint.
 - Historical V4 assignments, canary reviews, dispositions, and receipts retain their original
