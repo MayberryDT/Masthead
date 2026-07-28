@@ -292,18 +292,34 @@ describe("workbench-authoring-v5 loop", () => {
       const expectedStartCommand =
         `${command} workbench author start --request '${created.request.requestId}' --json`;
       if (packIndex === 0) {
+        // ISSUE-A5: pack finish is not request completion.
         expect(finished.nextAction).toMatchObject({
           kind: "claim_next",
-          command: expectedStartCommand
+          command: expectedStartCommand,
+          progress: { requestComplete: false },
+          stopRule: WORKBENCH_AUTHORING_V5_INCOMPLETE_STOP_RULE
         });
+        expect(finished.nextAction.kind).not.toBe("complete");
         expect(finished.followUp).toEqual({
           kind: "start",
           command: expectedStartCommand,
           reason: expect.stringMatching(/incomplete|next|claim|start/i)
         });
         expect(finished.requestReceipt).toBeUndefined();
+        const midStatus = getWorkbenchAuthoringV5RequestStatus(db, {
+          command,
+          requestId: created.request.requestId
+        });
+        expect(midStatus).not.toHaveProperty("receipt");
+        expect(midStatus.request.status).toBe("active");
+        expect(midStatus.nextAction.kind).not.toBe("complete");
       } else {
-        expect(finished.nextAction).toMatchObject({ kind: "complete", command: "" });
+        expect(finished.nextAction).toMatchObject({
+          kind: "complete",
+          command: "",
+          progress: { requestComplete: true },
+          stopRule: WORKBENCH_AUTHORING_V5_COMPLETE_STOP_RULE
+        });
         expect(finished.followUp).toBeUndefined();
         expect(finished.requestReceipt).toMatchObject({
           receiptVersion: "workbench-authoring-v5-request-receipt-v1",
@@ -317,6 +333,32 @@ describe("workbench-authoring-v5 loop", () => {
         packId
       });
       expect(retried).toEqual(finished);
+
+      // ISSUE-A5: agent-facing multipack contract — pack finish is not request completion.
+      // A1 may later add stopRule/progress on finish/status DTOs; extend these assertions after A1 merges.
+      const isLastPack = packIndex === 1;
+      if (!isLastPack) {
+        expect(finished).not.toHaveProperty("requestReceipt");
+        expect(finished.nextAction.kind).toBe("claim_next");
+        expect(finished.nextAction.kind).not.toBe("complete");
+        expect(finished.nextAction.command).toContain("workbench author start");
+        const midStatus = getWorkbenchAuthoringV5RequestStatus(db, {
+          command,
+          requestId: created.request.requestId
+        });
+        expect(midStatus).not.toHaveProperty("receipt");
+        expect(midStatus.request.status).toBe("active");
+        expect(midStatus.nextAction.kind).not.toBe("complete");
+        expect(midStatus.nextAction.kind).toBe("start");
+      } else {
+        expect(finished.requestReceipt).toMatchObject({
+          receiptVersion: "workbench-authoring-v5-request-receipt-v1",
+          requestId: created.request.requestId
+        });
+        expect(finished.nextAction.kind).toBe("complete");
+        expect(finished.nextAction.command).toBe("");
+      }
+
       expectedPublished += authored.sessions.length - 1;
       expectedRejected += 1;
       expectedSoftFlagged += 1;
@@ -552,6 +594,8 @@ describe("workbench-authoring-v5 loop", () => {
       rejected: 1,
       softFlagged: 1
     });
+    // ISSUE-A5: first of two packs — pack receipt only; request is not complete.
+    expect(finished).not.toHaveProperty("requestReceipt");
     expect(finished.nextAction).toMatchObject({
       kind: "claim_next",
       command: `${command} workbench author start --request '${created.request.requestId}' --json`,
@@ -564,6 +608,7 @@ describe("workbench-authoring-v5 loop", () => {
       },
       stopRule: WORKBENCH_AUTHORING_V5_INCOMPLETE_STOP_RULE
     });
+    expect(finished.nextAction.kind).not.toBe("complete");
     expect(finished.nextAction.reason).toContain("Request incomplete (10/20 sessions, 1/2 packs)");
     expect(finished.nextAction.reason).toContain("Immediately run nextAction.command");
     expect(finished.nextAction.reason).toContain("Do not report success");
@@ -572,7 +617,13 @@ describe("workbench-authoring-v5 loop", () => {
       command: finished.nextAction.command,
       reason: expect.stringMatching(/incomplete|next fixed pack|do not report success/i)
     });
-    expect(finished.requestReceipt).toBeUndefined();
+    const midStatus = getWorkbenchAuthoringV5RequestStatus(db, {
+      command,
+      requestId: created.request.requestId
+    });
+    expect(midStatus).not.toHaveProperty("receipt");
+    expect(midStatus.request.status).toBe("active");
+    expect(midStatus.nextAction.kind).not.toBe("complete");
     const next = startWorkbenchAuthoringV5Pack(db, {
       command,
       currentIdentity: identity,
@@ -586,6 +637,9 @@ describe("workbench-authoring-v5 loop", () => {
         stopRule: WORKBENCH_AUTHORING_V5_INCOMPLETE_STOP_RULE
       }
     });
+    expect(next).not.toHaveProperty("requestReceipt");
+    if (!("nextAction" in next)) throw new Error("expected_active_pack");
+    expect(next.nextAction.kind).not.toBe("complete");
 
     const activityTypes = (db.prepare(
       "SELECT event_type AS eventType FROM workbench_activity WHERE related_run_id = ?"
