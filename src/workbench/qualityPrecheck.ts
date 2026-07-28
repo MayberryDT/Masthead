@@ -34,6 +34,17 @@ export function runCaptureQualityPrecheck(db: MastheadDatabase, sessionId: strin
   ) {
     return result(sessionId, "suppress", "diagnostic_only");
   }
+  // System/session-start shells (e.g. Grok "session start" every ~5m): no user,
+  // assistant, tool, or file evidence — suppress to Not Added, not review.
+  if (
+    coverage.userMessages === 0 &&
+    coverage.assistantMessages === 0 &&
+    coverage.fileEffects === 0 &&
+    coverage.toolCalls + coverage.toolResults === 0 &&
+    coverage.messages > 0
+  ) {
+    return result(sessionId, "suppress", "session_start_only");
+  }
   if (hasExactCanonicalDuplicate(db, sessionId)) return result(sessionId, "suppress", "exact_duplicate");
   if (coverage.fileEffects > 0) return result(sessionId, "keep", "durable_file_effect");
   if (coverage.toolCalls + coverage.toolResults >= 4 && coverage.userMessages >= 1) {
