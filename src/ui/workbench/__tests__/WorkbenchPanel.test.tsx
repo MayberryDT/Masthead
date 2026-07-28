@@ -586,10 +586,90 @@ describe("WorkbenchPanel", () => {
     expect(html).toContain("grok");
     expect(html).toContain("2026-07-08T11:30:00.000Z");
     expect(html).toContain("workbench-quality-review-panel");
+    expect(html).toContain(">session</th>");
+    expect(html).toContain(">reason</th>");
+    expect(html).toContain(">runtime</th>");
+    expect(html).toContain(">last activity</th>");
+    expect(html).toContain('aria-label="Select Capture needs review for quality disposition"');
+    expect(html).toContain("Select visible");
     expect(html).not.toContain("Not Added — excluded from package path");
     for (let index = 0; index < forbiddenTokenParts.length; index += 1) {
       expect(html).not.toContain(forbiddenToken(index));
     }
+  });
+
+  test("Quality review panel empty state and bulk accept/fail labels", () => {
+    const empty = renderToStaticMarkup(
+      <WorkbenchPanel
+        sessions={[]}
+        qualityReviewOpen
+        qualityReviewSessions={[]}
+        qualityReviewSummary={{ ok: true, total: 0, reasons: [] }}
+        notAddedSummary={{ ok: true, total: 0, reasons: [] }}
+        loading={false}
+        setQualityReviewOpen={() => undefined}
+        onClearSelection={() => undefined}
+        onRetry={() => undefined}
+        onSelectAll={() => undefined}
+        onToggleSession={() => undefined}
+      />
+    );
+    expect(empty).toContain("No sessions awaiting quality review");
+    expect(empty).toContain("workbench-quality-review-panel");
+    expect(empty).not.toContain("Select visible");
+    expect(empty).not.toContain("Accept 1");
+    expect(empty).not.toContain("Fail 1");
+
+    const rows: WorkbenchQualityReviewSessionDto[] = [
+      {
+        lastActivityAt: "2026-07-08T11:30:00.000Z",
+        lifecycle: "ended",
+        project: "Masthead",
+        reason: "insufficient_evidence",
+        runtime: "grok",
+        sessionId: "session:review-a",
+        title: "Review A"
+      },
+      {
+        lastActivityAt: "2026-07-08T11:31:00.000Z",
+        lifecycle: "ended",
+        reason: "insufficient_evidence",
+        runtime: "codex",
+        sessionId: "session:review-b",
+        title: "Review B"
+      }
+    ];
+    const withSelection = renderToStaticMarkup(
+      <WorkbenchPanel
+        sessions={[]}
+        qualityReviewOpen
+        qualityReviewSessions={rows}
+        qualityReviewSummary={{
+          ok: true,
+          total: 2,
+          reasons: [{ reason: "insufficient_evidence", count: 2 }]
+        }}
+        selectedSessionIds={new Set(["session:review-a", "session:review-b"])}
+        qualityReviewSelectedCount={2}
+        canRun={allow("quality_pass", "quality_fail")}
+        loading={false}
+        setQualityReviewOpen={() => undefined}
+        onSelectQualityReviewVisible={() => undefined}
+        onClearSelection={() => undefined}
+        onRetry={() => undefined}
+        onSelectAll={() => undefined}
+        onToggleSession={() => undefined}
+      />
+    );
+    expect(withSelection).toContain("Select visible");
+    expect(withSelection).toContain("Accept 2 review");
+    expect(withSelection).toContain("Fail 2 review");
+    expect(withSelection).toContain("operator rejected");
+    expect(withSelection).toContain('aria-label="Select Review A for quality disposition"');
+    expect(withSelection).toContain('aria-label="Select Review B for quality disposition"');
+    expect(withSelection).toContain("insufficient_evidence");
+    expect(withSelection).toContain("2026-07-08T11:30:00.000Z");
+    expect(withSelection).toContain("2026-07-08T11:31:00.000Z");
   });
 
   test("shows action error strip and quiet last-action summary", () => {
