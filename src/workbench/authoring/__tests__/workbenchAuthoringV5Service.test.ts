@@ -1088,6 +1088,84 @@ describe("workbench-authoring-v5 loop", () => {
     db.close();
   });
 
+  test("scaffold catalog ranks a real user ask before AGENTS dumps without dropping inspect coverage", async () => {
+    const db = await testDatabase();
+    const sessionId = "session:v5:catalog-rank:1";
+    seedCompileReadySession(db, sessionId);
+    // Chronological noise first, then the substantive ask (agents title from [0] without ranking).
+    db.prepare("DELETE FROM messages WHERE session_id = ?").run(sessionId);
+    db.prepare(
+      `INSERT INTO messages (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      `${sessionId}:agents`,
+      sessionId,
+      "user",
+      "# AGENTS.md instructions for /home/tyler\n<INSTRUCTIONS>policy</INSTRUCTIONS>\n<environment_context><cwd>/tmp</cwd></environment_context>",
+      `${sessionId}:agents-hash`,
+      "2026-06-25T12:00:00.000Z",
+      "{}",
+      "authoritative"
+    );
+    db.prepare(
+      `INSERT INTO messages (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      `${sessionId}:ask`,
+      sessionId,
+      "user",
+      "Please harden OAuth callback state validation before publishing.",
+      `${sessionId}:ask-hash`,
+      "2026-06-25T12:01:00.000Z",
+      "{}",
+      "authoritative"
+    );
+    db.prepare(
+      `INSERT INTO messages (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      `${sessionId}:allow`,
+      sessionId,
+      "assistant",
+      JSON.stringify({ risk_level: "low", outcome: "allow" }),
+      `${sessionId}:allow-hash`,
+      "2026-06-25T12:02:00.000Z",
+      "{}",
+      "authoritative"
+    );
+
+    const created = createWorkbenchAuthoringV5Request(db, {
+      actorId: "agent:test", command, currentIdentity: identity, expectedIdentity: identity, sessionIds: [sessionId]
+    });
+    const started = startWorkbenchAuthoringV5Pack(db, {
+      command, currentIdentity: identity, expectedIdentity: identity, requestId: created.request.requestId
+    });
+    if (!("pack" in started)) throw new Error("expected_active_pack");
+
+    const firstInspect = inspectWorkbenchAuthoringV5Pack(db, {
+      command, currentIdentity: identity, expectedIdentity: identity, packId: started.pack.packId, sessionId, limit: 250
+    });
+    expect(firstInspect.evidence.total).toBeGreaterThanOrEqual(3);
+    // Inspect remains chronological: AGENTS envelope still appears first.
+    expect(firstInspect.evidence.items[0]?.text).toMatch(/# AGENTS\.md instructions/i);
+    await inspectWholePack(db, started.pack.packId);
+    expect(
+      inspectWorkbenchAuthoringV5Pack(db, {
+        command, currentIdentity: identity, expectedIdentity: identity, packId: started.pack.packId, sessionId, limit: 1
+      }).coverage.every(({ complete }) => complete)
+    ).toBe(true);
+
+    const scaffold = buildWorkbenchAuthoringV5Scaffold(db, { command, packId: started.pack.packId });
+    const catalog = scaffold.draft.sessions[0]!.evidenceCatalog;
+    expect(catalog[0]?.text).toContain("Please harden OAuth callback state validation");
+    expect(catalog.some((item) => /# AGENTS\.md instructions/i.test(item.text))).toBe(true);
+    expect(catalog.some((item) => item.text.includes('"outcome":"allow"') || item.text.includes('"outcome": "allow"'))).toBe(true);
+    expect(catalog.map((item) => item.id).sort()).toEqual(
+      firstInspect.evidence.items.map((item) => item.itemId).sort()
+    );
+    db.close();
+  });
+
   test("finishes a previously stored evidence-rich draft through immutable snapshot rehydration", async () => {
     const db = await testDatabase();
     const sessionIds = ["session:v5:legacy-draft:1", "session:v5:legacy-draft:2"];

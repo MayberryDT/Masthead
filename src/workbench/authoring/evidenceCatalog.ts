@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
 import { hasSemanticRedactedText } from "../../core/redaction.ts";
-import type { SessionTranscriptItem, SessionTranscriptKind, SessionTranscriptOrder } from "../../shared/sessionTranscript.ts";
+import type {
+  SessionTranscriptItem,
+  SessionTranscriptKind,
+  SessionTranscriptOrder,
+  SessionTranscriptRole
+} from "../../shared/sessionTranscript.ts";
 import type {
   WorkbenchAuthoringEvidenceManifest,
   WorkbenchAuthoringEvidencePage
@@ -75,6 +80,46 @@ export function hasUsableAuthoringEvidence(db: MastheadDatabase, sessionId: stri
 
 export function hasUsableAuthoringEvidenceItems(items: SessionTranscriptItem[]): boolean {
   return items.some(isUsableAuthoringEvidenceItem);
+}
+
+/**
+ * Minimal shape for scaffold catalog ranking. Accepts canonical transcript items
+ * and V5 catalog rows without requiring every SessionTranscriptItem field.
+ */
+export type ScaffoldEvidenceCatalogItemLike = {
+  itemId?: string;
+  id?: string;
+  kind: SessionTranscriptKind | string;
+  role?: SessionTranscriptRole | string | null;
+  text?: string | null;
+  narrativeText?: string | null;
+  lowValue?: boolean | null;
+  observedAt?: string | null;
+};
+
+/**
+ * Rank evidence for scaffold presentation: substantive user/assistant messages
+ * first; demote instruction dumps and approval/JSON noise. Never drops items so
+ * inspect coverage membership stays complete when the same set is ranked.
+ */
+export function rankScaffoldEvidenceCatalogItems<T extends ScaffoldEvidenceCatalogItemLike>(
+  items: readonly T[]
+): T[] {
+  return items
+    .map((item, index) => ({ index, item, score: scaffoldEvidenceCatalogScore(item) }))
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .map(({ item }) => item);
+}
+
+export function isDemotedScaffoldEvidenceItem(item: ScaffoldEvidenceCatalogItemLike): boolean {
+  if (item.lowValue === true) return true;
+  const text = scaffoldEvidenceText(item);
+  if (!text) return false;
+  if (isAgentsOrSkillInstructionDump(text)) return true;
+  if (isDeveloperSandboxPolicyText(text)) return true;
+  if (isApprovalAssessmentWrapperText(text)) return true;
+  if (isPureJsonAssistantAllowText(text, item.role, item.kind)) return true;
+  return false;
 }
 
 export function guidedAuthoringEvidenceRevisionFromInputs(
@@ -290,6 +335,114 @@ function authoringEvidenceSessionSnapshot(
 
 function isUsableAuthoringEvidenceItem(item: SessionTranscriptItem): boolean {
   return item.lowValue !== true && hasSemanticRedactedText(item.narrativeText ?? item.text);
+}
+
+function scaffoldEvidenceCatalogScore(item: ScaffoldEvidenceCatalogItemLike): number {
+  if (isDemotedScaffoldEvidenceItem(item)) return 0;
+  if (item.kind === "message" && item.role === "user") return 400;
+  if (item.kind === "message" && item.role === "assistant") return 350;
+  if (item.kind === "message") return 200;
+  if (item.kind === "tool_result") return 150;
+  if (item.kind === "checkpoint") return 140;
+  if (item.kind === "file_effect") return 130;
+  if (item.kind === "tool_call") return 100;
+  if (item.kind === "runtime_signal") return 80;
+  return 50;
+}
+
+function scaffoldEvidenceText(item: ScaffoldEvidenceCatalogItemLike): string {
+  return `${item.text ?? ""}\n${item.narrativeText ?? ""}`.trim();
+}
+
+function isAgentsOrSkillInstructionDump(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if (/^#\s*AGENTS\.md\b/i.test(trimmed)) return true;
+  if (/\bAGENTS\.md instructions\b/i.test(trimmed) && trimmed.length >= 80) return true;
+  if (/^<skill\b/i.test(trimmed)) return true;
+  if (/<(?:skills_instructions|permissions instructions|INSTRUCTIONS|project-doc)\b/i.test(trimmed)) {
+    // Instruction envelopes without a short standalone user ask dominate the row.
+    const withoutTags = trimmed
+      .replace(/<\/?[a-z][\w:-]*(?:\s+[^>]*)?>/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (withoutTags.length < 40) return true;
+    if (/^#\s*AGENTS\.md\b/i.test(trimmed) || /##\s*Skills\b/i.test(trimmed)) return true;
+  }
+  if (/^##\s*Skills\b/i.test(trimmed) && /\b(?:skill|instructions)\b/i.test(trimmed)) return true;
+  return false;
+}
+
+function isDeveloperSandboxPolicyText(text: string): boolean {
+  const trimmed = text.trim();
+  return [
+    "Filesystem sandboxing defines which files can be read or written.",
+    "Network access is restricted.",
+    "# Codex Behavioral Guidelines",
+    "Knowledge cutoff:",
+    "Current date:",
+    "You are Codex,",
+    "You are an AI assistant"
+  ].some((prefix) => trimmed.startsWith(prefix)) ||
+    (/\b(?:filesystem )?sandbox(?:ing)?\b/i.test(trimmed) &&
+      /\b(?:policy|restricted|network access|read or written)\b/i.test(trimmed) &&
+      trimmed.length < 600);
+}
+
+function isApprovalAssessmentWrapperText(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if (/\bapproval assessment\b/i.test(trimmed)) return true;
+  if (/\bprovide (?:your )?(?:an )?approval\b/i.test(trimmed) && /\brisk_level\b/i.test(trimmed)) {
+    return true;
+  }
+  if (/\brisk_level\b/i.test(trimmed) && /\boutcomes?\b/i.test(trimmed) &&
+      /\b(?:allow|deny|reject|approve)\b/i.test(trimmed) &&
+      !/\b(?:implement|fix|publish|author|migrate|repair)\b/i.test(trimmed)) {
+    return true;
+  }
+  return false;
+}
+
+function isPureJsonAssistantAllowText(
+  text: string,
+  role: ScaffoldEvidenceCatalogItemLike["role"],
+  kind: ScaffoldEvidenceCatalogItemLike["kind"]
+): boolean {
+  if (kind !== "message") return false;
+  if (role !== "assistant" && role !== "system" && role !== "tool") {
+    // Still demote pure allow JSON even when role is missing/unknown on catalog rows.
+    if (role === "user") return false;
+  }
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return false;
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+    const record = parsed as Record<string, unknown>;
+    const keys = Object.keys(record);
+    if (keys.length === 0 || keys.length > 8) return false;
+    const allowedKeys = new Set([
+      "risk_level",
+      "riskLevel",
+      "outcome",
+      "decision",
+      "reason",
+      "rationale",
+      "explanation",
+      "approval",
+      "status"
+    ]);
+    if (!keys.every((key) => allowedKeys.has(key))) return false;
+    const outcome = String(record.outcome ?? record.decision ?? record.approval ?? record.status ?? "");
+    if (/\ballow\b/i.test(outcome)) return true;
+    if ("risk_level" in record || "riskLevel" in record) {
+      return keys.every((key) => allowedKeys.has(key));
+    }
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 function serializeCanonicalEvidenceItem(item: SessionTranscriptItem): string {

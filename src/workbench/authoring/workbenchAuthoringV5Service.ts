@@ -497,7 +497,12 @@ export function buildWorkbenchAuthoringV5Scaffold(
     optionalConsiderations: [],
     packId: pack.packId,
     sessions: pack.sessionIds.map((sessionId) => ({
-      evidenceCatalog: evidenceForPackSession(db, pack, sessionId).map(catalogItem),
+      // Rank for authoring: substantive user/assistant first; demote AGENTS/skill/
+      // sandbox/approval/JSON-allow noise. Membership is unchanged (inspect still
+      // requires every item via chronological coverage accounting).
+      evidenceCatalog: evidenceCatalog.rankScaffoldEvidenceCatalogItems(
+        evidenceForPackSession(db, pack, sessionId)
+      ).map(catalogItem),
       fields: blankFields(),
       sessionId
     }))
