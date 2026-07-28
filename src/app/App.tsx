@@ -752,7 +752,9 @@ export function App() {
           canRun={workbench.canRun}
           clearActionFeedback={workbench.clearActionFeedback}
           copyAgentPrompt={workbench.copyAgentPrompt}
+          copyResumePrompt={workbench.copyResumePrompt}
           error={workbench.error}
+          incompleteAuthoring={workbench.incompleteAuthoring}
           lastActionSummary={workbench.lastActionSummary}
           loading={workbench.loading}
           notAddedOpen={workbench.notAddedOpen}

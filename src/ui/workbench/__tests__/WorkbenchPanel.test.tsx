@@ -550,6 +550,58 @@ describe("WorkbenchPanel", () => {
     expect(withSummary).not.toContain("workbench-action-summary");
   });
 
+  test("shows incomplete authoring banner with resume copy control", () => {
+    const copyResumePrompt = vi.fn(async () => "Masthead authoring request: authoring-v5-request:resume");
+    const html = renderToStaticMarkup(
+      <WorkbenchPanel
+        incompleteAuthoring={{
+          requestId: "authoring-v5-request:resume",
+          status: "active",
+          packsCompleted: 1,
+          packCount: 4,
+          sessionsCompleted: 12,
+          sessionCount: 48,
+          handoff: {
+            requestId: "authoring-v5-request:resume",
+            startCommand: "/opt/masthead/bin/mastheadctl workbench author bootstrap --request 'authoring-v5-request:resume' --json"
+          },
+          updatedAt: "2026-07-28T12:00:00.000Z"
+        }}
+        copyResumePrompt={copyResumePrompt}
+        sessions={[session()]}
+        loading={false}
+        onClearSelection={() => undefined}
+        onRetry={() => undefined}
+        onSelectAll={() => undefined}
+        onToggleSession={() => undefined}
+      />
+    );
+
+    expect(html).toContain("workbench-incomplete-banner");
+    expect(html).toContain(
+      "Authoring incomplete: 1/4 packs · 12/48 sessions. Copy resume prompt to continue."
+    );
+    expect(html).toContain("Copy resume prompt");
+    expect(html).toContain("workbench-copy-resume");
+  });
+
+  test("hides incomplete authoring banner when no active request", () => {
+    const html = renderToStaticMarkup(
+      <WorkbenchPanel
+        sessions={[session()]}
+        loading={false}
+        onClearSelection={() => undefined}
+        onRetry={() => undefined}
+        onSelectAll={() => undefined}
+        onToggleSession={() => undefined}
+      />
+    );
+
+    expect(html).not.toContain("workbench-incomplete-banner");
+    expect(html).not.toContain("Copy resume prompt");
+    expect(html).not.toContain("Authoring incomplete:");
+  });
+
   test("sanitizes forbidden session metadata before rendering the panel", () => {
     const html = renderToStaticMarkup(
       <WorkbenchPanel

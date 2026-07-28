@@ -216,6 +216,63 @@ describe("Workbench authoring V5 HTTP API", () => {
     expect(failedSessions.map(({ sessionId }) => sessionId)).toEqual(sessionIds.slice(0, 10).sort());
     db.close();
   });
+
+  test("GET /workbench/authoring/v5/requests returns incomplete resume summary", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "masthead-authoring-v5-api-incomplete-"));
+    tempDirs.push(directory);
+    const db = await openMastheadDatabase(join(directory, "masthead.sqlite"));
+    migrateDatabase(db);
+    const identity = {
+      baseUrl: "http://127.0.0.1:17373",
+      buildSha: "build:test",
+      databaseId: "database:test",
+      instanceId: "instance:test",
+      instanceManifest: join(directory, "masthead-instance.json")
+    };
+    const context = v5Context(db, identity);
+    const sessionIds = Array.from({ length: 5 }, (_, index) => `session:v5-incomplete:${index}`);
+    sessionIds.forEach((sessionId) => {
+      seedSession(db, { lifecycle: "completed", model: "gpt-5.6-sol", project: "Masthead", sessionId, title: sessionId });
+      markSessionCompileReady(db, sessionId);
+    });
+
+    const empty = routeWorkbenchAuthoringV5Request(context, {
+      method: "GET",
+      url: new URL("http://127.0.0.1/workbench/authoring/v5/requests")
+    });
+    expect(empty).toEqual({ body: {}, status: 200 });
+
+    const created = routeWorkbenchAuthoringV5Request(context, {
+      body: { creationToken: "api-incomplete", expectedIdentity: identity, sessionIds },
+      method: "POST",
+      url: new URL("http://127.0.0.1/workbench/authoring/v5/requests")
+    });
+    expect(created?.status).toBe(201);
+    const requestId = (created?.body as { request: { requestId: string } }).request.requestId;
+
+    const incomplete = routeWorkbenchAuthoringV5Request(context, {
+      method: "GET",
+      url: new URL("http://127.0.0.1/workbench/authoring/v5/requests")
+    });
+    expect(incomplete).toMatchObject({
+      status: 200,
+      body: {
+        request: {
+          requestId,
+          status: "open",
+          packsCompleted: 0,
+          packCount: 1,
+          sessionsCompleted: 0,
+          sessionCount: 5,
+          handoff: {
+            requestId,
+            startCommand: `/opt/masthead/bin/mastheadctl workbench author bootstrap --request '${requestId}' --json`
+          }
+        }
+      }
+    });
+    db.close();
+  });
 });
 
 function v5Context(db: Awaited<ReturnType<typeof openMastheadDatabase>>, identity: any) {
