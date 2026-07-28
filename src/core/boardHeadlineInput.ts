@@ -34,7 +34,7 @@ export function toBoardHeadlineInput(input: {
   const { facts, lifecycle, primaryStatus, signals } = input;
   const canonical = facts.canonicalEnrichment;
   const transcriptMessages = facts.recentTranscriptMessages ?? [];
-  const transcriptSubjects = uniqueBounded(transcriptMessages.flatMap(transcriptSubjectCandidates), 8);
+  const transcriptSubjects = collectTranscriptSubjects(transcriptMessages);
   const transcriptSupport = transcriptSubjectSupport(transcriptMessages);
   const hasTranscriptSubjects = transcriptSubjects.length > 0;
 
@@ -137,25 +137,105 @@ function isBlockedStatus(value: string): boolean {
   return /(^|[\s_-])blocked($|[\s_-])/.test(value);
 }
 
-function transcriptSubjectCandidates(message: string): string[] {
+/**
+ * Rank specific user-task phrases above domain-map singleton labels across the
+ * whole transcript so offlineSubject / LLM prompts see work substance first.
+ */
+function collectTranscriptSubjects(messages: string[]): string[] {
+  const specificPhrases: string[] = [];
+  const domainAndOther: string[] = [];
+
+  for (const message of messages) {
+    const { specific, rest } = transcriptSubjectCandidates(message);
+    specificPhrases.push(...specific);
+    domainAndOther.push(...rest);
+  }
+
+  return uniqueBounded([...specificPhrases, ...domainAndOther], 8);
+}
+
+function transcriptSubjectCandidates(message: string): { specific: string[]; rest: string[] } {
   const normalized = cleanText(message);
-  if (!normalized) return [];
+  if (!normalized) return { specific: [], rest: [] };
+
+  // Assistant openers never contribute subject candidates (even domain hits).
+  if (isAssistantOpener(normalized)) {
+    return { specific: [], rest: [] };
+  }
 
   const withoutLeadingAction = stripLeadingTaskFiller(normalized);
-  const candidates = [
+  const specificPhrase =
+    specificUserTaskPhrase(withoutLeadingAction) ?? specificUserTaskPhrase(normalized);
+
+  const restRaw = [
     ...domainSubjectCandidates(withoutLeadingAction),
     ...domainSubjectCandidates(normalized),
     capitalizedPhrase(withoutLeadingAction)
   ];
-  return uniqueBounded(candidates, 6);
+
+  const rest = uniqueBounded(
+    restRaw.filter((candidate) => candidate && !isAssistantOpener(candidate) && candidate !== specificPhrase),
+    6
+  );
+  const specific = specificPhrase ? [specificPhrase] : [];
+  return { specific, rest };
+}
+
+/**
+ * Multi-word task phrase from a user message after filler strip.
+ * Requires enough substance to beat a singleton domain label (e.g. "Logbook").
+ */
+function specificUserTaskPhrase(value: string): string | undefined {
+  const cleaned = cleanText(value)?.replace(/[.?!,:;]+$/g, "");
+  if (!cleaned) return undefined;
+  if (isAssistantOpener(cleaned)) return undefined;
+
+  const words = cleaned.split(/\s+/).filter(Boolean);
+  // Need more than a one/two-word domain singleton when enough words exist.
+  if (words.length < 3) return undefined;
+
+  const slice = words.slice(0, 6);
+  let phrase = slice.join(" ");
+  while (phrase.length > 56 && slice.length > 3) {
+    slice.pop();
+    phrase = slice.join(" ");
+  }
+  // Drop trailing glue words so subjects do not end mid-clause ("… from subject and").
+  while (
+    slice.length > 3 &&
+    /^(?:and|or|the|a|an|from|to|for|of|with|by|on|in|at|into|over|after|before)$/i.test(slice[slice.length - 1] ?? "")
+  ) {
+    slice.pop();
+    phrase = slice.join(" ");
+  }
+  if (phrase.length > 56 || phrase.length < 10) return undefined;
+
+  // Exact domain-map singleton is not "specific".
+  const domainHits = domainSubjectCandidates(phrase);
+  if (domainHits.some((hit) => hit.toLowerCase() === phrase.toLowerCase())) {
+    return undefined;
+  }
+
+  return cleanText(phrase);
+}
+
+function isAssistantOpener(value: string): boolean {
+  const trimmed = value.trim();
+  if (/^I (will|can|am going to)\b/i.test(trimmed)) return true;
+  if (/^I(?:'m| am) (going to|here to|looking|checking|inspecting)\b/i.test(trimmed)) return true;
+  if (/^Let me\b/i.test(trimmed)) return true;
+  return false;
 }
 
 function capitalizedPhrase(value: string): string | undefined {
+  if (isAssistantOpener(value)) return undefined;
   const words = value.replace(/[.?!,:;]+$/g, "").split(/\s+/);
   const start = words.findIndex((word) => /^[A-Z][A-Za-z0-9.-]*$/.test(word));
   if (start < 0) return undefined;
   const phrase = words.slice(start, start + 3).join(" ");
-  return cleanText(phrase);
+  const cleaned = cleanText(phrase);
+  if (!cleaned || isAssistantOpener(cleaned)) return undefined;
+  return cleaned;
 }
 
 function cleanWorkContextLabel(value: string | undefined): string | undefined {

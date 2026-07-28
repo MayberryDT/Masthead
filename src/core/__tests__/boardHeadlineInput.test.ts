@@ -270,4 +270,68 @@ describe("board headline input", () => {
     expect(input.subjectCandidates.filter((subject) => subject === "headline refreshes")).toHaveLength(1);
     expect(input.evidence.filter((evidence) => evidence === "work on headline refreshes")).toHaveLength(1);
   });
+
+  test("prefers specific user-task phrases over domain-map singleton labels", () => {
+    const input = toBoardHeadlineInput({
+      lifecycle: "running",
+      primaryStatus: "editing",
+      signals: [],
+      facts: facts({
+        workContext: {
+          label: "Logbook work",
+          confidence: "path_cluster",
+          pathClusters: ["logbook"],
+          sourceSignals: ["path:logbook"]
+        },
+        recentTranscriptMessages: ["Fix the Logbook artifact detail loading spinner"],
+        recentFileBasenames: ["LogbookSurface.tsx"]
+      })
+    });
+
+    const first = input.subjectCandidates[0];
+    expect(first).toBeDefined();
+    // Specific multi-word task phrase must outrank the singleton domain label.
+    expect(first?.toLowerCase()).not.toBe("logbook");
+    expect(first).toMatch(/logbook/i);
+    expect(first?.split(/\s+/).length).toBeGreaterThan(1);
+    // Domain map may still contribute, but after the specific phrase.
+    expect(input.subjectCandidates).toContain("Logbook");
+    expect(input.subjectCandidates.indexOf(first!)).toBeLessThan(input.subjectCandidates.indexOf("Logbook"));
+  });
+
+  test("filters assistant opener subjects when a user task phrase exists", () => {
+    const input = toBoardHeadlineInput({
+      lifecycle: "running",
+      primaryStatus: "editing",
+      signals: [],
+      facts: facts({
+        recentTranscriptMessages: [
+          "Fix the Logbook artifact detail loading spinner",
+          "I will inspect the repository",
+          "I can look through the failing tests"
+        ],
+        recentFileBasenames: []
+      })
+    });
+
+    expect(input.subjectCandidates.some((subject) => /^I (will|can|am going to)\b/i.test(subject))).toBe(false);
+    expect(input.subjectCandidates[0]).toMatch(/logbook/i);
+    expect(input.subjectCandidates[0]?.toLowerCase()).not.toBe("logbook");
+  });
+
+  test("does not promote assistant-only openers as subject candidates", () => {
+    const input = toBoardHeadlineInput({
+      lifecycle: "running",
+      primaryStatus: "editing",
+      signals: [],
+      facts: facts({
+        recentTranscriptMessages: ["I will inspect the repository", "I am going to check the adapter next"],
+        recentFileBasenames: [],
+        workContext: undefined
+      })
+    });
+
+    expect(input.subjectCandidates.some((subject) => /^I (will|can|am going to)\b/i.test(subject))).toBe(false);
+    expect(input.subjectCandidates).not.toContain("I will inspect");
+  });
 });
