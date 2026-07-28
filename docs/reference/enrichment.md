@@ -18,8 +18,10 @@ SHA, manifest path, and live instance identity so development and production can
 or database accidentally.
 
 Review-hold sessions never enter the handoff selection. Operators must accept them to ready or fail
-them to Not Added before they can join a later request. Package-path size alone is not the authorable
-count; see [Logbook and Workbench](../../openwiki/logbook-and-workbench.md#workbench-quality-exits-three-way).
+them to Not Added before they can join a later request. **Select-all for authoring / Copy Agent
+Prompt is compile-ready only** — review-only rows are left out of the V5 request (package-path size
+alone is not the authorable count). See
+[Logbook and Workbench](../../openwiki/logbook-and-workbench.md#workbench-quality-exits-three-way).
 
 ## Packs and complete-selection obligation
 
@@ -73,18 +75,43 @@ Two different quality layers:
    **Copy Agent Prompt**. Review hold with Not Added = 0 is normal: review is not Not Added, and it
    is not agent-ready either. Operator bulk accept/fail is the intended drain for large review
    backlogs.
-2. **V5 save quality** (inside a pack) — hard rejects skip that session and let the pack continue;
-   soft flags publish with Activity warnings. Neither outcome creates a request-wide revision loop.
+2. **V5 save quality** (inside a pack) — hard rejects skip publish for that session and, on finish,
+   **leave the package path** (Not Added, reason `authoring_hard_reject`); soft flags publish with
+   Activity warnings. Neither outcome creates a request-wide revision loop.
 
 ## Quality behavior (save-time)
 
-Hard rejects skip that session and let the pack continue: empty or generic titles, protocol or
-compaction boilerplate, empty or insufficient keywords, a purpose that is clearly not the user ask,
-or missing/unknown core grounding. Soft flags publish with Activity warnings for weak verification or
-thin key work. Missing decisions are valid when the session contained no durable decision.
+Hard rejects skip publish for that session and let the pack continue: empty or generic titles,
+protocol or compaction boilerplate, empty or insufficient keywords, a purpose that is clearly not
+the user ask, or missing/unknown core grounding. Soft flags publish with Activity warnings for weak
+verification or thin key work. Missing decisions are valid when the session contained no durable
+decision.
 
 One pack may publish a mix of passing, soft-flagged, and rejected sessions. Save never sends the
 whole request into a revision loop.
+
+### After finish: hard-reject clearance (package path)
+
+On pack **finish**, each session outcome updates Workbench pipeline state:
+
+| Disposition | Pipeline after finish |
+|-------------|------------------------|
+| `publishable` / `soft_flag` | Leaves package path as **published** (Logbook) |
+| `hard_reject` | Leaves package path as **Not Added** with reason **`authoring_hard_reject`** |
+
+Hard-rejected rows must not remain `publish_path` + `enrich` after a finished campaign. Activity
+records `authoring_session_rejected` (and related detail) so operators see reject → Not Added, not
+“still enriching.”
+
+After a request reaches `nextAction.kind === "complete"`:
+
+- Sessions that were in the request are either published or Not Added (`authoring_hard_reject`).
+- **Only unfinished ready work** remains authorable on the package path (sessions never selected,
+  or newly arrived compile-ready rows).
+- **Request complete ≠ empty Workbench.** Review-hold rows and new imports can still appear; they
+  were never part of that completed selection.
+
+Select-all for the next campaign again excludes review-only rows from handoff.
 
 ## Optional artifacts
 
