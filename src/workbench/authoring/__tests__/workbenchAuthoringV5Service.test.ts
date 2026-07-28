@@ -7,6 +7,10 @@ import { migrateDatabase } from "../../../daemon/db/schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../../../daemon/db/sqlite.ts";
 import { getLogbookArtifactDetail } from "../../../daemon/db/logbookArtifactRepository.ts";
 import { readCurrentSessionEnrichment } from "../../../daemon/db/enrichmentRepository.ts";
+import {
+  countWorkbenchQueue,
+  readWorkbenchSessionState
+} from "../../../daemon/db/workbenchPipelineRepository.ts";
 import type { DurableSessionEnrichment } from "../../../shared/sessionEnrichment.ts";
 import {
   WORKBENCH_AUTHORING_V5_COMPLETE_STOP_RULE,
@@ -25,6 +29,7 @@ import {
   saveWorkbenchAuthoringV5Draft,
   startWorkbenchAuthoringV5Pack
 } from "../workbenchAuthoringV5Service.ts";
+import { isWorkbenchAuthoringV5CompileReady } from "../guidedAuthoringPreflight.ts";
 import {
   COMPACTION_BANNER_FIXTURE,
   CRON_BOILERPLATE_FIXTURE,
@@ -758,6 +763,118 @@ describe("workbench-authoring-v5 loop", () => {
       "authoring_session_soft_flagged",
       "authoring_session_rejected"
     ]));
+    db.close();
+  });
+
+  test("finish hard_reject leaves package path (Not Added) while soft_flag and publishable stay published", async () => {
+    const db = await testDatabase();
+    const sessionIds = Array.from({ length: 5 }, (_, index) => `session:v5:w1-hard-reject:${index + 1}`);
+    for (const sessionId of sessionIds) seedCompileReadySession(db, sessionId);
+    const created = createWorkbenchAuthoringV5Request(db, {
+      actorId: "agent:test",
+      command,
+      currentIdentity: identity,
+      expectedIdentity: identity,
+      sessionIds
+    });
+    const started = startWorkbenchAuthoringV5Pack(db, {
+      command,
+      currentIdentity: identity,
+      expectedIdentity: identity,
+      requestId: created.request.requestId
+    });
+    if (!("pack" in started)) throw new Error("expected_active_pack");
+    const packId = started.pack.packId;
+    await inspectWholePack(db, packId);
+    const authored = authorDraft(buildWorkbenchAuthoringV5Scaffold(db, { command, packId }).draft);
+    authored.sessions[3]!.fields.verification = {
+      status: "unknown",
+      summary: "Verification looks okay."
+    };
+    authored.sessions[4]!.fields = {
+      ...authored.sessions[4]!.fields,
+      ...UNSUPPORTED_COMPLETION_THRASH_FIXTURE
+    };
+    const rejectedSessionId = authored.sessions[4]!.sessionId;
+    const softSessionId = authored.sessions[3]!.sessionId;
+    const publishableSessionIds = authored.sessions.slice(0, 3).map(({ sessionId }) => sessionId);
+
+    const saved = saveWorkbenchAuthoringV5Draft(db, {
+      command,
+      currentIdentity: identity,
+      draft: authored,
+      expectedIdentity: identity,
+      packId
+    });
+    expect(saved.outcomes.map(({ disposition }) => disposition)).toEqual([
+      "publishable",
+      "publishable",
+      "publishable",
+      "soft_flag",
+      "hard_reject"
+    ]);
+    const rejectFindings = saved.outcomes.find(({ sessionId }) => sessionId === rejectedSessionId)?.findings ?? [];
+    expect(rejectFindings.length).toBeGreaterThan(0);
+
+    const finished = finishWorkbenchAuthoringV5Pack(db, {
+      command,
+      currentIdentity: identity,
+      expectedIdentity: identity,
+      packId
+    });
+    expect(finished.receipt.counts).toEqual({
+      attempted: 5,
+      consideredNo: 1,
+      optionalPublished: 0,
+      published: 4,
+      rejected: 1,
+      softFlagged: 1
+    });
+
+    const rejectedState = readWorkbenchSessionState(db, rejectedSessionId);
+    expect(rejectedState).toMatchObject({
+      publicationStatus: "not_added_to_logbook",
+      qualityStatus: "failed",
+      nextAction: "none",
+      nonPublicationReason: "authoring_hard_reject"
+    });
+    expect(isWorkbenchAuthoringV5CompileReady(db, rejectedState!)).toBe(false);
+
+    for (const sessionId of [...publishableSessionIds, softSessionId]) {
+      expect(readWorkbenchSessionState(db, sessionId)).toMatchObject({
+        publicationStatus: "published"
+      });
+    }
+
+    // Hard-reject is off package path; published sessions leave the queue too.
+    expect(countWorkbenchQueue(db)).toBe(0);
+    expect(countWorkbenchQueue(db, { publicationStatus: "not_added_to_logbook" })).toBe(1);
+
+    const rejectActivity = db.prepare(
+      `SELECT details_json AS detailsJson FROM workbench_activity
+       WHERE session_id = ? AND event_type = 'authoring_session_rejected'
+       ORDER BY event_at DESC LIMIT 1`
+    ).get(rejectedSessionId) as { detailsJson: string } | undefined;
+    expect(rejectActivity).toBeTruthy();
+    const rejectDetails = JSON.parse(rejectActivity!.detailsJson) as { findings: Array<{ code: string }> };
+    expect(rejectDetails.findings.map(({ code }) => code)).toEqual(
+      expect.arrayContaining(rejectFindings.map(({ code }) => code))
+    );
+
+    // Idempotent re-finish must not error or re-mutate.
+    const refinis = finishWorkbenchAuthoringV5Pack(db, {
+      command,
+      currentIdentity: identity,
+      expectedIdentity: identity,
+      packId
+    });
+    expect(refinis.receipt.packId).toBe(packId);
+    expect(readWorkbenchSessionState(db, rejectedSessionId)).toMatchObject({
+      publicationStatus: "not_added_to_logbook",
+      qualityStatus: "failed",
+      nextAction: "none",
+      nonPublicationReason: "authoring_hard_reject"
+    });
     db.close();
   });
 

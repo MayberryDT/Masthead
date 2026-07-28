@@ -40,7 +40,10 @@ import {
   iterateSessionTranscriptItems,
   type SessionTranscriptRowIdCutoffs
 } from "../../daemon/db/sessionTranscriptRepository.ts";
-import { recordWorkbenchActivity } from "../../daemon/db/workbenchPipelineRepository.ts";
+import {
+  markWorkbenchQuality,
+  recordWorkbenchActivity
+} from "../../daemon/db/workbenchPipelineRepository.ts";
 import type { EvidenceRef } from "../../core/types.ts";
 import type { DurableSessionEnrichment } from "../../shared/sessionEnrichment.ts";
 import {
@@ -554,6 +557,18 @@ export function finishWorkbenchAuthoringV5Pack(
     const publishable = draft.sessions.filter(({ sessionId }) => (
       saved.outcomes.find((outcome) => outcome.sessionId === sessionId)?.disposition !== "hard_reject"
     ));
+    const hardRejected = saved.outcomes.filter(({ disposition }) => disposition === "hard_reject");
+    // D1 / ISSUE-W1: hard-reject leaves the package path (Not Added), not enrich.
+    for (const outcome of hardRejected) {
+      markWorkbenchQuality(db, {
+        actor: { id: request.actorId, kind: "agent" },
+        qualityDecisionSource: "automatic",
+        reason: "authoring_hard_reject",
+        sessionId: outcome.sessionId,
+        status: "failed",
+        suppressionCategory: "confirmed_noise"
+      });
+    }
     for (const session of publishable) {
       applyGuidedSessionEnrichmentInTransaction(db, {
         actorId: request.actorId,
