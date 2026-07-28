@@ -184,4 +184,77 @@ describe("Codex adapter", () => {
     const session = records.find((record) => record.normalized.kind === "session");
     expect(session?.normalized.value).toMatchObject({ title: "Masthead" });
   });
+
+  test("prefers later real user narrative after control-only first user turn", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "masthead-codex-control-then-user-"));
+    tempDirs.push(dir);
+    const path = join(dir, "rollout-control-then-user.jsonl");
+    const realPrompt = "Implement Logbook pagination spacing for dense artifact rows";
+    await writeFile(
+      path,
+      [
+        JSON.stringify({
+          timestamp: "2026-07-01T00:00:00.000Z",
+          type: "session_meta",
+          payload: { id: "session-control-then-user", cwd: "/workspace/Masthead", model: "gpt-5" }
+        }),
+        JSON.stringify({
+          timestamp: "2026-07-01T00:00:01.000Z",
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "<skill>Internal instructions only</skill>" }]
+          }
+        }),
+        JSON.stringify({
+          timestamp: "2026-07-01T00:00:02.000Z",
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "Acknowledged." }]
+          }
+        }),
+        JSON.stringify({
+          timestamp: "2026-07-01T00:00:03.000Z",
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: realPrompt }]
+          }
+        })
+      ].join("\n") + "\n",
+      "utf8"
+    );
+    const source: DiscoveredSource = {
+      confidence: "authoritative",
+      path,
+      runtime: "codex",
+      sourceId: "codex:control-then-user",
+      sourceKind: "jsonl"
+    };
+
+    const records: AdapterRecord[] = [];
+    for await (const record of codexAdapter.backfill(source)) records.push(record);
+
+    const session = records.find((record) => record.normalized.kind === "session");
+    const title = (session?.normalized.value as { title?: string } | undefined)?.title;
+    expect(title).toBeTruthy();
+    expect(title).not.toBe("Masthead");
+    expect(title).toMatch(/Logbook/i);
+    expect(title).toMatch(/pagination/i);
+    // Session must not precede the real user turn (weak title would have locked earlier).
+    const sessionIndex = records.findIndex((record) => record.normalized.kind === "session");
+    const realUserIndex = records.findIndex(
+      (record) =>
+        record.normalized.kind === "message" &&
+        (record.normalized.value as { role?: string; text?: string }).role === "user" &&
+        (record.normalized.value as { text?: string }).text === realPrompt
+    );
+    expect(sessionIndex).toBeGreaterThanOrEqual(0);
+    expect(realUserIndex).toBeGreaterThanOrEqual(0);
+    expect(sessionIndex).toBeLessThanOrEqual(realUserIndex);
+  });
 });

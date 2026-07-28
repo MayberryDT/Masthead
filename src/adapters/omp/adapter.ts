@@ -33,8 +33,8 @@ async function* backfillOmpSource(source: DiscoveredSource, cursor?: IngestCurso
   const modifiedAt = info.mtime.toISOString();
   const resumeOffset = cursor && cursor.byteOffset <= info.size ? cursor.byteOffset : 0;
 
-  // When harness session title is empty, defer the session record until a user turn
-  // supplies a short privacy-safe label (ingest COALESCE keeps the first non-null title).
+  // Empty harness titles: defer session until a user-derived label, or EOF.
+  // Explicit harness titles still emit immediately. COALESCE keeps first non-null title.
   let pendingSession:
     | {
         lineNumber: number;
@@ -49,8 +49,10 @@ async function* backfillOmpSource(source: DiscoveredSource, cursor?: IngestCurso
   let userTitle: string | undefined;
   let sessionYielded = false;
 
-  const emitPendingSession = function* (): Generator<AdapterRecord> {
+  /** Mid-stream only when userTitle is set; force=true at EOF allows empty-title fallback. */
+  const emitPendingSession = function* (options?: { force?: boolean }): Generator<AdapterRecord> {
     if (!pendingSession || sessionYielded) return;
+    if (!userTitle && !options?.force) return;
     const title = pendingSession.explicitTitle ?? userTitle;
     const sessionRecord = record(
       source,
@@ -81,7 +83,7 @@ async function* backfillOmpSource(source: DiscoveredSource, cursor?: IngestCurso
     try {
       payload = JSON.parse(trimmed);
     } catch {
-      yield* emitPendingSession();
+      // Do not force-emit empty/weak session title on diagnostics; wait for user turn or EOF.
       yield { ...diagnosticRecord(source, line.lineNumber, trimmed, "jsonl_invalid_line"), cursorAfter };
       continue;
     }
@@ -126,12 +128,13 @@ async function* backfillOmpSource(source: DiscoveredSource, cursor?: IngestCurso
         }
       }
     }
+    // Emit only once userTitle is known (no-op while still waiting).
     yield* emitPendingSession();
     if (records.length > 0) records[records.length - 1]!.cursorAfter = cursorAfter;
     for (const item of records) yield item;
   }
 
-  yield* emitPendingSession();
+  yield* emitPendingSession({ force: true });
 }
 
 function ompRecordsFromPayload(source: DiscoveredSource, identity: OmpSessionIdentity, lineNumber: number, rawLine: string, payload: Record<string, unknown>): AdapterRecord[] {

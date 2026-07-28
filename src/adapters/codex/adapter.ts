@@ -81,8 +81,8 @@ async function* backfillCodexSource(source: DiscoveredSource, cursor?: IngestCur
   let cwd = cursor?.cwd;
   let model = cursor?.model;
 
-  // Defer the session metadata record until we have a user-derived title candidate
-  // (or reach EOF). Ingest uses COALESCE(title) so the first non-null title sticks.
+  // Defer session metadata until a usable user-derived title exists, or EOF.
+  // Ingest COALESCE keeps the first non-null title — never lock in cwd basename mid-stream.
   let pendingSession:
     | {
         lineNumber: number;
@@ -95,8 +95,10 @@ async function* backfillCodexSource(source: DiscoveredSource, cursor?: IngestCur
   let sessionYielded = false;
 
   const weakTitle = (): string => (cwd ? basename(cwd) : "Codex session");
-  const emitPendingSession = function* (): Generator<AdapterRecord> {
+  /** Mid-stream only when userTitle is set; force=true at EOF allows weak basename fallback. */
+  const emitPendingSession = function* (options?: { force?: boolean }): Generator<AdapterRecord> {
     if (!pendingSession || sessionYielded) return;
+    if (!userTitle && !options?.force) return;
     const title = userTitle ?? weakTitle();
     yield record(
       source,
@@ -123,7 +125,7 @@ async function* backfillCodexSource(source: DiscoveredSource, cursor?: IngestCur
     try {
       payload = JSON.parse(trimmed);
     } catch {
-      yield* emitPendingSession();
+      // Do not force-emit weak session title on diagnostics; wait for user turn or EOF.
       yield diagnosticRecord(source, line.lineNumber, trimmed, "codex_jsonl_invalid_line", cursorAfter(line.byteOffsetAfter));
       continue;
     }
@@ -141,7 +143,6 @@ async function* backfillCodexSource(source: DiscoveredSource, cursor?: IngestCur
         payload,
         cursorAfter: cursorAfter(line.byteOffsetAfter)
       };
-      // Keep scanning for a user narrative before emitting session title.
       continue;
     }
     if (!sourceSessionId || !isRecord(body)) continue;
@@ -159,14 +160,13 @@ async function* backfillCodexSource(source: DiscoveredSource, cursor?: IngestCur
       }
     }
 
-    // Prefer emitting session with user title just before the first transcript record
-    // when we already captured narrative from this message; otherwise use weak title.
+    // Emit session only once userTitle is known (no-op while still waiting).
     yield* emitPendingSession();
     yield record(source, line.lineNumber, observedAt, payload, normalized, cursorAfter(line.byteOffsetAfter));
   }
 
-  // Meta-only files (or files with no recognized body rows) still need a session record.
-  yield* emitPendingSession();
+  // EOF: last-resort weak title if no usable user narrative was found.
+  yield* emitPendingSession({ force: true });
 
   function cursorAfter(byteOffset: number): Omit<IngestCursor, "cursorId"> {
     return { byteOffset, contentFingerprint, cwd, model, modifiedAt, sourceId: source.sourceId, sourcePath: source.path, sourceSessionId };
