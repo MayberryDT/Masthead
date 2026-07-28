@@ -749,6 +749,7 @@ export function App() {
           activity={workbench.activity}
           agentPromptExcludedCount={workbench.agentPromptExcludedCount}
           agentPromptSessionCount={workbench.agentPromptSessionCount}
+          qualityReviewSelectedCount={workbench.qualityReviewSelectedCount}
           canRun={workbench.canRun}
           clearActionFeedback={workbench.clearActionFeedback}
           copyAgentPrompt={workbench.copyAgentPrompt}

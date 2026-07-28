@@ -84,6 +84,8 @@ export type UseWorkbenchControllerResult = {
   qualityReviewOpen: boolean;
   qualityReviewSessions: WorkbenchQualityReviewSessionDto[];
   qualityReviewSummary?: WorkbenchQualityReviewSummaryDto;
+  /** Selected package-path sessions that still need a quality disposition (review / unchecked). */
+  qualityReviewSelectedCount: number;
   retry: () => void;
   runAction: (kind: WorkbenchActionKind) => Promise<void>;
   selectAll: () => Promise<void>;
@@ -116,6 +118,7 @@ export function useWorkbenchController({
   const [qualityReviewOpen, setQualityReviewOpenState] = useState(false);
   const [selectedSessionIds, setSelectedSessionIds] = useState(() => new Set<string>());
   const [selectedCompileReadySessionIds, setSelectedCompileReadySessionIds] = useState(() => new Set<string>());
+  const [selectedQualityReviewSessionIds, setSelectedQualityReviewSessionIds] = useState(() => new Set<string>());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
   const [actionBusy, setActionBusy] = useState(false);
@@ -178,6 +181,7 @@ export function useWorkbenchController({
       setIncompleteAuthoring(incomplete?.request);
       setSelectedSessionIds(selection.present);
       setSelectedCompileReadySessionIds(selection.compileReady);
+      setSelectedQualityReviewSessionIds(selection.qualityReview);
     } catch (loadError) {
       if (!options.signal?.aborted && requestId === loadRequestId.current) {
         setError(loadError instanceof Error ? loadError.message : String(loadError));
@@ -259,6 +263,11 @@ export function useWorkbenchController({
   );
   const agentPromptSessionCount = agentPromptSessionIds.length;
   const agentPromptExcludedCount = selectedSessionIds.size - agentPromptSessionCount;
+  const qualityReviewSelectedIds = useMemo(
+    () => Array.from(selectedSessionIds).filter((sessionId) => selectedQualityReviewSessionIds.has(sessionId)),
+    [selectedQualityReviewSessionIds, selectedSessionIds]
+  );
+  const qualityReviewSelectedCount = qualityReviewSelectedIds.length;
   const copyAgentPrompt = useCallback((): Promise<string> => {
     if (copyRequestInFlightRef.current) return copyRequestInFlightRef.current;
     if (!isLive || actionBusy || !authoringCapabilities || agentPromptSessionIds.length === 0) {
@@ -370,9 +379,8 @@ export function useWorkbenchController({
         case "quality_pass":
         case "quality_fail":
         case "quality_precheck":
-          return selectedSessions.some(
-            (session) => session.qualityStatus === "unchecked" || session.nextAction === "review_quality"
-          );
+          // Prefer tracked review selection so select-all across pages still enables bulk disposition.
+          return qualityReviewSelectedCount > 0;
         case "claim":
           return selectedSessions.some((session) => !session.activeClaim);
         case "release":
@@ -381,7 +389,14 @@ export function useWorkbenchController({
           return false;
       }
     },
-    [actionBusy, agentPromptSessionCount, authoringCapabilities, isLive, selectedSessions]
+    [
+      actionBusy,
+      agentPromptSessionCount,
+      authoringCapabilities,
+      isLive,
+      qualityReviewSelectedCount,
+      selectedSessions
+    ]
   );
 
   const runAction = useCallback(
@@ -433,27 +448,41 @@ export function useWorkbenchController({
             acted += 1;
           }
           setLastActionSummary(`Imported transcript for ${acted} session${acted === 1 ? "" : "s"}`);
-        } else if (kind === "quality_pass") {
-          for (const sessionId of ids) {
-            await postWorkbenchQuality(activeProjectionUrl, sessionId, { status: "passed" });
-            acted += 1;
+        } else if (kind === "quality_pass" || kind === "quality_fail" || kind === "quality_precheck") {
+          // Bulk quality disposition: only review/unchecked rows. Passed/ready sessions stay untouched.
+          const reviewIds = qualityReviewSelectedIds;
+          const skipped = Math.max(0, selectedSessionIds.size - reviewIds.length);
+          if (reviewIds.length === 0) {
+            setLastActionSummary("No selected sessions need quality review");
+            return;
           }
-          setLastActionSummary(`Accepted quality for ${acted} session${acted === 1 ? "" : "s"}`);
-        } else if (kind === "quality_fail") {
-          for (const sessionId of ids) {
-            await postWorkbenchQuality(activeProjectionUrl, sessionId, {
-              status: "failed",
-              reason: "operator_rejected"
-            });
-            acted += 1;
+
+          if (kind === "quality_pass") {
+            for (const sessionId of reviewIds) {
+              await postWorkbenchQuality(activeProjectionUrl, sessionId, { status: "passed" });
+              acted += 1;
+            }
+            setLastActionSummary(formatBulkQualitySummary("accept", acted, skipped));
+          } else if (kind === "quality_fail") {
+            for (const sessionId of reviewIds) {
+              await postWorkbenchQuality(activeProjectionUrl, sessionId, {
+                status: "failed",
+                reason: "operator_rejected"
+              });
+              acted += 1;
+            }
+            setLastActionSummary(formatBulkQualitySummary("fail", acted, skipped));
+          } else {
+            for (const sessionId of reviewIds) {
+              await postWorkbenchQuality(activeProjectionUrl, sessionId, { mode: "precheck" });
+              acted += 1;
+            }
+            setLastActionSummary(
+              skipped === 0
+                ? `Prechecked quality for ${acted} review session${acted === 1 ? "" : "s"}`
+                : `Prechecked quality for ${acted} review session${acted === 1 ? "" : "s"}; ${skipped} ready/passed left unchanged`
+            );
           }
-          setLastActionSummary(`Failed quality for ${acted} session${acted === 1 ? "" : "s"}`);
-        } else if (kind === "quality_precheck") {
-          for (const sessionId of ids) {
-            await postWorkbenchQuality(activeProjectionUrl, sessionId, { mode: "precheck" });
-            acted += 1;
-          }
-          setLastActionSummary(`Prechecked quality for ${acted} session${acted === 1 ? "" : "s"}`);
         } else if (kind === "claim") {
           for (const sessionId of ids) {
             await postWorkbenchClaim(activeProjectionUrl, sessionId, {
@@ -489,6 +518,7 @@ export function useWorkbenchController({
       canRun,
       load,
       onLibraryChanged,
+      qualityReviewSelectedIds,
       selectedSessionIds,
       sessions
     ]
@@ -501,6 +531,7 @@ export function useWorkbenchController({
 
   const toggleSession = useCallback((sessionId: string) => {
     const selecting = !selectedSessionIds.has(sessionId);
+    const target = sessions.find((session) => session.sessionId === sessionId);
     setSelectedSessionIds((current) => {
       const next = new Set(current);
       if (selecting) next.add(sessionId);
@@ -509,7 +540,16 @@ export function useWorkbenchController({
     });
     setSelectedCompileReadySessionIds((compileReady) => {
       const next = new Set(compileReady);
-      if (selecting && sessions.some((session) => session.sessionId === sessionId && isCompileReadySession(session))) {
+      if (selecting && target && isCompileReadySession(target)) {
+        next.add(sessionId);
+      } else if (!selecting) {
+        next.delete(sessionId);
+      }
+      return next;
+    });
+    setSelectedQualityReviewSessionIds((qualityReview) => {
+      const next = new Set(qualityReview);
+      if (selecting && target && isQualityReviewSession(target)) {
         next.add(sessionId);
       } else if (!selecting) {
         next.delete(sessionId);
@@ -524,6 +564,10 @@ export function useWorkbenchController({
       ...current,
       ...sessions.filter(isCompileReadySession).map((session) => session.sessionId)
     ]));
+    setSelectedQualityReviewSessionIds((current) => new Set([
+      ...current,
+      ...sessions.filter(isQualityReviewSession).map((session) => session.sessionId)
+    ]));
   }, [sessions]);
 
   const selectAll = useCallback(async () => {
@@ -533,6 +577,7 @@ export function useWorkbenchController({
     try {
       const ids = new Set<string>();
       const compileReadyIds = new Set<string>();
+      const qualityReviewIds = new Set<string>();
       let offset = 0;
       let queueTotal = Number.POSITIVE_INFINITY;
       const limit = 500;
@@ -542,6 +587,7 @@ export function useWorkbenchController({
         for (const session of response.sessions) {
           ids.add(session.sessionId);
           if (isCompileReadySession(session)) compileReadyIds.add(session.sessionId);
+          if (isQualityReviewSession(session)) qualityReviewIds.add(session.sessionId);
         }
         if (response.sessions.length === 0) break;
         offset += response.sessions.length;
@@ -549,6 +595,7 @@ export function useWorkbenchController({
       }
       setSelectedSessionIds(ids);
       setSelectedCompileReadySessionIds(compileReadyIds);
+      setSelectedQualityReviewSessionIds(qualityReviewIds);
       setLastActionSummary(
         ids.size === 0
           ? "No package-path sessions to select"
@@ -568,6 +615,7 @@ export function useWorkbenchController({
   const clearSelection = useCallback(() => {
     setSelectedSessionIds(new Set());
     setSelectedCompileReadySessionIds(new Set());
+    setSelectedQualityReviewSessionIds(new Set());
   }, []);
 
   return {
@@ -599,6 +647,7 @@ export function useWorkbenchController({
     qualityReviewOpen,
     qualityReviewSessions,
     qualityReviewSummary,
+    qualityReviewSelectedCount,
     retry,
     runAction,
     selectAll,
@@ -617,17 +666,44 @@ function isCompileReadySession(session: WorkbenchQueueSessionDto): boolean {
   return session.compileReady;
 }
 
+/** Sessions still awaiting operator/automatic quality disposition on the package path. */
+export function isQualityReviewSession(session: Pick<WorkbenchQueueSessionDto, "nextAction" | "qualityStatus">): boolean {
+  return session.nextAction === "review_quality" || session.qualityStatus === "unchecked";
+}
+
+function formatBulkQualitySummary(
+  disposition: "accept" | "fail",
+  acted: number,
+  skipped: number
+): string {
+  if (disposition === "accept") {
+    const base = `Accepted quality for ${acted} review session${acted === 1 ? "" : "s"} (compile-ready for enrichment)`;
+    return skipped === 0
+      ? base
+      : `${base}; ${skipped} ready/passed session${skipped === 1 ? "" : "s"} left unchanged`;
+  }
+  const base = `Failed quality for ${acted} review session${acted === 1 ? "" : "s"} → Not Added (operator rejected)`;
+  return skipped === 0
+    ? base
+    : `${base}; ${skipped} ready/passed session${skipped === 1 ? "" : "s"} left unchanged`;
+}
+
 async function resolveCurrentSelection(
   activeProjectionUrl: string,
   selectedSessionIds: Set<string>,
   visibleResponse: WorkbenchSessionsResponse,
   signal?: AbortSignal
-): Promise<{ compileReady: Set<string>; present: Set<string> }> {
+): Promise<{ compileReady: Set<string>; present: Set<string>; qualityReview: Set<string> }> {
   const unresolved = new Set(selectedSessionIds);
   const compileReady = new Set<string>();
-  collectCompileReadiness(visibleResponse.sessions, unresolved, compileReady);
+  const qualityReview = new Set<string>();
+  collectSelectionAttributes(visibleResponse.sessions, unresolved, compileReady, qualityReview);
   if (unresolved.size === 0 || visibleResponse.offset === 0 && visibleResponse.sessions.length >= visibleResponse.total) {
-    return { compileReady, present: new Set([...selectedSessionIds].filter((sessionId) => !unresolved.has(sessionId))) };
+    return {
+      compileReady,
+      present: new Set([...selectedSessionIds].filter((sessionId) => !unresolved.has(sessionId))),
+      qualityReview
+    };
   }
 
   const limit = 500;
@@ -635,22 +711,28 @@ async function resolveCurrentSelection(
   let total = Number.POSITIVE_INFINITY;
   while (unresolved.size > 0 && offset < total) {
     const response = await getWorkbenchSessions(activeProjectionUrl, { limit, offset, signal });
-    collectCompileReadiness(response.sessions, unresolved, compileReady);
+    collectSelectionAttributes(response.sessions, unresolved, compileReady, qualityReview);
     total = typeof response.total === "number" ? response.total : response.sessions.length;
     if (response.sessions.length === 0) break;
     offset += response.sessions.length;
   }
-  return { compileReady, present: new Set([...selectedSessionIds].filter((sessionId) => !unresolved.has(sessionId))) };
+  return {
+    compileReady,
+    present: new Set([...selectedSessionIds].filter((sessionId) => !unresolved.has(sessionId))),
+    qualityReview
+  };
 }
 
-function collectCompileReadiness(
+function collectSelectionAttributes(
   sessions: WorkbenchQueueSessionDto[],
   unresolved: Set<string>,
-  compileReady: Set<string>
+  compileReady: Set<string>,
+  qualityReview: Set<string>
 ): void {
   for (const session of sessions) {
     if (!unresolved.delete(session.sessionId)) continue;
     if (isCompileReadySession(session)) compileReady.add(session.sessionId);
+    if (isQualityReviewSession(session)) qualityReview.add(session.sessionId);
   }
 }
 

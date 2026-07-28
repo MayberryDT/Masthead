@@ -846,10 +846,13 @@ describe("useWorkbenchController", () => {
     await waitFor(() => (latest()?.sessions.length ?? 0) === 3);
 
     await select("session:quality");
+    expect(latest().qualityReviewSelectedCount).toBe(1);
     await act(async () => {
       await latest().runAction("quality_pass");
     });
     expect(postWorkbenchQuality).toHaveBeenCalledWith(baseUrl, "session:quality", { status: "passed" });
+    expect(latest().lastActionSummary).toContain("Accepted quality for 1 review session");
+    expect(latest().lastActionSummary).toContain("compile-ready");
 
     await select("session:quality");
     await act(async () => {
@@ -859,6 +862,9 @@ describe("useWorkbenchController", () => {
       status: "failed",
       reason: "operator_rejected"
     });
+    expect(latest().lastActionSummary).toContain("Failed quality for 1 review session");
+    expect(latest().lastActionSummary).toContain("Not Added");
+    expect(latest().lastActionSummary).toContain("operator rejected");
 
     await select("session:quality");
     await act(async () => {
@@ -867,6 +873,8 @@ describe("useWorkbenchController", () => {
     expect(postWorkbenchQuality).toHaveBeenCalledWith(baseUrl, "session:quality", { mode: "precheck" });
 
     await select("session:open");
+    expect(latest().qualityReviewSelectedCount).toBe(0);
+    expect(latest().canRun("quality_pass")).toBe(false);
     await act(async () => {
       await latest().runAction("claim");
     });
@@ -882,6 +890,74 @@ describe("useWorkbenchController", () => {
     expect(postWorkbenchReleaseClaim).toHaveBeenCalledWith(baseUrl, "claim:held", {
       reason: "operator_release"
     });
+  });
+
+  test("bulk quality disposition only acts on review sessions; ready/passed stay untouched", async () => {
+    mockWorkbenchResponse([
+      session("session:review-a", "Review A", {
+        nextAction: "review_quality",
+        qualityStatus: "unchecked",
+        transcriptStatus: "imported"
+      }),
+      session("session:review-b", "Review B", {
+        nextAction: "review_quality",
+        qualityStatus: "unchecked",
+        transcriptStatus: "imported"
+      }),
+      session("session:ready", "Ready", {
+        nextAction: "enrich",
+        qualityStatus: "passed",
+        transcriptStatus: "imported"
+      })
+    ]);
+    vi.mocked(postWorkbenchQuality).mockResolvedValue({ ok: true });
+
+    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
+    await waitFor(() => (latest()?.sessions.length ?? 0) === 3);
+
+    await act(async () => {
+      latest().selectPage();
+      await Promise.resolve();
+    });
+    expect(latest().selectedSessionIds.size).toBe(3);
+    expect(latest().qualityReviewSelectedCount).toBe(2);
+    expect(latest().canRun("quality_pass")).toBe(true);
+    expect(latest().canRun("quality_fail")).toBe(true);
+
+    await act(async () => {
+      await latest().runAction("quality_pass");
+    });
+
+    expect(postWorkbenchQuality).toHaveBeenCalledTimes(2);
+    expect(postWorkbenchQuality).toHaveBeenCalledWith(baseUrl, "session:review-a", { status: "passed" });
+    expect(postWorkbenchQuality).toHaveBeenCalledWith(baseUrl, "session:review-b", { status: "passed" });
+    expect(postWorkbenchQuality).not.toHaveBeenCalledWith(baseUrl, "session:ready", expect.anything());
+    expect(latest().lastActionSummary).toContain("Accepted quality for 2 review sessions");
+    expect(latest().lastActionSummary).toContain("1 ready/passed session");
+    expect(latest().lastActionSummary).toContain("left unchanged");
+
+    vi.mocked(postWorkbenchQuality).mockClear();
+    await act(async () => {
+      latest().selectPage();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await latest().runAction("quality_fail");
+    });
+
+    expect(postWorkbenchQuality).toHaveBeenCalledTimes(2);
+    expect(postWorkbenchQuality).toHaveBeenCalledWith(baseUrl, "session:review-a", {
+      status: "failed",
+      reason: "operator_rejected"
+    });
+    expect(postWorkbenchQuality).toHaveBeenCalledWith(baseUrl, "session:review-b", {
+      status: "failed",
+      reason: "operator_rejected"
+    });
+    expect(postWorkbenchQuality).not.toHaveBeenCalledWith(baseUrl, "session:ready", expect.anything());
+    expect(latest().lastActionSummary).toContain("Failed quality for 2 review sessions");
+    expect(latest().lastActionSummary).toContain("Not Added");
+    expect(latest().lastActionSummary).toContain("1 ready/passed session");
   });
 
   test("copy_agent_prompt reports ready and excluded selected sessions without posting", async () => {

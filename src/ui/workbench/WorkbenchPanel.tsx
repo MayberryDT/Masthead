@@ -39,6 +39,7 @@ type WorkbenchPanelProps = Partial<
     | "qualityReviewOpen"
     | "qualityReviewSessions"
     | "qualityReviewSummary"
+    | "qualityReviewSelectedCount"
     | "runAction"
     | "selectedSessionIds"
     | "sessions"
@@ -75,9 +76,11 @@ const TOOLTIPS = {
   enrollMissing: "Add captured sessions that are not yet on the Workbench package path.",
   checkTranscript: "Run a lightweight transcript availability check on selected sessions.",
   importTranscript: "Import transcript content for selected sessions (requires source permission).",
-  precheck: "Run the cheap capture quality precheck and apply pass/fail automatically.",
-  acceptQuality: "Mark quality as passed so selected sessions can move toward enrichment.",
-  failQuality: "Fail quality and remove sessions from the publish path (Not Added).",
+  precheck: "Run the cheap capture quality precheck on selected review sessions and apply pass/fail automatically.",
+  acceptQuality:
+    "Accept quality for selected review sessions only. Marks them quality passed so they become compile-ready for enrichment. Ready/passed sessions in the selection are left unchanged. Masthead does not write enrichment prose.",
+  failQuality:
+    "Fail quality for selected review sessions only. Moves them to Not Added with reason operator rejected. Destructive: they leave the package path. Ready/passed sessions in the selection are left unchanged.",
   claim: "Place a short-lived claim so agents avoid duplicate work on selected sessions.",
   release: "Release active claims on selected sessions.",
   pagePrevious: "Show the previous page of package-path sessions.",
@@ -95,7 +98,7 @@ type PipelineItem = {
   quiet?: boolean;
 };
 
-const PIPELINE_ITEMS: PipelineItem[] = [
+const PIPELINE_BASE_ITEMS: PipelineItem[] = [
   { kind: "enroll_missing", label: "Enroll missing", tooltip: TOOLTIPS.enrollMissing },
   { kind: "check_transcript", label: "Check Transcript", tooltip: TOOLTIPS.checkTranscript },
   { kind: "import_transcript", label: "Import Transcript", tooltip: TOOLTIPS.importTranscript },
@@ -105,6 +108,61 @@ const PIPELINE_ITEMS: PipelineItem[] = [
   { kind: "claim", label: "Claim", tooltip: TOOLTIPS.claim },
   { kind: "release", label: "Release", tooltip: TOOLTIPS.release }
 ];
+
+/** Confirm copy for bulk fail — destructive, explicit Not Added semantics. */
+export function buildBulkQualityFailConfirmMessage(reviewCount: number): string {
+  const n = Math.max(0, Math.trunc(reviewCount));
+  const noun = n === 1 ? "review session" : "review sessions";
+  return [
+    `Fail quality for ${n} selected ${noun}?`,
+    "",
+    "This moves them to Not Added (reason: operator rejected). They leave the package path.",
+    "Ready/passed sessions in the selection are not affected.",
+    "Masthead will not author artifacts or write enrichment prose."
+  ].join("\n");
+}
+
+/** Confirm copy for bulk accept — explicit compile-ready / no silent authoring. */
+export function buildBulkQualityAcceptConfirmMessage(reviewCount: number): string {
+  const n = Math.max(0, Math.trunc(reviewCount));
+  const noun = n === 1 ? "review session" : "review sessions";
+  return [
+    `Accept quality for ${n} selected ${noun}?`,
+    "",
+    "They will be marked quality passed and become compile-ready for enrichment.",
+    "Ready/passed sessions in the selection are not affected.",
+    "Masthead will not write enrichment prose."
+  ].join("\n");
+}
+
+function pipelineItemsForSelection(qualityReviewSelectedCount: number): PipelineItem[] {
+  if (qualityReviewSelectedCount <= 0) return PIPELINE_BASE_ITEMS;
+  const n = qualityReviewSelectedCount;
+  return PIPELINE_BASE_ITEMS.map((item) => {
+    if (item.kind === "quality_pass") {
+      return {
+        ...item,
+        label: n === 1 ? "Accept 1 review" : `Accept ${n} review`,
+        tooltip: `${TOOLTIPS.acceptQuality} (${n} selected need quality review.)`
+      };
+    }
+    if (item.kind === "quality_fail") {
+      return {
+        ...item,
+        label: n === 1 ? "Fail 1 review" : `Fail ${n} review`,
+        tooltip: `${TOOLTIPS.failQuality} (${n} selected need quality review.)`
+      };
+    }
+    if (item.kind === "quality_precheck") {
+      return {
+        ...item,
+        label: n === 1 ? "Precheck 1 review" : `Precheck ${n} review`,
+        tooltip: `${TOOLTIPS.precheck} (${n} selected need quality review.)`
+      };
+    }
+    return item;
+  });
+}
 
 export function WorkbenchPanel({
   actionBusy = false,
@@ -133,6 +191,7 @@ export function WorkbenchPanel({
   qualityReviewOpen = false,
   qualityReviewSessions = EMPTY_QUALITY_REVIEW,
   qualityReviewSummary,
+  qualityReviewSelectedCount = 0,
   runAction,
   selectedSessionIds = EMPTY_SELECTION,
   sessions = EMPTY_SESSIONS,
@@ -143,6 +202,14 @@ export function WorkbenchPanel({
 }: WorkbenchPanelProps) {
   const selectionCount = selectedSessionIds.size;
   const selectedSessions = sessions.filter((session) => selectedSessionIds.has(session.sessionId));
+  /** Prefer controller-tracked count; fall back to visible page for partial props / tests. */
+  const reviewSelectedCount =
+    qualityReviewSelectedCount > 0
+      ? qualityReviewSelectedCount
+      : selectedSessions.filter(
+          (session) => session.nextAction === "review_quality" || session.qualityStatus === "unchecked"
+        ).length;
+  const pipelineItems = pipelineItemsForSelection(reviewSelectedCount);
   const queueTotal = typeof total === "number" ? total : sessions.length;
   const publishPathLabel = typeof total === "number" ? String(total) : loading ? "…" : String(queueTotal);
   const notAddedTotal = notAddedSummary?.total;
@@ -245,6 +312,14 @@ export function WorkbenchPanel({
       } catch {
         return;
       }
+    }
+    if (kind === "quality_fail") {
+      const confirmed = window.confirm(buildBulkQualityFailConfirmMessage(reviewSelectedCount));
+      if (!confirmed) return;
+    } else if (kind === "quality_pass" && reviewSelectedCount > 1) {
+      // Multi-select accept: explicit confirm so bulk pass is intentional.
+      const confirmed = window.confirm(buildBulkQualityAcceptConfirmMessage(reviewSelectedCount));
+      if (!confirmed) return;
     }
     await runAction?.(kind);
   };
@@ -355,7 +430,7 @@ export function WorkbenchPanel({
               aria-label="Pipeline operations"
               aria-hidden={!pipelineExpanded || pipelineClosing}
             >
-              {PIPELINE_ITEMS.map((item) => (
+              {pipelineItems.map((item) => (
                 <AppButton
                   key={item.kind}
                   variant={item.quiet ? "quiet" : "default"}

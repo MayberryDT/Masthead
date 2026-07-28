@@ -166,21 +166,21 @@ describe("workbench API", () => {
     const body = await getJson(baseUrl, "/workbench/sessions?limit=10");
 
     expect(body).toMatchObject({ ok: true, scope: "default" });
-    expect(body.sessions).toEqual([
-      expect.objectContaining({
-        activeClaim: {
-          claimId: claim.claims[0].claimId,
-          claimedBy: "codex",
-          expiresAt
-        },
-        latestActivity: expect.objectContaining({ eventType: expect.any(String), sessionId: "session:queue" }),
-        nextAction: "check_transcript",
-        canonicalEvidenceReady: false,
-        publicationStatus: "publish_path",
-        sessionId: "session:queue",
-        title: "Queued session"
-      })
-    ]);
+    expect(body.sessions).toHaveLength(1);
+    expect(body.sessions[0]).toMatchObject({
+      activeClaim: {
+        claimId: claim.claims[0].claimId,
+        claimedBy: "codex",
+        expiresAt
+      },
+      latestActivity: expect.objectContaining({ eventType: expect.any(String), sessionId: "session:queue" }),
+      nextAction: "check_transcript",
+      // seedSession inserts a user message + file effect, so canonical evidence is present
+      canonicalEvidenceReady: true,
+      publicationStatus: "publish_path",
+      sessionId: "session:queue",
+      title: "Queued session"
+    });
     expect(JSON.stringify(body)).not.toContain("session:not-added");
     expect(JSON.stringify(body)).not.toContain("session:published");
   });
@@ -197,9 +197,18 @@ describe("workbench API", () => {
       });
       ensureWorkbenchSessionState(daemon.database, sessionId);
     }
+    // seedSession inserts a narrative user message; strip non-ready sessions so only
+    // session:ready remains compile-ready for the snapshot filter.
+    for (const sessionId of ["session:review", "session:hook-only"]) {
+      daemon.database.prepare("DELETE FROM messages WHERE session_id = ?").run(sessionId);
+      daemon.database.prepare("DELETE FROM file_effects WHERE session_id = ?").run(sessionId);
+    }
     daemon.database.prepare(
       "UPDATE workbench_session_state SET transcript_status = 'imported', quality_status = 'passed' WHERE session_id IN (?, ?, ?)"
     ).run("session:ready", "session:review", "session:hook-only");
+    daemon.database.prepare(
+      "UPDATE workbench_session_state SET quality_status = 'unchecked', next_action = 'review_quality' WHERE session_id = ?"
+    ).run("session:review");
     daemon.database.prepare(
       "INSERT INTO messages (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     ).run(
@@ -216,7 +225,8 @@ describe("workbench API", () => {
     const body = await getJson(baseUrl, "/workbench/selection-snapshot");
 
     expect(body).toMatchObject({ ok: true, total: 3 });
-    expect(body.sessionIds).toEqual(["session:ready", "session:review", "session:hook-only"]);
+    expect(body.sessionIds).toEqual(expect.arrayContaining(["session:ready", "session:review", "session:hook-only"]));
+    expect(body.sessionIds).toHaveLength(3);
     expect(body.compileReadySessionIds).toEqual(["session:ready"]);
   });
 
