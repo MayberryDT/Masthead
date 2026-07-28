@@ -1,5 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import type { WorkbenchAuthoringV5Draft, WorkbenchAuthoringV5NextAction } from "../shared/workbenchAuthoringV5.ts";
+import { WORKBENCH_AUTHORING_V5_INCOMPLETE_STOP_RULE } from "../shared/workbenchAuthoringV5.ts";
 import { MastheadAuthoringClient, MastheadAuthoringClientError } from "./authoringClient.ts";
 import { errorResult, jsonResult, textResult, type CliResult } from "./output.ts";
 
@@ -149,6 +150,11 @@ export function guidedAuthoringHelp(): string {
     "  mastheadctl workbench author status --request <request-id> [--json]",
     "  mastheadctl workbench author receipt --request <request-id> [--json]",
     "",
+    "Stop rule: only stop when nextAction.kind is \"complete\" and a request receipt exists.",
+    "Pack finish is not request completion — keep running the returned nextAction.command.",
+    "Progress / incomplete check: mastheadctl workbench author status --request <request-id> --json",
+    "Terminal receipt: mastheadctl workbench author receipt --request <request-id> --json",
+    "",
     "Run one returned nextAction at a time. Masthead owns pack membership and evidence coverage."
   ].join("\n") + "\n";
 }
@@ -175,7 +181,30 @@ function renderGuidedDto(
     return errorResult("invalid_daemon_response", "Masthead daemon returned no guided next action", json);
   }
   if (json) return jsonResult(dto);
-  return textResult(`${action.reason}\n${action.command ? `${action.command}\n` : ""}`);
+  return textResult(formatGuidedHumanOutput(action));
+}
+
+/** Human-readable nextAction output when --json is omitted. */
+function formatGuidedHumanOutput(action: WorkbenchAuthoringV5NextAction): string {
+  const lines = [action.reason];
+  if (action.command) lines.push(action.command);
+
+  const incomplete =
+    action.kind === "claim_next" || action.progress?.requestComplete === false;
+  if (incomplete) {
+    const stopRule =
+      typeof action.stopRule === "string" && action.stopRule.trim()
+        ? action.stopRule
+        : WORKBENCH_AUTHORING_V5_INCOMPLETE_STOP_RULE;
+    lines.push(stopRule);
+    lines.push(
+      "Request incomplete: pack finish is not done. Check status with mastheadctl workbench author status --request <request-id> --json"
+    );
+  } else if (typeof action.stopRule === "string" && action.stopRule.trim()) {
+    lines.push(action.stopRule);
+  }
+
+  return `${lines.join("\n")}\n`;
 }
 
 function requiredOption(args: string[], option: string, json: boolean): string | CliResult {
