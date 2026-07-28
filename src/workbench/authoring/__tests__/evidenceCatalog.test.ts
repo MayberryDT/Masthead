@@ -20,8 +20,11 @@ import {
   getAuthoringEvidencePage,
   guidedAuthoringEvidenceRevision,
   guidedAuthoringEvidenceRevisionInputs,
-  guidedAuthoringEvidenceRevisionFromInputs
+  guidedAuthoringEvidenceRevisionFromInputs,
+  isDemotedScaffoldEvidenceItem,
+  rankScaffoldEvidenceCatalogItems
 } from "../evidenceCatalog.ts";
+import type { SessionTranscriptItem } from "../../../shared/sessionTranscript.ts";
 
 const tempDirs: string[] = [];
 
@@ -525,6 +528,150 @@ describe("authoring evidence catalog", () => {
     expect(explicitlyUnstagedRevision).not.toBe(unknownRevision);
     db.close();
   });
+
+  test("ranks a substantive user ask ahead of AGENTS and skill instruction dumps", () => {
+    const agentsDump = catalogItem({
+      itemId: "message:agents",
+      kind: "message",
+      role: "user",
+      text: [
+        "# AGENTS.md instructions for /home/tyler/Documents/Masthead",
+        "<INSTRUCTIONS>Repository policy only.</INSTRUCTIONS>",
+        "<environment_context><cwd>/home/tyler/Documents/Masthead</cwd></environment_context>",
+        "## Skills",
+        "A skill is a set of local instructions."
+      ].join("\n"),
+      observedAt: "2026-07-10T12:00:00.000Z"
+    });
+    const skillDump = catalogItem({
+      itemId: "message:skill",
+      kind: "message",
+      role: "user",
+      text: "<skill>Internal authoring instructions only. Do not surface this as the ask.</skill>",
+      lowValue: true,
+      observedAt: "2026-07-10T12:00:30.000Z"
+    });
+    const realAsk = catalogItem({
+      itemId: "message:ask",
+      kind: "message",
+      role: "user",
+      text: "Please harden OAuth callback state validation before publishing.",
+      observedAt: "2026-07-10T12:01:00.000Z"
+    });
+    const outcome = catalogItem({
+      itemId: "message:outcome",
+      kind: "message",
+      role: "assistant",
+      text: "Callback nonce validation now rejects mismatched state and the focused tests passed.",
+      observedAt: "2026-07-10T12:02:00.000Z"
+    });
+
+    const ranked = rankScaffoldEvidenceCatalogItems([agentsDump, skillDump, realAsk, outcome]);
+    expect(ranked.map((item) => item.itemId)).toEqual([
+      "message:ask",
+      "message:outcome",
+      "message:agents",
+      "message:skill"
+    ]);
+    expect(isDemotedScaffoldEvidenceItem(agentsDump)).toBe(true);
+    expect(isDemotedScaffoldEvidenceItem(skillDump)).toBe(true);
+    expect(isDemotedScaffoldEvidenceItem(realAsk)).toBe(false);
+    expect(isDemotedScaffoldEvidenceItem(outcome)).toBe(false);
+  });
+
+  test("demotes developer sandbox policy, approval wrappers, and pure JSON allows", () => {
+    const sandbox = catalogItem({
+      itemId: "message:sandbox",
+      kind: "message",
+      role: "user",
+      text: "Filesystem sandboxing defines which files can be read or written. Network access is restricted.",
+      observedAt: "2026-07-10T12:00:00.000Z"
+    });
+    const approval = catalogItem({
+      itemId: "message:approval",
+      kind: "message",
+      role: "user",
+      text: "Approval assessment required before running shell. Provide risk_level and outcome for the pending command.",
+      observedAt: "2026-07-10T12:00:10.000Z"
+    });
+    const jsonAllow = catalogItem({
+      itemId: "message:allow",
+      kind: "message",
+      role: "assistant",
+      text: JSON.stringify({ risk_level: "low", outcome: "allow", reason: "read-only inspection" }),
+      observedAt: "2026-07-10T12:00:20.000Z"
+    });
+    const ask = catalogItem({
+      itemId: "message:ask",
+      kind: "message",
+      role: "user",
+      text: "Investigate the failing Workbench publish path.",
+      observedAt: "2026-07-10T12:00:30.000Z"
+    });
+
+    expect(isDemotedScaffoldEvidenceItem(sandbox)).toBe(true);
+    expect(isDemotedScaffoldEvidenceItem(approval)).toBe(true);
+    expect(isDemotedScaffoldEvidenceItem(jsonAllow)).toBe(true);
+    expect(isDemotedScaffoldEvidenceItem(ask)).toBe(false);
+
+    const ranked = rankScaffoldEvidenceCatalogItems([sandbox, approval, jsonAllow, ask]);
+    expect(ranked[0]?.itemId).toBe("message:ask");
+    expect(ranked.slice(1).map((item) => item.itemId).sort()).toEqual([
+      "message:allow",
+      "message:approval",
+      "message:sandbox"
+    ]);
+  });
+
+  test("keeps every catalog item when ranking, including demotion-only sessions", () => {
+    const onlyNoise = [
+      catalogItem({
+        itemId: "message:agents-only",
+        kind: "message",
+        role: "user",
+        text: "# AGENTS.md instructions for /tmp\n<environment_context><cwd>/tmp</cwd></environment_context>",
+        observedAt: "2026-07-10T12:00:00.000Z"
+      }),
+      catalogItem({
+        itemId: "message:json-only",
+        kind: "message",
+        role: "assistant",
+        text: '{"outcome":"allow","risk_level":"low"}',
+        observedAt: "2026-07-10T12:00:01.000Z"
+      })
+    ];
+    const ranked = rankScaffoldEvidenceCatalogItems(onlyNoise);
+    expect(ranked).toHaveLength(2);
+    expect(new Set(ranked.map((item) => item.itemId))).toEqual(new Set(onlyNoise.map((item) => item.itemId)));
+    expect(ranked.every(isDemotedScaffoldEvidenceItem)).toBe(true);
+  });
+
+  test("does not reorder inspect page completeness or drop coverage items", async () => {
+    const db = await testDb();
+    seedInstructionHeavySession(db, "session:rank-mixed");
+
+    const page = getAuthoringEvidencePage(db, { limit: 250, sessionId: "session:rank-mixed" });
+    expect(page.total).toBe(4);
+    expect(page.items).toHaveLength(4);
+    // Inspect/page path stays chronological (AGENTS first); ranking is scaffold-only.
+    expect(page.items[0]?.text).toMatch(/# AGENTS\.md instructions/i);
+    expect(page.items.map((item) => item.itemId)).toEqual([
+      "message:session:rank-mixed:agents",
+      "message:session:rank-mixed:user",
+      "message:session:rank-mixed:assistant",
+      "message:session:rank-mixed:allow"
+    ]);
+
+    const ranked = rankScaffoldEvidenceCatalogItems(page.items);
+    expect(ranked.map((item) => item.itemId)).toEqual([
+      "message:session:rank-mixed:user",
+      "message:session:rank-mixed:assistant",
+      "message:session:rank-mixed:agents",
+      "message:session:rank-mixed:allow"
+    ]);
+    expect(new Set(ranked.map((item) => item.itemId))).toEqual(new Set(page.items.map((item) => item.itemId)));
+    db.close();
+  });
 });
 
 async function testDb(): Promise<MastheadDatabase> {
@@ -638,6 +785,74 @@ function seedOneMessageSession(db: MastheadDatabase, sessionId: string): void {
   });
   clearCanonicalRows(db, sessionId);
   insertMessage(db, sessionId, "user", "user", "Implement the evidence catalog.", "2026-07-10T13:00:00.000Z");
+}
+
+function seedInstructionHeavySession(db: MastheadDatabase, sessionId: string): void {
+  seedSession(db, {
+    lifecycle: "ended",
+    model: "gpt-5",
+    project: "Masthead",
+    sessionId,
+    title: `Instruction heavy ${sessionId}`
+  });
+  clearCanonicalRows(db, sessionId);
+  insertMessage(
+    db,
+    sessionId,
+    "agents",
+    "user",
+    [
+      "# AGENTS.md instructions for /home/tyler/Documents/Masthead",
+      "<INSTRUCTIONS>Internal repository policy.</INSTRUCTIONS>",
+      "<environment_context><cwd>/home/tyler/Documents/Masthead</cwd></environment_context>"
+    ].join("\n"),
+    "2026-07-10T12:00:00.000Z"
+  );
+  insertMessage(
+    db,
+    sessionId,
+    "user",
+    "user",
+    "Please harden OAuth callback state validation before publishing.",
+    "2026-07-10T12:01:00.000Z"
+  );
+  insertMessage(
+    db,
+    sessionId,
+    "assistant",
+    "assistant",
+    "Callback nonce validation now rejects mismatched state.",
+    "2026-07-10T12:02:00.000Z"
+  );
+  insertMessage(
+    db,
+    sessionId,
+    "allow",
+    "assistant",
+    JSON.stringify({ risk_level: "low", outcome: "allow" }),
+    "2026-07-10T12:03:00.000Z"
+  );
+}
+
+function catalogItem(input: {
+  itemId: string;
+  kind: SessionTranscriptItem["kind"];
+  role: SessionTranscriptItem["role"];
+  text: string;
+  observedAt: string;
+  lowValue?: boolean;
+}): SessionTranscriptItem {
+  return {
+    itemId: input.itemId,
+    sessionId: "session:catalog-rank",
+    kind: input.kind,
+    role: input.role,
+    label: input.role,
+    text: input.text,
+    observedAt: input.observedAt,
+    sourceRef: {},
+    lowValue: input.lowValue
+  };
 }
 
 function seedToolResultSession(db: MastheadDatabase, sessionId: string): void {
