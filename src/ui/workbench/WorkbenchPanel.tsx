@@ -11,8 +11,7 @@ import {
 import { sanitizeWorkbenchVisibleText } from "./workbenchHandoff";
 import {
   formatCopyAgentPromptLabel,
-  formatCopyAgentPromptTitle,
-  formatWorkbenchSelectionHonesty
+  formatCopyAgentPromptTitle
 } from "./workbenchSelectionHonesty";
 
 type WorkbenchPanelProps = Partial<
@@ -26,9 +25,7 @@ type WorkbenchPanelProps = Partial<
     | "canRun"
     | "clearActionFeedback"
     | "copyAgentPrompt"
-    | "copyResumePrompt"
     | "error"
-    | "incompleteAuthoring"
     | "lastActionSummary"
     | "loading"
     | "notAddedOpen"
@@ -177,9 +174,7 @@ export function WorkbenchPanel({
   canRun = defaultCanRun,
   clearActionFeedback,
   copyAgentPrompt,
-  copyResumePrompt,
   error,
-  incompleteAuthoring,
   lastActionSummary,
   loading = false,
   notAddedOpen = false,
@@ -247,18 +242,7 @@ export function WorkbenchPanel({
     excluded: agentPromptExcludedCount,
     defaultTitle: TOOLTIPS.copyAgentPrompt
   });
-  const copyAgentPromptLabel = formatCopyAgentPromptLabel({
-    ready: agentPromptSessionCount,
-    excluded: agentPromptExcludedCount
-  });
-  const selectionHonesty =
-    selectionCount > 0
-      ? formatWorkbenchSelectionHonesty({
-          selected: selectionCount,
-          ready: agentPromptSessionCount,
-          needQualityReview: agentPromptExcludedCount
-        })
-      : undefined;
+  const copyAgentPromptLabel = formatCopyAgentPromptLabel();
 
   const pageSessionIds = sessions.map((session) => session.sessionId);
   const newSessionIds = useNewItemIds(pageSessionIds, page);
@@ -338,21 +322,6 @@ export function WorkbenchPanel({
     }
     await runAction?.(kind);
   };
-
-  const runCopyResume = async () => {
-    if (actionBusy || !copyResumePrompt || !incompleteAuthoring) return;
-    try {
-      const prompt = await copyResumePrompt();
-      if (!prompt || !(await copyTextToClipboard(prompt))) return;
-      clearActionFeedback?.();
-    } catch {
-      return;
-    }
-  };
-
-  const incompleteBannerLabel = incompleteAuthoring
-    ? `Authoring incomplete: ${incompleteAuthoring.packsCompleted}/${incompleteAuthoring.packCount} packs · ${incompleteAuthoring.sessionsCompleted}/${incompleteAuthoring.sessionCount} sessions. Copy resume prompt to continue.`
-    : undefined;
 
   const toggleNotAdded = () => {
     setNotAddedOpen?.(!notAddedOpen);
@@ -489,19 +458,9 @@ export function WorkbenchPanel({
             <dt>Package path</dt>
             <dd>{publishPathLabel}</dd>
           </div>
-          <div
-            title={
-              selectionHonesty ??
-              "Sessions currently selected for bulk actions. Only compile-ready sessions enter Copy Agent Prompt."
-            }
-          >
+          <div title="Sessions currently selected for bulk actions. Only compile-ready sessions enter Copy Agent Prompt.">
             <dt>Selected</dt>
             <dd>{selectionCount}</dd>
-            {selectionHonesty ? (
-              <span className="workbench-selection-readiness" data-selection-honesty="true">
-                {selectionHonesty.replace(/^Selected\s+\d+\s*/, "")}
-              </span>
-            ) : null}
           </div>
           {qualityReviewLabel != null ? (
             <div
@@ -558,28 +517,6 @@ export function WorkbenchPanel({
             ×
           </button>
         </div>
-      ) : null}
-
-      {incompleteBannerLabel ? (
-        <section
-          className="workbench-incomplete-banner surface-status"
-          aria-label="Incomplete authoring request"
-          role="status"
-        >
-          <div className="workbench-incomplete-banner-body">
-            <p className="mono-label">Authoring incomplete</p>
-            <p>{incompleteBannerLabel}</p>
-          </div>
-          <AppButton
-            variant="primary"
-            className="workbench-copy-resume"
-            onClick={() => void runCopyResume()}
-            disabled={actionBusy || !copyResumePrompt}
-            title="Copy the bootstrap resume prompt for the active authoring request"
-          >
-            Copy resume prompt
-          </AppButton>
-        </section>
       ) : null}
 
       {error ? (

@@ -417,12 +417,14 @@ describe("WorkbenchPanel", () => {
     const copyButtonOpen = html.match(/<button[^>]*workbench-copy-agent[^>]*>/)?.[0];
     const copyButtonBlock = html.match(/<button[^>]*workbench-copy-agent[\s\S]*?<\/button>/)?.[0] ?? "";
 
-    expect(text).toContain("Selected 3 package-path · 1 ready · 2 need quality review");
+    expect(text).toMatch(/Selected\s+3/);
+    expect(text).not.toContain("package-path ·");
     expect(copyButtonOpen).not.toContain("disabled");
     expect(copyButtonOpen).toContain(
-      "title=\"Copy a plain-language request for 1 ready session. 2 selected sessions need quality review and will be left out of the handoff.\""
+      "title=\"Copy for 1 ready session. 2 still need quality review and will be left out.\""
     );
-    expect(copyButtonBlock).toContain("Copy Agent Prompt (1 ready)");
+    expect(copyButtonBlock).toContain("Copy Agent Prompt");
+    expect(copyButtonBlock).not.toContain("ready)");
   });
 
   test("disables Copy Agent Prompt with a clear review reason when nothing selected is ready", () => {
@@ -443,13 +445,14 @@ describe("WorkbenchPanel", () => {
     const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
     const copyButtonOpen = html.match(/<button[^>]*workbench-copy-agent[^>]*>/)?.[0];
 
-    expect(text).toContain("Selected 2 package-path · 0 ready · 2 need quality review");
+    expect(text).toMatch(/Selected\s+2/);
+    expect(text).not.toContain("need quality review");
     expect(copyButtonOpen).toContain("disabled");
     expect(copyButtonOpen).toContain(
-      "title=\"0 of 2 selected sessions are ready for agent enrichment. 2 need quality review and will not be included in the handoff.\""
+      "title=\"No selected sessions are ready for agent enrichment. 2 need quality review and will not be included in the handoff.\""
     );
     expect(html).toContain("Copy Agent Prompt");
-    expect(html).not.toContain("Copy Agent Prompt (0 ready)");
+    expect(html).not.toContain("Copy Agent Prompt (");
   });
 
   test("activity rail renders clear V5 labels, tones, and editorial reasons", () => {
@@ -710,58 +713,6 @@ describe("WorkbenchPanel", () => {
     expect(withSummary).toContain("workbench-toast");
     expect(withSummary).toContain("is-ok");
     expect(withSummary).not.toContain("workbench-action-summary");
-  });
-
-  test("shows incomplete authoring banner with resume copy control", () => {
-    const copyResumePrompt = vi.fn(async () => "Masthead authoring request: authoring-v5-request:resume");
-    const html = renderToStaticMarkup(
-      <WorkbenchPanel
-        incompleteAuthoring={{
-          requestId: "authoring-v5-request:resume",
-          status: "active",
-          packsCompleted: 1,
-          packCount: 4,
-          sessionsCompleted: 12,
-          sessionCount: 48,
-          handoff: {
-            requestId: "authoring-v5-request:resume",
-            startCommand: "/opt/masthead/bin/mastheadctl workbench author bootstrap --request 'authoring-v5-request:resume' --json"
-          },
-          updatedAt: "2026-07-28T12:00:00.000Z"
-        }}
-        copyResumePrompt={copyResumePrompt}
-        sessions={[session()]}
-        loading={false}
-        onClearSelection={() => undefined}
-        onRetry={() => undefined}
-        onSelectAll={() => undefined}
-        onToggleSession={() => undefined}
-      />
-    );
-
-    expect(html).toContain("workbench-incomplete-banner");
-    expect(html).toContain(
-      "Authoring incomplete: 1/4 packs · 12/48 sessions. Copy resume prompt to continue."
-    );
-    expect(html).toContain("Copy resume prompt");
-    expect(html).toContain("workbench-copy-resume");
-  });
-
-  test("hides incomplete authoring banner when no active request", () => {
-    const html = renderToStaticMarkup(
-      <WorkbenchPanel
-        sessions={[session()]}
-        loading={false}
-        onClearSelection={() => undefined}
-        onRetry={() => undefined}
-        onSelectAll={() => undefined}
-        onToggleSession={() => undefined}
-      />
-    );
-
-    expect(html).not.toContain("workbench-incomplete-banner");
-    expect(html).not.toContain("Copy resume prompt");
-    expect(html).not.toContain("Authoring incomplete:");
   });
 
   test("sanitizes forbidden session metadata before rendering the panel", () => {
