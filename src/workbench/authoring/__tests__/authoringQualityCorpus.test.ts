@@ -12,15 +12,16 @@ import {
   JSON_APPROVAL_DESCRIPTION,
   SYSTEM_REMINDER_TITLE,
   authoringQualityCorpusFieldPatch,
-  type AuthoringQualityCorpusCase
+  type AuthoringQualityCorpusCase,
+  type AuthoringQualityCorpusKind
 } from "../__fixtures__/authoringQualityCorpus.ts";
 
-const REQUIRED_KINDS = new Set([
+const REQUIRED_KINDS: AuthoringQualityCorpusKind[] = [
   "instruction_title",
   "system_reminder_title",
   "json_approval_description",
   "good_session"
-]);
+];
 
 function assertCaseShape(entry: AuthoringQualityCorpusCase): void {
   expect(entry.id.trim().length).toBeGreaterThan(0);
