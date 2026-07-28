@@ -33,7 +33,7 @@ function offlineFrame(input: BoardHeadlineInput): BoardHeadlineFrame {
 
   return {
     subject,
-    disposition: offlineDisposition(input),
+    disposition: offlineDisposition(input, subject),
     state: input.stateHint,
     subjectKind: inferSubjectKind(subject),
     confidence: "low",
@@ -239,31 +239,202 @@ function isOpaqueIdentifier(value: string): boolean {
   return false;
 }
 
-function offlineDisposition(input: BoardHeadlineInput): string {
+function offlineDisposition(input: BoardHeadlineInput, subject?: string): string {
   // Blocked keeps explicit "blocked by …" shape for inspectors and tests.
   if (input.stateHint === "blocked") {
     return `blocked by ${blockedFailure(input)}`;
   }
 
   const specific = dispositionFromSessionEvidence(input);
-  if (specific) return specific;
-
-  switch (input.stateHint) {
-    case "needs_verification":
-      return "needs verification after recent changes";
-    case "paused":
-      return idleDispositionFallback(input);
-    case "completed":
-      return "ready for review";
-    case "failed":
-      return "failed on latest recorded evidence";
-    case "waiting":
-      return waitingDispositionFallback(input);
-    case "active":
-      return activeDispositionFallback(input);
-    case "unknown":
-      return "latest activity recorded";
+  let disposition = specific;
+  if (!disposition) {
+    switch (input.stateHint) {
+      case "needs_verification":
+        disposition = "needs verification after recent changes";
+        break;
+      case "paused":
+        disposition = idleDispositionFallback(input);
+        break;
+      case "completed":
+        disposition = "ready for review";
+        break;
+      case "failed":
+        disposition = "failed on latest recorded evidence";
+        break;
+      case "waiting":
+        disposition = waitingDispositionFallback(input);
+        break;
+      case "active":
+        disposition = activeDispositionFallback(input);
+        break;
+      case "unknown":
+        disposition = "latest activity recorded";
+        break;
+    }
   }
+
+  const resolvedSubject = subject ?? offlineSubject(input);
+  if (isWeakSubjectForDisposition(resolvedSubject, input)) {
+    return diversifyDispositionWithEvidence(disposition, input);
+  }
+  return disposition;
+}
+
+/**
+ * Disposition-local weak check. Leave subject acceptance rules alone (Task 1).
+ * Project labels, project·harness, single-token, and "X session" subjects need
+ * evidence tokens so same-subject cards still read differently.
+ */
+function isWeakSubjectForDisposition(subject: string, input: BoardHeadlineInput): boolean {
+  const normalized = subject.replace(/\s+/g, " ").trim();
+  if (!normalized) return true;
+
+  const project = projectSubject(input);
+  if (project && normalized.toLowerCase() === project.toLowerCase()) return true;
+
+  // Project · harness runtime labels (e.g. "Masthead · Grok Build")
+  if (/^.+\s*[·•]\s*\S/.test(normalized)) {
+    if (project && new RegExp(`^${escapeRegExp(project)}\\s*[·•]`, "i").test(normalized)) return true;
+    // Any pure project·runtime style with a known harness tail is weak.
+    if (/\s*[·•]\s*(codex|claude code|cursor|grok build|opencode|oh my pi|pi|hermes)\s*$/i.test(normalized)) {
+      return true;
+    }
+  }
+
+  if (/^.+\s+session$/i.test(normalized)) return true;
+
+  const words = normalized.split(/\s+/).filter(Boolean);
+  // Single token / short label without a task phrase.
+  if (words.length <= 1) return true;
+
+  return false;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Prefer a distinguishing evidence token (file basename, tool name, short failure)
+ * when subject is weak so two same-project cards do not share identical headlines.
+ */
+function diversifyDispositionWithEvidence(base: string, input: BoardHeadlineInput): string {
+  const token = dispositionEvidenceToken(input);
+  if (!token) return base;
+
+  const tokenLower = token.toLowerCase();
+  if (base.toLowerCase().includes(tokenLower)) return base;
+  // Also treat "SessionCard" as covered by "Session Card" style subjects already in base.
+  const tokenStem = tokenLower.replace(/\.[a-z0-9]+$/i, "");
+  if (tokenStem.length >= 4 && base.toLowerCase().includes(tokenStem)) return base;
+
+  const fileLike = isDispositionFileToken(token);
+  const toolLike = isDispositionToolToken(token);
+
+  // Natural phrasing for common generic bases.
+  if (/^editing files$/i.test(base) && fileLike) {
+    return clipDisposition(`editing ${token}`);
+  }
+  if (/^making file changes$/i.test(base) && fileLike) {
+    return clipDisposition(`changing ${token}`);
+  }
+  if (/^inspecting the workspace$/i.test(base) && fileLike) {
+    return clipDisposition(`inspecting ${token}`);
+  }
+  if (/^running checks$/i.test(base) && fileLike) {
+    return clipDisposition(`running checks on ${token}`);
+  }
+  if (/^in progress$/i.test(base)) {
+    return clipDisposition(`in progress · ${token}`);
+  }
+  if (/^working through tool calls$/i.test(base) && toolLike) {
+    return clipDisposition(`working via ${token}`);
+  }
+  if (/^quiet after /i.test(base) || /^no new /i.test(base) || /^stalled with /i.test(base)) {
+    if (fileLike) return clipDisposition(`quiet after ${token}`);
+    if (toolLike) return clipDisposition(`quiet after ${token}`);
+    return clipDisposition(`quiet after ${token}`);
+  }
+  if (/^latest activity recorded$/i.test(base) || /^ready for review$/i.test(base)) {
+    return clipDisposition(`${base} · ${token}`);
+  }
+  if (/^failed on latest recorded evidence$/i.test(base)) {
+    return clipDisposition(`failed · ${token}`);
+  }
+  if (/^needs verification after recent changes$/i.test(base)) {
+    return clipDisposition(`needs verification · ${token}`);
+  }
+  if (/^waiting for /i.test(base)) {
+    return clipDisposition(`${base} · ${token}`);
+  }
+
+  // Default: append middle-dot token; stay under disposition cap.
+  return clipDisposition(`${base} · ${token}`);
+}
+
+function dispositionEvidenceToken(input: BoardHeadlineInput): string | undefined {
+  // Prefer recent file basenames (already basenames — no sensitive paths).
+  for (const raw of input.facts.recentFileBasenames) {
+    const name = raw.replace(/\s+/g, " ").trim();
+    if (!name || name.length < 3 || name.length > 48) continue;
+    if (/[\\/]/.test(name) || name.startsWith("~")) continue;
+    if (isUnsafeDispositionToken(name)) continue;
+    // Skip only the weakest doc/config basenames that add no session color.
+    if (isWeakFilenameEvidence(name) && /\.(md|txt|json|yml|yaml|toml|lock|css|scss)$/i.test(name)) {
+      continue;
+    }
+    if (/^(readme|changelog|license|package)(\.|$)/i.test(name)) continue;
+    return name;
+  }
+
+  // Tool names next.
+  for (const raw of input.facts.recentToolNames) {
+    const tool = raw.replace(/\s+/g, " ").trim();
+    if (!tool || tool.length < 3 || tool.length > 40) continue;
+    if (isUnsafeDispositionToken(tool)) continue;
+    return tool;
+  }
+
+  // Short failure snippet.
+  for (const raw of input.facts.recentCommandFailures) {
+    const failure = raw.replace(/\s+/g, " ").trim();
+    if (!failure || failure.length < 6) continue;
+    if (!isSafeBlockedFailure(failure) && !isUsefulDispositionSnippet(failure)) continue;
+    if (isUnsafeDispositionToken(failure)) continue;
+    // Prefer a compact token: first ~40 chars at a word boundary.
+    if (failure.length <= 40) return failure;
+    const clipped = failure.slice(0, 41);
+    const boundary = clipped.lastIndexOf(" ");
+    return (boundary >= 16 ? clipped.slice(0, boundary) : failure.slice(0, 40)).trim();
+  }
+
+  // Last resort: short evidence items that look like file/tool tokens.
+  for (const raw of input.evidence) {
+    const item = raw.replace(/\s+/g, " ").trim();
+    if (!item || item.length < 3 || item.length > 48) continue;
+    if (/[\\/]/.test(item) || item.startsWith("~")) continue;
+    if (isUnsafeDispositionToken(item)) continue;
+    if (isDispositionFileToken(item) || isDispositionToolToken(item)) return item;
+  }
+
+  return undefined;
+}
+
+function isDispositionFileToken(value: string): boolean {
+  return /\.[a-z0-9]{1,8}$/i.test(value) && !/\s/.test(value) && !/[\\/]/.test(value);
+}
+
+function isDispositionToolToken(value: string): boolean {
+  return /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/i.test(value);
+}
+
+function isUnsafeDispositionToken(value: string): boolean {
+  if (/\bhttps?:\/\//i.test(value)) return true;
+  if (/::[-\w]+\{[^}]*\}/i.test(value)) return true;
+  if (/\bsk-[A-Za-z0-9_-]+\b/i.test(value)) return true;
+  if (hasUnsafeCredentialName(value)) return true;
+  if (/(?:^|[^A-Za-z0-9_])(?:~|\.{1,2})?\/\S+/.test(value)) return true;
+  return false;
 }
 
 /**
