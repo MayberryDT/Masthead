@@ -113,6 +113,7 @@ import {
 import { legacyCandidatesFromDirectory, maybeCopyLegacySqliteBeforeOpen } from "./legacyDataMigration.ts";
 import { migrateLegacyJournalOnce } from "./legacyJournalMigration.ts";
 import { runLegacyWorkbenchPublicationBackfill } from "../workbench/legacyPublicationBackfill.ts";
+import { ageStaleQualityReviews } from "../workbench/qualityReviewAging.ts";
 import { runCaptureQualityPrecheck } from "../workbench/qualityPrecheck.ts";
 import { authoringEvidenceRevision } from "../workbench/authoring/evidenceCatalog.ts";
 import { isWorkbenchAuthoringV5CompileReady } from "../workbench/authoring/guidedAuthoringPreflight.ts";
@@ -255,6 +256,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       if (pendingMigrations && !config.skipMigrationQuickCheck) quickCheckMastheadDatabase(database);
       initializeSessionTranscriptFingerprintIndex(database);
       if (config.legacyWorkbenchBackfillEnabled !== false) runLegacyWorkbenchPublicationBackfill(database);
+      // Bounded one-shot drain of stale quality-review purgatory (not per-request).
+      ageStaleQualityReviews(database);
       const databaseIdentity = getOrCreateDatabaseIdentity(database);
       const interruptedImportJobIds = recoverInterruptedImportJobs(database);
       const authoringV5PreparationCoordinator = createWorkbenchAuthoringV5PreparationCoordinator(database);
