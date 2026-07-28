@@ -164,8 +164,9 @@ The mechanism is purely runtime + dev-only. No build-time stripping or permanent
 
 ## Local Disk Hygiene
 
-Masthead install artifacts and Codex worktrees accumulate quickly on disk. Follow these rules on
-every production install, database migration, and worktree merge.
+Masthead install artifacts, SQLite stores, and Codex worktrees accumulate quickly and have filled
+disks with multi‑GB/TB leftovers. Follow these rules on every production install, data reset,
+migration, and worktree merge. **Prefer delete over archive.**
 
 ### Production builds
 
@@ -177,13 +178,37 @@ When installing a new versioned production bundle under `~/.local/share/masthead
    stale `app-menu-icons` or helper folders left from earlier installs.
 3. Never keep more than one production build on disk. Do not leave prior builds "just in case."
 
-### Database snapshots
+### Databases and instance data directories (mandatory)
+
+**Do not keep old databases from old production builds, failed e2e runs, or “fresh user” rebuilds
+unless Tyler explicitly says to preserve them.**
+
+Applies under `~/.config/masthead*`, `~/.local/share/masthead*`, and any agent-created
+instance path (including `*-newuser*`, `*-e2e*`, `*-contaminated*`, `*-archive*`, `*-backup*`).
+
+1. **Active store only.** For each live instance, keep exactly one active `masthead.sqlite`
+   (plus its normal `-wal`/`-shm`/lease files while the daemon is running).
+2. **No archive dirs.** Never leave renamed copies such as
+   `masthead-production-*-contaminated-*`, `*-backup-*`, or timestamped clones of a full data
+   directory. When resetting for a clean/new-user test: **stop the daemon, delete the old data
+   directory (or its sqlite files), create empty, start.** Do not `mv` aside multi‑GB clones.
+3. **No backup piles.** Do not keep `masthead.sqlite.backup-*` or `masthead.sqlite.backup-current`
+   after a migration or rebuild completes unless Tyler ordered a single named backup for a
+   specific recovery. If a one-shot backup is required, keep **at most one** file and delete it
+   when the next successful start/migration is verified.
+4. **Never copy multi‑GB sqlite “just in case.”** Agents have filled disks this way. If recovery
+   might matter, ask first; default is destroy and recreate.
+5. When a production or e2e instance is replaced, reclaim space in the same session: confirm
+   `du`/`find` shows no abandoned `masthead.sqlite*` or full instance trees left behind.
+
+### Database snapshots (dev only)
 
 When Masthead migrates or backs up the local SQLite database in `~/.local/share/masthead-dev/`:
 
 1. Keep exactly one `masthead.sqlite` as the active database.
-2. Keep at most one `masthead.sqlite.backup-*` snapshot beside it.
-3. Before creating a new backup snapshot, delete all older `masthead.sqlite.backup-*` files.
+2. Prefer **zero** long-lived backups. If a migration tool writes `masthead.sqlite.backup-*`, keep
+   at most one and delete it after the new DB is verified healthy.
+3. Before creating any new backup snapshot, delete all older `masthead.sqlite.backup-*` files.
 4. Do not accumulate multiple database snapshots across releases or migration runs.
 
 ### Worktree cleanup
