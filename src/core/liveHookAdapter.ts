@@ -41,8 +41,12 @@ const MAX_LIVE_HOOK_BYTES = 262_144;
 const MAX_LIVE_HOOK_DEPTH = 20;
 const MAX_LIVE_HOOK_ARRAY_LENGTH = 500;
 const MAX_LIVE_HOOK_OBJECT_KEYS = 200;
-/** Short privacy-safe task preview length for title/subject candidates only. */
-const TASK_PREVIEW_MAX_CHARS = 100;
+/**
+ * Short privacy-safe task preview length for title/subject candidates only.
+ * Aligned with `safeFactLabel` (≤80) so previews survive the title → facts pipeline.
+ * (Evidence backup path `subjectFromEvidence` is ≤72; primary path is session title.)
+ */
+const TASK_PREVIEW_MAX_CHARS = 80;
 const TASK_PREVIEW_MIN_CHARS = 8;
 
 export type LiveHookDiagnostic = {
@@ -653,14 +657,19 @@ function privacySafeTaskPreview(raw: string): string | undefined {
   const collapsed = raw.replace(/\s+/g, " ").trim();
   if (!collapsed) return undefined;
 
-  // Redact secrets/tokens/URLs first, then strip residual password-like assignments.
+  // Redact secrets/tokens first, then strip residual password-like assignments and URLs.
+  // (redactText does not strip bare https?://…; safeFactLabel rejects raw URLs in titles.)
   let redacted = redactText(collapsed)
     .replace(/\b(password|passwd|pwd|secret|token|api[_-]?key)\s*[:=]\s*\S+/gi, "$1=[redacted]")
     .replace(/\bsk-[A-Za-z0-9_-]+\b/g, "[SECRET:api_key]")
+    .replace(/\bhttps?:\/\/[^\s"'`<>]+/gi, "[redacted-url]")
+    .replace(/\bwww\.[^\s"'`<>]+/gi, "[redacted-url]")
     .replace(/\s+/g, " ")
     .trim();
 
   if (!redacted) return undefined;
+  // Never accept a preview that still contains a raw URL scheme.
+  if (/\bhttps?:\/\//i.test(redacted) || /^https[-_:]/i.test(redacted)) return undefined;
   // Drop previews that are only redaction wrappers / placeholders (no task signal).
   if (!hasSemanticRedactedText(redacted)) return undefined;
 

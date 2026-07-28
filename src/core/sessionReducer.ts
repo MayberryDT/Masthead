@@ -319,14 +319,46 @@ function usefulSessionTitle(value: string | undefined): string | undefined {
   return cleaned;
 }
 
-/** Prefer short privacy-safe user-turn summaries as session title when hooks suppressed prompt bodies. */
+/**
+ * Prefer short privacy-safe task previews as session title when hooks suppressed prompt bodies.
+ * Includes user turns and session.started events that already carry a non-generic task summary
+ * (liveHookAdapter may place first-user-message previews on session start).
+ */
 function usefulSessionTitleFromUserTurns(events: NormalizedEvent[]): string | undefined {
   for (const event of events) {
-    if (event.type !== "user.response" && event.type !== "user.question") continue;
+    if (
+      event.type !== "user.response" &&
+      event.type !== "user.question" &&
+      event.type !== "session.started"
+    ) {
+      continue;
+    }
     const title = usefulSessionTitle(event.summary);
-    if (title) return title;
+    if (!title) continue;
+    // session.started often has generic labels ("session.started", "Started"); only promote
+    // when the summary already looks like a task preview, not an event name.
+    if (event.type === "session.started" && !looksLikeTaskPreviewTitle(title)) continue;
+    return title;
   }
   return undefined;
+}
+
+function looksLikeTaskPreviewTitle(value: string): boolean {
+  const cleaned = value.replace(/\s+/g, " ").trim();
+  if (cleaned.length < 8) return false;
+  if (/^session[.\s_-]*start(?:ed)?$/i.test(cleaned)) return false;
+  if (/^(?:started|start|stop|stopped|end|ended|idle|running|active|complete|completed)$/i.test(cleaned)) {
+    return false;
+  }
+  if (
+    /^(?:grok build|codex|claude code|cursor|opencode|hermes|oh my pi|pi)\s*:\s*/i.test(cleaned) &&
+    /(?:session\s+start|hook\s+event|user\s+prompt|before\s+submit)/i.test(cleaned)
+  ) {
+    return false;
+  }
+  // Real task previews are multi-word phrases, not single event tokens.
+  if (!/\s/.test(cleaned)) return false;
+  return true;
 }
 
 function isOpaquePathSegment(value: string): boolean {
