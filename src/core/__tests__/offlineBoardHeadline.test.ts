@@ -427,4 +427,40 @@ describe("offline board headline views", () => {
     expect(view.frame?.disposition).toBe("editing files");
     expect(view.frame?.disposition).not.toMatch(/icon-registry/i);
   });
+
+  test("offline subject prefers specific user phrase over Logbook domain-map singleton", () => {
+    const view = buildOfflineBoardHeadlineView(
+      input({
+        workContext: {
+          label: "Logbook work",
+          confidence: "path_cluster",
+          pathClusters: ["logbook"],
+          sourceSignals: ["path:logbook"]
+        },
+        recentTranscriptMessages: ["Fix the Logbook artifact detail loading spinner"],
+        recentFileBasenames: ["LogbookSurface.tsx"]
+      })
+    );
+
+    expect(view.frame?.subject?.toLowerCase()).not.toBe("logbook");
+    expect(view.frame?.subject).toMatch(/logbook/i);
+    expect(view.frame?.subject?.split(/\s+/).length).toBeGreaterThan(1);
+    expect(view.headline).not.toMatch(/^Logbook:/i);
+  });
+
+  test("offline subject ignores assistant openers when user task phrase is present", () => {
+    const view = buildOfflineBoardHeadlineView(
+      input({
+        recentTranscriptMessages: [
+          "Fix the Logbook artifact detail loading spinner",
+          "I will inspect the repository"
+        ],
+        recentFileBasenames: []
+      })
+    );
+
+    expect(view.frame?.subject).not.toMatch(/^I will inspect/i);
+    expect(view.frame?.subject?.toLowerCase()).not.toBe("logbook");
+    expect(view.frame?.subject).toMatch(/logbook/i);
+  });
 });
