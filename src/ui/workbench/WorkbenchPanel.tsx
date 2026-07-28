@@ -36,10 +36,14 @@ type WorkbenchPanelProps = Partial<
     | "notAddedSummary"
     | "page"
     | "pageSize"
+    | "qualityReviewOpen"
+    | "qualityReviewSessions"
+    | "qualityReviewSummary"
     | "runAction"
     | "selectedSessionIds"
     | "sessions"
     | "setNotAddedOpen"
+    | "setQualityReviewOpen"
     | "setPage"
     | "total"
 >
@@ -56,6 +60,7 @@ type WorkbenchPanelProps = Partial<
 const EMPTY_SELECTION = new Set<string>();
 const EMPTY_SESSIONS: UseWorkbenchControllerResult["sessions"] = [];
 const EMPTY_NOT_ADDED: UseWorkbenchControllerResult["notAddedSessions"] = [];
+const EMPTY_QUALITY_REVIEW: UseWorkbenchControllerResult["qualityReviewSessions"] = [];
 const EMPTY_ACTIVITY: UseWorkbenchControllerResult["activity"] = [];
 
 const defaultCanRun: UseWorkbenchControllerResult["canRun"] = () => false;
@@ -78,7 +83,9 @@ const TOOLTIPS = {
   pagePrevious: "Show the previous page of package-path sessions.",
   pageNext: "Show the next page of package-path sessions.",
   selectPage: "Select or clear all sessions on this page.",
-  notAdded: "Review sessions excluded from the package path (Not Added)."
+  notAdded: "Review sessions excluded from the package path (Not Added).",
+  qualityReview:
+    "Package-path sessions that need a quality decision (review_quality) before enrichment."
 } as const;
 
 type PipelineItem = {
@@ -123,10 +130,14 @@ export function WorkbenchPanel({
   onToggleSession,
   page = 0,
   pageSize = 100,
+  qualityReviewOpen = false,
+  qualityReviewSessions = EMPTY_QUALITY_REVIEW,
+  qualityReviewSummary,
   runAction,
   selectedSessionIds = EMPTY_SELECTION,
   sessions = EMPTY_SESSIONS,
   setNotAddedOpen,
+  setQualityReviewOpen,
   setPage,
   total
 }: WorkbenchPanelProps) {
@@ -136,6 +147,8 @@ export function WorkbenchPanel({
   const publishPathLabel = typeof total === "number" ? String(total) : loading ? "…" : String(queueTotal);
   const notAddedTotal = notAddedSummary?.total;
   const notAddedLabel = notAddedTotal != null ? String(notAddedTotal) : undefined;
+  const qualityReviewTotal = qualityReviewSummary?.total;
+  const qualityReviewLabel = qualityReviewTotal != null ? String(qualityReviewTotal) : undefined;
   const pageCount = Math.max(1, Math.ceil(queueTotal / Math.max(1, pageSize)));
   const safePage = Math.min(page, pageCount - 1);
   const rangeStart = queueTotal === 0 ? 0 : safePage * pageSize + 1;
@@ -253,6 +266,10 @@ export function WorkbenchPanel({
 
   const toggleNotAdded = () => {
     setNotAddedOpen?.(!notAddedOpen);
+  };
+
+  const toggleQualityReview = () => {
+    setQualityReviewOpen?.(!qualityReviewOpen);
   };
 
   const onHeaderCheckboxChange = () => {
@@ -373,6 +390,26 @@ export function WorkbenchPanel({
               </span>
             ) : null}
           </div>
+          {qualityReviewLabel != null ? (
+            <div
+              className={qualityReviewOpen ? "is-active" : undefined}
+              title={TOOLTIPS.qualityReview}
+            >
+              <dt>Quality review</dt>
+              <dd>
+                <button
+                  type="button"
+                  className="workbench-fact-toggle"
+                  onClick={toggleQualityReview}
+                  aria-pressed={qualityReviewOpen}
+                  aria-label={`Quality review ${qualityReviewLabel}, ${qualityReviewOpen ? "close" : "open"} list`}
+                  title={TOOLTIPS.qualityReview}
+                >
+                  {qualityReviewLabel}
+                </button>
+              </dd>
+            </div>
+          ) : null}
           {notAddedLabel != null ? (
             <div className={notAddedOpen ? "is-active" : undefined} title={TOOLTIPS.notAdded}>
               <dt>Not Added</dt>
@@ -441,6 +478,63 @@ export function WorkbenchPanel({
           <AppButton variant="primary" onClick={onRetry} title="Reload Workbench queue and activity">
             Retry
           </AppButton>
+        </section>
+      ) : null}
+
+      {qualityReviewOpen ? (
+        <section
+          className="workbench-not-added-panel workbench-quality-review-panel"
+          aria-label="Quality review (package path)"
+        >
+          <div className="workbench-not-added-header">
+            <p className="mono-label">Quality review — still on package path</p>
+            <AppButton variant="quiet" onClick={() => setQualityReviewOpen?.(false)}>
+              Close
+            </AppButton>
+          </div>
+          <div className="workbench-table-wrap workbench-not-added-table-wrap">
+            <table className="workbench-session-table workbench-not-added-table">
+              <thead>
+                <tr>
+                  <th scope="col">session</th>
+                  <th scope="col">reason</th>
+                  <th scope="col">runtime</th>
+                  <th scope="col">last activity</th>
+                </tr>
+              </thead>
+              <tbody>
+                {qualityReviewSessions.length === 0 ? (
+                  <tr>
+                    <td className="workbench-session-empty" colSpan={4}>
+                      No sessions awaiting quality review
+                    </td>
+                  </tr>
+                ) : (
+                  qualityReviewSessions.map((session) => {
+                    const safeTitle = sanitizeWorkbenchVisibleText(session.title);
+                    const safeProject = session.project ? sanitizeWorkbenchVisibleText(session.project) : "-";
+                    return (
+                      <tr key={session.sessionId}>
+                        <td>
+                          <span className="workbench-session-meta">
+                            <strong>{safeTitle}</strong>
+                            <span>
+                              {safeProject} / {sanitizeWorkbenchVisibleText(session.sessionId)}
+                            </span>
+                          </span>
+                        </td>
+                        <td>{sanitizeWorkbenchVisibleText(session.reason)}</td>
+                        <td>{sanitizeWorkbenchVisibleText(session.runtime)}</td>
+                        <td>
+                          <span className="workbench-latest">{sanitizeWorkbenchVisibleText(session.lastActivityAt)}</span>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
         </section>
       ) : null}
 

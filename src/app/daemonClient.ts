@@ -22,6 +22,8 @@ import type {
   WorkbenchMissingSessionsResponse,
   WorkbenchNotAddedResponse,
   WorkbenchNotAddedSummaryDto,
+  WorkbenchQualityReviewResponse,
+  WorkbenchQualityReviewSummaryDto,
   WorkbenchImportHealthSummaryDto,
   WorkbenchSelectionSnapshotResponse,
   WorkbenchSessionsResponse
@@ -1458,6 +1460,16 @@ export async function getWorkbenchNotAddedSummary(
   });
 }
 
+export async function getWorkbenchQualityReviewSummary(
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { signal?: AbortSignal } = {}
+): Promise<WorkbenchQualityReviewSummaryDto> {
+  return getJson<WorkbenchQualityReviewSummaryDto>(baseUrl, "/workbench/quality-review-summary", {
+    label: "workbench quality review summary",
+    signal: options.signal
+  });
+}
+
 export async function getWorkbenchImportHealthSummary(
   baseUrl = defaultLiveProjectionUrl(),
   options: { signal?: AbortSignal } = {}
@@ -1474,6 +1486,17 @@ export async function getWorkbenchNotAddedSessions(
 ): Promise<WorkbenchNotAddedResponse> {
   return getJson<WorkbenchNotAddedResponse>(baseUrl, "/workbench/not-added", {
     label: "workbench not added sessions",
+    query: { includeDetails: true, limit: options.limit },
+    signal: options.signal
+  });
+}
+
+export async function getWorkbenchQualityReviewSessions(
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { limit?: number; signal?: AbortSignal } = {}
+): Promise<WorkbenchQualityReviewResponse> {
+  return getJson<WorkbenchQualityReviewResponse>(baseUrl, "/workbench/quality-review", {
+    label: "workbench quality review sessions",
     query: { includeDetails: true, limit: options.limit },
     signal: options.signal
   });

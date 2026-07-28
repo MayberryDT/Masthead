@@ -6,6 +6,8 @@ import {
   getWorkbenchActivity,
   getWorkbenchNotAddedSessions,
   getWorkbenchNotAddedSummary,
+  getWorkbenchQualityReviewSessions,
+  getWorkbenchQualityReviewSummary,
   getWorkbenchSessions,
   postWorkbenchCheckTranscript,
   postWorkbenchClaim,
@@ -18,6 +20,8 @@ import type {
   WorkbenchActivityDto,
   WorkbenchNotAddedSessionDto,
   WorkbenchNotAddedSummaryDto,
+  WorkbenchQualityReviewSessionDto,
+  WorkbenchQualityReviewSummaryDto,
   WorkbenchQueueSessionDto,
   WorkbenchSessionsResponse
 } from "../../shared/workbench";
@@ -70,12 +74,16 @@ export type UseWorkbenchControllerResult = {
   incompleteAuthoring?: WorkbenchAuthoringV5IncompleteRequestSummaryDto;
   lastActionSummary?: string;
   loadNotAdded: () => void;
+  loadQualityReview: () => void;
   loading: boolean;
   notAddedOpen: boolean;
   notAddedSessions: WorkbenchNotAddedSessionDto[];
   notAddedSummary?: WorkbenchNotAddedSummaryDto;
   page: number;
   pageSize: number;
+  qualityReviewOpen: boolean;
+  qualityReviewSessions: WorkbenchQualityReviewSessionDto[];
+  qualityReviewSummary?: WorkbenchQualityReviewSummaryDto;
   retry: () => void;
   runAction: (kind: WorkbenchActionKind) => Promise<void>;
   selectAll: () => Promise<void>;
@@ -83,6 +91,7 @@ export type UseWorkbenchControllerResult = {
   selectedSessionIds: Set<string>;
   sessions: WorkbenchQueueSessionDto[];
   setNotAddedOpen: (open: boolean) => void;
+  setQualityReviewOpen: (open: boolean) => void;
   setPage: (page: number) => void;
   total: number;
   toggleSession: (sessionId: string) => void;
@@ -99,9 +108,12 @@ export function useWorkbenchController({
   const [activity, setActivity] = useState<WorkbenchActivityDto[]>([]);
   const [notAddedSummary, setNotAddedSummary] = useState<WorkbenchNotAddedSummaryDto>();
   const [notAddedSessions, setNotAddedSessions] = useState<WorkbenchNotAddedSessionDto[]>([]);
+  const [qualityReviewSummary, setQualityReviewSummary] = useState<WorkbenchQualityReviewSummaryDto>();
+  const [qualityReviewSessions, setQualityReviewSessions] = useState<WorkbenchQualityReviewSessionDto[]>([]);
   const [authoringCapabilities, setAuthoringCapabilities] = useState<WorkbenchAuthoringV5CapabilitiesDto>();
   const [incompleteAuthoring, setIncompleteAuthoring] = useState<WorkbenchAuthoringV5IncompleteRequestSummaryDto>();
   const [notAddedOpen, setNotAddedOpenState] = useState(false);
+  const [qualityReviewOpen, setQualityReviewOpenState] = useState(false);
   const [selectedSessionIds, setSelectedSessionIds] = useState(() => new Set<string>());
   const [selectedCompileReadySessionIds, setSelectedCompileReadySessionIds] = useState(() => new Set<string>());
   const [loading, setLoading] = useState(false);
@@ -136,7 +148,7 @@ export function useWorkbenchController({
       const incompletePromise = getIncompleteWorkbenchAuthoringRequest(activeProjectionUrl, {
         signal: options.signal
       }).catch(() => undefined);
-      const [response, activityResponse, notAdded, capabilities, incomplete] = await Promise.all([
+      const [response, activityResponse, notAdded, qualityReview, capabilities, incomplete] = await Promise.all([
         getWorkbenchSessions(activeProjectionUrl, {
           limit: pageSize,
           offset: pageIndex * pageSize,
@@ -144,6 +156,7 @@ export function useWorkbenchController({
         }),
         getWorkbenchActivity(activeProjectionUrl, { limit: 30, signal: options.signal }),
         getWorkbenchNotAddedSummary(activeProjectionUrl, { signal: options.signal }),
+        getWorkbenchQualityReviewSummary(activeProjectionUrl, { signal: options.signal }),
         capabilitiesPromise,
         incompletePromise
       ]);
@@ -160,6 +173,7 @@ export function useWorkbenchController({
       setTotal(typeof response.total === "number" ? response.total : response.sessions.length);
       setActivity(activityResponse.activity);
       setNotAddedSummary(notAdded);
+      setQualityReviewSummary(qualityReview);
       setAuthoringCapabilities(capabilities);
       setIncompleteAuthoring(incomplete?.request);
       setSelectedSessionIds(selection.present);
@@ -196,12 +210,29 @@ export function useWorkbenchController({
     }
   }, [activeProjectionUrl]);
 
+  const loadQualityReview = useCallback(async () => {
+    try {
+      const response = await getWorkbenchQualityReviewSessions(activeProjectionUrl, { limit: 50 });
+      setQualityReviewSessions(response.sessions);
+    } catch (loadError) {
+      setActionError(loadError instanceof Error ? loadError.message : String(loadError));
+    }
+  }, [activeProjectionUrl]);
+
   const setNotAddedOpen = useCallback(
     (open: boolean) => {
       setNotAddedOpenState(open);
       if (open) void loadNotAdded();
     },
     [loadNotAdded]
+  );
+
+  const setQualityReviewOpen = useCallback(
+    (open: boolean) => {
+      setQualityReviewOpenState(open);
+      if (open) void loadQualityReview();
+    },
+    [loadQualityReview]
   );
 
   useEffect(() => {
@@ -556,12 +587,18 @@ export function useWorkbenchController({
     loadNotAdded: () => {
       void loadNotAdded();
     },
+    loadQualityReview: () => {
+      void loadQualityReview();
+    },
     loading,
     notAddedOpen,
     notAddedSessions,
     notAddedSummary,
     page,
     pageSize,
+    qualityReviewOpen,
+    qualityReviewSessions,
+    qualityReviewSummary,
     retry,
     runAction,
     selectAll,
@@ -569,6 +606,7 @@ export function useWorkbenchController({
     selectedSessionIds,
     sessions,
     setNotAddedOpen,
+    setQualityReviewOpen,
     setPage,
     total,
     toggleSession
