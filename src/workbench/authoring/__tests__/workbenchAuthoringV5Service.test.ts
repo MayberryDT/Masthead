@@ -201,8 +201,7 @@ describe("workbench-authoring-v5 loop", () => {
       skillContract: {
         owner: "agent",
         scaffoldWritesProse: false,
-        loop: ["start", "inspect", "scaffold", "save", "finish", "claim_next_or_complete"],
-        obligation: "Continue until the immutable request-complete receipt is returned. Resume is only crash recovery."
+        loop: ["start", "inspect", "scaffold", "save", "finish", "claim_next_or_complete"]
       },
       nextAction: {
         kind: "start",
@@ -217,6 +216,17 @@ describe("workbench-authoring-v5 loop", () => {
       }
     });
     expect(bootstrap.skillContract.loop).toContain("claim_next_or_complete");
+    expect(bootstrap.skillContract.scaffoldWritesProse).toBe(false);
+    expect(bootstrap.skillContract.synthesisRule).toMatch(/AGENTS\.md/i);
+    expect(bootstrap.skillContract.synthesisRule).toMatch(/system-reminder/i);
+    expect(bootstrap.skillContract.synthesisRule).toMatch(/MCP connection prose/i);
+    expect(bootstrap.skillContract.synthesisRule).toMatch(/approval JSON/i);
+    expect(bootstrap.skillContract.synthesisRule).toMatch(/risk_level/i);
+    expect(bootstrap.skillContract.synthesisRule).toMatch(/last substantive user ask/i);
+    expect(bootstrap.skillContract.synthesisRule).toMatch(/prose-free/i);
+    expect(bootstrap.skillContract.objective).toMatch(/last substantive user ask/i);
+    expect(bootstrap.skillContract.obligation).toMatch(/request-complete receipt/i);
+    expect(bootstrap.skillContract.obligation).toMatch(/approval-JSON/i);
     expect(bootstrap.nextAction.stopRule).toContain('nextAction.kind === "complete"');
     expect(bootstrap.nextAction.stopRule).toMatch(/request receipt/i);
     expect(bootstrap.nextAction.stopRule).toMatch(/Pack finish is not request completion/i);

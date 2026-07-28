@@ -61,6 +61,11 @@ not contain a deterministic title, summary, purpose, outcome, keyword suggestion
 agent must inspect the evidence, then cite canonical evidence for the core fields: title,
 description, purpose, outcome, key work, and verification.
 
+Bootstrap `skillContract.synthesisRule` requires the last substantive user ask and retained assistant
+outcome—not AGENTS.md / skill dumps, system-reminder text, MCP connection prose as title or primary
+ask, and not approval JSON (`risk_level`, `outcome: allow`) pasted into description. Masthead still
+writes no enrichment prose; scaffold fields stay blank until the agent fills them.
+
 Agents never author a session dossier body. Accepted durable enrichment is applied to the canonical
 session graph, then the daemon rebuilds the immutable `canonical-session-dossier-v1` presentation.
 
