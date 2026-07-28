@@ -825,14 +825,14 @@ export function WorkbenchPanel({
                     return (
                       <li
                         key={item.activityId}
-                        className={`workbench-activity-item is-${workbenchActivityTone(item.eventType)} ${newActivityIds.has(item.activityId) ? "is-new" : ""}`.trim()}
+                        className={`workbench-activity-item is-${workbenchActivityTone(item.eventType, item.details)} ${newActivityIds.has(item.activityId) ? "is-new" : ""}`.trim()}
                       >
                         <span className="workbench-activity-gutter" aria-hidden="true" />
                         <div className="workbench-activity-body">
                           <div className="workbench-activity-meta">
                             <time dateTime={item.eventAt}>{formatWorkbenchActivityTime(item.eventAt)}</time>
                             <span className="workbench-activity-type">
-                              {sanitizeWorkbenchVisibleText(workbenchActivityLabel(item.eventType))}
+                              {sanitizeWorkbenchVisibleText(workbenchActivityLabel(item.eventType, item.details))}
                             </span>
                             <span className="workbench-activity-actor">
                               {sanitizeWorkbenchVisibleText(item.actorId ?? item.actorKind)}

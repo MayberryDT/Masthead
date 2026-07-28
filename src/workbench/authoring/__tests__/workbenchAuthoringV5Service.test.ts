@@ -534,6 +534,116 @@ describe("workbench-authoring-v5 loop", () => {
     db.close();
   });
 
+  test("non-final pack finish records authoring_pack_finished with remaining work; final emits request completed", async () => {
+    const db = await testDatabase();
+    const sessionIds = Array.from({ length: 20 }, (_, index) => `session:v5:activity-a7:${index + 1}`);
+    for (const sessionId of sessionIds) seedCompileReadySession(db, sessionId);
+    const created = createWorkbenchAuthoringV5Request(db, {
+      actorId: "agent:test",
+      command,
+      currentIdentity: identity,
+      expectedIdentity: identity,
+      sessionIds
+    });
+    const requestId = created.request.requestId;
+
+    const started = startWorkbenchAuthoringV5Pack(db, {
+      command,
+      currentIdentity: identity,
+      expectedIdentity: identity,
+      requestId
+    });
+    if (!("pack" in started)) throw new Error("expected_active_pack");
+    await inspectWholePack(db, started.pack.packId);
+    saveWorkbenchAuthoringV5Draft(db, {
+      command,
+      currentIdentity: identity,
+      draft: authorDraft(buildWorkbenchAuthoringV5Scaffold(db, { command, packId: started.pack.packId }).draft),
+      expectedIdentity: identity,
+      packId: started.pack.packId
+    });
+    finishWorkbenchAuthoringV5Pack(db, {
+      command,
+      currentIdentity: identity,
+      expectedIdentity: identity,
+      packId: started.pack.packId
+    });
+
+    const midPackFinished = db.prepare(
+      `SELECT event_type AS eventType, summary, details_json AS detailsJson
+       FROM workbench_activity
+       WHERE related_run_id = ? AND event_type = 'authoring_pack_finished'
+       ORDER BY event_at ASC LIMIT 1`
+    ).get(requestId) as { eventType: string; summary: string; detailsJson: string };
+    expect(midPackFinished).toBeTruthy();
+    const midDetails = JSON.parse(midPackFinished.detailsJson) as Record<string, unknown>;
+    expect(midDetails).toMatchObject({
+      requestComplete: false,
+      remainingPacks: 1,
+      remainingSessions: 10,
+      packsCompleted: 1,
+      packsTotal: 2,
+      sessionsAttempted: 10,
+      sessionsTotal: 20
+    });
+    expect(midPackFinished.summary).toMatch(/pack finished|request (still )?open/i);
+    expect(midPackFinished.summary).not.toMatch(/request completed/i);
+    expect(typeof midDetails.message === "string" ? midDetails.message : "").toMatch(
+      /pack done|request (still )?open|remaining/i
+    );
+    const midCompleted = db.prepare(
+      `SELECT COUNT(*) AS count FROM workbench_activity
+       WHERE related_run_id = ? AND event_type = 'authoring_request_completed'`
+    ).get(requestId) as { count: number };
+    expect(Number(midCompleted.count)).toBe(0);
+
+    const next = startWorkbenchAuthoringV5Pack(db, {
+      command,
+      currentIdentity: identity,
+      expectedIdentity: identity,
+      requestId
+    });
+    if (!("pack" in next)) throw new Error("expected_active_pack");
+    await inspectWholePack(db, next.pack.packId);
+    saveWorkbenchAuthoringV5Draft(db, {
+      command,
+      currentIdentity: identity,
+      draft: authorDraft(buildWorkbenchAuthoringV5Scaffold(db, { command, packId: next.pack.packId }).draft),
+      expectedIdentity: identity,
+      packId: next.pack.packId
+    });
+    finishWorkbenchAuthoringV5Pack(db, {
+      command,
+      currentIdentity: identity,
+      expectedIdentity: identity,
+      packId: next.pack.packId
+    });
+
+    const finalPackFinished = db.prepare(
+      `SELECT event_type AS eventType, summary, details_json AS detailsJson
+       FROM workbench_activity
+       WHERE related_run_id = ? AND event_type = 'authoring_pack_finished'
+       ORDER BY event_at DESC LIMIT 1`
+    ).get(requestId) as { eventType: string; summary: string; detailsJson: string };
+    const finalDetails = JSON.parse(finalPackFinished.detailsJson) as Record<string, unknown>;
+    expect(finalDetails).toMatchObject({
+      requestComplete: true,
+      remainingPacks: 0,
+      remainingSessions: 0,
+      packsCompleted: 2,
+      packsTotal: 2,
+      sessionsAttempted: 20,
+      sessionsTotal: 20
+    });
+    expect(finalPackFinished.summary).toMatch(/pack finished/i);
+    const finalCompleted = db.prepare(
+      `SELECT COUNT(*) AS count FROM workbench_activity
+       WHERE related_run_id = ? AND event_type = 'authoring_request_completed'`
+    ).get(requestId) as { count: number };
+    expect(Number(finalCompleted.count)).toBeGreaterThan(0);
+    db.close();
+  });
+
   test("publishes eight good and one soft-flagged session, rejects one protocol dossier, and releases the next pack", async () => {
     const db = await testDatabase();
     const sessionIds = Array.from({ length: 20 }, (_, index) => `session:v5:quality:${index + 1}`);

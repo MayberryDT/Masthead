@@ -20,9 +20,18 @@ const AUTHORING_ACTIVITY_PRESENTATION: Record<string, WorkbenchActivityPresentat
   authoring_daemon_error: { label: "Daemon error", tone: "bad" }
 };
 
-export function workbenchActivityTone(eventType: string): WorkbenchActivityTone {
+/** Pack finished while more packs/sessions remain — not campaign-complete green. */
+const INCOMPLETE_PACK_FINISHED_PRESENTATION: WorkbenchActivityPresentation = {
+  label: "Pack finished — request open",
+  tone: "info"
+};
+
+export function workbenchActivityTone(
+  eventType: string,
+  details?: Record<string, unknown>
+): WorkbenchActivityTone {
   const normalizedEventType = eventType.toLowerCase();
-  const authoringPresentation = resolveAuthoringActivityPresentation(normalizedEventType);
+  const authoringPresentation = resolveAuthoringActivityPresentation(normalizedEventType, details);
   if (authoringPresentation) return authoringPresentation.tone;
   if (/(fail|error|denied|blocked|not_added|gate_failed|quality_failed)/.test(normalizedEventType)) return "bad";
   if (/(permission|warn|missing|required)/.test(normalizedEventType)) return "warn";
@@ -33,8 +42,11 @@ export function workbenchActivityTone(eventType: string): WorkbenchActivityTone 
   return "mute";
 }
 
-export function workbenchActivityLabel(eventType: string): string {
-  return resolveAuthoringActivityPresentation(eventType.toLowerCase())?.label ?? eventType;
+export function workbenchActivityLabel(
+  eventType: string,
+  details?: Record<string, unknown>
+): string {
+  return resolveAuthoringActivityPresentation(eventType.toLowerCase(), details)?.label ?? eventType;
 }
 
 export function workbenchActivityReason(
@@ -61,9 +73,24 @@ function findingMessage(value: unknown): string | undefined {
   return typeof message === "string" && message.trim() ? message.trim() : undefined;
 }
 
+function isIncompletePackFinished(
+  normalizedEventType: string,
+  details?: Record<string, unknown>
+): boolean {
+  if (normalizedEventType !== "authoring_pack_finished" || !details) return false;
+  if (details.requestComplete === false) return true;
+  if (typeof details.remainingPacks === "number" && details.remainingPacks > 0) return true;
+  if (typeof details.remainingSessions === "number" && details.remainingSessions > 0) return true;
+  return false;
+}
+
 function resolveAuthoringActivityPresentation(
-  normalizedEventType: string
+  normalizedEventType: string,
+  details?: Record<string, unknown>
 ): WorkbenchActivityPresentation | undefined {
+  if (isIncompletePackFinished(normalizedEventType, details)) {
+    return INCOMPLETE_PACK_FINISHED_PRESENTATION;
+  }
   if (AUTHORING_ACTIVITY_PRESENTATION[normalizedEventType]) {
     return AUTHORING_ACTIVITY_PRESENTATION[normalizedEventType];
   }
