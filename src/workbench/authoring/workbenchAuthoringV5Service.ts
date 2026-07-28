@@ -593,13 +593,25 @@ export function finishWorkbenchAuthoringV5Pack(
       receiptVersion: "workbench-authoring-v5-pack-receipt-v1",
       requestId: pack.requestId
     };
-    const completedReceipts = listWorkbenchAuthoringV5Packs(db, pack.requestId)
+    const allPacks = listWorkbenchAuthoringV5Packs(db, pack.requestId);
+    const completedReceipts = allPacks
       .map(({ packId }) => getWorkbenchAuthoringV5PackReceipt(db, packId))
       .filter((receipt): receipt is WorkbenchAuthoringV5PackReceipt => Boolean(receipt));
-    const hasLaterPack = listWorkbenchAuthoringV5Packs(db, pack.requestId)
-      .some(({ ordinal, status }) => ordinal > pack.ordinal && status === "pending");
+    const laterPacks = allPacks.filter(({ ordinal, status }) => ordinal > pack.ordinal && status === "pending");
+    const hasLaterPack = laterPacks.length > 0;
     const requestReceipt = hasLaterPack ? undefined : requestReceiptFrom([...completedReceipts, packReceipt], completedAt, pack.requestId);
-    recordFinishActivity(db, request.actorId, packReceipt, draft, Boolean(requestReceipt));
+    const packsCompletedAfter = completedReceipts.length + 1;
+    const sessionsAttemptedAfter =
+      completedReceipts.reduce((sum, prior) => sum + prior.counts.attempted, 0) + packReceipt.counts.attempted;
+    recordFinishActivity(db, request.actorId, packReceipt, draft, {
+      requestComplete: Boolean(requestReceipt),
+      remainingPacks: laterPacks.length,
+      remainingSessions: laterPacks.reduce((sum, later) => sum + later.sessionIds.length, 0),
+      packsCompleted: packsCompletedAfter,
+      packsTotal: request.packCount,
+      sessionsAttempted: sessionsAttemptedAfter,
+      sessionsTotal: request.sessionCount
+    });
     completeWorkbenchAuthoringV5PackRecord(db, { packReceipt, ...(requestReceipt ? { requestReceipt } : {}) });
     bumpDataRevisionInTransaction(db, "logbook");
     bumpDataRevisionInTransaction(db, "workbench");
@@ -932,11 +944,43 @@ function recordFinishActivity(
   actorId: string,
   receipt: WorkbenchAuthoringV5PackReceipt,
   draft: WorkbenchAuthoringV5Draft,
-  requestCompleted: boolean
+  progress: {
+    requestComplete: boolean;
+    remainingPacks: number;
+    remainingSessions: number;
+    packsCompleted: number;
+    packsTotal: number;
+    sessionsAttempted: number;
+    sessionsTotal: number;
+  }
 ): void {
   const actor = { id: actorId, kind: "agent" } as const;
+  const packProgressDetails = {
+    requestComplete: progress.requestComplete,
+    remainingPacks: progress.remainingPacks,
+    remainingSessions: progress.remainingSessions,
+    packsCompleted: progress.packsCompleted,
+    packsTotal: progress.packsTotal,
+    sessionsAttempted: progress.sessionsAttempted,
+    sessionsTotal: progress.sessionsTotal,
+    ...(!progress.requestComplete
+      ? {
+          message:
+            `Pack done; request still open (${progress.remainingPacks} pack${progress.remainingPacks === 1 ? "" : "s"}, ` +
+            `${progress.remainingSessions} session${progress.remainingSessions === 1 ? "" : "s"} remaining).`
+        }
+      : {})
+  };
+  const packFinishedSummary = progress.requestComplete
+    ? "V5 authoring pack finished"
+    : "V5 pack finished; request still open";
   for (const outcome of receipt.outcomes) {
-    const details = { findings: outcome.findings, packId: receipt.packId, requestId: receipt.requestId };
+    const details = {
+      findings: outcome.findings,
+      packId: receipt.packId,
+      requestId: receipt.requestId,
+      ...packProgressDetails
+    };
     if (outcome.disposition !== "hard_reject") {
       recordWorkbenchActivity(db, {
         actor,
@@ -972,9 +1016,9 @@ function recordFinishActivity(
       eventType: "authoring_pack_finished",
       relatedRunId: receipt.requestId,
       sessionId: outcome.sessionId,
-      summary: "V5 authoring pack finished"
+      summary: packFinishedSummary
     });
-    if (requestCompleted) {
+    if (progress.requestComplete) {
       recordWorkbenchActivity(db, {
         actor,
         details,
