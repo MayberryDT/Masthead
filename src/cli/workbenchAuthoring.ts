@@ -31,6 +31,10 @@ export async function runWorkbenchAuthoringCli(args: string[], options: Workbenc
     const { runWipePublishedMaintenance } = await import("./workbenchMaintenance.ts");
     return runWipePublishedMaintenance(args, options, json);
   }
+  if (command === "age-stale-quality-reviews") {
+    const { runAgeStaleQualityReviewsMaintenance } = await import("./workbenchMaintenance.ts");
+    return runAgeStaleQualityReviewsMaintenance(args, options, json);
+  }
   if (command === "author") {
     const { runGuidedAuthoringCli } = await import("./guidedAuthoring.ts");
     return runGuidedAuthoringCli(args.slice(1), options);
@@ -154,6 +158,7 @@ export function workbenchHelp(): string {
     "  mastheadctl workbench prepare-v5-quality-corpus --db <path> --retain-created-by <actor> [--retain-created-by <actor> ...] --receipt <path> --json",
     "  mastheadctl workbench invalidate-v5-quality-corpus --db <path> --prepared-receipt <path> --audit-hash <sha256> --confirm --json",
     "  mastheadctl workbench wipe-published --db <path> --confirm --json",
+    "  mastheadctl workbench age-stale-quality-reviews --db <path> [--limit 100] [--max-age-days 7] (--dry-run | --confirm) --json",
     "",
     "The daemon owns pack membership, evidence, validation, publication, receipts, and identity checks."
   ].join("\n") + "\n";
