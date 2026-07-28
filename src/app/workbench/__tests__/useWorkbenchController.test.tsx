@@ -544,6 +544,9 @@ describe("useWorkbenchController", () => {
     expect(Array.from(latest().selectedSessionIds).sort()).toEqual(["session:a", "session:b"]);
     expect(latest().agentPromptSessionCount).toBe(1);
     expect(latest().agentPromptExcludedCount).toBe(1);
+    expect(latest().lastActionSummary).toBe(
+      "Selected 2 package-path · 1 ready · 1 need quality review"
+    );
     expect(latest().canRun("copy_agent_prompt")).toBe(true);
     vi.mocked(createGuidedAuthoringRequest).mockResolvedValue(guidedRequestResult("request:select-all"));
     await act(async () => {

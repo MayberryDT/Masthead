@@ -9,6 +9,11 @@ import {
   workbenchActivityTone
 } from "./workbenchActivity";
 import { sanitizeWorkbenchVisibleText } from "./workbenchHandoff";
+import {
+  formatCopyAgentPromptLabel,
+  formatCopyAgentPromptTitle,
+  formatWorkbenchSelectionHonesty
+} from "./workbenchSelectionHonesty";
 
 type WorkbenchPanelProps = Partial<
   Pick<
@@ -137,17 +142,24 @@ export function WorkbenchPanel({
       ? sanitizeWorkbenchVisibleText(lastActionSummary)
       : undefined;
   const toastTone = actionError ? "error" : "ok";
-  const copyAgentPromptTitle = selectionCount === 0
-    ? TOOLTIPS.copyAgentPrompt
-    : agentPromptSessionCount === 0
-      ? "No selected sessions are ready for agent enrichment. Review transcript and quality status first."
-      : agentPromptExcludedCount > 0
-        ? `Copy a plain-language request for ${agentPromptSessionCount} ready session${
-          agentPromptSessionCount === 1 ? "" : "s"
-        }. ${agentPromptExcludedCount} selected session${
-          agentPromptExcludedCount === 1 ? " needs" : "s need"
-        } review and will be left out.`
-        : TOOLTIPS.copyAgentPrompt;
+  const copyAgentPromptTitle = formatCopyAgentPromptTitle({
+    selectionCount,
+    ready: agentPromptSessionCount,
+    excluded: agentPromptExcludedCount,
+    defaultTitle: TOOLTIPS.copyAgentPrompt
+  });
+  const copyAgentPromptLabel = formatCopyAgentPromptLabel({
+    ready: agentPromptSessionCount,
+    excluded: agentPromptExcludedCount
+  });
+  const selectionHonesty =
+    selectionCount > 0
+      ? formatWorkbenchSelectionHonesty({
+          selected: selectionCount,
+          ready: agentPromptSessionCount,
+          needQualityReview: agentPromptExcludedCount
+        })
+      : undefined;
 
   const pageSessionIds = sessions.map((session) => session.sessionId);
   const newSessionIds = useNewItemIds(pageSessionIds, page);
@@ -251,7 +263,7 @@ export function WorkbenchPanel({
             disabled={!canRun("copy_agent_prompt")}
             title={copyAgentPromptTitle}
           >
-            Copy Agent Prompt
+            {copyAgentPromptLabel}
           </AppButton>
 
           <span className="workbench-toolbar-divider" aria-hidden="true" />
@@ -328,13 +340,17 @@ export function WorkbenchPanel({
             <dt>Package path</dt>
             <dd>{publishPathLabel}</dd>
           </div>
-          <div title="Sessions currently selected for bulk actions and ready for agent enrichment">
+          <div
+            title={
+              selectionHonesty ??
+              "Sessions currently selected for bulk actions. Only compile-ready sessions enter Copy Agent Prompt."
+            }
+          >
             <dt>Selected</dt>
             <dd>{selectionCount}</dd>
-            {selectionCount > 0 ? (
-              <span className="workbench-selection-readiness">
-                {agentPromptSessionCount} ready
-                {agentPromptExcludedCount > 0 ? ` · ${agentPromptExcludedCount} review` : ""}
+            {selectionHonesty ? (
+              <span className="workbench-selection-readiness" data-selection-honesty="true">
+                {selectionHonesty.replace(/^Selected\s+\d+\s*/, "")}
               </span>
             ) : null}
           </div>
