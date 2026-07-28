@@ -110,6 +110,34 @@ describe("Grok adapter", () => {
     }
   });
 
+  test("keeps summary.json generated_title as the session title", async () => {
+    const root = await mkdtemp(join(tmpdir(), "masthead-grok-title-"));
+    const conversationDir = join(root, grokSessionId);
+    const path = join(conversationDir, "chat_history.jsonl");
+    await mkdir(conversationDir);
+    await writeFile(path, `${JSON.stringify({ type: "user", content: "Hello from the user turn" })}\n`);
+    await writeFile(
+      join(conversationDir, "summary.json"),
+      JSON.stringify({
+        info: { id: grokSessionId, cwd: "/workspace/Masthead" },
+        generated_title: "Preserve Grok summary titles",
+        last_active_at: "2026-07-18T12:00:00.000Z"
+      })
+    );
+
+    try {
+      const [unit] = await grokAdapter.planTranscriptUnits(grokFixtureSource(path));
+      const parsed = await grokAdapter.parseTranscriptUnit(unit);
+      const session = parsed.records.find((record) => record.normalized.kind === "session");
+      expect(session?.normalized.value).toMatchObject({
+        sessionId: grokSessionId,
+        title: "Preserve Grok summary titles"
+      });
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
   test("normalizes the observed Grok backend tool-call row", async () => {
     const root = await mkdtemp(join(tmpdir(), "masthead-grok-backend-tool-"));
     const conversationDir = join(root, grokSessionId);

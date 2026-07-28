@@ -4,6 +4,7 @@ import { adapterPayload, hash, isRecord, normalizeRole } from "../generic/jsonlA
 import { createLocalAdapter, genericCodingProfile } from "../generic/localAdapterFactory.ts";
 import type { AdapterRecord, DiscoveredSource, IngestCursor, SourceConfidence } from "../types.ts";
 import { streamJsonlLines } from "../generic/streamJsonl.ts";
+import { shortUserDerivedTitle } from "../userDerivedTitle.ts";
 import { ompCandidatePaths } from "./discovery.ts";
 
 const baseOmpAdapter = createLocalAdapter({
@@ -31,6 +32,49 @@ async function* backfillOmpSource(source: DiscoveredSource, cursor?: IngestCurso
   const contentFingerprint = `${info.size}:${Math.trunc(info.mtimeMs)}`;
   const modifiedAt = info.mtime.toISOString();
   const resumeOffset = cursor && cursor.byteOffset <= info.size ? cursor.byteOffset : 0;
+
+  // Empty harness titles: defer session until a user-derived label, or EOF.
+  // Explicit harness titles still emit immediately. COALESCE keeps first non-null title.
+  let pendingSession:
+    | {
+        lineNumber: number;
+        rawLine: string;
+        payload: Record<string, unknown>;
+        observedAt: string;
+        cwd?: string;
+        explicitTitle?: string;
+        cursorAfter: Omit<IngestCursor, "cursorId">;
+      }
+    | undefined;
+  let userTitle: string | undefined;
+  let sessionYielded = false;
+
+  /** Mid-stream only when userTitle is set; force=true at EOF allows empty-title fallback. */
+  const emitPendingSession = function* (options?: { force?: boolean }): Generator<AdapterRecord> {
+    if (!pendingSession || sessionYielded) return;
+    if (!userTitle && !options?.force) return;
+    const title = pendingSession.explicitTitle ?? userTitle;
+    const sessionRecord = record(
+      source,
+      pendingSession.lineNumber,
+      "session",
+      pendingSession.rawLine,
+      pendingSession.observedAt,
+      pendingSession.payload,
+      "session",
+      {
+        cwd: pendingSession.cwd,
+        observedAt: pendingSession.observedAt,
+        sessionId: identity.sessionId,
+        ...ompChildIdentity(identity),
+        title
+      }
+    );
+    sessionRecord.cursorAfter = pendingSession.cursorAfter;
+    yield sessionRecord;
+    sessionYielded = true;
+  };
+
   for await (const line of streamJsonlLines(source.path, resumeOffset)) {
     const trimmed = line.raw.trim();
     if (!trimmed) continue;
@@ -39,28 +83,64 @@ async function* backfillOmpSource(source: DiscoveredSource, cursor?: IngestCurso
     try {
       payload = JSON.parse(trimmed);
     } catch {
+      // Do not force-emit empty/weak session title on diagnostics; wait for user turn or EOF.
       yield { ...diagnosticRecord(source, line.lineNumber, trimmed, "jsonl_invalid_line"), cursorAfter };
       continue;
     }
     if (!isRecord(payload)) continue;
+
+    if (payload.type === "session") {
+      const observedAt = stringValue(payload.timestamp) ?? new Date(0).toISOString();
+      const explicitTitle = stringValue(payload.title);
+      if (explicitTitle) {
+        const sessionRecord = record(source, line.lineNumber, "session", trimmed, observedAt, payload, "session", {
+          cwd: stringValue(payload.cwd),
+          observedAt,
+          sessionId: identity.sessionId,
+          ...ompChildIdentity(identity),
+          title: explicitTitle
+        });
+        sessionRecord.cursorAfter = cursorAfter;
+        sessionYielded = true;
+        yield sessionRecord;
+      } else {
+        pendingSession = {
+          lineNumber: line.lineNumber,
+          rawLine: trimmed,
+          payload,
+          observedAt,
+          cwd: stringValue(payload.cwd),
+          explicitTitle,
+          cursorAfter
+        };
+      }
+      continue;
+    }
+
     const records = ompRecordsFromPayload(source, identity, line.lineNumber, trimmed, payload);
-    if (records.length > 0) records[records.length - 1].cursorAfter = cursorAfter;
-    for (const record of records) yield record;
+    if (!userTitle) {
+      for (const candidate of records) {
+        if (candidate.normalized.kind !== "message") continue;
+        const value = candidate.normalized.value as { role?: string; text?: string };
+        if (value.role === "user" && typeof value.text === "string") {
+          userTitle = shortUserDerivedTitle(value.text);
+          if (userTitle) break;
+        }
+      }
+    }
+    // Emit only once userTitle is known (no-op while still waiting).
+    yield* emitPendingSession();
+    if (records.length > 0) records[records.length - 1]!.cursorAfter = cursorAfter;
+    for (const item of records) yield item;
   }
+
+  yield* emitPendingSession({ force: true });
 }
 
 function ompRecordsFromPayload(source: DiscoveredSource, identity: OmpSessionIdentity, lineNumber: number, rawLine: string, payload: Record<string, unknown>): AdapterRecord[] {
   if (payload.type === "session") {
-    const observedAt = stringValue(payload.timestamp) ?? new Date(0).toISOString();
-    return [
-      record(source, lineNumber, "session", rawLine, observedAt, payload, "session", {
-        cwd: stringValue(payload.cwd),
-        observedAt,
-        sessionId: identity.sessionId,
-        ...ompChildIdentity(identity),
-        title: stringValue(payload.title)
-      })
-    ];
+    // Handled in backfillOmpSource so empty titles can wait for a user turn.
+    return [];
   }
   if (payload.type !== "message" || !isRecord(payload.message)) return [];
 

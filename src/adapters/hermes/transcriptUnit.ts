@@ -7,6 +7,7 @@ import { streamJsonlLines } from "../generic/streamJsonl.ts";
 import type { ParsedTranscriptUnit, TranscriptUnitPlan } from "../transcriptUnits.ts";
 import { parsedTranscriptUnit } from "../transcriptUnits.ts";
 import type { AdapterDiagnostic, AdapterRecord, DiscoveredSource, IngestCursor } from "../types.ts";
+import { shortUserDerivedTitle } from "../userDerivedTitle.ts";
 
 const SQLITE_PAGE_SIZE = 1_000;
 const HERMES_SQLITE_TABLES = ["sessions", "messages"] as const;
@@ -68,8 +69,10 @@ export async function parseHermesTranscriptUnit(unit: TranscriptUnitPlan, cursor
     ? rowsForSession(content.rows, unit.sourceSessionId, source.sourceKind !== "sqlite")
     : content.rows;
   const shapeDiagnostics = transcriptShapeDiagnostics(scopedRows, unit.sourceSessionId ?? sessionIdFromHermesFilename(source.path));
-  const records = deduplicateRecords(
-    scopedRows.flatMap((entry) => recordFromRow(source, unit.sourceSessionId, entry))
+  const records = withUserDerivedSessionTitle(
+    source,
+    unit.sourceSessionId ?? sessionIdFromHermesFilename(source.path),
+    deduplicateRecords(scopedRows.flatMap((entry) => recordFromRow(source, unit.sourceSessionId, entry)))
   );
   const parsed = parsedTranscriptUnit({ ...unit, source }, records);
   const scopedDiagnostics = (content.scopedDiagnostics ?? [])
@@ -329,6 +332,45 @@ function makeRecord(
     source,
     sourceRecordKey
   };
+}
+
+/** When harness metadata has no title, surface a short privacy-safe user-turn label. */
+function withUserDerivedSessionTitle(
+  source: DiscoveredSource,
+  sourceSessionId: string | undefined,
+  records: AdapterRecord[]
+): AdapterRecord[] {
+  if (!sourceSessionId) return records;
+  if (records.some((record) => record.normalized.kind === "session")) return records;
+
+  let title: string | undefined;
+  let observedAt: string | undefined;
+  for (const record of records) {
+    if (record.normalized.kind !== "message") continue;
+    const value = record.normalized.value as { role?: string; text?: string; observedAt?: string };
+    if (value.role !== "user" || typeof value.text !== "string") continue;
+    title = shortUserDerivedTitle(value.text);
+    observedAt = value.observedAt ?? record.observedAt;
+    if (title) break;
+  }
+  if (!title) return records;
+
+  const sessionObservedAt = observedAt ?? records[0]?.observedAt ?? new Date(0).toISOString();
+  const value = {
+    observedAt: sessionObservedAt,
+    sessionId: sourceSessionId,
+    title
+  };
+  const sessionRecord: AdapterRecord = {
+    diagnostics: [],
+    normalized: adapterPayload("session", source.confidence, { ...source, sourceSessionId }, value),
+    observedAt: sessionObservedAt,
+    payload: { titleSource: "user_turn" },
+    payloadHash: hash(stableJson({ kind: "session", value })),
+    source: { ...source, sourceSessionId },
+    sourceRecordKey: `hermes:${sourceSessionId}:session:${sessionObservedAt}:${hash(title).slice(0, 12)}`
+  };
+  return [sessionRecord, ...records];
 }
 
 function deduplicateRecords(records: AdapterRecord[]): AdapterRecord[] {

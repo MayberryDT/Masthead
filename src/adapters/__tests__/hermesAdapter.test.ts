@@ -39,9 +39,13 @@ describe("Hermes adapter", () => {
 
     const records = await collect(hermesAdapter.backfill(source(path)));
 
-    expect(records).toHaveLength(2);
-    expect(records.map((record) => record.diagnostics)).toEqual([[], []]);
-    expect(records.map((record) => messageValue(record))).toEqual([
+    expect(records.find((record) => record.normalized.kind === "session")?.normalized.value).toMatchObject({
+      sessionId: "20260414_084123_d48bd1",
+      title: expect.stringMatching(/Hermes user prompt/i)
+    });
+    expect(records.filter((record) => record.normalized.kind === "message")).toHaveLength(2);
+    expect(records.map((record) => record.diagnostics)).toEqual([[], [], []]);
+    expect(records.filter((record) => record.normalized.kind === "message").map((record) => messageValue(record))).toEqual([
       expect.objectContaining({ role: "user", sessionId: "20260414_084123_d48bd1", text: "Hermes user prompt" }),
       expect.objectContaining({ role: "assistant", sessionId: "20260414_084123_d48bd1", text: "Hermes assistant reply" })
     ]);
@@ -67,6 +71,28 @@ describe("Hermes adapter", () => {
       expect.objectContaining({ role: "assistant", sessionId: "20260515_165544_9d511138", text: "Hermes JSONL assistant reply" })
     ]);
     expect(records.flatMap((record) => record.diagnostics)).toEqual([]);
+  });
+
+  test("sets a non-empty title candidate from the first user turn", async () => {
+    const tempDir = await makeTempDir();
+    const path = join(tempDir, "20260710_100000_fixture.jsonl");
+    await writeFile(
+      path,
+      [
+        JSON.stringify({ model: "gpt-5", role: "session_meta", timestamp: "2026-07-10T10:00:00.000Z" }),
+        JSON.stringify({ content: "Repair the Hermes parser for empty titles", role: "user", timestamp: "2026-07-10T10:00:01.000Z" }),
+        JSON.stringify({ content: "Inspecting the adapter.", role: "assistant", timestamp: "2026-07-10T10:00:02.000Z" })
+      ].join("\n") + "\n",
+      "utf8"
+    );
+
+    const records = await collect(hermesAdapter.backfill(source(path)));
+    const session = records.find((record) => record.normalized.kind === "session");
+    expect(session?.normalized.value).toMatchObject({
+      sessionId: "20260710_100000_fixture",
+      title: expect.stringMatching(/Hermes parser/i)
+    });
+    expect((session?.normalized.value as { title?: string }).title).not.toMatch(/session$/i);
   });
 
   test("normalizes Hermes tool-role rows as tool calls and results", async () => {
@@ -104,11 +130,12 @@ describe("Hermes adapter", () => {
       }
     }
 
-    expect(db.prepare("SELECT source_session_id AS sourceSessionId FROM sessions").all()).toEqual([
-      { sourceSessionId: "20260710_100000_fixture" }
+    expect(db.prepare("SELECT source_session_id AS sourceSessionId, title FROM sessions").all()).toEqual([
+      { sourceSessionId: "20260710_100000_fixture", title: "Repair the parser." }
     ]);
     expect(db.prepare("SELECT role, text_redacted AS text FROM messages").all()).toEqual([{ role: "user", text: "Repair the parser." }]);
-    expect(db.prepare("SELECT COUNT(*) AS count FROM raw_events").get()).toEqual({ count: 2 });
+    // Each source emits session metadata + user message; messages still dedupe to one row.
+    expect(db.prepare("SELECT COUNT(*) AS count FROM raw_events").get()).toEqual({ count: 4 });
     expect(db.prepare("SELECT COUNT(*) AS count FROM session_sources").get()).toEqual({ count: 2 });
     db.close();
   });
@@ -129,6 +156,7 @@ describe("Hermes adapter", () => {
     expect(parsed.completeness).toBe("complete");
     expect(parsed.sourceSessionIds).toEqual(["hermes-json-string"]);
     expect(parsed.records.map(normalizedValue)).toEqual([
+      expect.objectContaining({ sessionId: "hermes-json-string", title: "Sanitized prompt" }),
       expect.objectContaining({ role: "user", sessionId: "hermes-json-string", text: "Sanitized prompt" })
     ]);
   });
@@ -307,7 +335,10 @@ describe("Hermes adapter", () => {
     const [unit] = await hermesAdapter.planTranscriptUnits(source(path));
     const parsed = await hermesAdapter.parseTranscriptUnit(unit);
 
-    expect(parsed.records).toHaveLength(1);
+    expect(parsed.records.filter((record) => record.normalized.kind === "message")).toHaveLength(1);
+    expect(parsed.records.find((record) => record.normalized.kind === "session")?.normalized.value).toMatchObject({
+      title: "Valid prompt"
+    });
     expect(parsed.completeness).toBe("partial");
     expect(parsed.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
       "hermes_invalid_json",
@@ -414,7 +445,10 @@ describe("Hermes adapter", () => {
 
     expect(parsed.completeness).toBe("complete");
     expect(parsed.diagnostics).toEqual([]);
-    expect(parsed.records.map(normalizedValue)).toEqual([expect.objectContaining({ text: "Real transcript message" })]);
+    expect(parsed.records.map(normalizedValue)).toEqual([
+      expect.objectContaining({ title: "Real transcript message" }),
+      expect.objectContaining({ text: "Real transcript message" })
+    ]);
   });
 
   test("discovers Hermes session files without crawling request dumps or logs", async () => {

@@ -14,6 +14,8 @@ import { discoverLocalSources } from "../generic/localAdapterFactory.ts";
 import { codexCandidatePaths } from "./discovery.ts";
 import { streamJsonlLines } from "../generic/streamJsonl.ts";
 import { collectAdapterRecords, parsedTranscriptUnit, planLocalTranscriptFiles } from "../transcriptUnits.ts";
+import { shortUserDerivedTitle } from "../userDerivedTitle.ts";
+import { projectCodexMessageNarrative } from "./messageNarrative.ts";
 
 export const codexAdapter: SessionAdapter = {
   runtime: "codex",
@@ -79,6 +81,42 @@ async function* backfillCodexSource(source: DiscoveredSource, cursor?: IngestCur
   let cwd = cursor?.cwd;
   let model = cursor?.model;
 
+  // Defer session metadata until a usable user-derived title exists, or EOF.
+  // Ingest COALESCE keeps the first non-null title — never lock in cwd basename mid-stream.
+  let pendingSession:
+    | {
+        lineNumber: number;
+        observedAt: string;
+        payload: unknown;
+        cursorAfter: Omit<IngestCursor, "cursorId">;
+      }
+    | undefined;
+  let userTitle: string | undefined;
+  let sessionYielded = false;
+
+  const weakTitle = (): string => (cwd ? basename(cwd) : "Codex session");
+  /** Mid-stream only when userTitle is set; force=true at EOF allows weak basename fallback. */
+  const emitPendingSession = function* (options?: { force?: boolean }): Generator<AdapterRecord> {
+    if (!pendingSession || sessionYielded) return;
+    if (!userTitle && !options?.force) return;
+    const title = userTitle ?? weakTitle();
+    yield record(
+      source,
+      pendingSession.lineNumber,
+      pendingSession.observedAt,
+      pendingSession.payload,
+      adapterPayload("session", source.confidence, source, {
+        cwd,
+        model,
+        observedAt: pendingSession.observedAt,
+        sessionId: sourceSessionId,
+        title
+      }),
+      pendingSession.cursorAfter
+    );
+    sessionYielded = true;
+  };
+
   const resumeOffset = cursor && cursor.byteOffset <= info.size ? cursor.byteOffset : 0;
   for await (const line of streamJsonlLines(source.path, resumeOffset)) {
     const trimmed = line.raw.trim();
@@ -87,6 +125,7 @@ async function* backfillCodexSource(source: DiscoveredSource, cursor?: IngestCur
     try {
       payload = JSON.parse(trimmed);
     } catch {
+      // Do not force-emit weak session title on diagnostics; wait for user turn or EOF.
       yield diagnosticRecord(source, line.lineNumber, trimmed, "codex_jsonl_invalid_line", cursorAfter(line.byteOffsetAfter));
       continue;
     }
@@ -98,20 +137,36 @@ async function* backfillCodexSource(source: DiscoveredSource, cursor?: IngestCur
       sourceSessionId = readString(body, ["id", "session_id", "sessionId"]) ?? sourceSessionId;
       cwd = readString(body, ["cwd", "repo_root", "repoRoot"]);
       model = readString(body, ["model", "model_provider"]);
-      yield record(source, line.lineNumber, observedAt, payload, adapterPayload("session", source.confidence, source, {
-        cwd,
-        model,
+      pendingSession = {
+        lineNumber: line.lineNumber,
         observedAt,
-        sessionId: sourceSessionId,
-        title: cwd ? basename(cwd) : "Codex session"
-      }), cursorAfter(line.byteOffsetAfter));
+        payload,
+        cursorAfter: cursorAfter(line.byteOffsetAfter)
+      };
       continue;
     }
     if (!sourceSessionId || !isRecord(body)) continue;
 
     const normalized = normalizedCodexPayload(source, sourceSessionId, observedAt, body, { cwd, model });
-    if (normalized) yield record(source, line.lineNumber, observedAt, payload, normalized, cursorAfter(line.byteOffsetAfter));
+    if (!normalized) continue;
+
+    if (!userTitle && normalized.kind === "message") {
+      const value = normalized.value as { role?: string; text?: string };
+      if (value.role === "user" && typeof value.text === "string") {
+        const narrative = projectCodexMessageNarrative(value.text);
+        if (!narrative.controlOnly) {
+          userTitle = shortUserDerivedTitle(narrative.text);
+        }
+      }
+    }
+
+    // Emit session only once userTitle is known (no-op while still waiting).
+    yield* emitPendingSession();
+    yield record(source, line.lineNumber, observedAt, payload, normalized, cursorAfter(line.byteOffsetAfter));
   }
+
+  // EOF: last-resort weak title if no usable user narrative was found.
+  yield* emitPendingSession({ force: true });
 
   function cursorAfter(byteOffset: number): Omit<IngestCursor, "cursorId"> {
     return { byteOffset, contentFingerprint, cwd, model, modifiedAt, sourceId: source.sourceId, sourcePath: source.path, sourceSessionId };

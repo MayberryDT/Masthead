@@ -104,6 +104,36 @@ describe("Oh My Pi adapter", () => {
     );
   });
 
+  test("derives a title from the first user turn when session metadata title is empty", async () => {
+    const tempDir = await makeTempDir();
+    const path = join(tempDir, "2026-07-20T10-00-00-000Z_omp-empty-title.jsonl");
+    await writeFile(
+      path,
+      [
+        JSON.stringify({ cwd: "/project/Masthead", id: "session", timestamp: "2026-07-20T10:00:00.000Z", type: "session", version: 1 }),
+        JSON.stringify({
+          id: "message-1",
+          message: {
+            content: [{ text: "Tighten OMP session titles for empty metadata", type: "text" }],
+            role: "user",
+            timestamp: "2026-07-20T10:00:01.000Z"
+          },
+          parentId: "session",
+          timestamp: "2026-07-20T10:00:01.000Z",
+          type: "message"
+        })
+      ].join("\n") + "\n",
+      "utf8"
+    );
+
+    const records = await collect(ompAdapter.backfill(source(path)));
+    const session = records.find((record) => record.normalized.kind === "session");
+    expect(session?.normalized.value).toMatchObject({
+      title: expect.stringMatching(/OMP session titles/i)
+    });
+    expect((session?.normalized.value as { title?: string }).title).not.toBe("Masthead");
+  });
+
   test("keeps nested OMP advisor sessions grouped under the parent source session", async () => {
     const tempDir = await makeTempDir();
     const parentSessionId = "2026-06-25T20-55-39-024Z_019f0091-2110-7000-a1e2-147639fff216";
