@@ -2,6 +2,7 @@ import { stat } from "node:fs/promises";
 import { basename, dirname } from "node:path";
 import { adapterPayload, hash, isRecord, normalizeRole } from "../generic/jsonlAdapterKit.ts";
 import { createLocalAdapter, genericCodingProfile } from "../generic/localAdapterFactory.ts";
+import { collectAdapterRecords, parsedTranscriptUnit, type TranscriptUnitPlan } from "../transcriptUnits.ts";
 import type { AdapterRecord, DiscoveredSource, IngestCursor, SourceConfidence } from "../types.ts";
 import { streamJsonlLines } from "../generic/streamJsonl.ts";
 import { shortUserDerivedTitle } from "../userDerivedTitle.ts";
@@ -13,9 +14,19 @@ const baseOmpAdapter = createLocalAdapter({
   jsonlProfile: genericCodingProfile("omp")
 });
 
+/**
+ * Import prefers `parseTranscriptUnit` over `backfill`. The factory default
+ * routes parse through generic `backfillLocalSource`, which drops OMP toolCall
+ * parts and stores toolResult as messages.role=tool. Override parse so the
+ * import path uses the same custom emitter as backfill.
+ */
 export const ompAdapter = {
   ...baseOmpAdapter,
-  backfill: backfillOmpSource
+  backfill: backfillOmpSource,
+  parseTranscriptUnit: async (unit: TranscriptUnitPlan, cursor?: IngestCursor) => {
+    const records = await collectAdapterRecords(backfillOmpSource(unit.source, cursor));
+    return parsedTranscriptUnit(unit, records);
+  }
 };
 
 type OmpSessionIdentity = {
