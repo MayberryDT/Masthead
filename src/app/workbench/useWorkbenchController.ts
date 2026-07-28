@@ -25,9 +25,10 @@ import type {
   WorkbenchQueueSessionDto,
   WorkbenchSessionsResponse
 } from "../../shared/workbench";
-import type {
-  WorkbenchAuthoringV5CapabilitiesDto,
-  WorkbenchAuthoringV5IncompleteRequestSummaryDto
+import {
+  WORKBENCH_AUTHORING_V5_INCOMPLETE_STOP_RULE,
+  type WorkbenchAuthoringV5CapabilitiesDto,
+  type WorkbenchAuthoringV5IncompleteRequestSummaryDto
 } from "../../shared/workbenchAuthoringV5";
 import { guidedAuthoringIdentityFromCapabilities } from "../../shared/guidedAuthoring";
 import { buildWorkbenchHandoff } from "../../ui/workbench/workbenchHandoff";
@@ -345,7 +346,8 @@ export function useWorkbenchController({
           nextAction: {
             command: incomplete.handoff.startCommand,
             kind: "start",
-            reason: "Resume the incomplete authoring request."
+            reason: "Resume the incomplete authoring request.",
+            stopRule: WORKBENCH_AUTHORING_V5_INCOMPLETE_STOP_RULE
           }
         }
       })

@@ -1487,7 +1487,9 @@ function guidedRequestResult(requestId: string) {
     nextAction: {
       command: `/home/test/.local/bin/mastheadctl workbench author start --request '${requestId}' --json`,
       kind: "start" as const,
-      reason: "Start or resume the next fixed pack."
+      reason: "Start or resume the next fixed pack.",
+      stopRule:
+        'Only stop when nextAction.kind === "complete" and a request receipt exists. Pack finish is not request completion. Immediately run nextAction.command.'
     },
     selection: {
       eligibleSessionCount: 2,
