@@ -294,6 +294,25 @@ export type WorkbenchAuthoringV5RequestReceipt = {
   completedAt: string;
 };
 
+/** Runnable next-step payload embedded on non-final pack finish (does not auto-claim). */
+export type WorkbenchAuthoringV5FollowUp = {
+  kind: "start";
+  command: string;
+  reason: string;
+};
+
+export type WorkbenchAuthoringV5FinishResult = {
+  receipt: WorkbenchAuthoringV5PackReceipt;
+  nextAction: WorkbenchAuthoringV5NextAction;
+  /** Present only when the full request completed on this finish. */
+  requestReceipt?: WorkbenchAuthoringV5RequestReceipt;
+  /**
+   * Present when packs remain after finish. Mirrors nextAction.command as an explicit
+   * start payload so agents can chain without inventing a new turn. Does not claim.
+   */
+  followUp?: WorkbenchAuthoringV5FollowUp;
+};
+
 export function isWorkbenchAuthoringV5CapabilitiesDto(value: unknown): value is WorkbenchAuthoringV5CapabilitiesDto {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const dto = value as Record<string, unknown>;

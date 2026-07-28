@@ -53,6 +53,8 @@ import {
   type WorkbenchAuthoringV5Draft,
   type WorkbenchAuthoringV5EvidenceCatalogItem,
   type WorkbenchAuthoringV5Fields,
+  type WorkbenchAuthoringV5FinishResult,
+  type WorkbenchAuthoringV5FollowUp,
   type WorkbenchAuthoringV5NextAction,
   type WorkbenchAuthoringV5OptionalConsideration,
   type WorkbenchAuthoringV5PackReceipt,
@@ -1058,12 +1060,33 @@ function requestReceiptFrom(
   };
 }
 
-function finishResult(db: MastheadDatabase, command: string, receipt: WorkbenchAuthoringV5PackReceipt) {
+function finishResult(
+  db: MastheadDatabase,
+  command: string,
+  receipt: WorkbenchAuthoringV5PackReceipt
+): WorkbenchAuthoringV5FinishResult {
   const request = requireWorkbenchAuthoringV5Request(db, receipt.requestId);
+  if (request.status === "completed") {
+    return {
+      receipt,
+      requestReceipt: getWorkbenchAuthoringV5RequestReceipt(db, request.requestId),
+      nextAction: completeAction()
+    };
+  }
+  const nextAction = claimNextAction(command, request.requestId);
   return {
     receipt,
-    ...(request.status === "completed" ? { requestReceipt: getWorkbenchAuthoringV5RequestReceipt(db, request.requestId) } : {}),
-    nextAction: request.status === "completed" ? completeAction() : claimNextAction(command, request.requestId)
+    nextAction,
+    followUp: followUpStartAction(nextAction.command)
+  };
+}
+
+function followUpStartAction(startCommand: string): WorkbenchAuthoringV5FollowUp {
+  return {
+    kind: "start",
+    command: startCommand,
+    reason:
+      "Request incomplete after pack finish. Immediately run this start command to claim the next fixed pack. Do not report success."
   };
 }
 

@@ -263,6 +263,27 @@ describe("workbench-authoring-v5 loop", () => {
         expectedIdentity: identity,
         packId
       });
+      const expectedStartCommand =
+        `${command} workbench author start --request '${created.request.requestId}' --json`;
+      if (packIndex === 0) {
+        expect(finished.nextAction).toMatchObject({
+          kind: "claim_next",
+          command: expectedStartCommand
+        });
+        expect(finished.followUp).toEqual({
+          kind: "start",
+          command: expectedStartCommand,
+          reason: expect.stringMatching(/incomplete|next|claim|start/i)
+        });
+        expect(finished.requestReceipt).toBeUndefined();
+      } else {
+        expect(finished.nextAction).toMatchObject({ kind: "complete", command: "" });
+        expect(finished.followUp).toBeUndefined();
+        expect(finished.requestReceipt).toMatchObject({
+          receiptVersion: "workbench-authoring-v5-request-receipt-v1",
+          requestId: created.request.requestId
+        });
+      }
       const retried = finishWorkbenchAuthoringV5Pack(db, {
         command,
         currentIdentity: identity,
@@ -308,6 +329,93 @@ describe("workbench-authoring-v5 loop", () => {
       "authoring_pack_finished",
       "authoring_request_completed"
     ]));
+    db.close();
+  });
+
+  test("non-final finish embeds followUp start payload without auto-claiming the next pack", async () => {
+    const db = await testDatabase();
+    const sessionIds = Array.from({ length: 20 }, (_, index) => `session:v5:followup:${index + 1}`);
+    for (const sessionId of sessionIds) seedCompileReadySession(db, sessionId);
+    const created = createWorkbenchAuthoringV5Request(db, {
+      actorId: "agent:test",
+      command,
+      currentIdentity: identity,
+      expectedIdentity: identity,
+      sessionIds
+    });
+    expect(created.request.packSizes).toEqual([10, 10]);
+    const requestId = created.request.requestId;
+    const expectedStartCommand =
+      `${command} workbench author start --request '${requestId}' --json`;
+
+    const started = startWorkbenchAuthoringV5Pack(db, {
+      command,
+      currentIdentity: identity,
+      expectedIdentity: identity,
+      requestId
+    });
+    if (!("pack" in started)) throw new Error("expected_active_pack");
+    const packId = started.pack.packId;
+    expect(started.pack.ordinal).toBe(0);
+    await inspectWholePack(db, packId);
+    const authored = authorDraft(buildWorkbenchAuthoringV5Scaffold(db, { command, packId }).draft);
+    saveWorkbenchAuthoringV5Draft(db, {
+      command,
+      currentIdentity: identity,
+      draft: authored,
+      expectedIdentity: identity,
+      packId
+    });
+
+    const finished = finishWorkbenchAuthoringV5Pack(db, {
+      command,
+      currentIdentity: identity,
+      expectedIdentity: identity,
+      packId
+    });
+
+    expect(finished.nextAction).toMatchObject({
+      kind: "claim_next",
+      command: expectedStartCommand
+    });
+    expect(finished.followUp).toEqual({
+      kind: "start",
+      command: expectedStartCommand,
+      reason: expect.stringMatching(/incomplete|next fixed pack|do not report success/i)
+    });
+    expect(finished.followUp!.command).toContain("workbench author start --request");
+    expect(finished.followUp!.command).toBe(finished.nextAction.command);
+    expect(finished.requestReceipt).toBeUndefined();
+
+    // Explicit start still required — finish only returns the payload.
+    const next = startWorkbenchAuthoringV5Pack(db, {
+      command,
+      currentIdentity: identity,
+      expectedIdentity: identity,
+      requestId
+    });
+    expect(next).toMatchObject({ pack: { ordinal: 1, status: "active" } });
+    if (!("pack" in next)) throw new Error("expected_active_pack");
+    await inspectWholePack(db, next.pack.packId);
+    saveWorkbenchAuthoringV5Draft(db, {
+      command,
+      currentIdentity: identity,
+      draft: authorDraft(buildWorkbenchAuthoringV5Scaffold(db, { command, packId: next.pack.packId }).draft),
+      expectedIdentity: identity,
+      packId: next.pack.packId
+    });
+    const finalFinish = finishWorkbenchAuthoringV5Pack(db, {
+      command,
+      currentIdentity: identity,
+      expectedIdentity: identity,
+      packId: next.pack.packId
+    });
+    expect(finalFinish.nextAction).toMatchObject({ kind: "complete", command: "" });
+    expect(finalFinish.followUp).toBeUndefined();
+    expect(finalFinish.requestReceipt).toMatchObject({
+      receiptVersion: "workbench-authoring-v5-request-receipt-v1",
+      requestId
+    });
     db.close();
   });
 
@@ -371,7 +479,16 @@ describe("workbench-authoring-v5 loop", () => {
       rejected: 1,
       softFlagged: 1
     });
-    expect(finished.nextAction).toMatchObject({ kind: "claim_next" });
+    expect(finished.nextAction).toMatchObject({
+      kind: "claim_next",
+      command: `${command} workbench author start --request '${created.request.requestId}' --json`
+    });
+    expect(finished.followUp).toEqual({
+      kind: "start",
+      command: finished.nextAction.command,
+      reason: expect.stringMatching(/incomplete|next fixed pack|do not report success/i)
+    });
+    expect(finished.requestReceipt).toBeUndefined();
     const next = startWorkbenchAuthoringV5Pack(db, {
       command,
       currentIdentity: identity,
