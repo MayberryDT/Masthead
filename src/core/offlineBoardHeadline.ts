@@ -226,6 +226,41 @@ function isGenericSubject(value: string): boolean {
     return true;
   }
   if (/^subagent-[0-9a-f-]+$/i.test(normalized)) return true;
+  // sessionReducer / adapters fall back to `${project} session` and similar labels.
+  // Reject those as board subjects so they cannot collide across cards; projectSubject
+  // / projectRuntimeSubject still provide non-colliding last-resort subjects.
+  if (isProjectSessionFallbackLabel(normalized)) return true;
+  return false;
+}
+
+/**
+ * Labels that are only project + "session" or pure project·harness chrome — not real work subjects.
+ * Opaque UUID/hex "… session" strings are handled by isOpaqueIdentifier instead.
+ */
+function isProjectSessionFallbackLabel(value: string): boolean {
+  const normalized = value.toLowerCase().replace(/\s+/g, " ").trim();
+  if (!normalized) return false;
+
+  // `${project} session`, `codex session`, multi-word project names, optional harness infix.
+  // e.g. "Masthead session", "Nova OS session", "codex session", "Masthead codex session"
+  if (/^.+\s+session$/i.test(normalized)) {
+    const stem = normalized.replace(/\s+session$/i, "").trim();
+    if (!stem) return false;
+    // Leave pure opaque id handling to isOpaqueIdentifier (UUID/hex stems).
+    if (/^[0-9a-f]{8,}(?:-[0-9a-f]+)*$/i.test(stem)) return false;
+    return true;
+  }
+
+  // Pure project · harness labels (middle-dot or bullet) without work-topic substance.
+  // e.g. "Masthead · Codex", "Nova OS • Grok Build"
+  if (
+    /^.+\s*[·•]\s*(?:codex|claude(?:\s+code)?|cursor|grok(?:\s+build)?|hermes|opencode|oh my pi|omp|pi)$/i.test(
+      normalized
+    )
+  ) {
+    return true;
+  }
+
   return false;
 }
 

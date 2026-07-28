@@ -224,4 +224,100 @@ describe("offline board headline views", () => {
     );
     expect(editing.frame?.disposition).toBe("editing files");
   });
+
+  test("rejects generic project-session subjects when better evidence exists", () => {
+    const baseInput = input({
+      project: "Masthead",
+      title: "Masthead session",
+      recentTranscriptMessages: ["Implement Board headline frames from subject and disposition."],
+      workContext: {
+        label: "Board headline work",
+        confidence: "path_cluster",
+        pathClusters: ["board"],
+        sourceSignals: ["path:board"]
+      }
+    });
+    const view = buildOfflineBoardHeadlineView({
+      ...baseInput,
+      subjectCandidates: ["Masthead session", "Board headline work", "SessionCard.tsx"]
+    });
+
+    expect(view.frame?.subject).not.toMatch(/^Masthead session$/i);
+    expect(view.frame?.subject).toMatch(/Board headline work|Board headlines|Session Card|SessionCard/i);
+    expect(view.headline).not.toMatch(/^Masthead session:/i);
+  });
+
+  test.each([
+    { project: "Masthead", title: "Masthead session" },
+    { project: "Masthead", title: "masthead session" },
+    { project: "Masthead", title: "MASTHEAD SESSION" },
+    { project: "Nova OS", title: "Nova OS session" },
+    { project: "Nova OS", title: "nova os session" },
+    { project: "codex", title: "codex session" },
+    { project: "Codex", title: "Codex session" }
+  ])("does not keep sole subject as exact project-session label ($title)", ({ project, title }) => {
+    const view = buildOfflineBoardHeadlineView(
+      input({
+        project,
+        title,
+        recentTranscriptMessages: [],
+        workContext: undefined,
+        recentFileBasenames: [],
+        recentEvents: [],
+        recentToolNames: [],
+        attentionTitles: [],
+        runtime: undefined
+      })
+    );
+
+    expect(view.frame?.subject).not.toBe(title);
+    expect(view.frame?.subject).not.toMatch(/^.+\s+session$/i);
+    // Prefer the bare project name (or other non-colliding fallback) over "X session".
+    expect(view.frame?.subject?.toLowerCase()).toBe(project.toLowerCase());
+  });
+
+  test("rejects project·harness title candidates when stronger subject evidence exists", () => {
+    const baseInput = input({
+      project: "Masthead",
+      title: "Masthead · Codex",
+      runtime: "codex",
+      recentTranscriptMessages: ["Polish SessionCard layout for the Now board."],
+      workContext: {
+        label: "Board cards work",
+        confidence: "path_cluster",
+        pathClusters: ["board"],
+        sourceSignals: ["path:board"]
+      },
+      recentFileBasenames: ["SessionCard.tsx"]
+    });
+    const view = buildOfflineBoardHeadlineView({
+      ...baseInput,
+      subjectCandidates: ["Masthead · Codex", "Masthead session", "Board cards"]
+    });
+
+    expect(view.frame?.subject).not.toMatch(/^Masthead\s*[·•]\s*Codex$/i);
+    expect(view.frame?.subject).not.toMatch(/^Masthead session$/i);
+    expect(view.frame?.subject).toMatch(/Board cards|Session Card|SessionCard/i);
+  });
+
+  test("hook-poverty inputs with only Masthead session titles do not stick on that label", () => {
+    const view = buildOfflineBoardHeadlineView({
+      ...input({
+        project: "Masthead",
+        title: "Masthead session",
+        recentTranscriptMessages: [],
+        workContext: undefined,
+        recentFileBasenames: ["README.md"],
+        recentEvents: [],
+        recentToolNames: [],
+        attentionTitles: [],
+        runtime: "grok"
+      }),
+      subjectCandidates: ["Masthead session", "Session", "Masthead"]
+    });
+
+    expect(view.frame?.subject).not.toMatch(/^Masthead session$/i);
+    // Bare project or project·harness fallback is fine; the colliding "X session" label is not.
+    expect(view.frame?.subject).toMatch(/^Masthead( · Grok Build)?$/i);
+  });
 });
