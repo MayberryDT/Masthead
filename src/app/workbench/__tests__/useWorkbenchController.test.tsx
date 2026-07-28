@@ -20,6 +20,7 @@ import {
   getWorkbenchSessions,
   getDataRevisions,
   createGuidedAuthoringRequest,
+  getIncompleteWorkbenchAuthoringRequest,
   listPendingGuidedCanaries,
   postWorkbenchCheckTranscript,
   postWorkbenchClaim,
@@ -38,6 +39,7 @@ const daemonClientMocks = vi.hoisted(() => ({
   getWorkbenchNotAddedSummary: vi.fn(),
   getWorkbenchSessions: vi.fn(),
   createGuidedAuthoringRequest: vi.fn(),
+  getIncompleteWorkbenchAuthoringRequest: vi.fn().mockResolvedValue({}),
   listPendingGuidedCanaries: vi.fn().mockResolvedValue([]),
   postWorkbenchCheckTranscript: vi.fn(),
   postWorkbenchClaim: vi.fn(),
@@ -92,6 +94,7 @@ afterEach(async () => {
   container = undefined;
   vi.clearAllMocks();
   vi.mocked(getDataRevisions).mockResolvedValue({ logbook: 0, workbench: 0 });
+  vi.mocked(getIncompleteWorkbenchAuthoringRequest).mockResolvedValue({});
 });
 
 describe("useWorkbenchController", () => {
@@ -1044,6 +1047,61 @@ describe("useWorkbenchController", () => {
     expect(latest().lastActionSummary).toBe("No missing sessions to enroll");
     expect(latest().canRun("enroll_missing")).toBe(true);
   });
+
+  test("surfaces incomplete V5 authoring request and reuses bootstrap handoff for resume", async () => {
+    mockWorkbenchResponse([session("session:a", "Ready")]);
+    vi.mocked(getIncompleteWorkbenchAuthoringRequest).mockResolvedValue({
+      request: {
+        requestId: "authoring-v5-request:resume",
+        status: "active",
+        packsCompleted: 1,
+        packCount: 3,
+        sessionsCompleted: 10,
+        sessionCount: 30,
+        handoff: {
+          requestId: "authoring-v5-request:resume",
+          startCommand:
+            "/home/test/.local/bin/mastheadctl workbench author bootstrap --request 'authoring-v5-request:resume' --json"
+        },
+        updatedAt: "2026-07-28T12:00:00.000Z"
+      }
+    });
+
+    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
+    await waitFor(() => latest().incompleteAuthoring?.requestId === "authoring-v5-request:resume");
+
+    expect(getIncompleteWorkbenchAuthoringRequest).toHaveBeenCalledWith(
+      baseUrl,
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
+    expect(latest().incompleteAuthoring).toMatchObject({
+      packsCompleted: 1,
+      packCount: 3,
+      sessionsCompleted: 10,
+      sessionCount: 30
+    });
+
+    let prompt = "";
+    await act(async () => {
+      prompt = await latest().copyResumePrompt();
+    });
+    expect(prompt).toContain("authoring-v5-request:resume");
+    expect(prompt).toContain("workbench author bootstrap --request 'authoring-v5-request:resume' --json");
+    expect(createGuidedAuthoringRequest).not.toHaveBeenCalled();
+  });
+
+  test("omits incomplete authoring when no open request exists", async () => {
+    mockWorkbenchResponse([session("session:a", "Ready")]);
+    vi.mocked(getIncompleteWorkbenchAuthoringRequest).mockResolvedValue({});
+
+    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
+    await waitFor(() => latest().loading === false);
+
+    expect(latest().incompleteAuthoring).toBeUndefined();
+    await expect(act(async () => {
+      await latest().copyResumePrompt();
+    })).rejects.toThrow("No incomplete authoring request to resume");
+  });
 });
 
 async function renderHarness(props: HarnessProps): Promise<void> {
@@ -1135,6 +1193,7 @@ function mockWorkbenchResponse(sessions: WorkbenchQueueSessionDto[]): void {
   vi.mocked(listPendingGuidedCanaries).mockResolvedValue([]);
   vi.mocked(getWorkbenchNotAddedSummary).mockResolvedValue(notAddedSummary());
   vi.mocked(getWorkbenchImportHealthSummary).mockResolvedValue({ ok: true, importJobIds: [], reasons: [], repairRequired: 0 });
+  vi.mocked(getIncompleteWorkbenchAuthoringRequest).mockResolvedValue({});
 }
 
 function authoringCapabilities(databaseId: string, command: string): WorkbenchAuthoringV5CapabilitiesDto {

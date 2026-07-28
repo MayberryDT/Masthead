@@ -1365,6 +1365,24 @@ export async function createGuidedAuthoringRequest(
   });
 }
 
+export type IncompleteWorkbenchAuthoringRequestResponse =
+  import("../shared/workbenchAuthoringV5.ts").WorkbenchAuthoringV5IncompleteRequestsDto;
+
+/** Most recent incomplete (open/active) V5 authoring request for Workbench resume UI. */
+export async function getIncompleteWorkbenchAuthoringRequest(
+  activeProjectionUrl: string,
+  options: { signal?: AbortSignal } = {}
+): Promise<IncompleteWorkbenchAuthoringRequestResponse> {
+  return getJson<IncompleteWorkbenchAuthoringRequestResponse>(
+    activeProjectionUrl,
+    "/workbench/authoring/v5/requests",
+    {
+      label: "incomplete workbench authoring request",
+      signal: options.signal
+    }
+  );
+}
+
 export async function listPendingGuidedCanaries(
   activeProjectionUrl: string,
   options: { signal?: AbortSignal } = {}

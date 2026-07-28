@@ -479,6 +479,17 @@ export function getWorkbenchAuthoringV5EvidenceSnapshot(
   throw new Error("authoring_v5_evidence_snapshot_invalid");
 }
 
+/** Request ids still open or active, newest first (resume UI). */
+export function listIncompleteWorkbenchAuthoringV5RequestIds(db: MastheadDatabase): string[] {
+  return (
+    db.prepare(
+      `SELECT request_id AS requestId FROM workbench_authoring_v5_requests
+       WHERE status IN ('open', 'active')
+       ORDER BY updated_at DESC, created_at DESC`
+    ).all() as Array<{ requestId: string }>
+  ).map(({ requestId }) => requestId);
+}
+
 export function getWorkbenchAuthoringV5Request(
   db: MastheadDatabase,
   requestId: string

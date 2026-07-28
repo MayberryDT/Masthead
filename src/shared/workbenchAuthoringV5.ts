@@ -188,6 +188,23 @@ export type WorkbenchAuthoringV5RequestDto = {
   completedAt?: string;
 };
 
+/** Lightweight read model for Workbench resume UI (GET /workbench/authoring/v5/requests). */
+export type WorkbenchAuthoringV5IncompleteRequestSummaryDto = {
+  requestId: string;
+  status: Extract<WorkbenchAuthoringV5RequestStatus, "open" | "active">;
+  packsCompleted: number;
+  packCount: number;
+  sessionsCompleted: number;
+  sessionCount: number;
+  handoff: { requestId: string; startCommand: string };
+  updatedAt: string;
+};
+
+export type WorkbenchAuthoringV5IncompleteRequestsDto = {
+  /** Most recently updated incomplete (open/active) request, if any. */
+  request?: WorkbenchAuthoringV5IncompleteRequestSummaryDto;
+};
+
 export type WorkbenchAuthoringV5PackDto = {
   packId: string;
   requestId: string;

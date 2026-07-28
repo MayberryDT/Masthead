@@ -18,6 +18,7 @@ import {
   insertWorkbenchAuthoringV5Pack,
   insertWorkbenchAuthoringV5RequestSessions,
   insertWorkbenchAuthoringV5RequestShell,
+  listIncompleteWorkbenchAuthoringV5RequestIds,
   listWorkbenchAuthoringV5EvidenceAccess,
   listWorkbenchAuthoringV5Packs,
   listWorkbenchAuthoringV5PreparedSessions,
@@ -50,6 +51,7 @@ import {
   WORKBENCH_AUTHORING_V5_COMPLETE_STOP_RULE,
   toWorkbenchAuthoringV5PreparationDto,
   toWorkbenchAuthoringV5AuthoredDraft,
+  type WorkbenchAuthoringV5IncompleteRequestsDto,
   workbenchAuthoringV5PreparationWaitAction,
   type WorkbenchAuthoringV5AuthoredDraft,
   type WorkbenchAuthoringV5Draft,
@@ -619,6 +621,35 @@ export function getWorkbenchAuthoringV5RequestStatus(
     nextAction: request.status === "completed"
       ? completeAction(db, request.requestId)
       : requestNextAction(db, input.command, request.requestId)
+  };
+}
+
+/** Most recent open/active V5 request for Workbench incomplete-resume banner. */
+export function getIncompleteWorkbenchAuthoringV5RequestSummary(
+  db: MastheadDatabase,
+  input: { command: string }
+): WorkbenchAuthoringV5IncompleteRequestsDto {
+  const requestId = listIncompleteWorkbenchAuthoringV5RequestIds(db)[0];
+  if (!requestId) return {};
+  const request = getWorkbenchAuthoringV5Request(db, requestId);
+  if (!request || (request.status !== "open" && request.status !== "active")) return {};
+  const packsCompleted = listWorkbenchAuthoringV5Packs(db, requestId)
+    .filter(({ status }) => status === "completed")
+    .length;
+  return {
+    request: {
+      requestId: request.requestId,
+      status: request.status,
+      packsCompleted,
+      packCount: request.packCount,
+      sessionsCompleted: request.attemptedSessionCount,
+      sessionCount: request.sessionCount,
+      handoff: {
+        requestId: request.requestId,
+        startCommand: `${input.command} workbench author bootstrap --request ${shellQuote(request.requestId)} --json`
+      },
+      updatedAt: request.updatedAt
+    }
   };
 }
 

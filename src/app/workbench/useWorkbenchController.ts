@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createGuidedAuthoringRequest,
+  getIncompleteWorkbenchAuthoringRequest,
   getWorkbenchAuthoringCapabilities,
   getWorkbenchActivity,
   getWorkbenchNotAddedSessions,
@@ -20,7 +21,10 @@ import type {
   WorkbenchQueueSessionDto,
   WorkbenchSessionsResponse
 } from "../../shared/workbench";
-import type { WorkbenchAuthoringV5CapabilitiesDto } from "../../shared/workbenchAuthoringV5";
+import type {
+  WorkbenchAuthoringV5CapabilitiesDto,
+  WorkbenchAuthoringV5IncompleteRequestSummaryDto
+} from "../../shared/workbenchAuthoringV5";
 import { guidedAuthoringIdentityFromCapabilities } from "../../shared/guidedAuthoring";
 import { buildWorkbenchHandoff } from "../../ui/workbench/workbenchHandoff";
 import { useMastheadDataRevisions } from "../useMastheadDataRevisions";
@@ -60,7 +64,9 @@ export type UseWorkbenchControllerResult = {
   clearActionFeedback: () => void;
   clearSelection: () => void;
   copyAgentPrompt: () => Promise<string>;
+  copyResumePrompt: () => Promise<string>;
   error?: string;
+  incompleteAuthoring?: WorkbenchAuthoringV5IncompleteRequestSummaryDto;
   lastActionSummary?: string;
   loadNotAdded: () => void;
   loading: boolean;
@@ -93,6 +99,7 @@ export function useWorkbenchController({
   const [notAddedSummary, setNotAddedSummary] = useState<WorkbenchNotAddedSummaryDto>();
   const [notAddedSessions, setNotAddedSessions] = useState<WorkbenchNotAddedSessionDto[]>([]);
   const [authoringCapabilities, setAuthoringCapabilities] = useState<WorkbenchAuthoringV5CapabilitiesDto>();
+  const [incompleteAuthoring, setIncompleteAuthoring] = useState<WorkbenchAuthoringV5IncompleteRequestSummaryDto>();
   const [notAddedOpen, setNotAddedOpenState] = useState(false);
   const [selectedSessionIds, setSelectedSessionIds] = useState(() => new Set<string>());
   const [selectedCompileReadySessionIds, setSelectedCompileReadySessionIds] = useState(() => new Set<string>());
@@ -125,7 +132,10 @@ export function useWorkbenchController({
       const capabilitiesPromise = getWorkbenchAuthoringCapabilities(activeProjectionUrl, {
         signal: options.signal
       }).catch(() => undefined);
-      const [response, activityResponse, notAdded, capabilities] = await Promise.all([
+      const incompletePromise = getIncompleteWorkbenchAuthoringRequest(activeProjectionUrl, {
+        signal: options.signal
+      }).catch(() => undefined);
+      const [response, activityResponse, notAdded, capabilities, incomplete] = await Promise.all([
         getWorkbenchSessions(activeProjectionUrl, {
           limit: pageSize,
           offset: pageIndex * pageSize,
@@ -133,7 +143,8 @@ export function useWorkbenchController({
         }),
         getWorkbenchActivity(activeProjectionUrl, { limit: 30, signal: options.signal }),
         getWorkbenchNotAddedSummary(activeProjectionUrl, { signal: options.signal }),
-        capabilitiesPromise
+        capabilitiesPromise,
+        incompletePromise
       ]);
       if (options.signal?.aborted || requestId !== loadRequestId.current) return;
       const selectedAtLoad = new Set(selectedSessionIdsRef.current);
@@ -149,6 +160,7 @@ export function useWorkbenchController({
       setActivity(activityResponse.activity);
       setNotAddedSummary(notAdded);
       setAuthoringCapabilities(capabilities);
+      setIncompleteAuthoring(incomplete?.request);
       setSelectedSessionIds(selection.present);
       setSelectedCompileReadySessionIds(selection.compileReady);
     } catch (loadError) {
@@ -195,6 +207,7 @@ export function useWorkbenchController({
     if (!active || !isLive) {
       loadRequestId.current += 1;
       setAuthoringCapabilities(undefined);
+      setIncompleteAuthoring(undefined);
       return;
     }
     const controller = new AbortController();
@@ -244,6 +257,22 @@ export function useWorkbenchController({
           sessionIds
         });
         if (copyCreationRef.current?.token === creationToken) copyCreationRef.current = undefined;
+        if (request.request && (request.request.status === "open" || request.request.status === "active")) {
+          setIncompleteAuthoring({
+            requestId: request.request.requestId,
+            status: request.request.status,
+            packsCompleted: 0,
+            packCount: request.request.packCount,
+            sessionsCompleted: request.request.attemptedSessionCount,
+            sessionCount: request.request.sessionCount,
+            handoff: request.handoff,
+            updatedAt: request.request.updatedAt
+          });
+        } else {
+          void getIncompleteWorkbenchAuthoringRequest(activeProjectionUrl)
+            .then((summary) => setIncompleteAuthoring(summary.request))
+            .catch(() => undefined);
+        }
         return buildWorkbenchHandoff({ capabilities, request });
       } catch (copyError) {
         setActionError(formatActionError(copyError));
@@ -258,6 +287,27 @@ export function useWorkbenchController({
     }).catch(() => undefined);
     return operation;
   }, [actionBusy, activeProjectionUrl, agentPromptSessionIds, authoringCapabilities, isLive]);
+
+  const copyResumePrompt = useCallback((): Promise<string> => {
+    if (!isLive || actionBusy || !authoringCapabilities || !incompleteAuthoring) {
+      return Promise.reject(new Error("No incomplete authoring request to resume"));
+    }
+    const capabilities = authoringCapabilities;
+    const incomplete = incompleteAuthoring;
+    return Promise.resolve(
+      buildWorkbenchHandoff({
+        capabilities,
+        request: {
+          handoff: incomplete.handoff,
+          nextAction: {
+            command: incomplete.handoff.startCommand,
+            kind: "start",
+            reason: "Resume the incomplete authoring request."
+          }
+        }
+      })
+    );
+  }, [actionBusy, authoringCapabilities, incompleteAuthoring, isLive]);
 
   const canRun = useCallback(
     (kind: WorkbenchActionKind): boolean => {
@@ -492,7 +542,9 @@ export function useWorkbenchController({
     clearActionFeedback,
     clearSelection,
     copyAgentPrompt,
+    copyResumePrompt,
     error,
+    incompleteAuthoring,
     lastActionSummary,
     loadNotAdded: () => {
       void loadNotAdded();
