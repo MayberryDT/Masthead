@@ -8,7 +8,11 @@ import type {
   WorkbenchQueueSessionDto
 } from "../../../shared/workbench";
 import { formatWorkbenchActivityTime } from "../workbenchActivity";
-import { WorkbenchPanel } from "../WorkbenchPanel";
+import {
+  buildBulkQualityAcceptConfirmMessage,
+  buildBulkQualityFailConfirmMessage,
+  WorkbenchPanel
+} from "../WorkbenchPanel";
 
 const forbiddenTokenParts = [
   ["mast", "head", "ctl"],
@@ -597,6 +601,65 @@ describe("WorkbenchPanel", () => {
       />
     );
     expect(runAction).not.toHaveBeenCalled();
+  });
+
+  test("bulk quality disposition labels count selected review sessions", () => {
+    const html = renderToStaticMarkup(
+      <WorkbenchPanel
+        sessions={[
+          session({
+            sessionId: "session:review-a",
+            nextAction: "review_quality",
+            qualityStatus: "unchecked"
+          }),
+          session({
+            sessionId: "session:review-b",
+            nextAction: "review_quality",
+            qualityStatus: "unchecked"
+          }),
+          session({
+            sessionId: "session:ready",
+            nextAction: "enrich",
+            qualityStatus: "passed",
+            compileReady: true
+          })
+        ]}
+        selectedSessionIds={new Set(["session:review-a", "session:review-b", "session:ready"])}
+        qualityReviewSelectedCount={2}
+        canRun={allow("quality_pass", "quality_fail", "quality_precheck")}
+        loading={false}
+        onClearSelection={() => undefined}
+        onRetry={() => undefined}
+        onSelectAll={() => undefined}
+        onToggleSession={() => undefined}
+      />
+    );
+
+    expect(html).toContain("Accept 2 review");
+    expect(html).toContain("Fail 2 review");
+    expect(html).toContain("Precheck 2 review");
+    expect(html).toContain("selected need quality review");
+    expect(html).toContain("operator rejected");
+    expect(html).toContain("Ready/passed sessions in the selection are left unchanged");
+    expect(html).not.toContain("Accept Quality");
+    expect(html).not.toContain("Fail Quality");
+  });
+
+  test("bulk quality confirm copy is explicit about Not Added and no silent authoring", () => {
+    const failMessage = buildBulkQualityFailConfirmMessage(3);
+    expect(failMessage).toContain("Fail quality for 3 selected review sessions?");
+    expect(failMessage).toContain("Not Added");
+    expect(failMessage).toContain("operator rejected");
+    expect(failMessage).toContain("leave the package path");
+    expect(failMessage).toContain("Ready/passed sessions in the selection are not affected");
+    expect(failMessage).toContain("will not author artifacts");
+    expect(failMessage).toContain("enrichment prose");
+
+    const acceptMessage = buildBulkQualityAcceptConfirmMessage(2);
+    expect(acceptMessage).toContain("Accept quality for 2 selected review sessions?");
+    expect(acceptMessage).toContain("quality passed");
+    expect(acceptMessage).toContain("compile-ready");
+    expect(acceptMessage).toContain("will not write enrichment prose");
   });
 });
 
