@@ -129,6 +129,8 @@ export function deriveSessions(
       usefulSessionTitle(stringPayload(start, "objective")) ??
       usefulSessionTitle(stringPayload(metadataEvent, "title")) ??
       usefulSessionTitle(stringPayload(metadataEvent, "objective")) ??
+      // Privacy-safe live task previews land on user-turn event summaries (not full prompts).
+      usefulSessionTitleFromUserTurns(ordered) ??
       `${project} session`;
 
     return {
@@ -304,8 +306,27 @@ function usefulSessionTitle(value: string | undefined): string | undefined {
     return undefined;
   }
   if (/\bhook event$/i.test(cleaned) && cleaned.length <= 40) return undefined;
+  // Generic live hook event labels ("Claude Code: User Prompt Submit") are not task titles.
+  if (
+    /^(?:grok build|codex|claude code|cursor|opencode|hermes|oh my pi|pi)\s*:\s*/i.test(cleaned) &&
+    /(?:user\s+prompt\s+submit|before\s+submit\s+prompt|session\s+start(?:ed)?|hook\s+event|permission|pre\s*tool|post\s*tool)/i.test(
+      cleaned
+    )
+  ) {
+    return undefined;
+  }
   if (isOpaquePathSegment(cleaned.replace(/\s+session$/i, ""))) return undefined;
   return cleaned;
+}
+
+/** Prefer short privacy-safe user-turn summaries as session title when hooks suppressed prompt bodies. */
+function usefulSessionTitleFromUserTurns(events: NormalizedEvent[]): string | undefined {
+  for (const event of events) {
+    if (event.type !== "user.response" && event.type !== "user.question") continue;
+    const title = usefulSessionTitle(event.summary);
+    if (title) return title;
+  }
+  return undefined;
 }
 
 function isOpaquePathSegment(value: string): boolean {
