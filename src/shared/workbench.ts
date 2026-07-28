@@ -18,7 +18,10 @@ export type CaptureQualityDisposition =
       reason: "meaningful_conversation" | "substantial_tool_work" | "durable_file_effect";
     }
   | { disposition: "review"; reason: "insufficient_evidence" }
-  | { disposition: "suppress"; reason: "empty" | "hook_only" | "diagnostic_only" | "exact_duplicate" };
+  | {
+      disposition: "suppress";
+      reason: "empty" | "hook_only" | "diagnostic_only" | "session_start_only" | "exact_duplicate";
+    };
 
 export type WorkbenchSuppressionCategory = "confirmed_noise" | "insufficient_evidence" | "manual_exclusion";
 export type WorkbenchQualityDecisionSource = "automatic" | "user";

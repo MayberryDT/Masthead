@@ -293,6 +293,48 @@ describe("Workbench capture quality precheck", () => {
       sessionId: "session:noise"
     });
   });
+
+  test("suppresses system session-start-only shells (Grok heartbeat)", async () => {
+    const db = await testDb();
+    const sessionId = "session:grok-session-start";
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "grok",
+      project: "Masthead",
+      sessionId,
+      title: "Grok Build: session start"
+    });
+    removeTranscriptRows(db, sessionId);
+    insertMessage(db, sessionId, 0, "system", "session start");
+
+    expect(runCaptureQualityPrecheck(db, sessionId)).toMatchObject({
+      disposition: "suppress",
+      reason: "session_start_only",
+      sessionId
+    });
+  });
+
+  test("does not suppress real Grok conversations with user and assistant turns", async () => {
+    const db = await testDb();
+    const sessionId = "session:grok-real-conversation";
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "grok",
+      project: "Masthead",
+      sessionId,
+      title: "Grok Build: implement quality gate"
+    });
+    removeTranscriptRows(db, sessionId);
+    insertMessage(db, sessionId, 0, "system", "session start");
+    insertMessage(db, sessionId, 1, "user", "Please implement the session-start suppress rule.");
+    insertMessage(db, sessionId, 2, "assistant", "I will add a quality precheck for system-only shells.");
+
+    expect(runCaptureQualityPrecheck(db, sessionId)).toMatchObject({
+      disposition: "keep",
+      reason: "meaningful_conversation",
+      sessionId
+    });
+  });
 });
 
 async function testDb(): Promise<MastheadDatabase> {
@@ -312,7 +354,13 @@ function removeTranscriptRows(db: MastheadDatabase, sessionId: string): void {
   db.prepare("DELETE FROM checkpoints WHERE session_id = ?").run(sessionId);
 }
 
-function insertMessage(db: MastheadDatabase, sessionId: string, index: number, role: "assistant" | "user", text: string): void {
+function insertMessage(
+  db: MastheadDatabase,
+  sessionId: string,
+  index: number,
+  role: "assistant" | "system" | "user",
+  text: string
+): void {
   db.prepare(
     "INSERT INTO messages (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
   ).run(
