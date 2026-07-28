@@ -55,6 +55,8 @@ type WorkbenchPanelProps = Partial<
   onRetry?: () => void;
   onSelectAll?: () => void;
   onSelectPage?: () => void;
+  /** Select every session currently listed in the Quality review panel. */
+  onSelectQualityReviewVisible?: () => void;
   onToggleSession?: (sessionId: string) => void;
 };
 
@@ -88,7 +90,9 @@ const TOOLTIPS = {
   selectPage: "Select or clear all sessions on this page.",
   notAdded: "Review sessions excluded from the package path (Not Added).",
   qualityReview:
-    "Package-path sessions that need a quality decision (review_quality) before enrichment."
+    "Package-path sessions that need a quality decision (review_quality) before enrichment.",
+  selectQualityReviewVisible:
+    "Select every session currently listed in the Quality review panel for bulk accept or fail."
 } as const;
 
 type PipelineItem = {
@@ -185,6 +189,7 @@ export function WorkbenchPanel({
   onRetry,
   onSelectAll,
   onSelectPage,
+  onSelectQualityReviewVisible,
   onToggleSession,
   page = 0,
   pageSize = 100,
@@ -202,13 +207,23 @@ export function WorkbenchPanel({
 }: WorkbenchPanelProps) {
   const selectionCount = selectedSessionIds.size;
   const selectedSessions = sessions.filter((session) => selectedSessionIds.has(session.sessionId));
-  /** Prefer controller-tracked count; fall back to visible page for partial props / tests. */
+  const qualityPanelSelectedCount = qualityReviewSessions.filter((session) =>
+    selectedSessionIds.has(session.sessionId)
+  ).length;
+  const allQualityPanelSelected =
+    qualityReviewSessions.length > 0 && qualityPanelSelectedCount === qualityReviewSessions.length;
+  const someQualityPanelSelected =
+    qualityPanelSelectedCount > 0 && !allQualityPanelSelected;
+  /** Prefer controller-tracked count; fall back to visible page / panel selection for partial props. */
   const reviewSelectedCount =
     qualityReviewSelectedCount > 0
       ? qualityReviewSelectedCount
-      : selectedSessions.filter(
-          (session) => session.nextAction === "review_quality" || session.qualityStatus === "unchecked"
-        ).length;
+      : Math.max(
+          selectedSessions.filter(
+            (session) => session.nextAction === "review_quality" || session.qualityStatus === "unchecked"
+          ).length,
+          qualityPanelSelectedCount
+        );
   const pipelineItems = pipelineItemsForSelection(reviewSelectedCount);
   const queueTotal = typeof total === "number" ? total : sessions.length;
   const publishPathLabel = typeof total === "number" ? String(total) : loading ? "…" : String(queueTotal);
@@ -356,6 +371,29 @@ export function WorkbenchPanel({
     }
     onSelectPage?.();
   };
+
+  const onQualityReviewHeaderCheckboxChange = () => {
+    if (allQualityPanelSelected) {
+      for (const session of qualityReviewSessions) {
+        if (selectedSessionIds.has(session.sessionId)) onToggleSession?.(session.sessionId);
+      }
+      return;
+    }
+    onSelectQualityReviewVisible?.();
+  };
+
+  const acceptQualityLabel =
+    reviewSelectedCount <= 0
+      ? "Accept"
+      : reviewSelectedCount === 1
+        ? "Accept 1 review"
+        : `Accept ${reviewSelectedCount} review`;
+  const failQualityLabel =
+    reviewSelectedCount <= 0
+      ? "Fail"
+      : reviewSelectedCount === 1
+        ? "Fail 1 review"
+        : `Fail ${reviewSelectedCount} review`;
 
   useEffect(() => {
     if (!toastMessage || !clearActionFeedback) return;
@@ -563,14 +601,56 @@ export function WorkbenchPanel({
         >
           <div className="workbench-not-added-header">
             <p className="mono-label">Quality review — still on package path</p>
-            <AppButton variant="quiet" onClick={() => setQualityReviewOpen?.(false)}>
-              Close
-            </AppButton>
+            <div className="workbench-quality-review-actions">
+              {qualityReviewSessions.length > 0 ? (
+                <>
+                  <AppButton
+                    variant="quiet"
+                    onClick={() => onSelectQualityReviewVisible?.()}
+                    disabled={actionBusy || allQualityPanelSelected}
+                    title={TOOLTIPS.selectQualityReviewVisible}
+                  >
+                    Select visible
+                  </AppButton>
+                  <AppButton
+                    onClick={() => void run("quality_pass")}
+                    disabled={!canRun("quality_pass") || actionBusy || reviewSelectedCount === 0}
+                    title={TOOLTIPS.acceptQuality}
+                  >
+                    {acceptQualityLabel}
+                  </AppButton>
+                  <AppButton
+                    variant="quiet"
+                    onClick={() => void run("quality_fail")}
+                    disabled={!canRun("quality_fail") || actionBusy || reviewSelectedCount === 0}
+                    title={TOOLTIPS.failQuality}
+                  >
+                    {failQualityLabel}
+                  </AppButton>
+                </>
+              ) : null}
+              <AppButton variant="quiet" onClick={() => setQualityReviewOpen?.(false)}>
+                Close
+              </AppButton>
+            </div>
           </div>
           <div className="workbench-table-wrap workbench-not-added-table-wrap">
             <table className="workbench-session-table workbench-not-added-table">
               <thead>
                 <tr>
+                  <th scope="col" className="workbench-select-col">
+                    <input
+                      type="checkbox"
+                      checked={allQualityPanelSelected}
+                      ref={(input) => {
+                        if (input) input.indeterminate = someQualityPanelSelected;
+                      }}
+                      disabled={actionBusy || qualityReviewSessions.length === 0}
+                      onChange={onQualityReviewHeaderCheckboxChange}
+                      title={TOOLTIPS.selectQualityReviewVisible}
+                      aria-label="Select all sessions listed in Quality review"
+                    />
+                  </th>
                   <th scope="col">session</th>
                   <th scope="col">reason</th>
                   <th scope="col">runtime</th>
@@ -580,16 +660,30 @@ export function WorkbenchPanel({
               <tbody>
                 {qualityReviewSessions.length === 0 ? (
                   <tr>
-                    <td className="workbench-session-empty" colSpan={4}>
+                    <td className="workbench-session-empty" colSpan={5}>
                       No sessions awaiting quality review
                     </td>
                   </tr>
                 ) : (
                   qualityReviewSessions.map((session) => {
+                    const selected = selectedSessionIds.has(session.sessionId);
                     const safeTitle = sanitizeWorkbenchVisibleText(session.title);
                     const safeProject = session.project ? sanitizeWorkbenchVisibleText(session.project) : "-";
                     return (
-                      <tr key={session.sessionId}>
+                      <tr
+                        key={session.sessionId}
+                        className={selected ? "is-selected" : undefined}
+                        onClick={() => onToggleSession?.(session.sessionId)}
+                      >
+                        <td className="workbench-select-col" onClick={(event) => event.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            disabled={actionBusy}
+                            onChange={() => onToggleSession?.(session.sessionId)}
+                            aria-label={`Select ${safeTitle} for quality disposition`}
+                          />
+                        </td>
                         <td>
                           <span className="workbench-session-meta">
                             <strong>{safeTitle}</strong>

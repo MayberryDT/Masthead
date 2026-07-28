@@ -90,6 +90,8 @@ export type UseWorkbenchControllerResult = {
   runAction: (kind: WorkbenchActionKind) => Promise<void>;
   selectAll: () => Promise<void>;
   selectPage: () => void;
+  /** Select every session currently loaded in the Quality review panel list. */
+  selectQualityReviewVisible: () => void;
   selectedSessionIds: Set<string>;
   sessions: WorkbenchQueueSessionDto[];
   setNotAddedOpen: (open: boolean) => void;
@@ -357,6 +359,10 @@ export function useWorkbenchController({
       if (kind === "copy_agent_prompt") {
         return Boolean(authoringCapabilities) && agentPromptSessionCount > 0;
       }
+      // Quality disposition tracks review IDs across pages / Quality review panel (not only current page).
+      if (kind === "quality_pass" || kind === "quality_fail" || kind === "quality_precheck") {
+        return qualityReviewSelectedCount > 0;
+      }
       if (selectedSessions.length === 0) return false;
 
       switch (kind) {
@@ -376,11 +382,6 @@ export function useWorkbenchController({
               session.transcriptStatus === "permission_needed" ||
               session.transcriptStatus === "available"
           );
-        case "quality_pass":
-        case "quality_fail":
-        case "quality_precheck":
-          // Prefer tracked review selection so select-all across pages still enables bulk disposition.
-          return qualityReviewSelectedCount > 0;
         case "claim":
           return selectedSessions.some((session) => !session.activeClaim);
         case "release":
@@ -504,6 +505,12 @@ export function useWorkbenchController({
         }
 
         await load();
+        if (
+          qualityReviewOpen &&
+          (kind === "quality_pass" || kind === "quality_fail" || kind === "quality_precheck")
+        ) {
+          await loadQualityReview();
+        }
         onLibraryChanged?.();
       } catch (runError) {
         setActionError(formatActionError(runError));
@@ -517,7 +524,9 @@ export function useWorkbenchController({
       agentPromptSessionCount,
       canRun,
       load,
+      loadQualityReview,
       onLibraryChanged,
+      qualityReviewOpen,
       qualityReviewSelectedIds,
       selectedSessionIds,
       sessions
@@ -532,6 +541,8 @@ export function useWorkbenchController({
   const toggleSession = useCallback((sessionId: string) => {
     const selecting = !selectedSessionIds.has(sessionId);
     const target = sessions.find((session) => session.sessionId === sessionId);
+    // Quality review panel rows are always review holds; they may not be on the current queue page.
+    const inQualityReviewPanel = qualityReviewSessions.some((session) => session.sessionId === sessionId);
     setSelectedSessionIds((current) => {
       const next = new Set(current);
       if (selecting) next.add(sessionId);
@@ -549,14 +560,14 @@ export function useWorkbenchController({
     });
     setSelectedQualityReviewSessionIds((qualityReview) => {
       const next = new Set(qualityReview);
-      if (selecting && target && isQualityReviewSession(target)) {
+      if (selecting && ((target && isQualityReviewSession(target)) || inQualityReviewPanel)) {
         next.add(sessionId);
       } else if (!selecting) {
         next.delete(sessionId);
       }
       return next;
     });
-  }, [selectedSessionIds, sessions]);
+  }, [qualityReviewSessions, selectedSessionIds, sessions]);
 
   const selectPage = useCallback(() => {
     setSelectedSessionIds((current) => new Set([...current, ...sessions.map((session) => session.sessionId)]));
@@ -569,6 +580,13 @@ export function useWorkbenchController({
       ...sessions.filter(isQualityReviewSession).map((session) => session.sessionId)
     ]));
   }, [sessions]);
+
+  const selectQualityReviewVisible = useCallback(() => {
+    const ids = qualityReviewSessions.map((session) => session.sessionId);
+    if (ids.length === 0) return;
+    setSelectedSessionIds((current) => new Set([...current, ...ids]));
+    setSelectedQualityReviewSessionIds((current) => new Set([...current, ...ids]));
+  }, [qualityReviewSessions]);
 
   const selectAll = useCallback(async () => {
     if (!isLive || actionBusy) return;
@@ -652,6 +670,7 @@ export function useWorkbenchController({
     runAction,
     selectAll,
     selectPage,
+    selectQualityReviewVisible,
     selectedSessionIds,
     sessions,
     setNotAddedOpen,

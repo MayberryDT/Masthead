@@ -765,6 +765,7 @@ export function App() {
           onRetry={workbench.retry}
           onSelectAll={workbench.selectAll}
           onSelectPage={workbench.selectPage}
+          onSelectQualityReviewVisible={workbench.selectQualityReviewVisible}
           onToggleSession={workbench.toggleSession}
           page={workbench.page}
           pageSize={workbench.pageSize}
