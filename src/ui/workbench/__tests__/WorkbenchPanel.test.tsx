@@ -407,13 +407,42 @@ describe("WorkbenchPanel", () => {
       />
     );
     const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-    const copyButton = html.match(/<button[^>]*workbench-copy-agent[^>]*>/)?.[0];
+    const copyButtonOpen = html.match(/<button[^>]*workbench-copy-agent[^>]*>/)?.[0];
+    const copyButtonBlock = html.match(/<button[^>]*workbench-copy-agent[\s\S]*?<\/button>/)?.[0] ?? "";
 
-    expect(text).toContain("Selected 3 1 ready · 2 review");
-    expect(copyButton).not.toContain("disabled");
-    expect(copyButton).toContain(
-      "title=\"Copy a plain-language request for 1 ready session. 2 selected sessions need review and will be left out.\""
+    expect(text).toContain("Selected 3 package-path · 1 ready · 2 need quality review");
+    expect(copyButtonOpen).not.toContain("disabled");
+    expect(copyButtonOpen).toContain(
+      "title=\"Copy a plain-language request for 1 ready session. 2 selected sessions need quality review and will be left out of the handoff.\""
     );
+    expect(copyButtonBlock).toContain("Copy Agent Prompt (1 ready)");
+  });
+
+  test("disables Copy Agent Prompt with a clear review reason when nothing selected is ready", () => {
+    const html = renderToStaticMarkup(
+      <WorkbenchPanel
+        sessions={[session({ qualityStatus: "unchecked", transcriptStatus: "unchecked" })]}
+        selectedSessionIds={new Set(["session:review-a", "session:review-b"])}
+        agentPromptSessionCount={0}
+        agentPromptExcludedCount={2}
+        canRun={allow()}
+        loading={false}
+        onClearSelection={() => undefined}
+        onRetry={() => undefined}
+        onSelectAll={() => undefined}
+        onToggleSession={() => undefined}
+      />
+    );
+    const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    const copyButtonOpen = html.match(/<button[^>]*workbench-copy-agent[^>]*>/)?.[0];
+
+    expect(text).toContain("Selected 2 package-path · 0 ready · 2 need quality review");
+    expect(copyButtonOpen).toContain("disabled");
+    expect(copyButtonOpen).toContain(
+      "title=\"0 of 2 selected sessions are ready for agent enrichment. 2 need quality review and will not be included in the handoff.\""
+    );
+    expect(html).toContain("Copy Agent Prompt");
+    expect(html).not.toContain("Copy Agent Prompt (0 ready)");
   });
 
   test("activity rail renders clear V5 labels, tones, and editorial reasons", () => {

@@ -27,6 +27,7 @@ import type {
 } from "../../shared/workbenchAuthoringV5";
 import { guidedAuthoringIdentityFromCapabilities } from "../../shared/guidedAuthoring";
 import { buildWorkbenchHandoff } from "../../ui/workbench/workbenchHandoff";
+import { formatWorkbenchSelectionHonesty } from "../../ui/workbench/workbenchSelectionHonesty";
 import { useMastheadDataRevisions } from "../useMastheadDataRevisions";
 
 const TRANSCRIPT_PERMISSION_ERROR =
@@ -518,7 +519,13 @@ export function useWorkbenchController({
       setSelectedSessionIds(ids);
       setSelectedCompileReadySessionIds(compileReadyIds);
       setLastActionSummary(
-        ids.size === 0 ? "No package-path sessions to select" : `Selected all ${ids.size} package-path sessions`
+        ids.size === 0
+          ? "No package-path sessions to select"
+          : formatWorkbenchSelectionHonesty({
+              selected: ids.size,
+              ready: compileReadyIds.size,
+              needQualityReview: ids.size - compileReadyIds.size
+            })
       );
     } catch (selectError) {
       setActionError(formatActionError(selectError));
