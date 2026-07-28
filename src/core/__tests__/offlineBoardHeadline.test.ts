@@ -320,4 +320,111 @@ describe("offline board headline views", () => {
     // Bare project or project·harness fallback is fine; the colliding "X session" label is not.
     expect(view.frame?.subject).toMatch(/^Masthead( · Grok Build)?$/i);
   });
+
+  test("diversifies disposition with evidence when subject is project-level", () => {
+    const sharedFacts = {
+      project: "Masthead",
+      title: undefined as string | undefined,
+      workContext: undefined,
+      recentTranscriptMessages: [] as string[],
+      attentionTitles: [] as string[],
+      recentEvents: [] as BoardHeadlineFacts["recentEvents"],
+      recentCommandFailures: [] as string[],
+      lifecycle: "running" as const,
+      primaryStatus: "editing",
+      runtime: "grok" as const,
+      changedFileCount: 2
+    };
+
+    // Force matching project-level subjects; basenames stay on facts for disposition only.
+    const withCard = buildOfflineBoardHeadlineView({
+      ...input({
+        ...sharedFacts,
+        recentFileBasenames: ["icon-registry.ts"],
+        recentToolNames: ["search_replace"]
+      }),
+      subjectCandidates: ["Masthead", "UI", "session"]
+    });
+    const withFrame = buildOfflineBoardHeadlineView({
+      ...input({
+        ...sharedFacts,
+        recentFileBasenames: ["boardHeadlineFrame.ts"],
+        recentToolNames: ["read_file"]
+      }),
+      subjectCandidates: ["Masthead", "UI", "session"]
+    });
+
+    expect(withCard.frame?.subject).toMatch(/Masthead/i);
+    expect(withFrame.frame?.subject).toMatch(/Masthead/i);
+    // Same project-level subject shape should still yield different full headlines via disposition tokens.
+    expect(withCard.frame?.subject).toBe(withFrame.frame?.subject);
+    expect(withCard.frame?.disposition).toMatch(/icon-registry/i);
+    expect(withFrame.frame?.disposition).toMatch(/boardHeadlineFrame/i);
+    expect(withCard.headline).not.toBe(withFrame.headline);
+    expect(withCard.frame?.disposition.length).toBeLessThanOrEqual(96);
+    expect(validateBoardHeadlineFrame(withCard.frame).ok).toBe(true);
+    expect(validateBoardHeadlineFrame(withFrame.frame).ok).toBe(true);
+  });
+
+  test("diversifies idle disposition with tool token when subject is project-level", () => {
+    const a = buildOfflineBoardHeadlineView({
+      ...input({
+        project: "Masthead",
+        title: undefined,
+        workContext: undefined,
+        recentTranscriptMessages: [],
+        attentionTitles: [],
+        recentEvents: [],
+        recentFileBasenames: [],
+        recentToolNames: ["todo_write"],
+        lifecycle: "idle",
+        primaryStatus: "stalled",
+        runtime: "codex",
+        changedFileCount: 0
+      }),
+      subjectCandidates: ["Masthead"]
+    });
+    const b = buildOfflineBoardHeadlineView({
+      ...input({
+        project: "Masthead",
+        title: undefined,
+        workContext: undefined,
+        recentTranscriptMessages: [],
+        attentionTitles: [],
+        recentEvents: [],
+        recentFileBasenames: [],
+        recentToolNames: ["run_terminal_command"],
+        lifecycle: "idle",
+        primaryStatus: "stalled",
+        runtime: "codex",
+        changedFileCount: 0
+      }),
+      subjectCandidates: ["Masthead"]
+    });
+
+    expect(a.frame?.subject).toBe(b.frame?.subject);
+    expect(a.frame?.disposition).toMatch(/todo_write/i);
+    expect(b.frame?.disposition).toMatch(/run_terminal_command/i);
+    expect(a.headline).not.toBe(b.headline);
+    expect(validateBoardHeadlineFrame(a.frame).ok).toBe(true);
+  });
+
+  test("keeps short state disposition when subject is a specific multi-word task phrase", () => {
+    const base = input({
+      lifecycle: "running",
+      primaryStatus: "editing",
+      recentFileBasenames: ["icon-registry.ts"],
+      recentToolNames: ["search_replace"],
+      recentTranscriptMessages: ["Implement Logbook pagination spacing for dense tables."]
+    });
+    const view = buildOfflineBoardHeadlineView({
+      ...base,
+      subjectCandidates: ["Logbook pagination spacing", "icon-registry.ts", "Masthead"]
+    });
+
+    expect(view.frame?.subject).toMatch(/Logbook pagination spacing/i);
+    // Specific subject already diversifies cards; disposition may stay a short state label.
+    expect(view.frame?.disposition).toBe("editing files");
+    expect(view.frame?.disposition).not.toMatch(/icon-registry/i);
+  });
 });
