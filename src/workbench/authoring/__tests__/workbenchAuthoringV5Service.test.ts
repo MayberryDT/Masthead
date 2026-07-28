@@ -270,6 +270,32 @@ describe("workbench-authoring-v5 loop", () => {
         packId
       });
       expect(retried).toEqual(finished);
+
+      // ISSUE-A5: agent-facing multipack contract — pack finish is not request completion.
+      // A1 may later add stopRule/progress on finish/status DTOs; extend these assertions after A1 merges.
+      const isLastPack = packIndex === 1;
+      if (!isLastPack) {
+        expect(finished).not.toHaveProperty("requestReceipt");
+        expect(finished.nextAction.kind).toBe("claim_next");
+        expect(finished.nextAction.kind).not.toBe("complete");
+        expect(finished.nextAction.command).toContain("workbench author start");
+        const midStatus = getWorkbenchAuthoringV5RequestStatus(db, {
+          command,
+          requestId: created.request.requestId
+        });
+        expect(midStatus).not.toHaveProperty("receipt");
+        expect(midStatus.request.status).toBe("active");
+        expect(midStatus.nextAction.kind).not.toBe("complete");
+        expect(midStatus.nextAction.kind).toBe("start");
+      } else {
+        expect(finished.requestReceipt).toMatchObject({
+          receiptVersion: "workbench-authoring-v5-request-receipt-v1",
+          requestId: created.request.requestId
+        });
+        expect(finished.nextAction.kind).toBe("complete");
+        expect(finished.nextAction.command).toBe("");
+      }
+
       expectedPublished += authored.sessions.length - 1;
       expectedRejected += 1;
       expectedSoftFlagged += 1;
@@ -371,7 +397,18 @@ describe("workbench-authoring-v5 loop", () => {
       rejected: 1,
       softFlagged: 1
     });
-    expect(finished.nextAction).toMatchObject({ kind: "claim_next" });
+    // ISSUE-A5: first of two packs — pack receipt only; request is not complete.
+    // After A1 merges, also assert stopRule + progress.requestComplete === false here.
+    expect(finished).not.toHaveProperty("requestReceipt");
+    expect(finished.nextAction.kind).toBe("claim_next");
+    expect(finished.nextAction.kind).not.toBe("complete");
+    const midStatus = getWorkbenchAuthoringV5RequestStatus(db, {
+      command,
+      requestId: created.request.requestId
+    });
+    expect(midStatus).not.toHaveProperty("receipt");
+    expect(midStatus.request.status).toBe("active");
+    expect(midStatus.nextAction.kind).not.toBe("complete");
     const next = startWorkbenchAuthoringV5Pack(db, {
       command,
       currentIdentity: identity,
@@ -379,6 +416,9 @@ describe("workbench-authoring-v5 loop", () => {
       requestId: created.request.requestId
     });
     expect(next).toMatchObject({ pack: { ordinal: 1, status: "active" } });
+    expect(next).not.toHaveProperty("requestReceipt");
+    if (!("nextAction" in next)) throw new Error("expected_active_pack");
+    expect(next.nextAction.kind).not.toBe("complete");
 
     const activityTypes = (db.prepare(
       "SELECT event_type AS eventType FROM workbench_activity WHERE related_run_id = ?"
