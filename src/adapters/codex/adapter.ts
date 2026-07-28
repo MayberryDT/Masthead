@@ -14,6 +14,8 @@ import { discoverLocalSources } from "../generic/localAdapterFactory.ts";
 import { codexCandidatePaths } from "./discovery.ts";
 import { streamJsonlLines } from "../generic/streamJsonl.ts";
 import { collectAdapterRecords, parsedTranscriptUnit, planLocalTranscriptFiles } from "../transcriptUnits.ts";
+import { shortUserDerivedTitle } from "../userDerivedTitle.ts";
+import { projectCodexMessageNarrative } from "./messageNarrative.ts";
 
 export const codexAdapter: SessionAdapter = {
   runtime: "codex",
@@ -79,6 +81,40 @@ async function* backfillCodexSource(source: DiscoveredSource, cursor?: IngestCur
   let cwd = cursor?.cwd;
   let model = cursor?.model;
 
+  // Defer the session metadata record until we have a user-derived title candidate
+  // (or reach EOF). Ingest uses COALESCE(title) so the first non-null title sticks.
+  let pendingSession:
+    | {
+        lineNumber: number;
+        observedAt: string;
+        payload: unknown;
+        cursorAfter: Omit<IngestCursor, "cursorId">;
+      }
+    | undefined;
+  let userTitle: string | undefined;
+  let sessionYielded = false;
+
+  const weakTitle = (): string => (cwd ? basename(cwd) : "Codex session");
+  const emitPendingSession = function* (): Generator<AdapterRecord> {
+    if (!pendingSession || sessionYielded) return;
+    const title = userTitle ?? weakTitle();
+    yield record(
+      source,
+      pendingSession.lineNumber,
+      pendingSession.observedAt,
+      pendingSession.payload,
+      adapterPayload("session", source.confidence, source, {
+        cwd,
+        model,
+        observedAt: pendingSession.observedAt,
+        sessionId: sourceSessionId,
+        title
+      }),
+      pendingSession.cursorAfter
+    );
+    sessionYielded = true;
+  };
+
   const resumeOffset = cursor && cursor.byteOffset <= info.size ? cursor.byteOffset : 0;
   for await (const line of streamJsonlLines(source.path, resumeOffset)) {
     const trimmed = line.raw.trim();
@@ -87,6 +123,7 @@ async function* backfillCodexSource(source: DiscoveredSource, cursor?: IngestCur
     try {
       payload = JSON.parse(trimmed);
     } catch {
+      yield* emitPendingSession();
       yield diagnosticRecord(source, line.lineNumber, trimmed, "codex_jsonl_invalid_line", cursorAfter(line.byteOffsetAfter));
       continue;
     }
@@ -98,20 +135,38 @@ async function* backfillCodexSource(source: DiscoveredSource, cursor?: IngestCur
       sourceSessionId = readString(body, ["id", "session_id", "sessionId"]) ?? sourceSessionId;
       cwd = readString(body, ["cwd", "repo_root", "repoRoot"]);
       model = readString(body, ["model", "model_provider"]);
-      yield record(source, line.lineNumber, observedAt, payload, adapterPayload("session", source.confidence, source, {
-        cwd,
-        model,
+      pendingSession = {
+        lineNumber: line.lineNumber,
         observedAt,
-        sessionId: sourceSessionId,
-        title: cwd ? basename(cwd) : "Codex session"
-      }), cursorAfter(line.byteOffsetAfter));
+        payload,
+        cursorAfter: cursorAfter(line.byteOffsetAfter)
+      };
+      // Keep scanning for a user narrative before emitting session title.
       continue;
     }
     if (!sourceSessionId || !isRecord(body)) continue;
 
     const normalized = normalizedCodexPayload(source, sourceSessionId, observedAt, body, { cwd, model });
-    if (normalized) yield record(source, line.lineNumber, observedAt, payload, normalized, cursorAfter(line.byteOffsetAfter));
+    if (!normalized) continue;
+
+    if (!userTitle && normalized.kind === "message") {
+      const value = normalized.value as { role?: string; text?: string };
+      if (value.role === "user" && typeof value.text === "string") {
+        const narrative = projectCodexMessageNarrative(value.text);
+        if (!narrative.controlOnly) {
+          userTitle = shortUserDerivedTitle(narrative.text);
+        }
+      }
+    }
+
+    // Prefer emitting session with user title just before the first transcript record
+    // when we already captured narrative from this message; otherwise use weak title.
+    yield* emitPendingSession();
+    yield record(source, line.lineNumber, observedAt, payload, normalized, cursorAfter(line.byteOffsetAfter));
   }
+
+  // Meta-only files (or files with no recognized body rows) still need a session record.
+  yield* emitPendingSession();
 
   function cursorAfter(byteOffset: number): Omit<IngestCursor, "cursorId"> {
     return { byteOffset, contentFingerprint, cwd, model, modifiedAt, sourceId: source.sourceId, sourcePath: source.path, sourceSessionId };

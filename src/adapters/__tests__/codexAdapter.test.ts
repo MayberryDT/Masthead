@@ -69,4 +69,119 @@ describe("Codex adapter", () => {
       normalized: { value: { role: "assistant", sessionId: "session-real", text: "second" } }
     });
   });
+
+  test("prefers a short user-derived title over cwd basename when user narrative exists", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "masthead-codex-title-"));
+    tempDirs.push(dir);
+    const path = join(dir, "rollout-title.jsonl");
+    const userPrompt = "Implement Logbook pagination spacing for dense artifact rows";
+    await writeFile(
+      path,
+      [
+        JSON.stringify({
+          timestamp: "2026-07-01T00:00:00.000Z",
+          type: "session_meta",
+          payload: { id: "session-title", cwd: "/workspace/Masthead", model: "gpt-5" }
+        }),
+        JSON.stringify({
+          timestamp: "2026-07-01T00:00:01.000Z",
+          type: "response_item",
+          payload: { type: "message", role: "user", content: [{ type: "input_text", text: userPrompt }] }
+        }),
+        JSON.stringify({
+          timestamp: "2026-07-01T00:00:02.000Z",
+          type: "response_item",
+          payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "Working on it." }] }
+        })
+      ].join("\n") + "\n",
+      "utf8"
+    );
+    const source: DiscoveredSource = {
+      confidence: "authoritative",
+      path,
+      runtime: "codex",
+      sourceId: "codex:title",
+      sourceKind: "jsonl"
+    };
+
+    const records: AdapterRecord[] = [];
+    for await (const record of codexAdapter.backfill(source)) records.push(record);
+
+    const session = records.find((record) => record.normalized.kind === "session");
+    const title = (session?.normalized.value as { title?: string } | undefined)?.title;
+    expect(title).toBeTruthy();
+    expect(title).not.toBe("Masthead");
+    expect(title).toMatch(/Logbook/i);
+    expect(title).toMatch(/pagination/i);
+    expect(title!.length).toBeLessThanOrEqual(80);
+  });
+
+  test("falls back to cwd basename when no usable user narrative exists", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "masthead-codex-basename-"));
+    tempDirs.push(dir);
+    const path = join(dir, "rollout-basename.jsonl");
+    await writeFile(
+      path,
+      `${JSON.stringify({
+        timestamp: "2026-07-01T00:00:00.000Z",
+        type: "session_meta",
+        payload: { id: "session-basename", cwd: "/workspace/Masthead", model: "gpt-5" }
+      })}\n`,
+      "utf8"
+    );
+    const source: DiscoveredSource = {
+      confidence: "authoritative",
+      path,
+      runtime: "codex",
+      sourceId: "codex:basename",
+      sourceKind: "jsonl"
+    };
+
+    const records: AdapterRecord[] = [];
+    for await (const record of codexAdapter.backfill(source)) records.push(record);
+
+    expect(records).toHaveLength(1);
+    expect(records[0]?.normalized.value).toMatchObject({
+      sessionId: "session-basename",
+      title: "Masthead"
+    });
+  });
+
+  test("does not use control-only Codex envelopes as session titles", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "masthead-codex-control-"));
+    tempDirs.push(dir);
+    const path = join(dir, "rollout-control.jsonl");
+    await writeFile(
+      path,
+      [
+        JSON.stringify({
+          timestamp: "2026-07-01T00:00:00.000Z",
+          type: "session_meta",
+          payload: { id: "session-control", cwd: "/workspace/Masthead", model: "gpt-5" }
+        }),
+        JSON.stringify({
+          timestamp: "2026-07-01T00:00:01.000Z",
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "<skill>Internal instructions only</skill>" }]
+          }
+        })
+      ].join("\n") + "\n",
+      "utf8"
+    );
+    const source: DiscoveredSource = {
+      confidence: "authoritative",
+      path,
+      runtime: "codex",
+      sourceId: "codex:control",
+      sourceKind: "jsonl"
+    };
+
+    const records: AdapterRecord[] = [];
+    for await (const record of codexAdapter.backfill(source)) records.push(record);
+    const session = records.find((record) => record.normalized.kind === "session");
+    expect(session?.normalized.value).toMatchObject({ title: "Masthead" });
+  });
 });
