@@ -52,6 +52,11 @@ export const READ_ONLY_ENDPOINTS = [
   { method: "GET", path: "/workbench/authoring/capabilities", label: "authoring capabilities" },
   {
     method: "GET",
+    path: "/workbench/authoring/v5/requests",
+    label: "incomplete workbench authoring v5 request"
+  },
+  {
+    method: "GET",
     path: "/workbench/authoring/requests/request%3Aone",
     label: "guided authoring request status",
     allowNotFound: true

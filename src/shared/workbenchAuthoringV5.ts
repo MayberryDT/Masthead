@@ -45,6 +45,26 @@ export type WorkbenchAuthoringV5FindingCode =
 export type WorkbenchAuthoringV5NextActionKind =
   | "wait" | "start" | "inspect" | "scaffold" | "save" | "finish" | "claim_next" | "complete";
 
+/** Agent-facing progress for the full request (not a single pack). */
+export type WorkbenchAuthoringV5ProgressDto = {
+  packsCompleted: number;
+  packsTotal: number;
+  sessionsAttempted: number;
+  sessionsTotal: number;
+  requestComplete: boolean;
+};
+
+/**
+ * Incomplete-request stop rule. Pack finish is not request completion; agents must
+ * keep running nextAction.command until kind is "complete" and a request receipt exists.
+ */
+export const WORKBENCH_AUTHORING_V5_INCOMPLETE_STOP_RULE =
+  'Only stop when nextAction.kind === "complete" and a request receipt exists. Pack finish is not request completion. Immediately run nextAction.command.';
+
+/** Complete-request stop rule. The immutable request receipt is the terminal artifact. */
+export const WORKBENCH_AUTHORING_V5_COMPLETE_STOP_RULE =
+  "The request receipt is immutable and the full request is complete. No further authoring steps are required.";
+
 export type WorkbenchAuthoringV5PreparationDto = {
   requestId: string;
   status: "preparing" | "ready" | "failed";
@@ -61,6 +81,10 @@ export type WorkbenchAuthoringV5NextAction = {
   kind: WorkbenchAuthoringV5NextActionKind;
   command: string;
   reason: string;
+  /** Present when request-level pack/session accounting is known. */
+  progress?: WorkbenchAuthoringV5ProgressDto;
+  /** Always present: incomplete vs complete stop wording. */
+  stopRule: string;
 };
 
 export function toWorkbenchAuthoringV5PreparationDto(
@@ -86,7 +110,8 @@ export function workbenchAuthoringV5PreparationWaitAction(
   return {
     command: `${command} workbench author bootstrap --request ${quoteWorkbenchAuthoringV5Argument(requestId)} --json`,
     kind: "wait",
-    reason: "The daemon is durably preparing the frozen request evidence. Retry bootstrap until preparation is ready."
+    reason: "The daemon is durably preparing the frozen request evidence. Retry bootstrap until preparation is ready.",
+    stopRule: WORKBENCH_AUTHORING_V5_INCOMPLETE_STOP_RULE
   };
 }
 
@@ -97,14 +122,27 @@ export function workbenchAuthoringV5PreparationRetryAction(
   return {
     command: `${command} workbench author start --request ${quoteWorkbenchAuthoringV5Argument(requestId)} --json`,
     kind: "start",
-    reason: "Retry the durable preparation from its last committed evidence page."
+    reason: "Retry the durable preparation from its last committed evidence page.",
+    stopRule: WORKBENCH_AUTHORING_V5_INCOMPLETE_STOP_RULE
   };
 }
 
 export function workbenchAuthoringV5PreparationTerminalAction(
   reason: string
 ): WorkbenchAuthoringV5NextAction {
-  return { command: "", kind: "complete", reason };
+  return {
+    command: "",
+    kind: "complete",
+    reason,
+    stopRule: WORKBENCH_AUTHORING_V5_COMPLETE_STOP_RULE,
+    progress: {
+      packsCompleted: 0,
+      packsTotal: 0,
+      sessionsAttempted: 0,
+      sessionsTotal: 0,
+      requestComplete: true
+    }
+  };
 }
 
 function quoteWorkbenchAuthoringV5Argument(value: string): string {
@@ -148,6 +186,23 @@ export type WorkbenchAuthoringV5RequestDto = {
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
+};
+
+/** Lightweight read model for Workbench resume UI (GET /workbench/authoring/v5/requests). */
+export type WorkbenchAuthoringV5IncompleteRequestSummaryDto = {
+  requestId: string;
+  status: Extract<WorkbenchAuthoringV5RequestStatus, "open" | "active">;
+  packsCompleted: number;
+  packCount: number;
+  sessionsCompleted: number;
+  sessionCount: number;
+  handoff: { requestId: string; startCommand: string };
+  updatedAt: string;
+};
+
+export type WorkbenchAuthoringV5IncompleteRequestsDto = {
+  /** Most recently updated incomplete (open/active) request, if any. */
+  request?: WorkbenchAuthoringV5IncompleteRequestSummaryDto;
 };
 
 export type WorkbenchAuthoringV5PackDto = {
@@ -292,6 +347,25 @@ export type WorkbenchAuthoringV5RequestReceipt = {
     consideredNo: number;
   };
   completedAt: string;
+};
+
+/** Runnable next-step payload embedded on non-final pack finish (does not auto-claim). */
+export type WorkbenchAuthoringV5FollowUp = {
+  kind: "start";
+  command: string;
+  reason: string;
+};
+
+export type WorkbenchAuthoringV5FinishResult = {
+  receipt: WorkbenchAuthoringV5PackReceipt;
+  nextAction: WorkbenchAuthoringV5NextAction;
+  /** Present only when the full request completed on this finish. */
+  requestReceipt?: WorkbenchAuthoringV5RequestReceipt;
+  /**
+   * Present when packs remain after finish. Mirrors nextAction.command as an explicit
+   * start payload so agents can chain without inventing a new turn. Does not claim.
+   */
+  followUp?: WorkbenchAuthoringV5FollowUp;
 };
 
 export function isWorkbenchAuthoringV5CapabilitiesDto(value: unknown): value is WorkbenchAuthoringV5CapabilitiesDto {

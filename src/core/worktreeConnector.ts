@@ -79,10 +79,13 @@ const staticReadOnlyBridgePaths = new Set([
   "/workbench/sessions",
   "/workbench/activity",
   "/workbench/not-added-summary",
+  "/workbench/quality-review-summary",
   "/workbench/import-health-summary",
   "/workbench/not-added",
+  "/workbench/quality-review",
   "/workbench/authoring/capabilities",
   "/workbench/authoring/canaries/pending",
+  "/workbench/authoring/v5/requests",
   "/logbook/summary",
   "/logbook/artifacts",
   "/logbook/search"

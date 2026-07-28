@@ -12,6 +12,7 @@ import {
   claimWorkbenchSessions,
   ensureWorkbenchSessionState,
   markWorkbenchNotAdded,
+  markWorkbenchQualityForReview,
   readWorkbenchSessionState,
   recordWorkbenchActivity
 } from "../db/workbenchPipelineRepository.ts";
@@ -165,21 +166,21 @@ describe("workbench API", () => {
     const body = await getJson(baseUrl, "/workbench/sessions?limit=10");
 
     expect(body).toMatchObject({ ok: true, scope: "default" });
-    expect(body.sessions).toEqual([
-      expect.objectContaining({
-        activeClaim: {
-          claimId: claim.claims[0].claimId,
-          claimedBy: "codex",
-          expiresAt
-        },
-        latestActivity: expect.objectContaining({ eventType: expect.any(String), sessionId: "session:queue" }),
-        nextAction: "check_transcript",
-        canonicalEvidenceReady: false,
-        publicationStatus: "publish_path",
-        sessionId: "session:queue",
-        title: "Queued session"
-      })
-    ]);
+    expect(body.sessions).toHaveLength(1);
+    expect(body.sessions[0]).toMatchObject({
+      activeClaim: {
+        claimId: claim.claims[0].claimId,
+        claimedBy: "codex",
+        expiresAt
+      },
+      latestActivity: expect.objectContaining({ eventType: expect.any(String), sessionId: "session:queue" }),
+      nextAction: "check_transcript",
+      // seedSession inserts a user message + file effect, so canonical evidence is present
+      canonicalEvidenceReady: true,
+      publicationStatus: "publish_path",
+      sessionId: "session:queue",
+      title: "Queued session"
+    });
     expect(JSON.stringify(body)).not.toContain("session:not-added");
     expect(JSON.stringify(body)).not.toContain("session:published");
   });
@@ -196,9 +197,18 @@ describe("workbench API", () => {
       });
       ensureWorkbenchSessionState(daemon.database, sessionId);
     }
+    // seedSession inserts a narrative user message; strip non-ready sessions so only
+    // session:ready remains compile-ready for the snapshot filter.
+    for (const sessionId of ["session:review", "session:hook-only"]) {
+      daemon.database.prepare("DELETE FROM messages WHERE session_id = ?").run(sessionId);
+      daemon.database.prepare("DELETE FROM file_effects WHERE session_id = ?").run(sessionId);
+    }
     daemon.database.prepare(
       "UPDATE workbench_session_state SET transcript_status = 'imported', quality_status = 'passed' WHERE session_id IN (?, ?, ?)"
     ).run("session:ready", "session:review", "session:hook-only");
+    daemon.database.prepare(
+      "UPDATE workbench_session_state SET quality_status = 'unchecked', next_action = 'review_quality' WHERE session_id = ?"
+    ).run("session:review");
     daemon.database.prepare(
       "INSERT INTO messages (message_id, session_id, role, text_redacted, text_hash, observed_at, source_ref_json, confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     ).run(
@@ -215,7 +225,8 @@ describe("workbench API", () => {
     const body = await getJson(baseUrl, "/workbench/selection-snapshot");
 
     expect(body).toMatchObject({ ok: true, total: 3 });
-    expect(body.sessionIds).toEqual(["session:ready", "session:review", "session:hook-only"]);
+    expect(body.sessionIds).toEqual(expect.arrayContaining(["session:ready", "session:review", "session:hook-only"]));
+    expect(body.sessionIds).toHaveLength(3);
     expect(body.compileReadySessionIds).toEqual(["session:ready"]);
   });
 
@@ -273,6 +284,89 @@ describe("workbench API", () => {
       ok: true,
       total: 1,
       sessions: [expect.objectContaining({ reason: "metadata_only", sessionId: "session:not-added" })]
+    });
+  });
+
+  test("summarizes Quality review independently from Not Added", async () => {
+    const { baseUrl, daemon } = await startTestDaemon();
+    seedSession(daemon.database, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:review-a",
+      title: "Needs quality review A"
+    });
+    seedSession(daemon.database, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:review-b",
+      title: "Needs quality review B"
+    });
+    seedSession(daemon.database, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:not-added",
+      title: "Excluded session"
+    });
+    markWorkbenchQualityForReview(daemon.database, {
+      actor: { kind: "system", id: "quality" },
+      evidenceRevision: "rev-review-a",
+      sessionId: "session:review-a"
+    });
+    markWorkbenchQualityForReview(daemon.database, {
+      actor: { kind: "system", id: "quality" },
+      evidenceRevision: "rev-review-b",
+      sessionId: "session:review-b"
+    });
+    markWorkbenchNotAdded(daemon.database, {
+      actor: { kind: "system", id: "quality" },
+      reason: "metadata_only",
+      sessionId: "session:not-added"
+    });
+
+    const qualitySummary = await getJson(baseUrl, "/workbench/quality-review-summary");
+    expect(qualitySummary).toEqual({
+      ok: true,
+      total: 2,
+      reasons: [{ count: 2, reason: "insufficient_evidence" }]
+    });
+    expect(JSON.stringify(qualitySummary)).not.toContain("session:review-a");
+    expect(JSON.stringify(qualitySummary)).not.toContain("session:not-added");
+
+    const notAddedSummary = await getJson(baseUrl, "/workbench/not-added-summary");
+    expect(notAddedSummary).toEqual({
+      ok: true,
+      total: 1,
+      reasons: [{ count: 1, reason: "metadata_only" }]
+    });
+
+    const details = await getJson(baseUrl, "/workbench/quality-review?includeDetails=true&limit=10");
+    expect(details).toMatchObject({
+      ok: true,
+      total: 2,
+      sessions: expect.arrayContaining([
+        expect.objectContaining({
+          reason: "insufficient_evidence",
+          sessionId: "session:review-a",
+          title: "Needs quality review A"
+        }),
+        expect.objectContaining({
+          reason: "insufficient_evidence",
+          sessionId: "session:review-b"
+        })
+      ])
+    });
+    expect(JSON.stringify(details)).not.toContain("session:not-added");
+
+    const deniedResponse = await fetch(`${baseUrl}/workbench/quality-review`, {
+      headers: { accept: "application/json" }
+    });
+    expect(deniedResponse.status).toBe(400);
+    await expect(deniedResponse.json()).resolves.toMatchObject({
+      ok: false,
+      error: "explicit includeDetails=true is required for Quality review inspection"
     });
   });
 

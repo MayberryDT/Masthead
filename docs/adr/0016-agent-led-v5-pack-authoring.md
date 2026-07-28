@@ -42,6 +42,17 @@ durable infrastructure and evidence checks while leaving all enrichment meaning 
 - Workbench Activity observes progress and reasons; it is not an approval console.
 - The product does not expose supervisors, workers, or nested authors. One agent follows the
   daemon-owned next action until the complete request receipt exists.
+- **Stop rule:** finishing a pack is not finishing the request. Agents stop only when
+  `nextAction.kind === "complete"` and the immutable request receipt exists; non-final finishes
+  return a continue action (typically `claim_next`) that must be run immediately. Handoff and
+  bootstrap restate this obligation so a pack-scoped milestone cannot be treated as done.
+- **Resume:** incomplete requests recover with the same request id and bootstrap/start. Completed
+  packs stay published; resume does not shrink the selection or open a second request for remaining
+  packs.
+- **Selection quality boundary:** capture quality is three-way — ready (`keep`), review hold
+  (`review` on package path), Not Added (`suppress`). Copy Agent Prompt includes compile-ready only
+  and discloses review-left-out counts. Review hold is not Not Added; operators accept or fail
+  review rows (including bulk disposition) rather than authoring around an unexplained purgatory.
 - Release proof proceeds through 10-session, 50-session, and full-selection gates. These validate
   quality and autonomy without reintroducing a canary or operator checkpoint.
 - Historical V4 assignments, canary reviews, dispositions, and receipts retain their original

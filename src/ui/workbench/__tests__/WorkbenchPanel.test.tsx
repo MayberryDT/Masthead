@@ -5,10 +5,15 @@ import type { WorkbenchActionKind } from "../../../app/workbench/useWorkbenchCon
 import type {
   WorkbenchActivityDto,
   WorkbenchNotAddedSessionDto,
+  WorkbenchQualityReviewSessionDto,
   WorkbenchQueueSessionDto
 } from "../../../shared/workbench";
 import { formatWorkbenchActivityTime } from "../workbenchActivity";
-import { WorkbenchPanel } from "../WorkbenchPanel";
+import {
+  buildBulkQualityAcceptConfirmMessage,
+  buildBulkQualityFailConfirmMessage,
+  WorkbenchPanel
+} from "../WorkbenchPanel";
 
 const forbiddenTokenParts = [
   ["mast", "head", "ctl"],
@@ -68,6 +73,7 @@ describe("WorkbenchPanel", () => {
     const html = renderToStaticMarkup(
       <WorkbenchPanel
         notAddedSummary={{ ok: true, total: 4, reasons: [{ reason: "confirmed_noise", count: 4 }] }}
+        qualityReviewSummary={{ ok: true, total: 538, reasons: [{ reason: "insufficient_evidence", count: 538 }] }}
         sessions={Array.from({ length: 102 }, (_, index) => session({ sessionId: `session:${index}` }))}
         selectedSessionIds={new Set()}
         loading={false}
@@ -81,6 +87,7 @@ describe("WorkbenchPanel", () => {
     const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 
     expect(text).toContain("Package path 102");
+    expect(text).toContain("Quality review 538");
     expect(text).toContain("Not Added 4");
     expect(text).not.toContain("Import repair");
     expect(text).not.toContain("outside the package path");
@@ -407,13 +414,42 @@ describe("WorkbenchPanel", () => {
       />
     );
     const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-    const copyButton = html.match(/<button[^>]*workbench-copy-agent[^>]*>/)?.[0];
+    const copyButtonOpen = html.match(/<button[^>]*workbench-copy-agent[^>]*>/)?.[0];
+    const copyButtonBlock = html.match(/<button[^>]*workbench-copy-agent[\s\S]*?<\/button>/)?.[0] ?? "";
 
-    expect(text).toContain("Selected 3 1 ready · 2 review");
-    expect(copyButton).not.toContain("disabled");
-    expect(copyButton).toContain(
-      "title=\"Copy a plain-language request for 1 ready session. 2 selected sessions need review and will be left out.\""
+    expect(text).toContain("Selected 3 package-path · 1 ready · 2 need quality review");
+    expect(copyButtonOpen).not.toContain("disabled");
+    expect(copyButtonOpen).toContain(
+      "title=\"Copy a plain-language request for 1 ready session. 2 selected sessions need quality review and will be left out of the handoff.\""
     );
+    expect(copyButtonBlock).toContain("Copy Agent Prompt (1 ready)");
+  });
+
+  test("disables Copy Agent Prompt with a clear review reason when nothing selected is ready", () => {
+    const html = renderToStaticMarkup(
+      <WorkbenchPanel
+        sessions={[session({ qualityStatus: "unchecked", transcriptStatus: "unchecked" })]}
+        selectedSessionIds={new Set(["session:review-a", "session:review-b"])}
+        agentPromptSessionCount={0}
+        agentPromptExcludedCount={2}
+        canRun={allow()}
+        loading={false}
+        onClearSelection={() => undefined}
+        onRetry={() => undefined}
+        onSelectAll={() => undefined}
+        onToggleSession={() => undefined}
+      />
+    );
+    const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    const copyButtonOpen = html.match(/<button[^>]*workbench-copy-agent[^>]*>/)?.[0];
+
+    expect(text).toContain("Selected 2 package-path · 0 ready · 2 need quality review");
+    expect(copyButtonOpen).toContain("disabled");
+    expect(copyButtonOpen).toContain(
+      "title=\"0 of 2 selected sessions are ready for agent enrichment. 2 need quality review and will not be included in the handoff.\""
+    );
+    expect(html).toContain("Copy Agent Prompt");
+    expect(html).not.toContain("Copy Agent Prompt (0 ready)");
   });
 
   test("activity rail renders clear V5 labels, tones, and editorial reasons", () => {
@@ -510,6 +546,132 @@ describe("WorkbenchPanel", () => {
     }
   });
 
+  test("renders Quality review list when open and keeps Not Added independent", () => {
+    const row: WorkbenchQualityReviewSessionDto = {
+      lastActivityAt: "2026-07-08T11:30:00.000Z",
+      lifecycle: "ended",
+      project: "Masthead",
+      reason: "insufficient_evidence",
+      runtime: "grok",
+      sessionId: "session:review",
+      title: "Capture needs review"
+    };
+    const html = renderToStaticMarkup(
+      <WorkbenchPanel
+        sessions={[]}
+        qualityReviewOpen
+        qualityReviewSessions={[row]}
+        qualityReviewSummary={{
+          ok: true,
+          total: 538,
+          reasons: [{ reason: "insufficient_evidence", count: 538 }]
+        }}
+        notAddedSummary={{ ok: true, total: 0, reasons: [] }}
+        loading={false}
+        setQualityReviewOpen={() => undefined}
+        setNotAddedOpen={() => undefined}
+        onClearSelection={() => undefined}
+        onRetry={() => undefined}
+        onSelectAll={() => undefined}
+        onToggleSession={() => undefined}
+      />
+    );
+    const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+
+    expect(text).toContain("Quality review 538");
+    expect(text).toContain("Not Added 0");
+    expect(html).toContain("Quality review — still on package path");
+    expect(html).toContain("Capture needs review");
+    expect(html).toContain("insufficient_evidence");
+    expect(html).toContain("grok");
+    expect(html).toContain("2026-07-08T11:30:00.000Z");
+    expect(html).toContain("workbench-quality-review-panel");
+    expect(html).toContain(">session</th>");
+    expect(html).toContain(">reason</th>");
+    expect(html).toContain(">runtime</th>");
+    expect(html).toContain(">last activity</th>");
+    expect(html).toContain('aria-label="Select Capture needs review for quality disposition"');
+    expect(html).toContain("Select visible");
+    expect(html).not.toContain("Not Added — excluded from package path");
+    for (let index = 0; index < forbiddenTokenParts.length; index += 1) {
+      expect(html).not.toContain(forbiddenToken(index));
+    }
+  });
+
+  test("Quality review panel empty state and bulk accept/fail labels", () => {
+    const empty = renderToStaticMarkup(
+      <WorkbenchPanel
+        sessions={[]}
+        qualityReviewOpen
+        qualityReviewSessions={[]}
+        qualityReviewSummary={{ ok: true, total: 0, reasons: [] }}
+        notAddedSummary={{ ok: true, total: 0, reasons: [] }}
+        loading={false}
+        setQualityReviewOpen={() => undefined}
+        onClearSelection={() => undefined}
+        onRetry={() => undefined}
+        onSelectAll={() => undefined}
+        onToggleSession={() => undefined}
+      />
+    );
+    expect(empty).toContain("No sessions awaiting quality review");
+    expect(empty).toContain("workbench-quality-review-panel");
+    expect(empty).not.toContain("Select visible");
+    expect(empty).not.toContain("Accept 1");
+    expect(empty).not.toContain("Fail 1");
+
+    const rows: WorkbenchQualityReviewSessionDto[] = [
+      {
+        lastActivityAt: "2026-07-08T11:30:00.000Z",
+        lifecycle: "ended",
+        project: "Masthead",
+        reason: "insufficient_evidence",
+        runtime: "grok",
+        sessionId: "session:review-a",
+        title: "Review A"
+      },
+      {
+        lastActivityAt: "2026-07-08T11:31:00.000Z",
+        lifecycle: "ended",
+        reason: "insufficient_evidence",
+        runtime: "codex",
+        sessionId: "session:review-b",
+        title: "Review B"
+      }
+    ];
+    const withSelection = renderToStaticMarkup(
+      <WorkbenchPanel
+        sessions={[]}
+        qualityReviewOpen
+        qualityReviewSessions={rows}
+        qualityReviewSummary={{
+          ok: true,
+          total: 2,
+          reasons: [{ reason: "insufficient_evidence", count: 2 }]
+        }}
+        selectedSessionIds={new Set(["session:review-a", "session:review-b"])}
+        qualityReviewSelectedCount={2}
+        canRun={allow("quality_pass", "quality_fail")}
+        loading={false}
+        setQualityReviewOpen={() => undefined}
+        onSelectQualityReviewVisible={() => undefined}
+        onClearSelection={() => undefined}
+        onRetry={() => undefined}
+        onSelectAll={() => undefined}
+        onToggleSession={() => undefined}
+      />
+    );
+    expect(withSelection).toContain("Select visible");
+    expect(withSelection).toContain("Accept 2 review");
+    expect(withSelection).toContain("Fail 2 review");
+    expect(withSelection).toContain("operator rejected");
+    expect(withSelection).toContain('aria-label="Select Review A for quality disposition"');
+    expect(withSelection).toContain('aria-label="Select Review B for quality disposition"');
+    expect(withSelection).toContain("insufficient_evidence");
+    expect(withSelection).toContain("2026-07-08T11:30:00.000Z");
+    expect(withSelection).toContain("2026-07-08T11:31:00.000Z");
+  });
+
   test("shows action error strip and quiet last-action summary", () => {
     const withError = renderToStaticMarkup(
       <WorkbenchPanel
@@ -548,6 +710,58 @@ describe("WorkbenchPanel", () => {
     expect(withSummary).toContain("workbench-toast");
     expect(withSummary).toContain("is-ok");
     expect(withSummary).not.toContain("workbench-action-summary");
+  });
+
+  test("shows incomplete authoring banner with resume copy control", () => {
+    const copyResumePrompt = vi.fn(async () => "Masthead authoring request: authoring-v5-request:resume");
+    const html = renderToStaticMarkup(
+      <WorkbenchPanel
+        incompleteAuthoring={{
+          requestId: "authoring-v5-request:resume",
+          status: "active",
+          packsCompleted: 1,
+          packCount: 4,
+          sessionsCompleted: 12,
+          sessionCount: 48,
+          handoff: {
+            requestId: "authoring-v5-request:resume",
+            startCommand: "/opt/masthead/bin/mastheadctl workbench author bootstrap --request 'authoring-v5-request:resume' --json"
+          },
+          updatedAt: "2026-07-28T12:00:00.000Z"
+        }}
+        copyResumePrompt={copyResumePrompt}
+        sessions={[session()]}
+        loading={false}
+        onClearSelection={() => undefined}
+        onRetry={() => undefined}
+        onSelectAll={() => undefined}
+        onToggleSession={() => undefined}
+      />
+    );
+
+    expect(html).toContain("workbench-incomplete-banner");
+    expect(html).toContain(
+      "Authoring incomplete: 1/4 packs · 12/48 sessions. Copy resume prompt to continue."
+    );
+    expect(html).toContain("Copy resume prompt");
+    expect(html).toContain("workbench-copy-resume");
+  });
+
+  test("hides incomplete authoring banner when no active request", () => {
+    const html = renderToStaticMarkup(
+      <WorkbenchPanel
+        sessions={[session()]}
+        loading={false}
+        onClearSelection={() => undefined}
+        onRetry={() => undefined}
+        onSelectAll={() => undefined}
+        onToggleSession={() => undefined}
+      />
+    );
+
+    expect(html).not.toContain("workbench-incomplete-banner");
+    expect(html).not.toContain("Copy resume prompt");
+    expect(html).not.toContain("Authoring incomplete:");
   });
 
   test("sanitizes forbidden session metadata before rendering the panel", () => {
@@ -597,6 +811,65 @@ describe("WorkbenchPanel", () => {
       />
     );
     expect(runAction).not.toHaveBeenCalled();
+  });
+
+  test("bulk quality disposition labels count selected review sessions", () => {
+    const html = renderToStaticMarkup(
+      <WorkbenchPanel
+        sessions={[
+          session({
+            sessionId: "session:review-a",
+            nextAction: "review_quality",
+            qualityStatus: "unchecked"
+          }),
+          session({
+            sessionId: "session:review-b",
+            nextAction: "review_quality",
+            qualityStatus: "unchecked"
+          }),
+          session({
+            sessionId: "session:ready",
+            nextAction: "enrich",
+            qualityStatus: "passed",
+            compileReady: true
+          })
+        ]}
+        selectedSessionIds={new Set(["session:review-a", "session:review-b", "session:ready"])}
+        qualityReviewSelectedCount={2}
+        canRun={allow("quality_pass", "quality_fail", "quality_precheck")}
+        loading={false}
+        onClearSelection={() => undefined}
+        onRetry={() => undefined}
+        onSelectAll={() => undefined}
+        onToggleSession={() => undefined}
+      />
+    );
+
+    expect(html).toContain("Accept 2 review");
+    expect(html).toContain("Fail 2 review");
+    expect(html).toContain("Precheck 2 review");
+    expect(html).toContain("selected need quality review");
+    expect(html).toContain("operator rejected");
+    expect(html).toContain("Ready/passed sessions in the selection are left unchanged");
+    expect(html).not.toContain("Accept Quality");
+    expect(html).not.toContain("Fail Quality");
+  });
+
+  test("bulk quality confirm copy is explicit about Not Added and no silent authoring", () => {
+    const failMessage = buildBulkQualityFailConfirmMessage(3);
+    expect(failMessage).toContain("Fail quality for 3 selected review sessions?");
+    expect(failMessage).toContain("Not Added");
+    expect(failMessage).toContain("operator rejected");
+    expect(failMessage).toContain("leave the package path");
+    expect(failMessage).toContain("Ready/passed sessions in the selection are not affected");
+    expect(failMessage).toContain("will not author artifacts");
+    expect(failMessage).toContain("enrichment prose");
+
+    const acceptMessage = buildBulkQualityAcceptConfirmMessage(2);
+    expect(acceptMessage).toContain("Accept quality for 2 selected review sessions?");
+    expect(acceptMessage).toContain("quality passed");
+    expect(acceptMessage).toContain("compile-ready");
+    expect(acceptMessage).toContain("will not write enrichment prose");
   });
 });
 

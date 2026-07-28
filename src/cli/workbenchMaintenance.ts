@@ -30,6 +30,55 @@ import {
   type V5QualityCorpusPreparedRecovery
 } from "../daemon/db/v5QualityCorpusRecovery.ts";
 
+export async function runAgeStaleQualityReviewsMaintenance(
+  args: string[],
+  options: { env?: NodeJS.ProcessEnv },
+  json: boolean
+): Promise<CliResult> {
+  const dryRun = args.includes("--dry-run");
+  if (!dryRun && !args.includes("--confirm")) {
+    return errorResult(
+      "missing_argument",
+      "Pass --confirm to age stale quality reviews, or --dry-run to inspect eligibility only",
+      json
+    );
+  }
+  const databasePath = resolveWorkbenchDatabasePath({ args, env: options.env });
+  const limitRaw = optionValue(args, "--limit");
+  const maxAgeDaysRaw = optionValue(args, "--max-age-days");
+  let limit: number | undefined;
+  let maxAgeMs: number | undefined;
+  if (limitRaw !== undefined) {
+    const parsed = Number(limitRaw);
+    if (!Number.isInteger(parsed) || parsed < 1) {
+      return errorResult("invalid_argument", "--limit must be a positive integer", json);
+    }
+    limit = parsed;
+  }
+  if (maxAgeDaysRaw !== undefined) {
+    const parsed = Number(maxAgeDaysRaw);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      return errorResult("invalid_argument", "--max-age-days must be a non-negative number", json);
+    }
+    maxAgeMs = Math.trunc(parsed * 24 * 60 * 60 * 1000);
+  }
+  const { ageStaleQualityReviews, QUALITY_REVIEW_STALE_AGE_MS } = await import(
+    "../workbench/qualityReviewAging.ts"
+  );
+  const db = await openMastheadDatabase(databasePath);
+  try {
+    migrateDatabase(db);
+    const result = ageStaleQualityReviews(db, {
+      dryRun,
+      limit,
+      maxAgeMs: maxAgeMs ?? QUALITY_REVIEW_STALE_AGE_MS
+    });
+    return jsonResult({ databasePath, ok: true, ...result });
+  } finally {
+    db.close();
+  }
+}
+
 export async function runWipePublishedMaintenance(
   args: string[],
   options: { env?: NodeJS.ProcessEnv },

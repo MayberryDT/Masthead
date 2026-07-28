@@ -2072,8 +2072,10 @@ main {
 
 .workbench-panel > .workbench-toolbar,
 .workbench-panel > .workbench-error,
+.workbench-panel > .workbench-incomplete-banner,
 .workbench-panel > .workbench-action-summary,
-.workbench-panel > .workbench-not-added-panel {
+.workbench-panel > .workbench-not-added-panel,
+.workbench-panel > .workbench-quality-review-panel {
   flex: 0 0 auto;
 }
 
@@ -2590,6 +2592,15 @@ main {
   margin: 0;
 }
 
+.workbench-quality-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
 .workbench-not-added-table-wrap {
   max-height: 220px;
 }
@@ -2619,6 +2630,38 @@ main {
   margin: 0;
   color: var(--body);
   line-height: 1.45;
+}
+
+.workbench-incomplete-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  border: 1px solid rgba(255, 207, 54, 0.28);
+  border-radius: 5px;
+  background: rgba(255, 207, 54, 0.08);
+  padding: 12px 14px;
+}
+
+.workbench-incomplete-banner-body {
+  min-width: 0;
+}
+
+.workbench-incomplete-banner .mono-label {
+  margin: 0 0 4px;
+  color: #ffd978;
+}
+
+.workbench-incomplete-banner p {
+  margin: 0;
+  color: var(--body);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.workbench-incomplete-banner .workbench-copy-resume {
+  flex: 0 0 auto;
 }
 
 .workbench-layout {

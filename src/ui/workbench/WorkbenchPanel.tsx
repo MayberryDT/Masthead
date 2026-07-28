@@ -9,6 +9,11 @@ import {
   workbenchActivityTone
 } from "./workbenchActivity";
 import { sanitizeWorkbenchVisibleText } from "./workbenchHandoff";
+import {
+  formatCopyAgentPromptLabel,
+  formatCopyAgentPromptTitle,
+  formatWorkbenchSelectionHonesty
+} from "./workbenchSelectionHonesty";
 
 type WorkbenchPanelProps = Partial<
   Pick<
@@ -21,7 +26,9 @@ type WorkbenchPanelProps = Partial<
     | "canRun"
     | "clearActionFeedback"
     | "copyAgentPrompt"
+    | "copyResumePrompt"
     | "error"
+    | "incompleteAuthoring"
     | "lastActionSummary"
     | "loading"
     | "notAddedOpen"
@@ -29,10 +36,15 @@ type WorkbenchPanelProps = Partial<
     | "notAddedSummary"
     | "page"
     | "pageSize"
+    | "qualityReviewOpen"
+    | "qualityReviewSessions"
+    | "qualityReviewSummary"
+    | "qualityReviewSelectedCount"
     | "runAction"
     | "selectedSessionIds"
     | "sessions"
     | "setNotAddedOpen"
+    | "setQualityReviewOpen"
     | "setPage"
     | "total"
 >
@@ -43,12 +55,15 @@ type WorkbenchPanelProps = Partial<
   onRetry?: () => void;
   onSelectAll?: () => void;
   onSelectPage?: () => void;
+  /** Select every session currently listed in the Quality review panel. */
+  onSelectQualityReviewVisible?: () => void;
   onToggleSession?: (sessionId: string) => void;
 };
 
 const EMPTY_SELECTION = new Set<string>();
 const EMPTY_SESSIONS: UseWorkbenchControllerResult["sessions"] = [];
 const EMPTY_NOT_ADDED: UseWorkbenchControllerResult["notAddedSessions"] = [];
+const EMPTY_QUALITY_REVIEW: UseWorkbenchControllerResult["qualityReviewSessions"] = [];
 const EMPTY_ACTIVITY: UseWorkbenchControllerResult["activity"] = [];
 
 const defaultCanRun: UseWorkbenchControllerResult["canRun"] = () => false;
@@ -63,15 +78,21 @@ const TOOLTIPS = {
   enrollMissing: "Add captured sessions that are not yet on the Workbench package path.",
   checkTranscript: "Run a lightweight transcript availability check on selected sessions.",
   importTranscript: "Import transcript content for selected sessions (requires source permission).",
-  precheck: "Run the cheap capture quality precheck and apply pass/fail automatically.",
-  acceptQuality: "Mark quality as passed so selected sessions can move toward enrichment.",
-  failQuality: "Fail quality and remove sessions from the publish path (Not Added).",
+  precheck: "Run the cheap capture quality precheck on selected review sessions and apply pass/fail automatically.",
+  acceptQuality:
+    "Accept quality for selected review sessions only. Marks them quality passed so they become compile-ready for enrichment. Ready/passed sessions in the selection are left unchanged. Masthead does not write enrichment prose.",
+  failQuality:
+    "Fail quality for selected review sessions only. Moves them to Not Added with reason operator rejected. Destructive: they leave the package path. Ready/passed sessions in the selection are left unchanged.",
   claim: "Place a short-lived claim so agents avoid duplicate work on selected sessions.",
   release: "Release active claims on selected sessions.",
   pagePrevious: "Show the previous page of package-path sessions.",
   pageNext: "Show the next page of package-path sessions.",
   selectPage: "Select or clear all sessions on this page.",
-  notAdded: "Review sessions excluded from the package path (Not Added)."
+  notAdded: "Review sessions excluded from the package path (Not Added).",
+  qualityReview:
+    "Package-path sessions that need a quality decision (review_quality) before enrichment.",
+  selectQualityReviewVisible:
+    "Select every session currently listed in the Quality review panel for bulk accept or fail."
 } as const;
 
 type PipelineItem = {
@@ -81,7 +102,7 @@ type PipelineItem = {
   quiet?: boolean;
 };
 
-const PIPELINE_ITEMS: PipelineItem[] = [
+const PIPELINE_BASE_ITEMS: PipelineItem[] = [
   { kind: "enroll_missing", label: "Enroll missing", tooltip: TOOLTIPS.enrollMissing },
   { kind: "check_transcript", label: "Check Transcript", tooltip: TOOLTIPS.checkTranscript },
   { kind: "import_transcript", label: "Import Transcript", tooltip: TOOLTIPS.importTranscript },
@@ -92,6 +113,61 @@ const PIPELINE_ITEMS: PipelineItem[] = [
   { kind: "release", label: "Release", tooltip: TOOLTIPS.release }
 ];
 
+/** Confirm copy for bulk fail — destructive, explicit Not Added semantics. */
+export function buildBulkQualityFailConfirmMessage(reviewCount: number): string {
+  const n = Math.max(0, Math.trunc(reviewCount));
+  const noun = n === 1 ? "review session" : "review sessions";
+  return [
+    `Fail quality for ${n} selected ${noun}?`,
+    "",
+    "This moves them to Not Added (reason: operator rejected). They leave the package path.",
+    "Ready/passed sessions in the selection are not affected.",
+    "Masthead will not author artifacts or write enrichment prose."
+  ].join("\n");
+}
+
+/** Confirm copy for bulk accept — explicit compile-ready / no silent authoring. */
+export function buildBulkQualityAcceptConfirmMessage(reviewCount: number): string {
+  const n = Math.max(0, Math.trunc(reviewCount));
+  const noun = n === 1 ? "review session" : "review sessions";
+  return [
+    `Accept quality for ${n} selected ${noun}?`,
+    "",
+    "They will be marked quality passed and become compile-ready for enrichment.",
+    "Ready/passed sessions in the selection are not affected.",
+    "Masthead will not write enrichment prose."
+  ].join("\n");
+}
+
+function pipelineItemsForSelection(qualityReviewSelectedCount: number): PipelineItem[] {
+  if (qualityReviewSelectedCount <= 0) return PIPELINE_BASE_ITEMS;
+  const n = qualityReviewSelectedCount;
+  return PIPELINE_BASE_ITEMS.map((item) => {
+    if (item.kind === "quality_pass") {
+      return {
+        ...item,
+        label: n === 1 ? "Accept 1 review" : `Accept ${n} review`,
+        tooltip: `${TOOLTIPS.acceptQuality} (${n} selected need quality review.)`
+      };
+    }
+    if (item.kind === "quality_fail") {
+      return {
+        ...item,
+        label: n === 1 ? "Fail 1 review" : `Fail ${n} review`,
+        tooltip: `${TOOLTIPS.failQuality} (${n} selected need quality review.)`
+      };
+    }
+    if (item.kind === "quality_precheck") {
+      return {
+        ...item,
+        label: n === 1 ? "Precheck 1 review" : `Precheck ${n} review`,
+        tooltip: `${TOOLTIPS.precheck} (${n} selected need quality review.)`
+      };
+    }
+    return item;
+  });
+}
+
 export function WorkbenchPanel({
   actionBusy = false,
   actionError,
@@ -101,7 +177,9 @@ export function WorkbenchPanel({
   canRun = defaultCanRun,
   clearActionFeedback,
   copyAgentPrompt,
+  copyResumePrompt,
   error,
+  incompleteAuthoring,
   lastActionSummary,
   loading = false,
   notAddedOpen = false,
@@ -111,22 +189,48 @@ export function WorkbenchPanel({
   onRetry,
   onSelectAll,
   onSelectPage,
+  onSelectQualityReviewVisible,
   onToggleSession,
   page = 0,
   pageSize = 100,
+  qualityReviewOpen = false,
+  qualityReviewSessions = EMPTY_QUALITY_REVIEW,
+  qualityReviewSummary,
+  qualityReviewSelectedCount = 0,
   runAction,
   selectedSessionIds = EMPTY_SELECTION,
   sessions = EMPTY_SESSIONS,
   setNotAddedOpen,
+  setQualityReviewOpen,
   setPage,
   total
 }: WorkbenchPanelProps) {
   const selectionCount = selectedSessionIds.size;
   const selectedSessions = sessions.filter((session) => selectedSessionIds.has(session.sessionId));
+  const qualityPanelSelectedCount = qualityReviewSessions.filter((session) =>
+    selectedSessionIds.has(session.sessionId)
+  ).length;
+  const allQualityPanelSelected =
+    qualityReviewSessions.length > 0 && qualityPanelSelectedCount === qualityReviewSessions.length;
+  const someQualityPanelSelected =
+    qualityPanelSelectedCount > 0 && !allQualityPanelSelected;
+  /** Prefer controller-tracked count; fall back to visible page / panel selection for partial props. */
+  const reviewSelectedCount =
+    qualityReviewSelectedCount > 0
+      ? qualityReviewSelectedCount
+      : Math.max(
+          selectedSessions.filter(
+            (session) => session.nextAction === "review_quality" || session.qualityStatus === "unchecked"
+          ).length,
+          qualityPanelSelectedCount
+        );
+  const pipelineItems = pipelineItemsForSelection(reviewSelectedCount);
   const queueTotal = typeof total === "number" ? total : sessions.length;
   const publishPathLabel = typeof total === "number" ? String(total) : loading ? "…" : String(queueTotal);
   const notAddedTotal = notAddedSummary?.total;
   const notAddedLabel = notAddedTotal != null ? String(notAddedTotal) : undefined;
+  const qualityReviewTotal = qualityReviewSummary?.total;
+  const qualityReviewLabel = qualityReviewTotal != null ? String(qualityReviewTotal) : undefined;
   const pageCount = Math.max(1, Math.ceil(queueTotal / Math.max(1, pageSize)));
   const safePage = Math.min(page, pageCount - 1);
   const rangeStart = queueTotal === 0 ? 0 : safePage * pageSize + 1;
@@ -137,17 +241,24 @@ export function WorkbenchPanel({
       ? sanitizeWorkbenchVisibleText(lastActionSummary)
       : undefined;
   const toastTone = actionError ? "error" : "ok";
-  const copyAgentPromptTitle = selectionCount === 0
-    ? TOOLTIPS.copyAgentPrompt
-    : agentPromptSessionCount === 0
-      ? "No selected sessions are ready for agent enrichment. Review transcript and quality status first."
-      : agentPromptExcludedCount > 0
-        ? `Copy a plain-language request for ${agentPromptSessionCount} ready session${
-          agentPromptSessionCount === 1 ? "" : "s"
-        }. ${agentPromptExcludedCount} selected session${
-          agentPromptExcludedCount === 1 ? " needs" : "s need"
-        } review and will be left out.`
-        : TOOLTIPS.copyAgentPrompt;
+  const copyAgentPromptTitle = formatCopyAgentPromptTitle({
+    selectionCount,
+    ready: agentPromptSessionCount,
+    excluded: agentPromptExcludedCount,
+    defaultTitle: TOOLTIPS.copyAgentPrompt
+  });
+  const copyAgentPromptLabel = formatCopyAgentPromptLabel({
+    ready: agentPromptSessionCount,
+    excluded: agentPromptExcludedCount
+  });
+  const selectionHonesty =
+    selectionCount > 0
+      ? formatWorkbenchSelectionHonesty({
+          selected: selectionCount,
+          ready: agentPromptSessionCount,
+          needQualityReview: agentPromptExcludedCount
+        })
+      : undefined;
 
   const pageSessionIds = sessions.map((session) => session.sessionId);
   const newSessionIds = useNewItemIds(pageSessionIds, page);
@@ -217,11 +328,38 @@ export function WorkbenchPanel({
         return;
       }
     }
+    if (kind === "quality_fail") {
+      const confirmed = window.confirm(buildBulkQualityFailConfirmMessage(reviewSelectedCount));
+      if (!confirmed) return;
+    } else if (kind === "quality_pass" && reviewSelectedCount > 1) {
+      // Multi-select accept: explicit confirm so bulk pass is intentional.
+      const confirmed = window.confirm(buildBulkQualityAcceptConfirmMessage(reviewSelectedCount));
+      if (!confirmed) return;
+    }
     await runAction?.(kind);
   };
 
+  const runCopyResume = async () => {
+    if (actionBusy || !copyResumePrompt || !incompleteAuthoring) return;
+    try {
+      const prompt = await copyResumePrompt();
+      if (!prompt || !(await copyTextToClipboard(prompt))) return;
+      clearActionFeedback?.();
+    } catch {
+      return;
+    }
+  };
+
+  const incompleteBannerLabel = incompleteAuthoring
+    ? `Authoring incomplete: ${incompleteAuthoring.packsCompleted}/${incompleteAuthoring.packCount} packs · ${incompleteAuthoring.sessionsCompleted}/${incompleteAuthoring.sessionCount} sessions. Copy resume prompt to continue.`
+    : undefined;
+
   const toggleNotAdded = () => {
     setNotAddedOpen?.(!notAddedOpen);
+  };
+
+  const toggleQualityReview = () => {
+    setQualityReviewOpen?.(!qualityReviewOpen);
   };
 
   const onHeaderCheckboxChange = () => {
@@ -233,6 +371,29 @@ export function WorkbenchPanel({
     }
     onSelectPage?.();
   };
+
+  const onQualityReviewHeaderCheckboxChange = () => {
+    if (allQualityPanelSelected) {
+      for (const session of qualityReviewSessions) {
+        if (selectedSessionIds.has(session.sessionId)) onToggleSession?.(session.sessionId);
+      }
+      return;
+    }
+    onSelectQualityReviewVisible?.();
+  };
+
+  const acceptQualityLabel =
+    reviewSelectedCount <= 0
+      ? "Accept"
+      : reviewSelectedCount === 1
+        ? "Accept 1 review"
+        : `Accept ${reviewSelectedCount} review`;
+  const failQualityLabel =
+    reviewSelectedCount <= 0
+      ? "Fail"
+      : reviewSelectedCount === 1
+        ? "Fail 1 review"
+        : `Fail ${reviewSelectedCount} review`;
 
   useEffect(() => {
     if (!toastMessage || !clearActionFeedback) return;
@@ -251,7 +412,7 @@ export function WorkbenchPanel({
             disabled={!canRun("copy_agent_prompt")}
             title={copyAgentPromptTitle}
           >
-            Copy Agent Prompt
+            {copyAgentPromptLabel}
           </AppButton>
 
           <span className="workbench-toolbar-divider" aria-hidden="true" />
@@ -307,7 +468,7 @@ export function WorkbenchPanel({
               aria-label="Pipeline operations"
               aria-hidden={!pipelineExpanded || pipelineClosing}
             >
-              {PIPELINE_ITEMS.map((item) => (
+              {pipelineItems.map((item) => (
                 <AppButton
                   key={item.kind}
                   variant={item.quiet ? "quiet" : "default"}
@@ -328,16 +489,40 @@ export function WorkbenchPanel({
             <dt>Package path</dt>
             <dd>{publishPathLabel}</dd>
           </div>
-          <div title="Sessions currently selected for bulk actions and ready for agent enrichment">
+          <div
+            title={
+              selectionHonesty ??
+              "Sessions currently selected for bulk actions. Only compile-ready sessions enter Copy Agent Prompt."
+            }
+          >
             <dt>Selected</dt>
             <dd>{selectionCount}</dd>
-            {selectionCount > 0 ? (
-              <span className="workbench-selection-readiness">
-                {agentPromptSessionCount} ready
-                {agentPromptExcludedCount > 0 ? ` · ${agentPromptExcludedCount} review` : ""}
+            {selectionHonesty ? (
+              <span className="workbench-selection-readiness" data-selection-honesty="true">
+                {selectionHonesty.replace(/^Selected\s+\d+\s*/, "")}
               </span>
             ) : null}
           </div>
+          {qualityReviewLabel != null ? (
+            <div
+              className={qualityReviewOpen ? "is-active" : undefined}
+              title={TOOLTIPS.qualityReview}
+            >
+              <dt>Quality review</dt>
+              <dd>
+                <button
+                  type="button"
+                  className="workbench-fact-toggle"
+                  onClick={toggleQualityReview}
+                  aria-pressed={qualityReviewOpen}
+                  aria-label={`Quality review ${qualityReviewLabel}, ${qualityReviewOpen ? "close" : "open"} list`}
+                  title={TOOLTIPS.qualityReview}
+                >
+                  {qualityReviewLabel}
+                </button>
+              </dd>
+            </div>
+          ) : null}
           {notAddedLabel != null ? (
             <div className={notAddedOpen ? "is-active" : undefined} title={TOOLTIPS.notAdded}>
               <dt>Not Added</dt>
@@ -375,6 +560,28 @@ export function WorkbenchPanel({
         </div>
       ) : null}
 
+      {incompleteBannerLabel ? (
+        <section
+          className="workbench-incomplete-banner surface-status"
+          aria-label="Incomplete authoring request"
+          role="status"
+        >
+          <div className="workbench-incomplete-banner-body">
+            <p className="mono-label">Authoring incomplete</p>
+            <p>{incompleteBannerLabel}</p>
+          </div>
+          <AppButton
+            variant="primary"
+            className="workbench-copy-resume"
+            onClick={() => void runCopyResume()}
+            disabled={actionBusy || !copyResumePrompt}
+            title="Copy the bootstrap resume prompt for the active authoring request"
+          >
+            Copy resume prompt
+          </AppButton>
+        </section>
+      ) : null}
+
       {error ? (
         <section className="workbench-error surface-status" aria-live="polite">
           <div>
@@ -384,6 +591,119 @@ export function WorkbenchPanel({
           <AppButton variant="primary" onClick={onRetry} title="Reload Workbench queue and activity">
             Retry
           </AppButton>
+        </section>
+      ) : null}
+
+      {qualityReviewOpen ? (
+        <section
+          className="workbench-not-added-panel workbench-quality-review-panel"
+          aria-label="Quality review (package path)"
+        >
+          <div className="workbench-not-added-header">
+            <p className="mono-label">Quality review — still on package path</p>
+            <div className="workbench-quality-review-actions">
+              {qualityReviewSessions.length > 0 ? (
+                <>
+                  <AppButton
+                    variant="quiet"
+                    onClick={() => onSelectQualityReviewVisible?.()}
+                    disabled={actionBusy || allQualityPanelSelected}
+                    title={TOOLTIPS.selectQualityReviewVisible}
+                  >
+                    Select visible
+                  </AppButton>
+                  <AppButton
+                    onClick={() => void run("quality_pass")}
+                    disabled={!canRun("quality_pass") || actionBusy || reviewSelectedCount === 0}
+                    title={TOOLTIPS.acceptQuality}
+                  >
+                    {acceptQualityLabel}
+                  </AppButton>
+                  <AppButton
+                    variant="quiet"
+                    onClick={() => void run("quality_fail")}
+                    disabled={!canRun("quality_fail") || actionBusy || reviewSelectedCount === 0}
+                    title={TOOLTIPS.failQuality}
+                  >
+                    {failQualityLabel}
+                  </AppButton>
+                </>
+              ) : null}
+              <AppButton variant="quiet" onClick={() => setQualityReviewOpen?.(false)}>
+                Close
+              </AppButton>
+            </div>
+          </div>
+          <div className="workbench-table-wrap workbench-not-added-table-wrap">
+            <table className="workbench-session-table workbench-not-added-table">
+              <thead>
+                <tr>
+                  <th scope="col" className="workbench-select-col">
+                    <input
+                      type="checkbox"
+                      checked={allQualityPanelSelected}
+                      ref={(input) => {
+                        if (input) input.indeterminate = someQualityPanelSelected;
+                      }}
+                      disabled={actionBusy || qualityReviewSessions.length === 0}
+                      onChange={onQualityReviewHeaderCheckboxChange}
+                      title={TOOLTIPS.selectQualityReviewVisible}
+                      aria-label="Select all sessions listed in Quality review"
+                    />
+                  </th>
+                  <th scope="col">session</th>
+                  <th scope="col">reason</th>
+                  <th scope="col">runtime</th>
+                  <th scope="col">last activity</th>
+                </tr>
+              </thead>
+              <tbody>
+                {qualityReviewSessions.length === 0 ? (
+                  <tr>
+                    <td className="workbench-session-empty" colSpan={5}>
+                      No sessions awaiting quality review
+                    </td>
+                  </tr>
+                ) : (
+                  qualityReviewSessions.map((session) => {
+                    const selected = selectedSessionIds.has(session.sessionId);
+                    const safeTitle = sanitizeWorkbenchVisibleText(session.title);
+                    const safeProject = session.project ? sanitizeWorkbenchVisibleText(session.project) : "-";
+                    return (
+                      <tr
+                        key={session.sessionId}
+                        className={selected ? "is-selected" : undefined}
+                        onClick={() => onToggleSession?.(session.sessionId)}
+                      >
+                        <td className="workbench-select-col" onClick={(event) => event.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            disabled={actionBusy}
+                            onChange={() => onToggleSession?.(session.sessionId)}
+                            aria-label={`Select ${safeTitle} for quality disposition`}
+                          />
+                        </td>
+                        <td>
+                          <span className="workbench-session-meta">
+                            <strong>{safeTitle}</strong>
+                            <span>
+                              {safeProject} / {sanitizeWorkbenchVisibleText(session.sessionId)}
+                            </span>
+                          </span>
+                        </td>
+                        <td>{sanitizeWorkbenchVisibleText(session.reason)}</td>
+                        <td>{sanitizeWorkbenchVisibleText(session.runtime)}</td>
+                        <td>
+                          <span className="workbench-latest">{sanitizeWorkbenchVisibleText(session.lastActivityAt)}</span>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
         </section>
       ) : null}
 
@@ -599,14 +919,14 @@ export function WorkbenchPanel({
                     return (
                       <li
                         key={item.activityId}
-                        className={`workbench-activity-item is-${workbenchActivityTone(item.eventType)} ${newActivityIds.has(item.activityId) ? "is-new" : ""}`.trim()}
+                        className={`workbench-activity-item is-${workbenchActivityTone(item.eventType, item.details)} ${newActivityIds.has(item.activityId) ? "is-new" : ""}`.trim()}
                       >
                         <span className="workbench-activity-gutter" aria-hidden="true" />
                         <div className="workbench-activity-body">
                           <div className="workbench-activity-meta">
                             <time dateTime={item.eventAt}>{formatWorkbenchActivityTime(item.eventAt)}</time>
                             <span className="workbench-activity-type">
-                              {sanitizeWorkbenchVisibleText(workbenchActivityLabel(item.eventType))}
+                              {sanitizeWorkbenchVisibleText(workbenchActivityLabel(item.eventType, item.details))}
                             </span>
                             <span className="workbench-activity-actor">
                               {sanitizeWorkbenchVisibleText(item.actorId ?? item.actorKind)}

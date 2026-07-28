@@ -37,6 +37,38 @@ describe("workbenchActivityTone", () => {
     expect(workbenchActivityTone(eventType)).toBe(tone);
   });
 
+  test("presents incomplete pack finished as pack done / request open, not campaign-complete green", () => {
+    const incompleteDetails = {
+      requestComplete: false,
+      remainingPacks: 1,
+      remainingSessions: 10,
+      packsCompleted: 1,
+      packsTotal: 2,
+      sessionsAttempted: 10,
+      sessionsTotal: 20,
+      message: "Pack done; request still open (1 pack, 10 sessions remaining)."
+    };
+    expect(workbenchActivityLabel("authoring_pack_finished", incompleteDetails))
+      .toBe("Pack finished — request open");
+    expect(workbenchActivityTone("authoring_pack_finished", incompleteDetails)).toBe("info");
+    expect(workbenchActivityReason({
+      eventType: "authoring_pack_finished",
+      details: incompleteDetails
+    })).toBe("Pack done; request still open (1 pack, 10 sessions remaining).");
+
+    const completeDetails = {
+      requestComplete: true,
+      remainingPacks: 0,
+      remainingSessions: 0,
+      packsCompleted: 2,
+      packsTotal: 2
+    };
+    expect(workbenchActivityLabel("authoring_pack_finished", completeDetails)).toBe("Pack finished");
+    expect(workbenchActivityTone("authoring_pack_finished", completeDetails)).toBe("ok");
+    expect(workbenchActivityLabel("authoring_request_completed")).toBe("Request completed");
+    expect(workbenchActivityTone("authoring_request_completed")).toBe("ok");
+  });
+
   test("surfaces editorial findings and explicit errors without inventing a reason", () => {
     expect(workbenchActivityReason({
       details: {
