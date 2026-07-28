@@ -5,6 +5,7 @@ import type { WorkbenchActionKind } from "../../../app/workbench/useWorkbenchCon
 import type {
   WorkbenchActivityDto,
   WorkbenchNotAddedSessionDto,
+  WorkbenchQualityReviewSessionDto,
   WorkbenchQueueSessionDto
 } from "../../../shared/workbench";
 import { formatWorkbenchActivityTime } from "../workbenchActivity";
@@ -68,6 +69,7 @@ describe("WorkbenchPanel", () => {
     const html = renderToStaticMarkup(
       <WorkbenchPanel
         notAddedSummary={{ ok: true, total: 4, reasons: [{ reason: "confirmed_noise", count: 4 }] }}
+        qualityReviewSummary={{ ok: true, total: 538, reasons: [{ reason: "insufficient_evidence", count: 538 }] }}
         sessions={Array.from({ length: 102 }, (_, index) => session({ sessionId: `session:${index}` }))}
         selectedSessionIds={new Set()}
         loading={false}
@@ -81,6 +83,7 @@ describe("WorkbenchPanel", () => {
     const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 
     expect(text).toContain("Package path 102");
+    expect(text).toContain("Quality review 538");
     expect(text).toContain("Not Added 4");
     expect(text).not.toContain("Import repair");
     expect(text).not.toContain("outside the package path");
@@ -505,6 +508,52 @@ describe("WorkbenchPanel", () => {
     expect(html).toContain(">reason</th>");
     expect(html).toContain(">runtime</th>");
     expect(html).toContain(">last activity</th>");
+    for (let index = 0; index < forbiddenTokenParts.length; index += 1) {
+      expect(html).not.toContain(forbiddenToken(index));
+    }
+  });
+
+  test("renders Quality review list when open and keeps Not Added independent", () => {
+    const row: WorkbenchQualityReviewSessionDto = {
+      lastActivityAt: "2026-07-08T11:30:00.000Z",
+      lifecycle: "ended",
+      project: "Masthead",
+      reason: "insufficient_evidence",
+      runtime: "grok",
+      sessionId: "session:review",
+      title: "Capture needs review"
+    };
+    const html = renderToStaticMarkup(
+      <WorkbenchPanel
+        sessions={[]}
+        qualityReviewOpen
+        qualityReviewSessions={[row]}
+        qualityReviewSummary={{
+          ok: true,
+          total: 538,
+          reasons: [{ reason: "insufficient_evidence", count: 538 }]
+        }}
+        notAddedSummary={{ ok: true, total: 0, reasons: [] }}
+        loading={false}
+        setQualityReviewOpen={() => undefined}
+        setNotAddedOpen={() => undefined}
+        onClearSelection={() => undefined}
+        onRetry={() => undefined}
+        onSelectAll={() => undefined}
+        onToggleSession={() => undefined}
+      />
+    );
+    const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+
+    expect(text).toContain("Quality review 538");
+    expect(text).toContain("Not Added 0");
+    expect(html).toContain("Quality review — still on package path");
+    expect(html).toContain("Capture needs review");
+    expect(html).toContain("insufficient_evidence");
+    expect(html).toContain("grok");
+    expect(html).toContain("2026-07-08T11:30:00.000Z");
+    expect(html).toContain("workbench-quality-review-panel");
+    expect(html).not.toContain("Not Added — excluded from package path");
     for (let index = 0; index < forbiddenTokenParts.length; index += 1) {
       expect(html).not.toContain(forbiddenToken(index));
     }

@@ -12,6 +12,7 @@ import {
   claimWorkbenchSessions,
   ensureWorkbenchSessionState,
   markWorkbenchNotAdded,
+  markWorkbenchQualityForReview,
   readWorkbenchSessionState,
   recordWorkbenchActivity
 } from "../db/workbenchPipelineRepository.ts";
@@ -273,6 +274,89 @@ describe("workbench API", () => {
       ok: true,
       total: 1,
       sessions: [expect.objectContaining({ reason: "metadata_only", sessionId: "session:not-added" })]
+    });
+  });
+
+  test("summarizes Quality review independently from Not Added", async () => {
+    const { baseUrl, daemon } = await startTestDaemon();
+    seedSession(daemon.database, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:review-a",
+      title: "Needs quality review A"
+    });
+    seedSession(daemon.database, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:review-b",
+      title: "Needs quality review B"
+    });
+    seedSession(daemon.database, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:not-added",
+      title: "Excluded session"
+    });
+    markWorkbenchQualityForReview(daemon.database, {
+      actor: { kind: "system", id: "quality" },
+      evidenceRevision: "rev-review-a",
+      sessionId: "session:review-a"
+    });
+    markWorkbenchQualityForReview(daemon.database, {
+      actor: { kind: "system", id: "quality" },
+      evidenceRevision: "rev-review-b",
+      sessionId: "session:review-b"
+    });
+    markWorkbenchNotAdded(daemon.database, {
+      actor: { kind: "system", id: "quality" },
+      reason: "metadata_only",
+      sessionId: "session:not-added"
+    });
+
+    const qualitySummary = await getJson(baseUrl, "/workbench/quality-review-summary");
+    expect(qualitySummary).toEqual({
+      ok: true,
+      total: 2,
+      reasons: [{ count: 2, reason: "insufficient_evidence" }]
+    });
+    expect(JSON.stringify(qualitySummary)).not.toContain("session:review-a");
+    expect(JSON.stringify(qualitySummary)).not.toContain("session:not-added");
+
+    const notAddedSummary = await getJson(baseUrl, "/workbench/not-added-summary");
+    expect(notAddedSummary).toEqual({
+      ok: true,
+      total: 1,
+      reasons: [{ count: 1, reason: "metadata_only" }]
+    });
+
+    const details = await getJson(baseUrl, "/workbench/quality-review?includeDetails=true&limit=10");
+    expect(details).toMatchObject({
+      ok: true,
+      total: 2,
+      sessions: expect.arrayContaining([
+        expect.objectContaining({
+          reason: "insufficient_evidence",
+          sessionId: "session:review-a",
+          title: "Needs quality review A"
+        }),
+        expect.objectContaining({
+          reason: "insufficient_evidence",
+          sessionId: "session:review-b"
+        })
+      ])
+    });
+    expect(JSON.stringify(details)).not.toContain("session:not-added");
+
+    const deniedResponse = await fetch(`${baseUrl}/workbench/quality-review`, {
+      headers: { accept: "application/json" }
+    });
+    expect(deniedResponse.status).toBe(400);
+    await expect(deniedResponse.json()).resolves.toMatchObject({
+      ok: false,
+      error: "explicit includeDetails=true is required for Quality review inspection"
     });
   });
 

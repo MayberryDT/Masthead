@@ -17,6 +17,8 @@ import {
   getWorkbenchImportHealthSummary,
   getWorkbenchNotAddedSessions,
   getWorkbenchNotAddedSummary,
+  getWorkbenchQualityReviewSessions,
+  getWorkbenchQualityReviewSummary,
   getWorkbenchSessions,
   getDataRevisions,
   createGuidedAuthoringRequest,
@@ -36,6 +38,8 @@ const daemonClientMocks = vi.hoisted(() => ({
   getWorkbenchImportHealthSummary: vi.fn().mockResolvedValue({ ok: true, importJobIds: [], reasons: [], repairRequired: 0 }),
   getWorkbenchNotAddedSessions: vi.fn(),
   getWorkbenchNotAddedSummary: vi.fn(),
+  getWorkbenchQualityReviewSessions: vi.fn(),
+  getWorkbenchQualityReviewSummary: vi.fn(),
   getWorkbenchSessions: vi.fn(),
   createGuidedAuthoringRequest: vi.fn(),
   listPendingGuidedCanaries: vi.fn().mockResolvedValue([]),
@@ -222,6 +226,7 @@ describe("useWorkbenchController", () => {
     );
     vi.mocked(getWorkbenchActivity).mockResolvedValue(activityResponse());
     vi.mocked(getWorkbenchNotAddedSummary).mockResolvedValue(notAddedSummary());
+    vi.mocked(getWorkbenchQualityReviewSummary).mockResolvedValue(qualityReviewSummary());
     vi.mocked(createGuidedAuthoringRequest).mockResolvedValue(guidedRequestResult("request:paged"));
     vi.mocked(getWorkbenchSessions).mockImplementation(async (_base, options = {}) => {
       const pageSessions = options.offset === 100
@@ -263,6 +268,7 @@ describe("useWorkbenchController", () => {
     );
     vi.mocked(getWorkbenchActivity).mockResolvedValue(activityResponse());
     vi.mocked(getWorkbenchNotAddedSummary).mockResolvedValue(notAddedSummary());
+    vi.mocked(getWorkbenchQualityReviewSummary).mockResolvedValue(qualityReviewSummary());
     vi.mocked(getWorkbenchSessions).mockImplementation(async (_base, options = {}) => {
       if (options.offset === 100) {
         return { ...response([session("session:page-2", "Second page")]), offset: 100, total: 101 };
@@ -379,9 +385,12 @@ describe("useWorkbenchController", () => {
     expect(latest().sessions).toEqual([session("session:abc", "Workbench import review")]);
     expect(latest().activity).toEqual([]);
     expect(latest().notAddedSummary).toMatchObject({ total: 0 });
+    expect(latest().qualityReviewSummary).toMatchObject({ total: 0 });
     expect(latest().actionBusy).toBe(false);
     expect(latest().notAddedOpen).toBe(false);
     expect(latest().notAddedSessions).toEqual([]);
+    expect(latest().qualityReviewOpen).toBe(false);
+    expect(latest().qualityReviewSessions).toEqual([]);
   });
 
   test("does not load while inactive or offline", async () => {
@@ -402,6 +411,7 @@ describe("useWorkbenchController", () => {
       .mockResolvedValueOnce(response([session("session:def", "Second session")]));
     vi.mocked(getWorkbenchActivity).mockResolvedValue(activityResponse());
     vi.mocked(getWorkbenchNotAddedSummary).mockResolvedValue(notAddedSummary());
+    vi.mocked(getWorkbenchQualityReviewSummary).mockResolvedValue(qualityReviewSummary());
 
     await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
     await waitFor(() => (latest()?.sessions.length ?? 0) === 2);
@@ -427,6 +437,7 @@ describe("useWorkbenchController", () => {
       .mockResolvedValue(response([]));
     vi.mocked(getWorkbenchActivity).mockResolvedValue(activityResponse());
     vi.mocked(getWorkbenchNotAddedSummary).mockResolvedValue(notAddedSummary());
+    vi.mocked(getWorkbenchQualityReviewSummary).mockResolvedValue(qualityReviewSummary());
     vi.mocked(getWorkbenchAuthoringCapabilities).mockResolvedValue(
       authoringCapabilities("database:test", "/home/test/.local/bin/mastheadctl")
     );
@@ -519,6 +530,7 @@ describe("useWorkbenchController", () => {
     );
     vi.mocked(getWorkbenchActivity).mockResolvedValue(activityResponse());
     vi.mocked(getWorkbenchNotAddedSummary).mockResolvedValue(notAddedSummary());
+    vi.mocked(getWorkbenchQualityReviewSummary).mockResolvedValue(qualityReviewSummary());
     vi.mocked(getWorkbenchSessions).mockImplementation(async (_base, options = {}) => {
       if (options.limit === 500) {
         return {
@@ -558,6 +570,7 @@ describe("useWorkbenchController", () => {
       .mockResolvedValueOnce(response([session("session:abc", "Recovered session")]));
     vi.mocked(getWorkbenchActivity).mockResolvedValue(activityResponse());
     vi.mocked(getWorkbenchNotAddedSummary).mockResolvedValue(notAddedSummary());
+    vi.mocked(getWorkbenchQualityReviewSummary).mockResolvedValue(qualityReviewSummary());
 
     await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
     await waitFor(() => latest()?.error === "temporary failure");
@@ -751,6 +764,7 @@ describe("useWorkbenchController", () => {
       .mockResolvedValueOnce(response([checked]));
     vi.mocked(getWorkbenchActivity).mockResolvedValue(activityResponse());
     vi.mocked(getWorkbenchNotAddedSummary).mockResolvedValue(notAddedSummary());
+    vi.mocked(getWorkbenchQualityReviewSummary).mockResolvedValue(qualityReviewSummary());
     vi.mocked(postWorkbenchCheckTranscript).mockResolvedValue({ ok: true });
 
     await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
@@ -931,6 +945,55 @@ describe("useWorkbenchController", () => {
     await waitFor(() => vi.mocked(getWorkbenchNotAddedSessions).mock.calls.length >= 2);
   });
 
+  test("loads Quality review sessions when the panel is opened", async () => {
+    mockWorkbenchResponse([session("session:abc", "Queue session")]);
+    vi.mocked(getWorkbenchQualityReviewSummary).mockResolvedValue({
+      ok: true,
+      total: 538,
+      reasons: [{ reason: "insufficient_evidence", count: 538 }]
+    });
+    vi.mocked(getWorkbenchQualityReviewSessions).mockResolvedValue({
+      ok: true,
+      generatedAt: "2026-07-07T12:00:00.000Z",
+      limit: 50,
+      total: 538,
+      sessions: [
+        {
+          sessionId: "session:review",
+          title: "Insufficient evidence",
+          runtime: "grok",
+          lifecycle: "ended",
+          lastActivityAt: "2026-07-07T11:00:00.000Z",
+          reason: "insufficient_evidence"
+        }
+      ]
+    });
+
+    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
+    await waitFor(() => (latest()?.sessions.length ?? 0) === 1);
+
+    expect(getWorkbenchQualityReviewSummary).toHaveBeenCalled();
+    expect(latest().qualityReviewSummary).toMatchObject({ total: 538 });
+    expect(getWorkbenchQualityReviewSessions).not.toHaveBeenCalled();
+
+    await act(async () => {
+      latest().setQualityReviewOpen(true);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => (latest()?.qualityReviewSessions.length ?? 0) === 1);
+
+    expect(getWorkbenchQualityReviewSessions).toHaveBeenCalledWith(baseUrl, expect.objectContaining({ limit: 50 }));
+    expect(latest().qualityReviewOpen).toBe(true);
+    expect(latest().qualityReviewSessions[0]?.sessionId).toBe("session:review");
+
+    await act(async () => {
+      latest().loadQualityReview();
+      await Promise.resolve();
+    });
+    await waitFor(() => vi.mocked(getWorkbenchQualityReviewSessions).mock.calls.length >= 2);
+  });
+
   test("busy state disables actions until the mutation finishes", async () => {
     mockWorkbenchResponse([session("session:abc", "Busy session")]);
     let resolveCheck: ((value: unknown) => void) | undefined;
@@ -977,6 +1040,7 @@ describe("useWorkbenchController", () => {
       .mockResolvedValueOnce(response([enrolled]));
     vi.mocked(getWorkbenchActivity).mockResolvedValue(activityResponse());
     vi.mocked(getWorkbenchNotAddedSummary).mockResolvedValue(notAddedSummary());
+    vi.mocked(getWorkbenchQualityReviewSummary).mockResolvedValue(qualityReviewSummary());
     vi.mocked(postWorkbenchEnrollMissing).mockResolvedValue({
       ok: true,
       enrolled: 2,
@@ -1126,6 +1190,10 @@ function notAddedSummary() {
   return { ok: true as const, reasons: [], total: 0 };
 }
 
+function qualityReviewSummary() {
+  return { ok: true as const, reasons: [], total: 0 };
+}
+
 function mockWorkbenchResponse(sessions: WorkbenchQueueSessionDto[]): void {
   vi.mocked(getWorkbenchAuthoringCapabilities).mockResolvedValue(
     authoringCapabilities("database:test", "/home/test/.local/bin/mastheadctl")
@@ -1134,6 +1202,7 @@ function mockWorkbenchResponse(sessions: WorkbenchQueueSessionDto[]): void {
   vi.mocked(getWorkbenchActivity).mockResolvedValue(activityResponse());
   vi.mocked(listPendingGuidedCanaries).mockResolvedValue([]);
   vi.mocked(getWorkbenchNotAddedSummary).mockResolvedValue(notAddedSummary());
+  vi.mocked(getWorkbenchQualityReviewSummary).mockResolvedValue(qualityReviewSummary());
   vi.mocked(getWorkbenchImportHealthSummary).mockResolvedValue({ ok: true, importJobIds: [], reasons: [], repairRequired: 0 });
 }
 

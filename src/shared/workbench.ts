@@ -153,6 +153,31 @@ export type WorkbenchNotAddedResponse = {
   total: number;
 };
 
+/** Package-path sessions held for quality review (not Not Added). */
+export type WorkbenchQualityReviewSummaryDto = {
+  ok: true;
+  total: number;
+  reasons: Array<{ reason: string; count: number }>;
+};
+
+export type WorkbenchQualityReviewSessionDto = {
+  sessionId: string;
+  title: string;
+  project?: string;
+  runtime: string;
+  lifecycle: string;
+  lastActivityAt: string;
+  reason: string;
+};
+
+export type WorkbenchQualityReviewResponse = {
+  ok: true;
+  generatedAt: string;
+  limit: number;
+  sessions: WorkbenchQualityReviewSessionDto[];
+  total: number;
+};
+
 export type WorkbenchMissingSessionsResponse = {
   ok: true;
   generatedAt: string;

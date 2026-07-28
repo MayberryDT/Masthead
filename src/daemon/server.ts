@@ -155,6 +155,9 @@ import type {
   WorkbenchNotAddedResponse,
   WorkbenchNotAddedSessionDto,
   WorkbenchNotAddedSummaryDto,
+  WorkbenchQualityReviewResponse,
+  WorkbenchQualityReviewSessionDto,
+  WorkbenchQualityReviewSummaryDto,
   WorkbenchQueueSessionDto,
   WorkbenchSelectionSnapshotResponse,
   WorkbenchSessionsResponse
@@ -2866,6 +2869,11 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/workbench/quality-review-summary") {
+      sendJson(request, response, config.allowedOrigins, 200, workbenchQualityReviewSummary(database));
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/workbench/import-health-summary") {
       sendJson(request, response, config.allowedOrigins, 200, {
         ok: true,
@@ -2884,6 +2892,19 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       }
       const limit = readWorkbenchLimit(url.searchParams.get("limit"));
       sendJson(request, response, config.allowedOrigins, 200, workbenchNotAddedDetails(database, limit));
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/workbench/quality-review") {
+      if (url.searchParams.get("includeDetails") !== "true") {
+        sendJson(request, response, config.allowedOrigins, 400, {
+          ok: false,
+          error: "explicit includeDetails=true is required for Quality review inspection"
+        });
+        return;
+      }
+      const limit = readWorkbenchLimit(url.searchParams.get("limit"));
+      sendJson(request, response, config.allowedOrigins, 200, workbenchQualityReviewDetails(database, limit));
       return;
     }
 
@@ -4996,6 +5017,81 @@ function workbenchNotAddedSessionDto(row: WorkbenchNotAddedDetailRow): Workbench
     lifecycle: row.lifecycle,
     project: row.project ?? undefined,
     reason: row.reason ?? "unknown",
+    runtime: row.runtime,
+    sessionId: row.sessionId,
+    title: row.title ?? row.sessionId
+  };
+}
+
+type WorkbenchQualityReviewSummaryRow = {
+  reason: string | null;
+  count: number;
+};
+
+type WorkbenchQualityReviewDetailRow = WorkbenchSessionMetadataRow & {
+  reason: string | null;
+};
+
+/** Package-path sessions with next_action=review_quality (quality purgatory, not Not Added). */
+function workbenchQualityReviewSummary(database: MastheadDatabase): WorkbenchQualityReviewSummaryDto {
+  const rows = database
+    .prepare(
+      `SELECT COALESCE(workbench_session_state.suppression_category, 'insufficient_evidence') AS reason,
+        COUNT(*) AS count
+      FROM workbench_session_state
+      JOIN sessions ON sessions.session_id = workbench_session_state.session_id
+      WHERE workbench_session_state.publication_status = 'publish_path'
+        AND workbench_session_state.next_action = 'review_quality'
+        AND sessions.deleted_at IS NULL
+      GROUP BY COALESCE(workbench_session_state.suppression_category, 'insufficient_evidence')
+      ORDER BY count DESC, lower(COALESCE(workbench_session_state.suppression_category, 'insufficient_evidence'))`
+    )
+    .all() as WorkbenchQualityReviewSummaryRow[];
+  return {
+    ok: true,
+    reasons: rows.map((row) => ({ count: row.count, reason: row.reason ?? "insufficient_evidence" })),
+    total: rows.reduce((total, row) => total + row.count, 0)
+  };
+}
+
+function workbenchQualityReviewDetails(database: MastheadDatabase, limit: number): WorkbenchQualityReviewResponse {
+  const rows = database
+    .prepare(
+      `SELECT
+        sessions.session_id AS sessionId,
+        COALESCE(sessions.title, sessions.objective, sessions.source_session_id) AS title,
+        sessions.project_label AS project,
+        runtimes.runtime_kind AS runtime,
+        sessions.lifecycle AS lifecycle,
+        sessions.last_activity_at AS lastActivityAt,
+        COALESCE(workbench_session_state.suppression_category, 'insufficient_evidence') AS reason
+      FROM workbench_session_state
+      JOIN sessions ON sessions.session_id = workbench_session_state.session_id
+      JOIN runtimes ON runtimes.runtime_id = sessions.runtime_id
+      WHERE workbench_session_state.publication_status = 'publish_path'
+        AND workbench_session_state.next_action = 'review_quality'
+        AND sessions.deleted_at IS NULL
+      ORDER BY COALESCE(workbench_session_state.last_activity_at, sessions.last_activity_at, workbench_session_state.updated_at) DESC,
+        sessions.session_id DESC
+      LIMIT ?`
+    )
+    .all(limit) as WorkbenchQualityReviewDetailRow[];
+  const total = workbenchQualityReviewSummary(database).total;
+  return {
+    ok: true,
+    generatedAt: new Date().toISOString(),
+    limit,
+    sessions: rows.map(workbenchQualityReviewSessionDto),
+    total
+  };
+}
+
+function workbenchQualityReviewSessionDto(row: WorkbenchQualityReviewDetailRow): WorkbenchQualityReviewSessionDto {
+  return {
+    lastActivityAt: row.lastActivityAt,
+    lifecycle: row.lifecycle,
+    project: row.project ?? undefined,
+    reason: row.reason ?? "insufficient_evidence",
     runtime: row.runtime,
     sessionId: row.sessionId,
     title: row.title ?? row.sessionId
