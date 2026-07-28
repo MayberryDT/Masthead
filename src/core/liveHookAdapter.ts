@@ -4,7 +4,7 @@ import { ALL_RUNTIME_KINDS, type RuntimeKind } from "../adapters/types.ts";
 import { buildLatestFeedbackSnapshot } from "./feedbackSnapshot.ts";
 import { liveStateImpliedByEvent } from "./livePermission.ts";
 import { normalizeLiveState, type LiveStateAuthority, type LiveStateReportInput } from "./liveState.ts";
-import { redactPath, redactText } from "./redaction.ts";
+import { hasSemanticRedactedText, redactPath, redactText } from "./redaction.ts";
 import type { EventType, NormalizedEvent, WorkspaceRef } from "./types";
 
 const SUPPRESSED_RAW_PAYLOAD_KEYS = new Set([
@@ -41,6 +41,13 @@ const MAX_LIVE_HOOK_BYTES = 262_144;
 const MAX_LIVE_HOOK_DEPTH = 20;
 const MAX_LIVE_HOOK_ARRAY_LENGTH = 500;
 const MAX_LIVE_HOOK_OBJECT_KEYS = 200;
+/**
+ * Short privacy-safe task preview length for title/subject candidates only.
+ * Aligned with `safeFactLabel` (≤80) so previews survive the title → facts pipeline.
+ * (Evidence backup path `subjectFromEvidence` is ≤72; primary path is session title.)
+ */
+const TASK_PREVIEW_MAX_CHARS = 80;
+const TASK_PREVIEW_MIN_CHARS = 8;
 
 export type LiveHookDiagnostic = {
   code: "malformed_json" | "invalid_payload" | "unsupported_runtime";
@@ -170,7 +177,7 @@ export function normalizeLiveHookPayload(input: unknown, options: LiveHookNormal
     receivedAt,
     type,
     workspace,
-    summary: summaryFrom(redactedInput, payload, profile),
+    summary: summaryFrom(redactedInput, payload, profile, type),
     payload,
     sensitivity: rawPayloadSuppressed(redactedInput, profile) ? "redacted" : sensitivity,
     payloadHash,
@@ -546,8 +553,16 @@ function normalizeRuntimeStateKey(value: string | undefined): string | undefined
 function summaryFrom(
   input: Record<string, unknown>,
   payload: Record<string, unknown>,
-  profile: LiveRuntimeProfile
+  profile: LiveRuntimeProfile,
+  eventType: EventType
 ): string {
+  // Prefer privacy-safe task previews for user turns / prompt-bearing events so offline
+  // subjects have non-generic candidates without dumping full prompts into payload.
+  if (shouldExtractTaskPreview(eventType, input)) {
+    const preview = taskPreviewFromHook(input);
+    if (preview) return preview;
+  }
+
   const explicit =
     firstString(input, ["summary", "title", "objective"]) ??
     firstString(payload, ["summary", "title", "objective", "command", "normalizedCommand"]);
@@ -563,6 +578,124 @@ function summaryFrom(
   }
 
   return `${profile.label} ${profile.surface} event`;
+}
+
+/**
+ * Extract a short redacted task preview from hook prompt / user-message fields.
+ * Intended for title/subject candidates only — full prompt remains suppressed from payload.
+ */
+export function taskPreviewFromHook(input: Record<string, unknown>): string | undefined {
+  const raw = extractUserTaskText(input);
+  if (!raw) return undefined;
+  return privacySafeTaskPreview(raw);
+}
+
+function shouldExtractTaskPreview(eventType: EventType, input: Record<string, unknown>): boolean {
+  if (eventType === "user.response" || eventType === "user.question") return true;
+  // Session start / chat events may carry the first user message without a user.response type.
+  if (eventType === "session.started" && extractUserTaskText(input)) return true;
+  return false;
+}
+
+function extractUserTaskText(input: Record<string, unknown>): string | undefined {
+  const direct =
+    firstString(input, ["prompt", "rawPrompt", "userPrompt", "user_prompt", "text", "content", "query", "input"]) ??
+    firstString(input, ["message"]);
+  if (direct) return direct;
+
+  const message = input.message;
+  if (isRecord(message)) {
+    const fromMessage =
+      firstString(message, ["content", "text", "prompt", "value"]) ??
+      textFromMessageParts(message.parts) ??
+      textFromMessageParts(message.content);
+    if (fromMessage && isUserishRole(message.role)) return fromMessage;
+    if (fromMessage && message.role === undefined) return fromMessage;
+  }
+
+  const messages = input.messages;
+  if (Array.isArray(messages)) {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const entry = messages[index];
+      if (!isRecord(entry)) continue;
+      if (!isUserishRole(entry.role) && entry.role !== undefined) continue;
+      const text =
+        firstString(entry, ["content", "text", "prompt", "value"]) ??
+        textFromMessageParts(entry.parts) ??
+        textFromMessageParts(entry.content);
+      if (text) return text;
+    }
+  }
+
+  return undefined;
+}
+
+function isUserishRole(role: unknown): boolean {
+  if (typeof role !== "string") return false;
+  const normalized = role.trim().toLowerCase();
+  return normalized === "user" || normalized === "human" || normalized === "customer";
+}
+
+function textFromMessageParts(value: unknown): string | undefined {
+  if (typeof value === "string" && value.trim()) return value;
+  if (!Array.isArray(value)) return undefined;
+  const chunks: string[] = [];
+  for (const part of value) {
+    if (typeof part === "string" && part.trim()) {
+      chunks.push(part);
+      continue;
+    }
+    if (!isRecord(part)) continue;
+    const text = firstString(part, ["text", "content", "value"]);
+    if (text) chunks.push(text);
+  }
+  const joined = chunks.join(" ").replace(/\s+/g, " ").trim();
+  return joined || undefined;
+}
+
+function privacySafeTaskPreview(raw: string): string | undefined {
+  const collapsed = raw.replace(/\s+/g, " ").trim();
+  if (!collapsed) return undefined;
+
+  // Redact secrets/tokens first, then strip residual password-like assignments and URLs.
+  // (redactText does not strip bare https?://…; safeFactLabel rejects raw URLs in titles.)
+  let redacted = redactText(collapsed)
+    .replace(/\b(password|passwd|pwd|secret|token|api[_-]?key)\s*[:=]\s*\S+/gi, "$1=[redacted]")
+    .replace(/\bsk-[A-Za-z0-9_-]+\b/g, "[SECRET:api_key]")
+    .replace(/\bhttps?:\/\/[^\s"'`<>]+/gi, "[redacted-url]")
+    .replace(/\bwww\.[^\s"'`<>]+/gi, "[redacted-url]")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!redacted) return undefined;
+  // Never accept a preview that still contains a raw URL scheme.
+  if (/\bhttps?:\/\//i.test(redacted) || /^https[-_:]/i.test(redacted)) return undefined;
+  // Drop previews that are only redaction wrappers / placeholders (no task signal).
+  if (!hasSemanticRedactedText(redacted)) return undefined;
+
+  const truncated = truncateAtWordBoundary(redacted, TASK_PREVIEW_MAX_CHARS);
+  if (truncated.length < TASK_PREVIEW_MIN_CHARS) return undefined;
+  // Avoid promoting pure event-label noise if it somehow appears as prompt text.
+  if (isGenericTaskPreviewText(truncated)) return undefined;
+  return truncated;
+}
+
+function truncateAtWordBoundary(value: string, maxChars: number): string {
+  if (value.length <= maxChars) return value;
+  const slice = value.slice(0, maxChars);
+  const lastSpace = slice.lastIndexOf(" ");
+  const base = lastSpace >= Math.floor(maxChars * 0.6) ? slice.slice(0, lastSpace) : slice;
+  return base.replace(/[.,;:!?-]+$/g, "").trim();
+}
+
+function isGenericTaskPreviewText(value: string): boolean {
+  const normalized = value.replace(/\s+/g, " ").trim().toLowerCase();
+  return (
+    /^(?:user\s+)?prompt\s+submit$/i.test(normalized) ||
+    /^before\s+submit\s+prompt$/i.test(normalized) ||
+    /^(?:session\s+)?start(?:ed)?$/i.test(normalized) ||
+    /^(?:hook|plugin|extension)\s+event$/i.test(normalized)
+  );
 }
 
 function isGenericHookSummary(value: string, profile: LiveRuntimeProfile): boolean {
