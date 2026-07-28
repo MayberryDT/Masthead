@@ -46,6 +46,8 @@ import {
   WORKBENCH_AUTHORING_V5_VERSION,
   WORKBENCH_AUTHORING_V5_HARD_REJECT_CODES,
   WORKBENCH_AUTHORING_V5_SOFT_FLAG_CODES,
+  WORKBENCH_AUTHORING_V5_INCOMPLETE_STOP_RULE,
+  WORKBENCH_AUTHORING_V5_COMPLETE_STOP_RULE,
   toWorkbenchAuthoringV5PreparationDto,
   toWorkbenchAuthoringV5AuthoredDraft,
   workbenchAuthoringV5PreparationWaitAction,
@@ -56,6 +58,7 @@ import {
   type WorkbenchAuthoringV5NextAction,
   type WorkbenchAuthoringV5OptionalConsideration,
   type WorkbenchAuthoringV5PackReceipt,
+  type WorkbenchAuthoringV5ProgressDto,
   type WorkbenchAuthoringV5RequestReceipt,
   type WorkbenchAuthoringV5SelectionDto,
   type WorkbenchAuthoringV5SessionOutcome
@@ -138,7 +141,7 @@ export function createWorkbenchAuthoringV5Request(
         startCommand: `${input.command} workbench author bootstrap --request ${shellQuote(preparation.requestId)} --json`
       },
       nextAction: preparation.status === "ready"
-        ? startAction(input.command, preparation.requestId)
+        ? startAction(db, input.command, preparation.requestId)
         : workbenchAuthoringV5PreparationWaitAction(input.command, preparation.requestId),
       preparation: toWorkbenchAuthoringV5PreparationDto(preparation),
       ...(getWorkbenchAuthoringV5Request(db, preparation.requestId)
@@ -322,7 +325,7 @@ export function bootstrapWorkbenchAuthoringV5Request(
       scaffoldWritesProse: false as const,
       authoredFields: ["title", "description", "keywords", "purpose", "outcome", "keyWork", "decisions", "verification"],
       synthesisRule: "Synthesize each dossier from the substantive user ask and retained outcome. Do not treat environment, AGENTS/skill, monitor, protocol, path, timestamp, timezone, or tool rows as the primary ask, and do not extract first-message text, paths, timestamps, or tool tokens deterministically.",
-      loop: ["start", "inspect", "scaffold", "save", "finish"],
+      loop: ["start", "inspect", "scaffold", "save", "finish", "claim_next_or_complete"],
       obligation: "Continue until the immutable request-complete receipt is returned. Resume is only crash recovery."
     },
     packPolicy: {
@@ -364,7 +367,7 @@ export function startWorkbenchAuthoringV5Pack(
   if (request.status === "completed") {
     return {
       receipt: getWorkbenchAuthoringV5RequestReceipt(db, request.requestId),
-      nextAction: completeAction(),
+      nextAction: completeAction(db, request.requestId),
       request
     };
   }
@@ -466,8 +469,8 @@ export function inspectWorkbenchAuthoringV5Pack(
       coverage: after,
       progressRecorded: items.length > 0,
       nextAction: after.every(({ complete }) => complete)
-        ? scaffoldAction(input.command, pack.packId)
-        : inspectAction(input.command, pack.packId)
+        ? scaffoldAction(db, input.command, pack.packId)
+        : inspectAction(db, input.command, pack.packId)
     };
   });
 }
@@ -492,7 +495,7 @@ export function buildWorkbenchAuthoringV5Scaffold(
       sessionId
     }))
   };
-  return { draft, nextAction: saveAction(input.command, pack.packId), packId: pack.packId };
+  return { draft, nextAction: saveAction(db, input.command, pack.packId), packId: pack.packId };
 }
 
 export function saveWorkbenchAuthoringV5Draft(
@@ -524,7 +527,7 @@ export function saveWorkbenchAuthoringV5Draft(
       outcomes,
       packId: saved.packId,
       requestStatus: requireWorkbenchAuthoringV5Request(db, saved.requestId).status,
-      nextAction: finishAction(input.command, saved.packId)
+      nextAction: finishAction(db, input.command, saved.packId)
     };
   });
 }
@@ -611,7 +614,9 @@ export function getWorkbenchAuthoringV5RequestStatus(
     request,
     ...(preparation?.selection ? { selection: preparation.selection } : {}),
     ...(receipt ? { receipt } : {}),
-    nextAction: request.status === "completed" ? completeAction() : requestNextAction(db, input.command, request.requestId)
+    nextAction: request.status === "completed"
+      ? completeAction(db, request.requestId)
+      : requestNextAction(db, input.command, request.requestId)
   };
 }
 
@@ -1063,43 +1068,115 @@ function finishResult(db: MastheadDatabase, command: string, receipt: WorkbenchA
   return {
     receipt,
     ...(request.status === "completed" ? { requestReceipt: getWorkbenchAuthoringV5RequestReceipt(db, request.requestId) } : {}),
-    nextAction: request.status === "completed" ? completeAction() : claimNextAction(command, request.requestId)
+    nextAction: request.status === "completed"
+      ? completeAction(db, request.requestId)
+      : claimNextAction(db, command, request.requestId)
+  };
+}
+
+function requestProgress(db: MastheadDatabase, requestId: string): WorkbenchAuthoringV5ProgressDto {
+  const request = requireWorkbenchAuthoringV5Request(db, requestId);
+  const packsCompleted = listWorkbenchAuthoringV5Packs(db, requestId)
+    .filter(({ status }) => status === "completed").length;
+  return {
+    packsCompleted,
+    packsTotal: request.packCount,
+    sessionsAttempted: request.attemptedSessionCount,
+    sessionsTotal: request.sessionCount,
+    requestComplete: request.status === "completed"
+  };
+}
+
+function withRequestProgress(
+  db: MastheadDatabase,
+  requestId: string,
+  action: Omit<WorkbenchAuthoringV5NextAction, "progress" | "stopRule">
+): WorkbenchAuthoringV5NextAction {
+  const progress = requestProgress(db, requestId);
+  return {
+    ...action,
+    progress,
+    stopRule: progress.requestComplete
+      ? WORKBENCH_AUTHORING_V5_COMPLETE_STOP_RULE
+      : WORKBENCH_AUTHORING_V5_INCOMPLETE_STOP_RULE
   };
 }
 
 function requestNextAction(db: MastheadDatabase, command: string, requestId: string): WorkbenchAuthoringV5NextAction {
   const pack = activeOrAvailableWorkbenchAuthoringV5Pack(db, requestId);
-  if (!pack || pack.status === "available") return startAction(command, requestId);
+  if (!pack || pack.status === "available") return startAction(db, command, requestId);
   return packNextAction(db, command, pack.packId);
 }
 
 function packNextAction(db: MastheadDatabase, command: string, packId: string): WorkbenchAuthoringV5NextAction {
   const pack = requireWorkbenchAuthoringV5Pack(db, packId);
-  if (pack.status === "saved") return finishAction(command, packId);
-  return coverage(db, packId).every(({ complete }) => complete) ? scaffoldAction(command, packId) : inspectAction(command, packId);
+  if (pack.status === "saved") return finishAction(db, command, packId);
+  return coverage(db, packId).every(({ complete }) => complete)
+    ? scaffoldAction(db, command, packId)
+    : inspectAction(db, command, packId);
 }
 
-function startAction(command: string, requestId: string): WorkbenchAuthoringV5NextAction {
-  return { kind: "start", command: `${command} workbench author start --request ${shellQuote(requestId)} --json`, reason: "Start or resume the next fixed pack." };
+function startAction(db: MastheadDatabase, command: string, requestId: string): WorkbenchAuthoringV5NextAction {
+  return withRequestProgress(db, requestId, {
+    kind: "start",
+    command: `${command} workbench author start --request ${shellQuote(requestId)} --json`,
+    reason: "Start or resume the next fixed pack."
+  });
 }
 
-function inspectAction(command: string, packId: string): WorkbenchAuthoringV5NextAction {
-  return { kind: "inspect", command: `${command} workbench author inspect --pack ${shellQuote(packId)} --json`, reason: "Inspect the next unread canonical evidence page." };
+function inspectAction(db: MastheadDatabase, command: string, packId: string): WorkbenchAuthoringV5NextAction {
+  const pack = requireWorkbenchAuthoringV5Pack(db, packId);
+  return withRequestProgress(db, pack.requestId, {
+    kind: "inspect",
+    command: `${command} workbench author inspect --pack ${shellQuote(packId)} --json`,
+    reason: "Inspect the next unread canonical evidence page."
+  });
 }
-function scaffoldAction(command: string, packId: string): WorkbenchAuthoringV5NextAction {
-  return { kind: "scaffold", command: `${command} workbench author scaffold --pack ${shellQuote(packId)} --file ${shellQuote(`${packId}.json`)} --json`, reason: "Write the blank skill-field scaffold and evidence catalog to a file." };
+function scaffoldAction(db: MastheadDatabase, command: string, packId: string): WorkbenchAuthoringV5NextAction {
+  const pack = requireWorkbenchAuthoringV5Pack(db, packId);
+  return withRequestProgress(db, pack.requestId, {
+    kind: "scaffold",
+    command: `${command} workbench author scaffold --pack ${shellQuote(packId)} --file ${shellQuote(`${packId}.json`)} --json`,
+    reason: "Write the blank skill-field scaffold and evidence catalog to a file."
+  });
 }
-function saveAction(command: string, packId: string): WorkbenchAuthoringV5NextAction {
-  return { kind: "save", command: `${command} workbench author save --pack ${shellQuote(packId)} --file ${shellQuote(`${packId}.json`)} --json`, reason: "Fill every session field from inspected evidence, then save the pack." };
+function saveAction(db: MastheadDatabase, command: string, packId: string): WorkbenchAuthoringV5NextAction {
+  const pack = requireWorkbenchAuthoringV5Pack(db, packId);
+  return withRequestProgress(db, pack.requestId, {
+    kind: "save",
+    command: `${command} workbench author save --pack ${shellQuote(packId)} --file ${shellQuote(`${packId}.json`)} --json`,
+    reason: "Fill every session field from inspected evidence, then save the pack."
+  });
 }
-function finishAction(command: string, packId: string): WorkbenchAuthoringV5NextAction {
-  return { kind: "finish", command: `${command} workbench author finish --pack ${shellQuote(packId)} --json`, reason: "Publish passers and soft flags, record rejects, and release the next pack." };
+function finishAction(db: MastheadDatabase, command: string, packId: string): WorkbenchAuthoringV5NextAction {
+  const pack = requireWorkbenchAuthoringV5Pack(db, packId);
+  return withRequestProgress(db, pack.requestId, {
+    kind: "finish",
+    command: `${command} workbench author finish --pack ${shellQuote(packId)} --json`,
+    reason: "Publish passers and soft flags, record rejects, and release the next pack."
+  });
 }
-function claimNextAction(command: string, requestId: string): WorkbenchAuthoringV5NextAction {
-  return { kind: "claim_next", command: `${command} workbench author start --request ${shellQuote(requestId)} --json`, reason: "The next fixed pack is available." };
+function claimNextAction(db: MastheadDatabase, command: string, requestId: string): WorkbenchAuthoringV5NextAction {
+  const progress = requestProgress(db, requestId);
+  return {
+    kind: "claim_next",
+    command: `${command} workbench author start --request ${shellQuote(requestId)} --json`,
+    reason:
+      `Request incomplete (${progress.sessionsAttempted}/${progress.sessionsTotal} sessions, ` +
+      `${progress.packsCompleted}/${progress.packsTotal} packs). Immediately run nextAction.command. Do not report success.`,
+    progress: { ...progress, requestComplete: false },
+    stopRule: WORKBENCH_AUTHORING_V5_INCOMPLETE_STOP_RULE
+  };
 }
-function completeAction(): WorkbenchAuthoringV5NextAction {
-  return { kind: "complete", command: "", reason: "The full request is complete; this receipt is immutable." };
+function completeAction(db: MastheadDatabase, requestId: string): WorkbenchAuthoringV5NextAction {
+  const progress = requestProgress(db, requestId);
+  return {
+    kind: "complete",
+    command: "",
+    reason: "The full request is complete; this receipt is immutable.",
+    progress: { ...progress, requestComplete: true },
+    stopRule: WORKBENCH_AUTHORING_V5_COMPLETE_STOP_RULE
+  };
 }
 
 function firstUnreadOffset(items: Array<{ itemId: string }>, accessed: Set<string>): number {
