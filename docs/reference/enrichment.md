@@ -13,15 +13,27 @@ while their mutations fail with `authoring_contract_retired` before writing.
 
 **Copy Agent Prompt** creates one durable request from the compile-ready selection and discloses any
 review-needed rows left out. The clipboard contains only the opaque request ID and one instance-bound
-start command. Every mutation verifies daemon URL, database ID, build SHA, manifest path, and live
-instance identity so development and production cannot share a launcher or database accidentally.
+start command (plus stop-rule restatement). Every mutation verifies daemon URL, database ID, build
+SHA, manifest path, and live instance identity so development and production cannot share a launcher
+or database accidentally.
+
+Review-hold sessions never enter the handoff selection. Operators must accept them to ready or fail
+them to Not Added before they can join a later request. Package-path size alone is not the authorable
+count; see [Logbook and Workbench](../../openwiki/logbook-and-workbench.md#workbench-quality-exits-three-way).
 
 ## Packs and complete-selection obligation
 
 The daemon divides the full selection into fixed packs of 5–12 sessions, except the final remainder.
-One agent follows the returned next action until the immutable request receipt exists. Resume uses
-the same request ID only after a crash; it does not reduce the selected work or turn completed packs
-into optional follow-up.
+One agent follows the returned next action until the immutable **request** receipt exists.
+
+**Stop rule:** pack finish is not request completion. After a non-final finish the daemon returns a
+continue action (typically `claim_next`); the agent must run `nextAction.command` immediately and
+must not report success. Stop only when `nextAction.kind === "complete"` and the request receipt
+exists. A pack receipt proves that pack only.
+
+**Resume:** use the same request ID with `author bootstrap --request <id>` (then the returned next
+action / start). Completed packs stay published; the selection is not reduced and finished packs are
+not optional follow-up.
 
 ## CLI loop
 
@@ -52,7 +64,19 @@ description, purpose, outcome, key work, and verification.
 Agents never author a session dossier body. Accepted durable enrichment is applied to the canonical
 session graph, then the daemon rebuilds the immutable `canonical-session-dossier-v1` presentation.
 
-## Quality behavior
+## Capture quality vs authoring quality
+
+Two different quality layers:
+
+1. **Workbench capture / publication quality** (before handoff) — three exits: **ready** (`keep`),
+   **review hold** (`review` on package path), **Not Added** (`suppress`). Only ready rows enter
+   **Copy Agent Prompt**. Review hold with Not Added = 0 is normal: review is not Not Added, and it
+   is not agent-ready either. Operator bulk accept/fail is the intended drain for large review
+   backlogs.
+2. **V5 save quality** (inside a pack) — hard rejects skip that session and let the pack continue;
+   soft flags publish with Activity warnings. Neither outcome creates a request-wide revision loop.
+
+## Quality behavior (save-time)
 
 Hard rejects skip that session and let the pack continue: empty or generic titles, protocol or
 compaction boilerplate, empty or insufficient keywords, a purpose that is clearly not the user ask,
