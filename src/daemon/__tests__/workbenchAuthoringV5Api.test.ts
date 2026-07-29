@@ -264,6 +264,10 @@ describe("Workbench authoring V5 HTTP API", () => {
           packCount: 1,
           sessionsCompleted: 0,
           sessionCount: 5,
+          publishedSessionCount: 0,
+          rejectedSessionCount: 0,
+          softFlaggedSessionCount: 0,
+          stalled: false,
           handoff: {
             requestId,
             startCommand: `/opt/masthead/bin/mastheadctl workbench author bootstrap --request '${requestId}' --json`
@@ -271,6 +275,19 @@ describe("Workbench authoring V5 HTTP API", () => {
         }
       }
     });
+    const request = (incomplete?.body as { request: {
+      publishedSessionCount: number;
+      rejectedSessionCount: number;
+      softFlaggedSessionCount: number;
+      stalled: boolean;
+      idleMs: number;
+    } }).request;
+    expect(request.publishedSessionCount).toBe(0);
+    expect(request.rejectedSessionCount).toBe(0);
+    expect(request.softFlaggedSessionCount).toBe(0);
+    expect(request.stalled).toBe(false);
+    expect(typeof request.idleMs).toBe("number");
+    expect(request.idleMs).toBeGreaterThanOrEqual(0);
     db.close();
   });
 });

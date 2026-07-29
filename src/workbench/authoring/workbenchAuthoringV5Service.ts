@@ -78,6 +78,7 @@ import {
 import * as evidenceCatalog from "./evidenceCatalog.ts";
 import { workbenchAuthoringV5ReadinessReason } from "./guidedAuthoringPreflight.ts";
 import * as workbenchAuthoringV5Quality from "./workbenchAuthoringV5Quality.ts";
+import { evaluateAuthoringCampaignStall } from "./workbenchAuthoringV5Stall.ts";
 import {
   applyGuidedSessionEnrichmentInTransaction,
   publishStagedGuidedArtifactsInTransaction,
@@ -667,7 +668,8 @@ export function getWorkbenchAuthoringV5RequestStatus(
 /** Most recent open/active V5 request for Workbench incomplete-resume banner. */
 export function getIncompleteWorkbenchAuthoringV5RequestSummary(
   db: MastheadDatabase,
-  input: { command: string }
+  input: { command: string },
+  options: { nowMs?: number } = {}
 ): WorkbenchAuthoringV5IncompleteRequestsDto {
   const requestId = listIncompleteWorkbenchAuthoringV5RequestIds(db)[0];
   if (!requestId) return {};
@@ -676,6 +678,10 @@ export function getIncompleteWorkbenchAuthoringV5RequestSummary(
   const packsCompleted = listWorkbenchAuthoringV5Packs(db, requestId)
     .filter(({ status }) => status === "completed")
     .length;
+  const stall = evaluateAuthoringCampaignStall({
+    updatedAt: request.updatedAt,
+    nowMs: options.nowMs ?? Date.now()
+  });
   return {
     request: {
       requestId: request.requestId,
@@ -684,6 +690,12 @@ export function getIncompleteWorkbenchAuthoringV5RequestSummary(
       packCount: request.packCount,
       sessionsCompleted: request.attemptedSessionCount,
       sessionCount: request.sessionCount,
+      publishedSessionCount: request.publishedSessionCount,
+      rejectedSessionCount: request.rejectedSessionCount,
+      softFlaggedSessionCount: request.softFlaggedSessionCount,
+      stalled: stall.stalled,
+      idleMs: stall.idleMs,
+      ...(request.currentPackId ? { currentPackId: request.currentPackId } : {}),
       handoff: {
         requestId: request.requestId,
         startCommand: `${input.command} workbench author bootstrap --request ${shellQuote(request.requestId)} --json`

@@ -23,12 +23,14 @@ import {
   buildWorkbenchAuthoringV5Scaffold,
   createWorkbenchAuthoringV5Request as acceptWorkbenchAuthoringV5Request,
   finishWorkbenchAuthoringV5Pack,
+  getIncompleteWorkbenchAuthoringV5RequestSummary,
   getWorkbenchAuthoringV5RequestStatus,
   inspectWorkbenchAuthoringV5Pack,
   prepareWorkbenchAuthoringV5RequestStep,
   saveWorkbenchAuthoringV5Draft,
   startWorkbenchAuthoringV5Pack
 } from "../workbenchAuthoringV5Service.ts";
+import { WORKBENCH_AUTHORING_V5_STALL_MS } from "../workbenchAuthoringV5Stall.ts";
 import { isWorkbenchAuthoringV5CompileReady } from "../guidedAuthoringPreflight.ts";
 import {
   COMPACTION_BANNER_FIXTURE,
@@ -68,6 +70,69 @@ afterEach(async () => {
 });
 
 describe("workbench-authoring-v5 loop", () => {
+  test("incomplete summary marks stalled after idle threshold and exposes disposition counts", async () => {
+    const db = await testDatabase();
+    const sessionIds = Array.from({ length: 5 }, (_, index) => `session:v5:incomplete-stall:${index + 1}`);
+    for (const sessionId of sessionIds) seedCompileReadySession(db, sessionId);
+    const created = createWorkbenchAuthoringV5Request(db, {
+      actorId: "agent:test", command, currentIdentity: identity, expectedIdentity: identity, sessionIds
+    });
+    const requestId = created.request.requestId;
+    const started = startWorkbenchAuthoringV5Pack(db, {
+      command, currentIdentity: identity, expectedIdentity: identity, requestId
+    });
+    if (!("pack" in started)) throw new Error("expected_active_pack");
+
+    // Seed known disposition counters without finishing the campaign.
+    db.prepare(
+      "UPDATE workbench_authoring_v5_request_sessions SET state = ? WHERE request_id = ? AND session_id = ?"
+    ).run("published", requestId, sessionIds[0]);
+    db.prepare(
+      "UPDATE workbench_authoring_v5_request_sessions SET state = ? WHERE request_id = ? AND session_id = ?"
+    ).run("published", requestId, sessionIds[1]);
+    db.prepare(
+      "UPDATE workbench_authoring_v5_request_sessions SET state = ? WHERE request_id = ? AND session_id = ?"
+    ).run("soft_flagged", requestId, sessionIds[2]);
+    db.prepare(
+      "UPDATE workbench_authoring_v5_request_sessions SET state = ? WHERE request_id = ? AND session_id = ?"
+    ).run("rejected", requestId, sessionIds[3]);
+
+    const updatedAt = "2026-07-28T12:00:00.000Z";
+    db.prepare("UPDATE workbench_authoring_v5_requests SET updated_at = ? WHERE request_id = ?").run(
+      updatedAt,
+      requestId
+    );
+    const nowMs = Date.parse(updatedAt) + WORKBENCH_AUTHORING_V5_STALL_MS + 5_000;
+
+    const summary = getIncompleteWorkbenchAuthoringV5RequestSummary(
+      db,
+      { command },
+      { nowMs }
+    );
+
+    expect(summary.request).toBeDefined();
+    // Explicit field asserts so toMatchObject-style drift cannot hide missing stall/count fields.
+    expect(summary.request!.requestId).toBe(requestId);
+    expect(summary.request!.status).toBe("active");
+    expect(summary.request!.packsCompleted).toBe(0);
+    expect(summary.request!.packCount).toBe(1);
+    expect(summary.request!.sessionsCompleted).toBe(4);
+    expect(summary.request!.sessionCount).toBe(5);
+    expect(summary.request!.publishedSessionCount).toBe(3);
+    expect(summary.request!.rejectedSessionCount).toBe(1);
+    expect(summary.request!.softFlaggedSessionCount).toBe(1);
+    expect(summary.request!.stalled).toBe(true);
+    expect(summary.request!.idleMs).toBe(WORKBENCH_AUTHORING_V5_STALL_MS + 5_000);
+    expect(summary.request!.idleMs).toBeGreaterThanOrEqual(WORKBENCH_AUTHORING_V5_STALL_MS);
+    expect(summary.request!.currentPackId).toBe(started.pack.packId);
+    expect(summary.request!.updatedAt).toBe(updatedAt);
+    expect(summary.request!.handoff).toEqual({
+      requestId,
+      startCommand: `${command} workbench author bootstrap --request '${requestId}' --json`
+    });
+    db.close();
+  });
+
   test("hard-rejects production-remediation title and description escapes at save", async () => {
     const db = await testDatabase();
     const sessionIds = Array.from({ length: 6 }, (_, index) => `session:v5:remediation-escape:${index + 1}`);
