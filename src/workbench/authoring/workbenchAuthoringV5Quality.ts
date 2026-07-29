@@ -43,10 +43,16 @@ export function classifyWorkbenchAuthoringV5Session(
       message: "Title must name the session's specific user work."
     });
   }
-  if (isContextOrMetadataTitle(session.fields.title)) {
+  // Q1 owns discrete instruction/policy heads; skip Q3 metadata when Q1 matches (one code per fixture).
+  if (isInstructionOrPolicyTitle(session.fields.title)) {
+    findings.push({
+      code: "instruction_or_policy_title",
+      message: "Title must name the substantive work, not an instruction file, system reminder, or MCP connection dump."
+    });
+  } else if (isContextOrMetadataTitle(session.fields.title)) {
     findings.push({
       code: "context_or_metadata_title",
-      message: "Title must name the substantive work, not a path, timestamp, timezone, or session context."
+      message: "Title must name the substantive work, not a path, timestamp, timezone, system prompt, or session context."
     });
   }
   if (isConversationalFillerTitle(session.fields.title)) {
@@ -59,6 +65,15 @@ export function classifyWorkbenchAuthoringV5Session(
     findings.push({
       code: "empty_or_generic_description",
       message: "Description must summarize the session's specific user work."
+    });
+  }
+  if (
+    isApprovalOrJsonPayload(session.fields.description) ||
+    isApprovalOrJsonPayload(session.fields.title)
+  ) {
+    findings.push({
+      code: "approval_or_json_payload_description",
+      message: "Description and title must summarize the work in prose, not paste approval JSON or raw JSON objects."
     });
   }
   const proseFields = [session.fields.title, session.fields.description, session.fields.purpose];
@@ -193,8 +208,52 @@ function isEmptyOrGenericTitle(value: string, sessionId: string): boolean {
     /^(?:codex|claude|cursor|masthead)?\s*(?:work\s*)?session\s*\d*$/i.test(normalized);
 }
 
+/**
+ * Q1: instruction-file / system-policy / MCP connection titles.
+ * Requires `# AGENTS` / `AGENTS.md` shape (or exact `AGENTS`) so prose like
+ * "Improve agent handoff UX" is not rejected.
+ */
+function isInstructionOrPolicyTitle(value: string): boolean {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized) return false;
+  if (/^<system-reminder\b/i.test(normalized)) return true;
+  if (/^mcp servers? connected\b/i.test(normalized)) return true;
+  // `# AGENTS`, `## AGENTS.md`, exact `AGENTS` — not bare "Agent …" product prose
+  if (/^(?:#+\s*)agents(?:\.md)?\b/i.test(normalized)) return true;
+  if (/^agents\.md\b/i.test(normalized)) return true;
+  if (/^agents$/i.test(normalized)) return true;
+  return false;
+}
+
+/**
+ * Q2: approval JSON or pure JSON object payloads in description/title.
+ * Pure parseable object starting with `{` is hard-rejected; truncated approval
+ * shapes with risk_level + outcome allow|deny are also rejected.
+ */
+function isApprovalOrJsonPayload(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("{")) return false;
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    return !!parsed && typeof parsed === "object" && !Array.isArray(parsed);
+  } catch {
+    return (
+      /"risk_level"\s*:/.test(trimmed) &&
+      /"outcome"\s*:\s*"(?:allow|deny)"/i.test(trimmed)
+    ) || (
+      /"user_authorization"\s*:/.test(trimmed) &&
+      /"outcome"\s*:\s*"(?:allow|deny)"/i.test(trimmed)
+    );
+  }
+}
+
 function isContextOrMetadataTitle(value: string): boolean {
   const normalized = value.replace(/\s+/g, " ").trim();
+  // Q3 expanded heads (system-reminder without angle brackets owned by Q1)
+  if (/^system-reminder\b/i.test(normalized)) return true;
+  if (/^permissions?\s+instructions?\b/i.test(normalized)) return true;
+  if (/^you are codex\b/i.test(normalized)) return true;
+  if (/^you are reviewing\b/i.test(normalized)) return true;
   const tokens = normalized.toLowerCase().match(/[a-z0-9]+/g) ?? [];
   const metadataTokens = tokens.filter((token) => (
     ["home", "asia", "tokyo", "utc", "timezone"].includes(token) ||

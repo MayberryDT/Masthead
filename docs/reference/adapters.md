@@ -39,3 +39,26 @@ Scanning checks known local agent-history locations and configured overrides onl
 Full transcript import requires explicit approval because transcripts may contain secrets, customer data, private code, proprietary prompts, and local paths.
 
 If local storage is detected but the schema is not recognized, adapters emit diagnostics and do not create successful transcript sessions from unknown data.
+
+## OMP import path (B7)
+
+OMP's custom `backfillOmpSource` emits structured `tool_call` / `tool_result` records from
+assistant `toolCall` content parts and `role=toolResult` rows. The import runner prefers
+`parseTranscriptUnit` over `backfill`; that method is overridden to call the same custom
+emitter (same pattern as Codex/Grok). Without the override, generic JSONL parse stores
+`toolResult` as `messages.role='tool'` and drops `toolCall` parts, so quality precheck
+never sees `substantial_tool_work`.
+
+### Repairing sessions imported before the fix
+
+Existing OMP rows that show many `messages.role='tool'` and zero `tool_calls` /
+`tool_results` need re-import, not a precheck loosen:
+
+1. Identify OMP import jobs (or work units) for the affected sources.
+2. Preview repair: `mastheadctl import repair --job <id> --json` (or UI Sources repair).
+3. Apply repair with the returned plan hash so units/cursors reset and re-parse.
+4. After re-import, quality reconcile re-runs from evidence revision; sessions with
+   `userMessages >= 1` and `tool_calls + tool_results >= 4` should keep as
+   `substantial_tool_work`. Thin residual OMP (0–1 tools, no assistant text) stay review.
+
+Do not auto-keep incomplete Grok user-only shells as part of this fix.

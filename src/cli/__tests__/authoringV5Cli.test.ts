@@ -2,7 +2,10 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { WORKBENCH_AUTHORING_V5_SAVE_BODY_LIMIT_BYTES } from "../../shared/workbenchAuthoringV5.ts";
+import {
+  WORKBENCH_AUTHORING_V5_INCOMPLETE_STOP_RULE,
+  WORKBENCH_AUTHORING_V5_SAVE_BODY_LIMIT_BYTES
+} from "../../shared/workbenchAuthoringV5.ts";
 import { runMastheadCli } from "../mastheadctl.ts";
 
 const tempDirs: string[] = [];
@@ -13,6 +16,94 @@ afterEach(async () => {
 });
 
 describe("mastheadctl workbench-authoring-v5", () => {
+  test("help emphasizes incomplete stop rule and status (ISSUE-A6)", async () => {
+    const authorHelp = await runMastheadCli(["workbench", "author", "--help"], { env: {} });
+    expect(authorHelp.exitCode).toBe(0);
+    expect(authorHelp.stdout).toMatch(/only stop when nextAction\.kind is "complete"/i);
+    expect(authorHelp.stdout).toMatch(/request receipt/i);
+    expect(authorHelp.stdout).toMatch(/Pack finish is not request completion/i);
+    expect(authorHelp.stdout).toContain("workbench author status --request");
+    expect(authorHelp.stdout).toContain("workbench author receipt --request");
+
+    const workbenchHelp = await runMastheadCli(["workbench", "--help"], { env: {} });
+    expect(workbenchHelp.exitCode).toBe(0);
+    expect(workbenchHelp.stdout).toMatch(/Pack finish is not request completion/i);
+    expect(workbenchHelp.stdout).toContain("workbench author status --request");
+  });
+
+  test("non-json finish with claim_next prints incomplete warning (ISSUE-A6)", async () => {
+    const instanceDir = await mkdtemp(join(tmpdir(), "masthead-authoring-v5-cli-incomplete-"));
+    tempDirs.push(instanceDir);
+    const instanceManifest = join(instanceDir, "masthead-instance.json");
+    const command = join(instanceDir, "bin", "mastheadctl");
+    const identity = {
+      baseUrl: "http://127.0.0.1:17373",
+      buildSha: "build:test",
+      databaseId: "database:test",
+      instanceId: "instance:test",
+      instanceManifest
+    };
+    await writeFile(instanceManifest, JSON.stringify({
+      schemaVersion: 1,
+      instanceId: identity.instanceId,
+      baseUrl: identity.baseUrl,
+      databaseId: identity.databaseId,
+      buildSha: identity.buildSha,
+      pid: 12345,
+      instanceDir,
+      updatedAt: "2026-07-22T12:00:00.000Z"
+    }));
+    const requestId = "authoring-v5-request:incomplete";
+    const packId = "authoring-v5-pack:one";
+    const startCommand = `${command} workbench author start --request '${requestId}' --json`;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/workbench/authoring/capabilities") {
+        return response({
+          ...identity,
+          bundleVersion: "workbench-authoring-v5",
+          capability: "artifact_authoring",
+          command,
+          maximumSessionsPerPack: 12,
+          minimumSessionsPerPack: 5,
+          operations: ["bootstrap", "start", "claim", "inspect", "scaffold", "save", "finish", "status", "receipt"],
+          policyVersion: "workbench-authoring-v5",
+          protocol: "masthead.workbench.authoring/v1"
+        });
+      }
+      if (url.pathname.endsWith("/finish") && String(init?.method).toUpperCase() === "POST") {
+        return response({
+          nextAction: {
+            kind: "claim_next",
+            reason: "Request incomplete (5/10 sessions, 1/2 packs). Immediately run nextAction.command. Do not report success.",
+            command: startCommand,
+            progress: {
+              packsCompleted: 1,
+              packsTotal: 2,
+              sessionsAttempted: 5,
+              sessionsTotal: 10,
+              requestComplete: false
+            },
+            stopRule: WORKBENCH_AUTHORING_V5_INCOMPLETE_STOP_RULE
+          }
+        });
+      }
+      throw new Error(`unexpected_request:${url.pathname}`);
+    }));
+
+    const result = await runMastheadCli(
+      ["workbench", "author", "finish", "--pack", packId],
+      { env: { MASTHEAD_INSTANCE_MANIFEST: instanceManifest } }
+    );
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    expect(result.stdout).toMatch(/Request incomplete/i);
+    expect(result.stdout).toContain(startCommand);
+    expect(result.stdout).toContain(WORKBENCH_AUTHORING_V5_INCOMPLETE_STOP_RULE);
+    expect(result.stdout).toMatch(/pack finish is not done/i);
+    expect(result.stdout).toContain("workbench author status --request");
+  });
+
   test.each([
     ["review", ["review", "--assignment", "assignment:legacy"]],
     ["assignment inspect", ["inspect", "--assignment", "assignment:legacy"]],

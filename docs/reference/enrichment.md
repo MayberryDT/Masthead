@@ -13,15 +13,29 @@ while their mutations fail with `authoring_contract_retired` before writing.
 
 **Copy Agent Prompt** creates one durable request from the compile-ready selection and discloses any
 review-needed rows left out. The clipboard contains only the opaque request ID and one instance-bound
-start command. Every mutation verifies daemon URL, database ID, build SHA, manifest path, and live
-instance identity so development and production cannot share a launcher or database accidentally.
+start command (plus stop-rule restatement). Every mutation verifies daemon URL, database ID, build
+SHA, manifest path, and live instance identity so development and production cannot share a launcher
+or database accidentally.
+
+Review-hold sessions never enter the handoff selection. Operators must accept them to ready or fail
+them to Not Added before they can join a later request. **Select-all for authoring / Copy Agent
+Prompt is compile-ready only** — review-only rows are left out of the V5 request (package-path size
+alone is not the authorable count). See
+[Logbook and Workbench](../../openwiki/logbook-and-workbench.md#workbench-quality-exits-three-way).
 
 ## Packs and complete-selection obligation
 
 The daemon divides the full selection into fixed packs of 5–12 sessions, except the final remainder.
-One agent follows the returned next action until the immutable request receipt exists. Resume uses
-the same request ID only after a crash; it does not reduce the selected work or turn completed packs
-into optional follow-up.
+One agent follows the returned next action until the immutable **request** receipt exists.
+
+**Stop rule:** pack finish is not request completion. After a non-final finish the daemon returns a
+continue action (typically `claim_next`); the agent must run `nextAction.command` immediately and
+must not report success. Stop only when `nextAction.kind === "complete"` and the request receipt
+exists. A pack receipt proves that pack only.
+
+**Resume:** use the same request ID with `author bootstrap --request <id>` (then the returned next
+action / start). Completed packs stay published; the selection is not reduced and finished packs are
+not optional follow-up.
 
 ## CLI loop
 
@@ -49,18 +63,60 @@ not contain a deterministic title, summary, purpose, outcome, keyword suggestion
 agent must inspect the evidence, then cite canonical evidence for the core fields: title,
 description, purpose, outcome, key work, and verification.
 
+Bootstrap `skillContract.synthesisRule` requires the last substantive user ask and retained assistant
+outcome—not AGENTS.md / skill dumps, system-reminder text, MCP connection prose as title or primary
+ask, and not approval JSON (`risk_level`, `outcome: allow`) pasted into description. Masthead still
+writes no enrichment prose; scaffold fields stay blank until the agent fills them.
+
 Agents never author a session dossier body. Accepted durable enrichment is applied to the canonical
 session graph, then the daemon rebuilds the immutable `canonical-session-dossier-v1` presentation.
 
-## Quality behavior
+## Capture quality vs authoring quality
 
-Hard rejects skip that session and let the pack continue: empty or generic titles, protocol or
-compaction boilerplate, empty or insufficient keywords, a purpose that is clearly not the user ask,
-or missing/unknown core grounding. Soft flags publish with Activity warnings for weak verification or
-thin key work. Missing decisions are valid when the session contained no durable decision.
+Two different quality layers:
+
+1. **Workbench capture / publication quality** (before handoff) — three exits: **ready** (`keep`),
+   **review hold** (`review` on package path), **Not Added** (`suppress`). Only ready rows enter
+   **Copy Agent Prompt**. Review hold with Not Added = 0 is normal: review is not Not Added, and it
+   is not agent-ready either. Operator bulk accept/fail is the intended drain for large review
+   backlogs.
+2. **V5 save quality** (inside a pack) — hard rejects skip publish for that session and, on finish,
+   **leave the package path** (Not Added, reason `authoring_hard_reject`); soft flags publish with
+   Activity warnings. Neither outcome creates a request-wide revision loop.
+
+## Quality behavior (save-time)
+
+Hard rejects skip publish for that session and let the pack continue: empty or generic titles,
+protocol or compaction boilerplate, empty or insufficient keywords, a purpose that is clearly not
+the user ask, or missing/unknown core grounding. Soft flags publish with Activity warnings for weak
+verification or thin key work. Missing decisions are valid when the session contained no durable
+decision.
 
 One pack may publish a mix of passing, soft-flagged, and rejected sessions. Save never sends the
 whole request into a revision loop.
+
+### After finish: hard-reject clearance (package path)
+
+On pack **finish**, each session outcome updates Workbench pipeline state:
+
+| Disposition | Pipeline after finish |
+|-------------|------------------------|
+| `publishable` / `soft_flag` | Leaves package path as **published** (Logbook) |
+| `hard_reject` | Leaves package path as **Not Added** with reason **`authoring_hard_reject`** |
+
+Hard-rejected rows must not remain `publish_path` + `enrich` after a finished campaign. Activity
+records `authoring_session_rejected` (and related detail) so operators see reject → Not Added, not
+“still enriching.”
+
+After a request reaches `nextAction.kind === "complete"`:
+
+- Sessions that were in the request are either published or Not Added (`authoring_hard_reject`).
+- **Only unfinished ready work** remains authorable on the package path (sessions never selected,
+  or newly arrived compile-ready rows).
+- **Request complete ≠ empty Workbench.** Review-hold rows and new imports can still appear; they
+  were never part of that completed selection.
+
+Select-all for the next campaign again excludes review-only rows from handoff.
 
 ## Optional artifacts
 

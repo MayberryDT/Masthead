@@ -2072,9 +2072,69 @@ main {
 
 .workbench-panel > .workbench-toolbar,
 .workbench-panel > .workbench-error,
+.workbench-panel > .workbench-campaign-status,
+.workbench-panel > .workbench-incomplete-banner,
 .workbench-panel > .workbench-action-summary,
-.workbench-panel > .workbench-not-added-panel {
+.workbench-panel > .workbench-not-added-panel,
+.workbench-panel > .workbench-quality-review-panel {
   flex: 0 0 auto;
+}
+
+.workbench-campaign-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 2px;
+  min-width: 0;
+  min-height: 32px;
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px solid rgba(92, 153, 187, 0.18);
+  border-radius: 3px;
+  background: rgba(3, 16, 25, 0.5);
+  box-shadow:
+    inset 0 0 0 1px rgba(92, 153, 187, 0.08),
+    inset 0 1px 0 rgba(246, 251, 255, 0.035);
+  color: var(--body);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+}
+
+.workbench-campaign-status.is-stalled {
+  border-color: rgba(255, 207, 54, 0.34);
+  background: rgba(255, 207, 54, 0.07);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 207, 54, 0.12),
+    inset 0 1px 0 rgba(246, 251, 255, 0.04);
+}
+
+.workbench-campaign-status-label {
+  color: var(--mute);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  font-size: 10px;
+}
+
+.workbench-campaign-status-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+.workbench-campaign-status-sep {
+  color: var(--mute);
+  opacity: 0.75;
+}
+
+.workbench-campaign-status-stalled {
+  color: #ffd978;
+  font-weight: 700;
+  letter-spacing: 0.03em;
 }
 
 .workbench-surface {
@@ -2098,7 +2158,7 @@ main {
   max-width: 100%;
   min-height: 56px;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   /* Panel gap supplies bottom rhythm; avoid stacking shared toolbar margin. */
   margin: 0;
   flex-wrap: nowrap;
@@ -2115,7 +2175,8 @@ main {
   align-items: center;
   gap: 6px;
   min-width: 0;
-  overflow: hidden; /* pipeline expands inline; avoid vertical scrollbar from a popover */
+  /* Pipeline expands into full toolbar width — facts live under the session table. */
+  overflow: hidden;
 }
 
 .workbench-toolbar-actions .app-button {
@@ -2327,26 +2388,30 @@ main {
   }
 }
 
-.workbench-toolbar-facts {
+/* Queue facts sit under the session table so Pipeline can use the full toolbar width. */
+.workbench-queue-facts {
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: max-content;
+  grid-auto-columns: minmax(0, 1fr);
   gap: 6px;
   min-width: 0;
   margin: 0;
-  margin-left: auto;
-  flex: 0 0 auto;
-  align-items: center;
+  align-items: stretch;
+  border: 1px solid rgba(92, 153, 187, 0.16);
+  border-top: 0;
+  border-radius: 0 0 5px 5px;
+  background: #061925;
+  padding: 6px 8px;
 }
 
-.workbench-toolbar-facts div {
+.workbench-queue-facts div {
   display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: center;
   gap: 8px;
   min-width: 0;
-  min-height: 40px;
+  min-height: 34px;
   border: 1px solid rgba(92, 153, 187, 0.14);
   border-radius: 3px;
   background: rgba(3, 16, 25, 0.5);
@@ -2357,14 +2422,14 @@ main {
   text-align: left;
 }
 
-.workbench-toolbar-facts div.is-active {
+.workbench-queue-facts div.is-active {
   border-color: rgba(46, 167, 255, 0.34);
   box-shadow:
     inset 0 0 0 1px rgba(46, 167, 255, 0.16),
     inset 0 1px 0 rgba(246, 251, 255, 0.05);
 }
 
-.workbench-toolbar-facts dt {
+.workbench-queue-facts dt {
   flex: 0 0 auto;
   margin: 0;
   color: var(--mute);
@@ -2374,7 +2439,7 @@ main {
   white-space: nowrap;
 }
 
-.workbench-toolbar-facts dd {
+.workbench-queue-facts dd {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
@@ -2590,6 +2655,15 @@ main {
   margin: 0;
 }
 
+.workbench-quality-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
 .workbench-not-added-table-wrap {
   max-height: 220px;
 }
@@ -2619,6 +2693,38 @@ main {
   margin: 0;
   color: var(--body);
   line-height: 1.45;
+}
+
+.workbench-incomplete-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  border: 1px solid rgba(255, 207, 54, 0.28);
+  border-radius: 5px;
+  background: rgba(255, 207, 54, 0.08);
+  padding: 12px 14px;
+}
+
+.workbench-incomplete-banner-body {
+  min-width: 0;
+}
+
+.workbench-incomplete-banner .mono-label {
+  margin: 0 0 4px;
+  color: #ffd978;
+}
+
+.workbench-incomplete-banner p {
+  margin: 0;
+  color: var(--body);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.workbench-incomplete-banner .workbench-copy-resume {
+  flex: 0 0 auto;
 }
 
 .workbench-layout {
@@ -2729,7 +2835,7 @@ main {
 
 .workbench-queue-column {
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr) auto auto;
   min-width: 0;
   min-height: 0;
   height: 100%;
@@ -2745,7 +2851,7 @@ main {
   min-height: 40px;
   border: 1px solid rgba(92, 153, 187, 0.16);
   border-top: 0;
-  border-radius: 0 0 5px 5px;
+  border-radius: 0;
   background: #061925;
   padding: 6px 10px;
 }
@@ -3438,17 +3544,9 @@ main {
 
 @media (max-width: 1120px) {
   .workbench-toolbar.observability-toolbar {
-    flex-direction: column;
     flex-wrap: nowrap;
     align-items: stretch;
-    overflow: visible;
-  }
-
-  .workbench-toolbar-facts {
-    margin-left: 0;
-    grid-auto-flow: row;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    grid-auto-columns: unset;
+    overflow: hidden;
   }
 
   .workbench-toolbar-actions {
@@ -3457,8 +3555,14 @@ main {
   }
 
   .workbench-toolbar.observability-toolbar .workbench-toolbar-actions {
-    flex: 0 0 auto;
+    flex: 1 1 auto;
     min-height: 40px;
+  }
+
+  .workbench-queue-facts {
+    grid-auto-flow: row;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-auto-columns: unset;
   }
 
   .workbench-layout {
@@ -3496,7 +3600,7 @@ main {
     display: none;
   }
 
-  .workbench-toolbar-facts {
+  .workbench-queue-facts {
     grid-template-columns: 1fr;
   }
 

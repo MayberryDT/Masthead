@@ -29,6 +29,7 @@ import {
   buildWorkbenchAuthoringV5Scaffold,
   createWorkbenchAuthoringV5Request,
   finishWorkbenchAuthoringV5Pack,
+  getIncompleteWorkbenchAuthoringV5RequestSummary,
   getWorkbenchAuthoringV5RequestReceiptStatus,
   getWorkbenchAuthoringV5RequestStatus,
   inspectWorkbenchAuthoringV5Pack,
@@ -72,6 +73,12 @@ export function routeWorkbenchAuthoringV5Request(
   if (!isWorkbenchAuthoringV5Path(pathname)) return undefined;
   try {
     if (pathname === "/workbench/authoring/v5/requests") {
+      if (request.method === "GET") {
+        return {
+          body: getIncompleteWorkbenchAuthoringV5RequestSummary(context.db, { command: context.authoringCommand }),
+          status: 200
+        };
+      }
       if (request.method !== "POST") return methodNotAllowed();
       const body = record(request.body);
       const creationToken = requiredString(body.creationToken, "creationToken");

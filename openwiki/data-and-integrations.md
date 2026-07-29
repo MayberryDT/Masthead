@@ -69,6 +69,18 @@ into fixed packs of 5–12 sessions, except the final remainder. The agent trave
 enriches every pack session, and may submit zero or more grounded optional artifacts. There is **no
 Logbook bulk-enrich UI or primary bulk-enrich product path**.
 
+**Quality exits before handoff:** complete sessions leave precheck as ready (`keep`), review hold
+(`review` on the package path), or Not Added (`suppress`). Only ready rows join **Copy Agent
+Prompt**; review counts can be large while Not Added stays 0. Operators accept review → ready or
+fail review → Not Added (bulk disposition is the intended drain). Detail:
+[Logbook and Workbench](logbook-and-workbench.md#workbench-quality-exits-three-way),
+[enrichment reference](../docs/reference/enrichment.md).
+
+**Authoring stop rule:** a pack finish and pack receipt are not request completion. The agent stops
+only when `nextAction.kind === "complete"` and the immutable request receipt exists; after a
+non-final finish it must run the returned `nextAction.command` (typically claim next pack). Resume
+an incomplete request with the same request id and bootstrap/start — completed packs stay published.
+
 The original dossier is different: the daemon snapshots `SessionDossierDto` as
 `canonical-session-dossier-v1`, and Logbook renders that immutable body through
 the original dossier presentation. An authoring agent has no dossier-body write

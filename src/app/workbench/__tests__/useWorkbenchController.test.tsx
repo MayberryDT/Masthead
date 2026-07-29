@@ -5,18 +5,24 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { WorkbenchEnrollMissingResponse, WorkbenchQueueSessionDto } from "../../../shared/workbench";
 import type { GuidedAuthoringReviewDto } from "../../../shared/guidedAuthoring";
-import type { WorkbenchAuthoringV5CapabilitiesDto } from "../../../shared/workbenchAuthoringV5";
+import type {
+  WorkbenchAuthoringV5CapabilitiesDto,
+  WorkbenchAuthoringV5IncompleteRequestSummaryDto
+} from "../../../shared/workbenchAuthoringV5";
 import {
   useWorkbenchController,
   type UseWorkbenchControllerResult,
   type WorkbenchActionKind
 } from "../useWorkbenchController";
 import {
+  getIncompleteWorkbenchAuthoringRequest,
   getWorkbenchAuthoringCapabilities,
   getWorkbenchActivity,
   getWorkbenchImportHealthSummary,
   getWorkbenchNotAddedSessions,
   getWorkbenchNotAddedSummary,
+  getWorkbenchQualityReviewSessions,
+  getWorkbenchQualityReviewSummary,
   getWorkbenchSessions,
   getDataRevisions,
   createGuidedAuthoringRequest,
@@ -31,11 +37,14 @@ import {
 
 const daemonClientMocks = vi.hoisted(() => ({
   getDataRevisions: vi.fn().mockResolvedValue({ logbook: 0, workbench: 0 }),
+  getIncompleteWorkbenchAuthoringRequest: vi.fn().mockResolvedValue({}),
   getWorkbenchAuthoringCapabilities: vi.fn(),
   getWorkbenchActivity: vi.fn(),
   getWorkbenchImportHealthSummary: vi.fn().mockResolvedValue({ ok: true, importJobIds: [], reasons: [], repairRequired: 0 }),
   getWorkbenchNotAddedSessions: vi.fn(),
   getWorkbenchNotAddedSummary: vi.fn(),
+  getWorkbenchQualityReviewSessions: vi.fn(),
+  getWorkbenchQualityReviewSummary: vi.fn(),
   getWorkbenchSessions: vi.fn(),
   createGuidedAuthoringRequest: vi.fn(),
   listPendingGuidedCanaries: vi.fn().mockResolvedValue([]),
@@ -95,6 +104,72 @@ afterEach(async () => {
 });
 
 describe("useWorkbenchController", () => {
+  test("loads incomplete authoring campaign summary for Workbench status strip", async () => {
+    mockWorkbenchResponse([session("session:a", "First session")]);
+    vi.mocked(getIncompleteWorkbenchAuthoringRequest).mockResolvedValue({
+      request: incompleteCampaignSummary({
+        requestId: "authoring-v5-request:campaign",
+        stalled: true,
+        packsCompleted: 1,
+        packCount: 87
+      })
+    });
+
+    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
+    await waitFor(() => latest().loading === false && latest().campaignRequest != null);
+
+    expect(getIncompleteWorkbenchAuthoringRequest).toHaveBeenCalledWith(
+      baseUrl,
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
+    expect(latest().campaignRequest?.requestId).toBe("authoring-v5-request:campaign");
+    expect(latest().campaignRequest?.stalled).toBe(true);
+    expect(latest().campaignRequest?.packsCompleted).toBe(1);
+    expect(latest().campaignRequest?.packCount).toBe(87);
+    expect(latest().sessions).toHaveLength(1);
+  });
+
+  test("does not block queue when incomplete campaign summary fetch fails", async () => {
+    mockWorkbenchResponse([session("session:a", "First session")]);
+    vi.mocked(getIncompleteWorkbenchAuthoringRequest).mockRejectedValue(new Error("campaign summary unavailable"));
+
+    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
+    await waitFor(() => latest().loading === false && latest().sessions.length === 1);
+
+    expect(latest().campaignRequest).toBeNull();
+    expect(latest().error).toBeUndefined();
+    expect(latest().sessions[0]?.sessionId).toBe("session:a");
+  });
+
+  test("re-fetches incomplete campaign summary after successful copy_agent_prompt", async () => {
+    mockWorkbenchResponse([session("session:a", "First session")]);
+    vi.mocked(getIncompleteWorkbenchAuthoringRequest)
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({
+        request: incompleteCampaignSummary({
+          requestId: "authoring-v5-request:fresh",
+          stalled: false,
+          packsCompleted: 0,
+          packCount: 2
+        })
+      });
+    vi.mocked(createGuidedAuthoringRequest).mockResolvedValue(guidedRequestResult("authoring-v5-request:fresh"));
+
+    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
+    await waitFor(() => latest().loading === false && latest().campaignRequest === null);
+    expect(getIncompleteWorkbenchAuthoringRequest).toHaveBeenCalledTimes(1);
+
+    await select("session:a");
+    await act(async () => {
+      await latest().copyAgentPrompt();
+    });
+    await waitFor(() => latest().campaignRequest?.requestId === "authoring-v5-request:fresh");
+
+    expect(vi.mocked(getIncompleteWorkbenchAuthoringRequest).mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(latest().campaignRequest?.requestId).toBe("authoring-v5-request:fresh");
+    expect(latest().campaignRequest?.stalled).toBe(false);
+  });
+
   test("creates a durable guided request before returning the copied prompt", async () => {
     mockWorkbenchResponse([
       session("session:a", "First session"),
@@ -222,6 +297,7 @@ describe("useWorkbenchController", () => {
     );
     vi.mocked(getWorkbenchActivity).mockResolvedValue(activityResponse());
     vi.mocked(getWorkbenchNotAddedSummary).mockResolvedValue(notAddedSummary());
+    vi.mocked(getWorkbenchQualityReviewSummary).mockResolvedValue(qualityReviewSummary());
     vi.mocked(createGuidedAuthoringRequest).mockResolvedValue(guidedRequestResult("request:paged"));
     vi.mocked(getWorkbenchSessions).mockImplementation(async (_base, options = {}) => {
       const pageSessions = options.offset === 100
@@ -263,6 +339,7 @@ describe("useWorkbenchController", () => {
     );
     vi.mocked(getWorkbenchActivity).mockResolvedValue(activityResponse());
     vi.mocked(getWorkbenchNotAddedSummary).mockResolvedValue(notAddedSummary());
+    vi.mocked(getWorkbenchQualityReviewSummary).mockResolvedValue(qualityReviewSummary());
     vi.mocked(getWorkbenchSessions).mockImplementation(async (_base, options = {}) => {
       if (options.offset === 100) {
         return { ...response([session("session:page-2", "Second page")]), offset: 100, total: 101 };
@@ -379,9 +456,12 @@ describe("useWorkbenchController", () => {
     expect(latest().sessions).toEqual([session("session:abc", "Workbench import review")]);
     expect(latest().activity).toEqual([]);
     expect(latest().notAddedSummary).toMatchObject({ total: 0 });
+    expect(latest().qualityReviewSummary).toMatchObject({ total: 0 });
     expect(latest().actionBusy).toBe(false);
     expect(latest().notAddedOpen).toBe(false);
     expect(latest().notAddedSessions).toEqual([]);
+    expect(latest().qualityReviewOpen).toBe(false);
+    expect(latest().qualityReviewSessions).toEqual([]);
   });
 
   test("does not load while inactive or offline", async () => {
@@ -402,6 +482,7 @@ describe("useWorkbenchController", () => {
       .mockResolvedValueOnce(response([session("session:def", "Second session")]));
     vi.mocked(getWorkbenchActivity).mockResolvedValue(activityResponse());
     vi.mocked(getWorkbenchNotAddedSummary).mockResolvedValue(notAddedSummary());
+    vi.mocked(getWorkbenchQualityReviewSummary).mockResolvedValue(qualityReviewSummary());
 
     await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
     await waitFor(() => (latest()?.sessions.length ?? 0) === 2);
@@ -427,6 +508,7 @@ describe("useWorkbenchController", () => {
       .mockResolvedValue(response([]));
     vi.mocked(getWorkbenchActivity).mockResolvedValue(activityResponse());
     vi.mocked(getWorkbenchNotAddedSummary).mockResolvedValue(notAddedSummary());
+    vi.mocked(getWorkbenchQualityReviewSummary).mockResolvedValue(qualityReviewSummary());
     vi.mocked(getWorkbenchAuthoringCapabilities).mockResolvedValue(
       authoringCapabilities("database:test", "/home/test/.local/bin/mastheadctl")
     );
@@ -519,6 +601,7 @@ describe("useWorkbenchController", () => {
     );
     vi.mocked(getWorkbenchActivity).mockResolvedValue(activityResponse());
     vi.mocked(getWorkbenchNotAddedSummary).mockResolvedValue(notAddedSummary());
+    vi.mocked(getWorkbenchQualityReviewSummary).mockResolvedValue(qualityReviewSummary());
     vi.mocked(getWorkbenchSessions).mockImplementation(async (_base, options = {}) => {
       if (options.limit === 500) {
         return {
@@ -544,6 +627,9 @@ describe("useWorkbenchController", () => {
     expect(Array.from(latest().selectedSessionIds).sort()).toEqual(["session:a", "session:b"]);
     expect(latest().agentPromptSessionCount).toBe(1);
     expect(latest().agentPromptExcludedCount).toBe(1);
+    expect(latest().lastActionSummary).toBe(
+      "Selected all 2 package-path sessions"
+    );
     expect(latest().canRun("copy_agent_prompt")).toBe(true);
     vi.mocked(createGuidedAuthoringRequest).mockResolvedValue(guidedRequestResult("request:select-all"));
     await act(async () => {
@@ -558,6 +644,7 @@ describe("useWorkbenchController", () => {
       .mockResolvedValueOnce(response([session("session:abc", "Recovered session")]));
     vi.mocked(getWorkbenchActivity).mockResolvedValue(activityResponse());
     vi.mocked(getWorkbenchNotAddedSummary).mockResolvedValue(notAddedSummary());
+    vi.mocked(getWorkbenchQualityReviewSummary).mockResolvedValue(qualityReviewSummary());
 
     await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
     await waitFor(() => latest()?.error === "temporary failure");
@@ -751,6 +838,7 @@ describe("useWorkbenchController", () => {
       .mockResolvedValueOnce(response([checked]));
     vi.mocked(getWorkbenchActivity).mockResolvedValue(activityResponse());
     vi.mocked(getWorkbenchNotAddedSummary).mockResolvedValue(notAddedSummary());
+    vi.mocked(getWorkbenchQualityReviewSummary).mockResolvedValue(qualityReviewSummary());
     vi.mocked(postWorkbenchCheckTranscript).mockResolvedValue({ ok: true });
 
     await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
@@ -826,10 +914,13 @@ describe("useWorkbenchController", () => {
     await waitFor(() => (latest()?.sessions.length ?? 0) === 3);
 
     await select("session:quality");
+    expect(latest().qualityReviewSelectedCount).toBe(1);
     await act(async () => {
       await latest().runAction("quality_pass");
     });
     expect(postWorkbenchQuality).toHaveBeenCalledWith(baseUrl, "session:quality", { status: "passed" });
+    expect(latest().lastActionSummary).toContain("Accepted quality for 1 review session");
+    expect(latest().lastActionSummary).toContain("compile-ready");
 
     await select("session:quality");
     await act(async () => {
@@ -839,6 +930,9 @@ describe("useWorkbenchController", () => {
       status: "failed",
       reason: "operator_rejected"
     });
+    expect(latest().lastActionSummary).toContain("Failed quality for 1 review session");
+    expect(latest().lastActionSummary).toContain("Not Added");
+    expect(latest().lastActionSummary).toContain("operator rejected");
 
     await select("session:quality");
     await act(async () => {
@@ -847,6 +941,8 @@ describe("useWorkbenchController", () => {
     expect(postWorkbenchQuality).toHaveBeenCalledWith(baseUrl, "session:quality", { mode: "precheck" });
 
     await select("session:open");
+    expect(latest().qualityReviewSelectedCount).toBe(0);
+    expect(latest().canRun("quality_pass")).toBe(false);
     await act(async () => {
       await latest().runAction("claim");
     });
@@ -862,6 +958,74 @@ describe("useWorkbenchController", () => {
     expect(postWorkbenchReleaseClaim).toHaveBeenCalledWith(baseUrl, "claim:held", {
       reason: "operator_release"
     });
+  });
+
+  test("bulk quality disposition only acts on review sessions; ready/passed stay untouched", async () => {
+    mockWorkbenchResponse([
+      session("session:review-a", "Review A", {
+        nextAction: "review_quality",
+        qualityStatus: "unchecked",
+        transcriptStatus: "imported"
+      }),
+      session("session:review-b", "Review B", {
+        nextAction: "review_quality",
+        qualityStatus: "unchecked",
+        transcriptStatus: "imported"
+      }),
+      session("session:ready", "Ready", {
+        nextAction: "enrich",
+        qualityStatus: "passed",
+        transcriptStatus: "imported"
+      })
+    ]);
+    vi.mocked(postWorkbenchQuality).mockResolvedValue({ ok: true });
+
+    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
+    await waitFor(() => (latest()?.sessions.length ?? 0) === 3);
+
+    await act(async () => {
+      latest().selectPage();
+      await Promise.resolve();
+    });
+    expect(latest().selectedSessionIds.size).toBe(3);
+    expect(latest().qualityReviewSelectedCount).toBe(2);
+    expect(latest().canRun("quality_pass")).toBe(true);
+    expect(latest().canRun("quality_fail")).toBe(true);
+
+    await act(async () => {
+      await latest().runAction("quality_pass");
+    });
+
+    expect(postWorkbenchQuality).toHaveBeenCalledTimes(2);
+    expect(postWorkbenchQuality).toHaveBeenCalledWith(baseUrl, "session:review-a", { status: "passed" });
+    expect(postWorkbenchQuality).toHaveBeenCalledWith(baseUrl, "session:review-b", { status: "passed" });
+    expect(postWorkbenchQuality).not.toHaveBeenCalledWith(baseUrl, "session:ready", expect.anything());
+    expect(latest().lastActionSummary).toContain("Accepted quality for 2 review sessions");
+    expect(latest().lastActionSummary).toContain("1 ready/passed session");
+    expect(latest().lastActionSummary).toContain("left unchanged");
+
+    vi.mocked(postWorkbenchQuality).mockClear();
+    await act(async () => {
+      latest().selectPage();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await latest().runAction("quality_fail");
+    });
+
+    expect(postWorkbenchQuality).toHaveBeenCalledTimes(2);
+    expect(postWorkbenchQuality).toHaveBeenCalledWith(baseUrl, "session:review-a", {
+      status: "failed",
+      reason: "operator_rejected"
+    });
+    expect(postWorkbenchQuality).toHaveBeenCalledWith(baseUrl, "session:review-b", {
+      status: "failed",
+      reason: "operator_rejected"
+    });
+    expect(postWorkbenchQuality).not.toHaveBeenCalledWith(baseUrl, "session:ready", expect.anything());
+    expect(latest().lastActionSummary).toContain("Failed quality for 2 review sessions");
+    expect(latest().lastActionSummary).toContain("Not Added");
+    expect(latest().lastActionSummary).toContain("1 ready/passed session");
   });
 
   test("copy_agent_prompt reports ready and excluded selected sessions without posting", async () => {
@@ -931,6 +1095,140 @@ describe("useWorkbenchController", () => {
     await waitFor(() => vi.mocked(getWorkbenchNotAddedSessions).mock.calls.length >= 2);
   });
 
+  test("loads Quality review sessions when the panel is opened", async () => {
+    mockWorkbenchResponse([session("session:abc", "Queue session")]);
+    vi.mocked(getWorkbenchQualityReviewSummary).mockResolvedValue({
+      ok: true,
+      total: 538,
+      reasons: [{ reason: "insufficient_evidence", count: 538 }]
+    });
+    vi.mocked(getWorkbenchQualityReviewSessions).mockResolvedValue({
+      ok: true,
+      generatedAt: "2026-07-07T12:00:00.000Z",
+      limit: 50,
+      total: 538,
+      sessions: [
+        {
+          sessionId: "session:review",
+          title: "Insufficient evidence",
+          runtime: "grok",
+          lifecycle: "ended",
+          lastActivityAt: "2026-07-07T11:00:00.000Z",
+          reason: "insufficient_evidence"
+        }
+      ]
+    });
+
+    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
+    await waitFor(() => (latest()?.sessions.length ?? 0) === 1);
+
+    expect(getWorkbenchQualityReviewSummary).toHaveBeenCalled();
+    expect(latest().qualityReviewSummary).toMatchObject({ total: 538 });
+    expect(getWorkbenchQualityReviewSessions).not.toHaveBeenCalled();
+
+    await act(async () => {
+      latest().setQualityReviewOpen(true);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => (latest()?.qualityReviewSessions.length ?? 0) === 1);
+
+    expect(getWorkbenchQualityReviewSessions).toHaveBeenCalledWith(baseUrl, expect.objectContaining({ limit: 50 }));
+    expect(latest().qualityReviewOpen).toBe(true);
+    expect(latest().qualityReviewSessions[0]?.sessionId).toBe("session:review");
+
+    await act(async () => {
+      latest().loadQualityReview();
+      await Promise.resolve();
+    });
+    await waitFor(() => vi.mocked(getWorkbenchQualityReviewSessions).mock.calls.length >= 2);
+  });
+
+  test("selects Quality review panel rows as review even when not on the current queue page", async () => {
+    mockWorkbenchResponse([
+      session("session:ready", "Ready on page", {
+        nextAction: "enrich",
+        qualityStatus: "passed",
+        transcriptStatus: "imported"
+      })
+    ]);
+    vi.mocked(getWorkbenchQualityReviewSessions).mockResolvedValue({
+      ok: true,
+      generatedAt: "2026-07-07T12:00:00.000Z",
+      limit: 50,
+      total: 2,
+      sessions: [
+        {
+          sessionId: "session:off-page-a",
+          title: "Off page A",
+          runtime: "grok",
+          lifecycle: "ended",
+          lastActivityAt: "2026-07-07T11:00:00.000Z",
+          reason: "insufficient_evidence"
+        },
+        {
+          sessionId: "session:off-page-b",
+          title: "Off page B",
+          runtime: "codex",
+          lifecycle: "ended",
+          lastActivityAt: "2026-07-07T11:01:00.000Z",
+          reason: "insufficient_evidence"
+        }
+      ]
+    });
+    vi.mocked(postWorkbenchQuality).mockResolvedValue({ ok: true });
+
+    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
+    await waitFor(() => (latest()?.sessions.length ?? 0) === 1);
+
+    await act(async () => {
+      latest().setQualityReviewOpen(true);
+      await Promise.resolve();
+    });
+    await waitFor(() => (latest()?.qualityReviewSessions.length ?? 0) === 2);
+
+    await act(async () => {
+      latest().selectQualityReviewVisible();
+      await Promise.resolve();
+    });
+
+    expect(latest().selectedSessionIds.has("session:off-page-a")).toBe(true);
+    expect(latest().selectedSessionIds.has("session:off-page-b")).toBe(true);
+    expect(latest().qualityReviewSelectedCount).toBe(2);
+    expect(latest().canRun("quality_pass")).toBe(true);
+    expect(latest().canRun("quality_fail")).toBe(true);
+
+    await act(async () => {
+      latest().toggleSession("session:off-page-a");
+      await Promise.resolve();
+    });
+    expect(latest().selectedSessionIds.has("session:off-page-a")).toBe(false);
+    expect(latest().qualityReviewSelectedCount).toBe(1);
+
+    await act(async () => {
+      latest().toggleSession("session:off-page-a");
+      await Promise.resolve();
+    });
+    expect(latest().qualityReviewSelectedCount).toBe(2);
+
+    const listCallsBefore = vi.mocked(getWorkbenchQualityReviewSessions).mock.calls.length;
+    await act(async () => {
+      await latest().runAction("quality_fail");
+    });
+
+    expect(postWorkbenchQuality).toHaveBeenCalledTimes(2);
+    expect(postWorkbenchQuality).toHaveBeenCalledWith(baseUrl, "session:off-page-a", {
+      status: "failed",
+      reason: "operator_rejected"
+    });
+    expect(postWorkbenchQuality).toHaveBeenCalledWith(baseUrl, "session:off-page-b", {
+      status: "failed",
+      reason: "operator_rejected"
+    });
+    expect(latest().lastActionSummary).toContain("Failed quality for 2 review sessions");
+    await waitFor(() => vi.mocked(getWorkbenchQualityReviewSessions).mock.calls.length > listCallsBefore);
+  });
+
   test("busy state disables actions until the mutation finishes", async () => {
     mockWorkbenchResponse([session("session:abc", "Busy session")]);
     let resolveCheck: ((value: unknown) => void) | undefined;
@@ -977,6 +1275,7 @@ describe("useWorkbenchController", () => {
       .mockResolvedValueOnce(response([enrolled]));
     vi.mocked(getWorkbenchActivity).mockResolvedValue(activityResponse());
     vi.mocked(getWorkbenchNotAddedSummary).mockResolvedValue(notAddedSummary());
+    vi.mocked(getWorkbenchQualityReviewSummary).mockResolvedValue(qualityReviewSummary());
     vi.mocked(postWorkbenchEnrollMissing).mockResolvedValue({
       ok: true,
       enrolled: 2,
@@ -1044,6 +1343,8 @@ describe("useWorkbenchController", () => {
     expect(latest().lastActionSummary).toBe("No missing sessions to enroll");
     expect(latest().canRun("enroll_missing")).toBe(true);
   });
+
+
 });
 
 async function renderHarness(props: HarnessProps): Promise<void> {
@@ -1126,15 +1427,46 @@ function notAddedSummary() {
   return { ok: true as const, reasons: [], total: 0 };
 }
 
+function qualityReviewSummary() {
+  return { ok: true as const, reasons: [], total: 0 };
+}
+
 function mockWorkbenchResponse(sessions: WorkbenchQueueSessionDto[]): void {
   vi.mocked(getWorkbenchAuthoringCapabilities).mockResolvedValue(
     authoringCapabilities("database:test", "/home/test/.local/bin/mastheadctl")
   );
+  vi.mocked(getIncompleteWorkbenchAuthoringRequest).mockResolvedValue({});
   vi.mocked(getWorkbenchSessions).mockResolvedValue(response(sessions));
   vi.mocked(getWorkbenchActivity).mockResolvedValue(activityResponse());
   vi.mocked(listPendingGuidedCanaries).mockResolvedValue([]);
   vi.mocked(getWorkbenchNotAddedSummary).mockResolvedValue(notAddedSummary());
+  vi.mocked(getWorkbenchQualityReviewSummary).mockResolvedValue(qualityReviewSummary());
   vi.mocked(getWorkbenchImportHealthSummary).mockResolvedValue({ ok: true, importJobIds: [], reasons: [], repairRequired: 0 });
+}
+
+function incompleteCampaignSummary(
+  overrides: Partial<WorkbenchAuthoringV5IncompleteRequestSummaryDto> = {}
+): WorkbenchAuthoringV5IncompleteRequestSummaryDto {
+  return {
+    requestId: "authoring-v5-request:default",
+    status: "active",
+    packsCompleted: 0,
+    packCount: 1,
+    sessionsCompleted: 0,
+    sessionCount: 12,
+    publishedSessionCount: 0,
+    rejectedSessionCount: 0,
+    softFlaggedSessionCount: 0,
+    stalled: false,
+    idleMs: 0,
+    currentPackId: "authoring-v5-pack:current",
+    handoff: {
+      requestId: "authoring-v5-request:default",
+      startCommand: "/home/test/.local/bin/mastheadctl workbench author bootstrap --request 'authoring-v5-request:default' --json"
+    },
+    updatedAt: "2026-07-20T12:00:00.000Z",
+    ...overrides
+  };
 }
 
 function authoringCapabilities(databaseId: string, command: string): WorkbenchAuthoringV5CapabilitiesDto {
@@ -1195,7 +1527,9 @@ function guidedRequestResult(requestId: string) {
     nextAction: {
       command: `/home/test/.local/bin/mastheadctl workbench author start --request '${requestId}' --json`,
       kind: "start" as const,
-      reason: "Start or resume the next fixed pack."
+      reason: "Start or resume the next fixed pack.",
+      stopRule:
+        'Only stop when nextAction.kind === "complete" and a request receipt exists. Pack finish is not request completion. Immediately run nextAction.command.'
     },
     selection: {
       eligibleSessionCount: 2,

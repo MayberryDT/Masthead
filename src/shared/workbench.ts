@@ -18,7 +18,10 @@ export type CaptureQualityDisposition =
       reason: "meaningful_conversation" | "substantial_tool_work" | "durable_file_effect";
     }
   | { disposition: "review"; reason: "insufficient_evidence" }
-  | { disposition: "suppress"; reason: "empty" | "hook_only" | "diagnostic_only" | "exact_duplicate" };
+  | {
+      disposition: "suppress";
+      reason: "empty" | "hook_only" | "diagnostic_only" | "session_start_only" | "exact_duplicate";
+    };
 
 export type WorkbenchSuppressionCategory = "confirmed_noise" | "insufficient_evidence" | "manual_exclusion";
 export type WorkbenchQualityDecisionSource = "automatic" | "user";
@@ -150,6 +153,31 @@ export type WorkbenchNotAddedResponse = {
   generatedAt: string;
   limit: number;
   sessions: WorkbenchNotAddedSessionDto[];
+  total: number;
+};
+
+/** Package-path sessions held for quality review (not Not Added). */
+export type WorkbenchQualityReviewSummaryDto = {
+  ok: true;
+  total: number;
+  reasons: Array<{ reason: string; count: number }>;
+};
+
+export type WorkbenchQualityReviewSessionDto = {
+  sessionId: string;
+  title: string;
+  project?: string;
+  runtime: string;
+  lifecycle: string;
+  lastActivityAt: string;
+  reason: string;
+};
+
+export type WorkbenchQualityReviewResponse = {
+  ok: true;
+  generatedAt: string;
+  limit: number;
+  sessions: WorkbenchQualityReviewSessionDto[];
   total: number;
 };
 

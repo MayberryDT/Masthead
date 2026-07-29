@@ -749,6 +749,8 @@ export function App() {
           activity={workbench.activity}
           agentPromptExcludedCount={workbench.agentPromptExcludedCount}
           agentPromptSessionCount={workbench.agentPromptSessionCount}
+          campaignRequest={workbench.campaignRequest}
+          qualityReviewSelectedCount={workbench.qualityReviewSelectedCount}
           canRun={workbench.canRun}
           clearActionFeedback={workbench.clearActionFeedback}
           copyAgentPrompt={workbench.copyAgentPrompt}
@@ -762,13 +764,18 @@ export function App() {
           onRetry={workbench.retry}
           onSelectAll={workbench.selectAll}
           onSelectPage={workbench.selectPage}
+          onSelectQualityReviewVisible={workbench.selectQualityReviewVisible}
           onToggleSession={workbench.toggleSession}
           page={workbench.page}
           pageSize={workbench.pageSize}
+          qualityReviewOpen={workbench.qualityReviewOpen}
+          qualityReviewSessions={workbench.qualityReviewSessions}
+          qualityReviewSummary={workbench.qualityReviewSummary}
           runAction={workbench.runAction}
           selectedSessionIds={workbench.selectedSessionIds}
           sessions={workbench.sessions}
           setNotAddedOpen={workbench.setNotAddedOpen}
+          setQualityReviewOpen={workbench.setQualityReviewOpen}
           setPage={workbench.setPage}
           total={workbench.total}
         />
