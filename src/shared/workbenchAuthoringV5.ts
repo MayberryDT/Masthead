@@ -63,14 +63,33 @@ export type WorkbenchAuthoringV5ProgressDto = {
 
 /**
  * Incomplete-request stop rule. Pack finish is not request completion; agents must
- * keep running nextAction.command until kind is "complete" and a request receipt exists.
+ * keep running nextAction.command until kind is "complete", a request receipt exists,
+ * and every pack for the request is finished.
  */
 export const WORKBENCH_AUTHORING_V5_INCOMPLETE_STOP_RULE =
-  'Only stop when nextAction.kind === "complete" and a request receipt exists. Pack finish is not request completion. Immediately run nextAction.command.';
+  'NOT DONE. Do not stop, end, finish, summarize, or hand control back. ' +
+  'Only stop when nextAction.kind === "complete" AND a request receipt exists AND every pack for this request is finished (progress.packsCompleted === progress.packsTotal). ' +
+  "Finishing one pack — or six packs — is NEVER request completion. Immediately run nextAction.command (and followUp.command if present).";
 
 /** Complete-request stop rule. The immutable request receipt is the terminal artifact. */
 export const WORKBENCH_AUTHORING_V5_COMPLETE_STOP_RULE =
   "The request receipt is immutable and the full request is complete. No further authoring steps are required.";
+
+/** Embed live pack/session progress into the stop rule so mid-run agents cannot miss remaining work. */
+export function workbenchAuthoringV5IncompleteStopRule(
+  progress?: Pick<
+    WorkbenchAuthoringV5ProgressDto,
+    "packsCompleted" | "packsTotal" | "sessionsAttempted" | "sessionsTotal"
+  >
+): string {
+  if (!progress || progress.packsTotal <= 0) return WORKBENCH_AUTHORING_V5_INCOMPLETE_STOP_RULE;
+  const remainingPacks = Math.max(0, progress.packsTotal - progress.packsCompleted);
+  return (
+    `NOT DONE — packs ${progress.packsCompleted}/${progress.packsTotal} (${remainingPacks} remaining), ` +
+    `sessions ${progress.sessionsAttempted}/${progress.sessionsTotal}. ` +
+    WORKBENCH_AUTHORING_V5_INCOMPLETE_STOP_RULE
+  );
+}
 
 export type WorkbenchAuthoringV5PreparationDto = {
   requestId: string;

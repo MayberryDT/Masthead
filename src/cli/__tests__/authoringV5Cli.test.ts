@@ -97,10 +97,10 @@ describe("mastheadctl workbench-authoring-v5", () => {
     );
 
     expect(result.exitCode, result.stderr).toBe(0);
-    expect(result.stdout).toMatch(/Request incomplete/i);
+    expect(result.stdout).toMatch(/Request incomplete|NOT DONE/i);
     expect(result.stdout).toContain(startCommand);
     expect(result.stdout).toContain(WORKBENCH_AUTHORING_V5_INCOMPLETE_STOP_RULE);
-    expect(result.stdout).toMatch(/pack finish is not done/i);
+    expect(result.stdout).toMatch(/pack finish is not (done|request completion)/i);
     expect(result.stdout).toContain("workbench author status --request");
   });
 

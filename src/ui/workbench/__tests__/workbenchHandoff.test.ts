@@ -33,46 +33,23 @@ const baseRequest = {
   request: { requestId: "authoring-v5-request:one" }
 };
 
-const STOP_RULE_LINE =
-  'Stop rule: Do not stop, end, finish, or hand control back until nextAction.kind is "complete", a request receipt exists, and every pack for this request is done.';
-const PACK_LOOP_LINE =
-  "Pack finish is not request completion. One pack done is not done. Keep looping nextAction.command (and followUp if present) until all packs complete.";
-const MILESTONE_LINE =
-  "Progress only counts when mastheadctl save/finish succeeds. Local file edits are not progress.";
-const VERIFICATION_LINE =
-  'Verification: never set status "passed" with empty evidenceRefs.verification; if no verification evidence, use an honest not-run/boundary claim with refs (empty verification refs hard-reject).';
-const LOOP_LINE =
-  "After every pack finish, immediately claim and run the next pack. On hard_reject, read findings, fix the pattern, and continue — do not stop early.";
-
-test("includes stop-rule lines so the copied prompt restates full-request obligation", () => {
+test("includes critical all-packs obligation at the top of the handoff", () => {
   const text = buildWorkbenchHandoff({
     capabilities,
     request: baseRequest as never
   });
 
-  expect(text).toBe(
-    "Masthead authoring request: authoring-v5-request:one\n" +
-      "Start: /opt/masthead/bin/mastheadctl workbench author bootstrap --request 'authoring-v5-request:one' --json\n" +
-      `${STOP_RULE_LINE}\n` +
-      `${PACK_LOOP_LINE}\n` +
-      `${MILESTONE_LINE}\n` +
-      `${VERIFICATION_LINE}\n` +
-      LOOP_LINE
-  );
-  expect(text).toContain(STOP_RULE_LINE);
-  expect(text).toContain(PACK_LOOP_LINE);
-  expect(text).toContain("until all packs complete");
-  expect(text).toContain("do not stop early");
+  expect(text.startsWith("CRITICAL OBLIGATION:")).toBe(true);
+  expect(text).toContain("finish EVERY pack");
+  expect(text).toContain("Stopping after 1 pack, 6 packs, or any partial count is a failure");
+  expect(text).toContain('progress.packsCompleted === progress.packsTotal');
+  expect(text).toContain("Never write a final answer until nextAction.kind is complete");
+  expect(text).toContain("authoring-v5-request:one");
   expect(text).not.toContain("sessionIds");
-  expect(text).not.toContain("guided authoring");
-  expect(text).not.toContain("claimSupport");
   expect(text.toLowerCase()).not.toMatch(/worker|nested agent|sub-agent|multi-agent/);
-  // request id, start, stop rule, pack-finish, milestone, verification, loop
-  expect(text.split("\n")).toHaveLength(7);
-  expect(text).not.toMatch(/^Scope:/m);
 });
 
-test("adds opaque scope counts when create response already exposes sessionCount and packCount", () => {
+test("adds opaque scope counts and pack ownership when available", () => {
   const text = buildWorkbenchHandoff({
     capabilities,
     request: {
@@ -85,14 +62,12 @@ test("adds opaque scope counts when create response already exposes sessionCount
     } as never
   });
 
-  expect(text).toContain("Scope: 25 sessions in 3 fixed packs (daemon-owned).");
-  // scope sits between pack-finish and milestone lines
-  expect(text.split("\n")).toHaveLength(8);
+  expect(text).toContain("Scope: 25 sessions in 3 fixed packs (daemon-owned). You own all 3 packs.");
+  expect(text).toContain("This request has 3 packs covering 25 sessions — all of them.");
   expect(text).not.toContain("sessionIds");
-  expect(text.toLowerCase()).not.toMatch(/worker|nested agent|sub-agent|multi-agent/);
 });
 
-test("omits scope line when sessionCount or packCount is unavailable", () => {
+test("omits numeric scope line when packCount is unavailable", () => {
   const text = buildWorkbenchHandoff({
     capabilities,
     request: {
@@ -100,13 +75,12 @@ test("omits scope line when sessionCount or packCount is unavailable", () => {
       request: {
         requestId: "authoring-v5-request:one",
         sessionCount: 10
-        // packCount missing
       }
     } as never
   });
 
   expect(text).not.toMatch(/^Scope:/m);
-  expect(text.split("\n")).toHaveLength(7);
+  expect(text).toContain("multiple fixed packs — all of them");
 });
 
 test("handoff encodes verification grounding and durable milestones", () => {
@@ -123,8 +97,6 @@ test("handoff encodes verification grounding and durable milestones", () => {
   });
   expect(text).toContain("Progress only counts when mastheadctl save/finish succeeds");
   expect(text).toContain('never set status "passed" with empty evidenceRefs.verification');
-  expect(text).toContain("After every pack finish, immediately claim and run the next pack");
-  expect(text).toContain("every pack for this request is done");
+  expect(text).toContain("Immediately claim and run the next pack");
   expect(text).not.toContain("sessionIds");
-  expect(text.toLowerCase()).not.toMatch(/worker|nested agent|sub-agent|multi-agent/);
 });

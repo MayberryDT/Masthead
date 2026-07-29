@@ -51,6 +51,7 @@ import {
   WORKBENCH_AUTHORING_V5_HARD_REJECT_CODES,
   WORKBENCH_AUTHORING_V5_SOFT_FLAG_CODES,
   WORKBENCH_AUTHORING_V5_INCOMPLETE_STOP_RULE,
+  workbenchAuthoringV5IncompleteStopRule,
   WORKBENCH_AUTHORING_V5_COMPLETE_STOP_RULE,
   toWorkbenchAuthoringV5PreparationDto,
   toWorkbenchAuthoringV5AuthoredDraft,
@@ -1197,16 +1198,28 @@ function finishResult(
   return {
     receipt,
     nextAction,
-    followUp: followUpStartAction(nextAction.command)
+    followUp: followUpStartAction(nextAction.command, nextAction.progress)
   };
 }
 
-function followUpStartAction(startCommand: string): WorkbenchAuthoringV5FollowUp {
+function followUpStartAction(
+  startCommand: string,
+  progress?: WorkbenchAuthoringV5ProgressDto
+): WorkbenchAuthoringV5FollowUp {
+  const remainingPacks =
+    progress && progress.packsTotal > 0
+      ? Math.max(0, progress.packsTotal - progress.packsCompleted)
+      : undefined;
+  const progressBit =
+    progress && progress.packsTotal > 0
+      ? ` Packs ${progress.packsCompleted}/${progress.packsTotal} (${remainingPacks} remaining).`
+      : "";
   return {
     kind: "start",
     command: startCommand,
     reason:
-      "Request incomplete after pack finish. Immediately run this start command to claim the next fixed pack. Do not report success."
+      `NOT DONE after pack finish.${progressBit} Immediately run this start command to claim the next fixed pack. ` +
+      "Do not report success, stop, or hand control back until every pack is complete."
   };
 }
 
@@ -1234,7 +1247,7 @@ function withRequestProgress(
     progress,
     stopRule: progress.requestComplete
       ? WORKBENCH_AUTHORING_V5_COMPLETE_STOP_RULE
-      : WORKBENCH_AUTHORING_V5_INCOMPLETE_STOP_RULE
+      : workbenchAuthoringV5IncompleteStopRule(progress)
   };
 }
 
@@ -1294,14 +1307,16 @@ function finishAction(db: MastheadDatabase, command: string, packId: string): Wo
 }
 function claimNextAction(db: MastheadDatabase, command: string, requestId: string): WorkbenchAuthoringV5NextAction {
   const progress = requestProgress(db, requestId);
+  const remainingPacks = Math.max(0, progress.packsTotal - progress.packsCompleted);
   return {
     kind: "claim_next",
     command: `${command} workbench author start --request ${shellQuote(requestId)} --json`,
     reason:
-      `Request incomplete (${progress.sessionsAttempted}/${progress.sessionsTotal} sessions, ` +
-      `${progress.packsCompleted}/${progress.packsTotal} packs). Immediately run nextAction.command. Do not report success.`,
+      `NOT DONE — ${progress.packsCompleted}/${progress.packsTotal} packs finished, ${remainingPacks} packs remaining ` +
+      `(${progress.sessionsAttempted}/${progress.sessionsTotal} sessions). ` +
+      "Immediately run nextAction.command to claim the next pack. Do not report success, stop, or hand control back.",
     progress: { ...progress, requestComplete: false },
-    stopRule: WORKBENCH_AUTHORING_V5_INCOMPLETE_STOP_RULE
+    stopRule: workbenchAuthoringV5IncompleteStopRule(progress)
   };
 }
 function completeAction(db: MastheadDatabase, requestId: string): WorkbenchAuthoringV5NextAction {

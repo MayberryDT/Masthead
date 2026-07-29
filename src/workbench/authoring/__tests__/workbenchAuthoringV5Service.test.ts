@@ -15,6 +15,7 @@ import type { DurableSessionEnrichment } from "../../../shared/sessionEnrichment
 import {
   WORKBENCH_AUTHORING_V5_COMPLETE_STOP_RULE,
   WORKBENCH_AUTHORING_V5_INCOMPLETE_STOP_RULE,
+  workbenchAuthoringV5IncompleteStopRule,
   toWorkbenchAuthoringV5AuthoredDraft,
   type WorkbenchAuthoringV5Draft
 } from "../../../shared/workbenchAuthoringV5.ts";
@@ -282,7 +283,12 @@ describe("workbench-authoring-v5 loop", () => {
           sessionsTotal: 13,
           requestComplete: false
         },
-        stopRule: WORKBENCH_AUTHORING_V5_INCOMPLETE_STOP_RULE
+        stopRule: workbenchAuthoringV5IncompleteStopRule({
+          packsCompleted: 0,
+          packsTotal: 2,
+          sessionsAttempted: 0,
+          sessionsTotal: 13
+        })
       }
     });
     expect(bootstrap.skillContract.loop).toContain("claim_next_or_complete");
@@ -297,9 +303,11 @@ describe("workbench-authoring-v5 loop", () => {
     expect(bootstrap.skillContract.objective).toMatch(/last substantive user ask/i);
     expect(bootstrap.skillContract.obligation).toMatch(/request-complete receipt/i);
     expect(bootstrap.skillContract.obligation).toMatch(/approval-JSON/i);
+    expect(bootstrap.nextAction.stopRule).toContain("NOT DONE");
+    expect(bootstrap.nextAction.stopRule).toContain("packs 0/2");
     expect(bootstrap.nextAction.stopRule).toContain('nextAction.kind === "complete"');
     expect(bootstrap.nextAction.stopRule).toMatch(/request receipt/i);
-    expect(bootstrap.nextAction.stopRule).toMatch(/Pack finish is not request completion/i);
+    expect(bootstrap.nextAction.stopRule).toMatch(/every pack/i);
     expect(bootstrap.nextAction.stopRule).toMatch(/Immediately run nextAction\.command/i);
 
     let expectedPublished = 0;
@@ -316,7 +324,7 @@ describe("workbench-authoring-v5 loop", () => {
       const packId = started.pack.packId;
       expect(started.nextAction).toMatchObject({
         progress: { requestComplete: false, packsTotal: 2, sessionsTotal: 13 },
-        stopRule: WORKBENCH_AUTHORING_V5_INCOMPLETE_STOP_RULE
+        stopRule: expect.stringContaining("NOT DONE")
       });
 
       while (true) {
@@ -377,13 +385,14 @@ describe("workbench-authoring-v5 loop", () => {
           kind: "claim_next",
           command: expectedStartCommand,
           progress: { requestComplete: false },
-          stopRule: WORKBENCH_AUTHORING_V5_INCOMPLETE_STOP_RULE
+          stopRule: expect.stringContaining("NOT DONE")
         });
+        expect(finished.nextAction.stopRule).toContain("packs 1/2");
         expect(finished.nextAction.kind).not.toBe("complete");
         expect(finished.followUp).toEqual({
           kind: "start",
           command: expectedStartCommand,
-          reason: expect.stringMatching(/incomplete|next|claim|start/i)
+          reason: expect.stringMatching(/NOT DONE|next|claim|start/i)
         });
         expect(finished.requestReceipt).toBeUndefined();
         const midStatus = getWorkbenchAuthoringV5RequestStatus(db, {
@@ -453,12 +462,16 @@ describe("workbench-authoring-v5 loop", () => {
           sessionsTotal: 13,
           requestComplete: false
         });
-        expect(finished.nextAction.stopRule).toBe(WORKBENCH_AUTHORING_V5_INCOMPLETE_STOP_RULE);
-        expect(finished.nextAction.reason).toMatch(
-          new RegExp(
-            `Request incomplete \\(${started.pack.sessionIds.length}/13 sessions, 1/2 packs\\)`
-          )
+        expect(finished.nextAction.stopRule).toBe(
+          workbenchAuthoringV5IncompleteStopRule({
+            packsCompleted: 1,
+            packsTotal: 2,
+            sessionsAttempted: started.pack.sessionIds.length,
+            sessionsTotal: 13
+          })
         );
+        expect(finished.nextAction.reason).toMatch(/NOT DONE/);
+        expect(finished.nextAction.reason).toMatch(/1\/2 packs/);
         expect(finished.nextAction.reason).toMatch(/Immediately run nextAction\.command/);
         expect(finished.nextAction.reason).toMatch(/Do not report success/);
         expect(finished).not.toHaveProperty("requestReceipt");
@@ -796,16 +809,23 @@ describe("workbench-authoring-v5 loop", () => {
         sessionsTotal: 20,
         requestComplete: false
       },
-      stopRule: WORKBENCH_AUTHORING_V5_INCOMPLETE_STOP_RULE
+      stopRule: workbenchAuthoringV5IncompleteStopRule({
+        packsCompleted: 1,
+        packsTotal: 2,
+        sessionsAttempted: 10,
+        sessionsTotal: 20
+      })
     });
     expect(finished.nextAction.kind).not.toBe("complete");
-    expect(finished.nextAction.reason).toContain("Request incomplete (10/20 sessions, 1/2 packs)");
+    expect(finished.nextAction.reason).toContain("NOT DONE");
+    expect(finished.nextAction.reason).toContain("1/2 packs");
+    expect(finished.nextAction.reason).toContain("10/20 sessions");
     expect(finished.nextAction.reason).toContain("Immediately run nextAction.command");
     expect(finished.nextAction.reason).toContain("Do not report success");
     expect(finished.followUp).toEqual({
       kind: "start",
       command: finished.nextAction.command,
-      reason: expect.stringMatching(/incomplete|next fixed pack|do not report success/i)
+      reason: expect.stringMatching(/NOT DONE|next fixed pack|do not report success/i)
     });
     const midStatus = getWorkbenchAuthoringV5RequestStatus(db, {
       command,
@@ -824,7 +844,7 @@ describe("workbench-authoring-v5 loop", () => {
       pack: { ordinal: 1, status: "active" },
       nextAction: {
         progress: { requestComplete: false, packsCompleted: 1, packsTotal: 2 },
-        stopRule: WORKBENCH_AUTHORING_V5_INCOMPLETE_STOP_RULE
+        stopRule: expect.stringContaining("packs 1/2")
       }
     });
     expect(next).not.toHaveProperty("requestReceipt");

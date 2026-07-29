@@ -198,7 +198,7 @@ function formatGuidedHumanOutput(action: WorkbenchAuthoringV5NextAction): string
         : WORKBENCH_AUTHORING_V5_INCOMPLETE_STOP_RULE;
     lines.push(stopRule);
     lines.push(
-      "Request incomplete: pack finish is not done. Check status with mastheadctl workbench author status --request <request-id> --json"
+      "NOT DONE: pack finish is not request completion. Keep looping until every pack is finished. Check: mastheadctl workbench author status --request <request-id> --json"
     );
   } else if (typeof action.stopRule === "string" && action.stopRule.trim()) {
     lines.push(action.stopRule);
