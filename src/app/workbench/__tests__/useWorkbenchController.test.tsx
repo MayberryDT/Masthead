@@ -5,13 +5,17 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { WorkbenchEnrollMissingResponse, WorkbenchQueueSessionDto } from "../../../shared/workbench";
 import type { GuidedAuthoringReviewDto } from "../../../shared/guidedAuthoring";
-import type { WorkbenchAuthoringV5CapabilitiesDto } from "../../../shared/workbenchAuthoringV5";
+import type {
+  WorkbenchAuthoringV5CapabilitiesDto,
+  WorkbenchAuthoringV5IncompleteRequestSummaryDto
+} from "../../../shared/workbenchAuthoringV5";
 import {
   useWorkbenchController,
   type UseWorkbenchControllerResult,
   type WorkbenchActionKind
 } from "../useWorkbenchController";
 import {
+  getIncompleteWorkbenchAuthoringRequest,
   getWorkbenchAuthoringCapabilities,
   getWorkbenchActivity,
   getWorkbenchImportHealthSummary,
@@ -33,6 +37,7 @@ import {
 
 const daemonClientMocks = vi.hoisted(() => ({
   getDataRevisions: vi.fn().mockResolvedValue({ logbook: 0, workbench: 0 }),
+  getIncompleteWorkbenchAuthoringRequest: vi.fn().mockResolvedValue({}),
   getWorkbenchAuthoringCapabilities: vi.fn(),
   getWorkbenchActivity: vi.fn(),
   getWorkbenchImportHealthSummary: vi.fn().mockResolvedValue({ ok: true, importJobIds: [], reasons: [], repairRequired: 0 }),
@@ -99,6 +104,72 @@ afterEach(async () => {
 });
 
 describe("useWorkbenchController", () => {
+  test("loads incomplete authoring campaign summary for Workbench status strip", async () => {
+    mockWorkbenchResponse([session("session:a", "First session")]);
+    vi.mocked(getIncompleteWorkbenchAuthoringRequest).mockResolvedValue({
+      request: incompleteCampaignSummary({
+        requestId: "authoring-v5-request:campaign",
+        stalled: true,
+        packsCompleted: 1,
+        packCount: 87
+      })
+    });
+
+    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
+    await waitFor(() => latest().loading === false && latest().campaignRequest != null);
+
+    expect(getIncompleteWorkbenchAuthoringRequest).toHaveBeenCalledWith(
+      baseUrl,
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
+    expect(latest().campaignRequest?.requestId).toBe("authoring-v5-request:campaign");
+    expect(latest().campaignRequest?.stalled).toBe(true);
+    expect(latest().campaignRequest?.packsCompleted).toBe(1);
+    expect(latest().campaignRequest?.packCount).toBe(87);
+    expect(latest().sessions).toHaveLength(1);
+  });
+
+  test("does not block queue when incomplete campaign summary fetch fails", async () => {
+    mockWorkbenchResponse([session("session:a", "First session")]);
+    vi.mocked(getIncompleteWorkbenchAuthoringRequest).mockRejectedValue(new Error("campaign summary unavailable"));
+
+    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
+    await waitFor(() => latest().loading === false && latest().sessions.length === 1);
+
+    expect(latest().campaignRequest).toBeNull();
+    expect(latest().error).toBeUndefined();
+    expect(latest().sessions[0]?.sessionId).toBe("session:a");
+  });
+
+  test("re-fetches incomplete campaign summary after successful copy_agent_prompt", async () => {
+    mockWorkbenchResponse([session("session:a", "First session")]);
+    vi.mocked(getIncompleteWorkbenchAuthoringRequest)
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({
+        request: incompleteCampaignSummary({
+          requestId: "authoring-v5-request:fresh",
+          stalled: false,
+          packsCompleted: 0,
+          packCount: 2
+        })
+      });
+    vi.mocked(createGuidedAuthoringRequest).mockResolvedValue(guidedRequestResult("authoring-v5-request:fresh"));
+
+    await renderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 1 });
+    await waitFor(() => latest().loading === false && latest().campaignRequest === null);
+    expect(getIncompleteWorkbenchAuthoringRequest).toHaveBeenCalledTimes(1);
+
+    await select("session:a");
+    await act(async () => {
+      await latest().copyAgentPrompt();
+    });
+    await waitFor(() => latest().campaignRequest?.requestId === "authoring-v5-request:fresh");
+
+    expect(getIncompleteWorkbenchAuthoringRequest.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(latest().campaignRequest?.requestId).toBe("authoring-v5-request:fresh");
+    expect(latest().campaignRequest?.stalled).toBe(false);
+  });
+
   test("creates a durable guided request before returning the copied prompt", async () => {
     mockWorkbenchResponse([
       session("session:a", "First session"),
@@ -1364,12 +1435,38 @@ function mockWorkbenchResponse(sessions: WorkbenchQueueSessionDto[]): void {
   vi.mocked(getWorkbenchAuthoringCapabilities).mockResolvedValue(
     authoringCapabilities("database:test", "/home/test/.local/bin/mastheadctl")
   );
+  vi.mocked(getIncompleteWorkbenchAuthoringRequest).mockResolvedValue({});
   vi.mocked(getWorkbenchSessions).mockResolvedValue(response(sessions));
   vi.mocked(getWorkbenchActivity).mockResolvedValue(activityResponse());
   vi.mocked(listPendingGuidedCanaries).mockResolvedValue([]);
   vi.mocked(getWorkbenchNotAddedSummary).mockResolvedValue(notAddedSummary());
   vi.mocked(getWorkbenchQualityReviewSummary).mockResolvedValue(qualityReviewSummary());
   vi.mocked(getWorkbenchImportHealthSummary).mockResolvedValue({ ok: true, importJobIds: [], reasons: [], repairRequired: 0 });
+}
+
+function incompleteCampaignSummary(
+  overrides: Partial<WorkbenchAuthoringV5IncompleteRequestSummaryDto> = {}
+): WorkbenchAuthoringV5IncompleteRequestSummaryDto {
+  return {
+    requestId: "authoring-v5-request:default",
+    status: "active",
+    packsCompleted: 0,
+    packCount: 1,
+    sessionsCompleted: 0,
+    sessionCount: 12,
+    publishedSessionCount: 0,
+    rejectedSessionCount: 0,
+    softFlaggedSessionCount: 0,
+    stalled: false,
+    idleMs: 0,
+    currentPackId: "authoring-v5-pack:current",
+    handoff: {
+      requestId: "authoring-v5-request:default",
+      startCommand: "/home/test/.local/bin/mastheadctl workbench author bootstrap --request 'authoring-v5-request:default' --json"
+    },
+    updatedAt: "2026-07-20T12:00:00.000Z",
+    ...overrides
+  };
 }
 
 function authoringCapabilities(databaseId: string, command: string): WorkbenchAuthoringV5CapabilitiesDto {

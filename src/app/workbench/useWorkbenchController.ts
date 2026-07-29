@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createGuidedAuthoringRequest,
+  getIncompleteWorkbenchAuthoringRequest,
   getWorkbenchAuthoringCapabilities,
   getWorkbenchActivity,
   getWorkbenchNotAddedSessions,
@@ -24,7 +25,10 @@ import type {
   WorkbenchQueueSessionDto,
   WorkbenchSessionsResponse
 } from "../../shared/workbench";
-import type { WorkbenchAuthoringV5CapabilitiesDto } from "../../shared/workbenchAuthoringV5";
+import type {
+  WorkbenchAuthoringV5CapabilitiesDto,
+  WorkbenchAuthoringV5IncompleteRequestSummaryDto
+} from "../../shared/workbenchAuthoringV5";
 import { guidedAuthoringIdentityFromCapabilities } from "../../shared/guidedAuthoring";
 import { buildWorkbenchHandoff } from "../../ui/workbench/workbenchHandoff";
 import { formatSelectAllSummary } from "../../ui/workbench/workbenchSelectionHonesty";
@@ -61,6 +65,8 @@ export type UseWorkbenchControllerResult = {
   activity: WorkbenchActivityDto[];
   agentPromptExcludedCount: number;
   agentPromptSessionCount: number;
+  /** Most recent incomplete (open/active) V5 authoring campaign, if any. */
+  campaignRequest: WorkbenchAuthoringV5IncompleteRequestSummaryDto | null;
   canRun: (kind: WorkbenchActionKind) => boolean;
   clearActionFeedback: () => void;
   clearSelection: () => void;
@@ -109,6 +115,7 @@ export function useWorkbenchController({
   const [qualityReviewSummary, setQualityReviewSummary] = useState<WorkbenchQualityReviewSummaryDto>();
   const [qualityReviewSessions, setQualityReviewSessions] = useState<WorkbenchQualityReviewSessionDto[]>([]);
   const [authoringCapabilities, setAuthoringCapabilities] = useState<WorkbenchAuthoringV5CapabilitiesDto>();
+  const [campaignRequest, setCampaignRequest] = useState<WorkbenchAuthoringV5IncompleteRequestSummaryDto | null>(null);
   const [notAddedOpen, setNotAddedOpenState] = useState(false);
   const [qualityReviewOpen, setQualityReviewOpenState] = useState(false);
   const [selectedSessionIds, setSelectedSessionIds] = useState(() => new Set<string>());
@@ -123,6 +130,7 @@ export function useWorkbenchController({
   const [total, setTotal] = useState(0);
   const pageSize = WORKBENCH_PAGE_SIZE;
   const loadRequestId = useRef(0);
+  const campaignLoadRequestId = useRef(0);
   const copyRequestInFlightRef = useRef<Promise<string> | null>(null);
   const copyCreationRef = useRef<{ fingerprint: string; token: string } | undefined>(undefined);
   const selectedSessionIdsRef = useRef(selectedSessionIds);
@@ -132,6 +140,19 @@ export function useWorkbenchController({
     activeProjectionUrl,
     isLive
   });
+
+  const loadCampaignRequest = useCallback(async (options: { signal?: AbortSignal } = {}) => {
+    const requestId = ++campaignLoadRequestId.current;
+    try {
+      const response = await getIncompleteWorkbenchAuthoringRequest(activeProjectionUrl, {
+        signal: options.signal
+      });
+      if (options.signal?.aborted || requestId !== campaignLoadRequestId.current) return;
+      setCampaignRequest(response.request ?? null);
+    } catch {
+      // Campaign summary is status-strip only; keep any previous value and never block queue rendering.
+    }
+  }, [activeProjectionUrl]);
 
   const load = useCallback(async (options: { signal?: AbortSignal; page?: number } = {}) => {
     const requestId = ++loadRequestId.current;
@@ -143,6 +164,8 @@ export function useWorkbenchController({
       const capabilitiesPromise = getWorkbenchAuthoringCapabilities(activeProjectionUrl, {
         signal: options.signal
       }).catch(() => undefined);
+      // Campaign status strip: fail-soft so queue still renders if summary is unavailable.
+      void loadCampaignRequest({ signal: options.signal });
       const [response, activityResponse, notAdded, qualityReview, capabilities] = await Promise.all([
         getWorkbenchSessions(activeProjectionUrl, {
           limit: pageSize,
@@ -179,7 +202,7 @@ export function useWorkbenchController({
     } finally {
       if (!options.signal?.aborted && requestId === loadRequestId.current) setLoading(false);
     }
-  }, [activeProjectionUrl, page, pageSize]);
+  }, [activeProjectionUrl, loadCampaignRequest, page, pageSize]);
 
   const setPage = useCallback(
     (nextPage: number) => {
@@ -232,7 +255,9 @@ export function useWorkbenchController({
   useEffect(() => {
     if (!active || !isLive) {
       loadRequestId.current += 1;
+      campaignLoadRequestId.current += 1;
       setAuthoringCapabilities(undefined);
+      setCampaignRequest(null);
       return;
     }
     const controller = new AbortController();
@@ -287,6 +312,8 @@ export function useWorkbenchController({
           sessionIds
         });
         if (copyCreationRef.current?.token === creationToken) copyCreationRef.current = undefined;
+        // New campaign should appear on the status strip without waiting for the next queue poll.
+        void loadCampaignRequest();
         return buildWorkbenchHandoff({ capabilities, request });
       } catch (copyError) {
         setActionError(formatActionError(copyError));
@@ -300,7 +327,7 @@ export function useWorkbenchController({
       if (copyRequestInFlightRef.current === operation) copyRequestInFlightRef.current = null;
     }).catch(() => undefined);
     return operation;
-  }, [actionBusy, activeProjectionUrl, agentPromptSessionIds, authoringCapabilities, isLive]);
+  }, [actionBusy, activeProjectionUrl, agentPromptSessionIds, authoringCapabilities, isLive, loadCampaignRequest]);
 
   const canRun = useCallback(
     (kind: WorkbenchActionKind): boolean => {
@@ -584,6 +611,7 @@ export function useWorkbenchController({
     activity,
     agentPromptExcludedCount,
     agentPromptSessionCount,
+    campaignRequest,
     canRun,
     clearActionFeedback,
     clearSelection,
