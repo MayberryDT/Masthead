@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { WorkbenchActionKind, UseWorkbenchControllerResult } from "../../app/workbench/useWorkbenchController";
 import type { WorkbenchAuthoringV5IncompleteRequestSummaryDto } from "../../shared/workbenchAuthoringV5";
+import { evaluateAuthoringCampaignStall } from "../../workbench/authoring/workbenchAuthoringV5Stall";
 import { AppButton } from "../primitives/AppButton";
 import { useNewItemIds } from "../motion/useNewItemIds";
 import {
@@ -14,6 +15,9 @@ import {
   formatCopyAgentPromptLabel,
   formatCopyAgentPromptTitle
 } from "./workbenchSelectionHonesty";
+
+/** Re-render cadence so stall threshold can cross while Workbench stays open without server churn. */
+const CAMPAIGN_STALL_TICK_MS = 30_000;
 
 type WorkbenchPanelProps = Partial<
   Pick<
@@ -897,6 +901,21 @@ function CampaignStatusStrip({
 }: {
   request: WorkbenchAuthoringV5IncompleteRequestSummaryDto;
 }) {
+  // Force periodic re-render so idle→stalled can flip while the UI stays open with a frozen
+  // server snapshot (agent dead, workbench revision unchanged). Interval clears on unmount when
+  // campaignRequest becomes null and the strip is not rendered.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => setTick((t) => t + 1), CAMPAIGN_STALL_TICK_MS);
+    return () => window.clearInterval(id);
+  }, []);
+
+  // Always recompute stall from clock math; do not trust server stalled/idleMs for display.
+  const { stalled, idleMs } = evaluateAuthoringCampaignStall({
+    updatedAt: request.updatedAt,
+    nowMs: Date.now()
+  });
+
   const parts =
     request.status === "open"
       ? [
@@ -905,21 +924,21 @@ function CampaignStatusStrip({
           `${request.packCount} packs`
         ]
       : [
-          ...(request.stalled ? ["Stalled"] : []),
+          ...(stalled ? ["Stalled"] : []),
           `${request.packsCompleted}/${request.packCount} packs`,
           `${request.publishedSessionCount} published`,
           `${request.rejectedSessionCount} rejected`,
           `${request.sessionsCompleted} attempted`,
-          ...(request.stalled ? [`idle ${formatCampaignIdleDuration(request.idleMs)}`] : []),
+          ...(stalled ? [`idle ${formatCampaignIdleDuration(idleMs)}`] : []),
           `updated ${formatCampaignUpdatedAt(request.updatedAt)}`
         ];
 
   return (
     <div
-      className={`workbench-campaign-status${request.stalled ? " is-stalled" : ""}`}
+      className={`workbench-campaign-status${stalled ? " is-stalled" : ""}`}
       role="status"
       aria-label="Authoring campaign status"
-      aria-live={request.stalled ? "polite" : undefined}
+      aria-live={stalled ? "polite" : undefined}
     >
       <span className="workbench-campaign-status-label">Campaign</span>
       {parts.map((part, index) => (
