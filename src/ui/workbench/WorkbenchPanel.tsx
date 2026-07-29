@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { WorkbenchActionKind, UseWorkbenchControllerResult } from "../../app/workbench/useWorkbenchController";
+import type { WorkbenchAuthoringV5IncompleteRequestSummaryDto } from "../../shared/workbenchAuthoringV5";
 import { AppButton } from "../primitives/AppButton";
 import { useNewItemIds } from "../motion/useNewItemIds";
 import {
@@ -22,6 +23,7 @@ type WorkbenchPanelProps = Partial<
     | "activity"
     | "agentPromptExcludedCount"
     | "agentPromptSessionCount"
+    | "campaignRequest"
     | "canRun"
     | "clearActionFeedback"
     | "copyAgentPrompt"
@@ -171,6 +173,7 @@ export function WorkbenchPanel({
   activity = EMPTY_ACTIVITY,
   agentPromptExcludedCount = 0,
   agentPromptSessionCount = 0,
+  campaignRequest,
   canRun = defaultCanRun,
   clearActionFeedback,
   copyAgentPrompt,
@@ -531,6 +534,8 @@ export function WorkbenchPanel({
         </section>
       ) : null}
 
+      {campaignRequest ? <CampaignStatusStrip request={campaignRequest} /> : null}
+
       {qualityReviewOpen ? (
         <section
           className="workbench-not-added-panel workbench-quality-review-panel"
@@ -885,6 +890,68 @@ export function WorkbenchPanel({
       </section>
     </section>
   );
+}
+
+function CampaignStatusStrip({
+  request
+}: {
+  request: WorkbenchAuthoringV5IncompleteRequestSummaryDto;
+}) {
+  const parts =
+    request.status === "open"
+      ? [
+          "preparing/open",
+          `${request.sessionCount} sessions`,
+          `${request.packCount} packs`
+        ]
+      : [
+          ...(request.stalled ? ["Stalled"] : []),
+          `${request.packsCompleted}/${request.packCount} packs`,
+          `${request.publishedSessionCount} published`,
+          `${request.rejectedSessionCount} rejected`,
+          `${request.sessionsCompleted} attempted`,
+          ...(request.stalled ? [`idle ${formatCampaignIdleDuration(request.idleMs)}`] : []),
+          `updated ${formatCampaignUpdatedAt(request.updatedAt)}`
+        ];
+
+  return (
+    <div
+      className={`workbench-campaign-status${request.stalled ? " is-stalled" : ""}`}
+      role="status"
+      aria-label="Authoring campaign status"
+      aria-live={request.stalled ? "polite" : undefined}
+    >
+      <span className="workbench-campaign-status-label">Campaign</span>
+      {parts.map((part, index) => (
+        <span key={`${index}-${part}`} className="workbench-campaign-status-part">
+          <span className="workbench-campaign-status-sep" aria-hidden="true">
+            ·
+          </span>
+          <span
+            className={
+              part === "Stalled" ? "workbench-campaign-status-stalled" : undefined
+            }
+          >
+            {part}
+          </span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function formatCampaignIdleDuration(idleMs: number): string {
+  const totalMinutes = Math.max(0, Math.floor(idleMs / 60_000));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
+
+function formatCampaignUpdatedAt(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return iso.slice(0, 16).replace("T", " ");
 }
 
 function StatusToken({ value, tone, label }: { value: string; tone?: "next"; label?: string }) {

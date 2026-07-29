@@ -822,6 +822,40 @@ describe("WorkbenchPanel", () => {
     expect(acceptMessage).toContain("compile-ready");
     expect(acceptMessage).toContain("will not write enrichment prose");
   });
+
+  test("renders campaign status strip when incomplete request present", () => {
+    const html = renderToStaticMarkup(
+      <WorkbenchPanel
+        campaignRequest={{
+          requestId: "authoring-v5-request:one",
+          status: "active",
+          packsCompleted: 1,
+          packCount: 87,
+          sessionsCompleted: 12,
+          sessionCount: 1039,
+          publishedSessionCount: 0,
+          rejectedSessionCount: 12,
+          softFlaggedSessionCount: 0,
+          stalled: true,
+          idleMs: 6 * 3600_000,
+          handoff: { requestId: "authoring-v5-request:one", startCommand: "…" },
+          updatedAt: "2026-07-28T21:40:25.195Z"
+        }}
+      />
+    );
+    expect(html).toContain("workbench-campaign-status");
+    expect(html).toContain("Stalled");
+    expect(html).toContain("1/87");
+    expect(html).toContain("0 published");
+    expect(html).toContain("12 rejected");
+    expect(html).toContain("12 attempted");
+    expect(html).not.toMatch(/workbench-activity-rail[\s\S]*workbench-campaign-status/);
+  });
+
+  test("omits campaign status strip when no incomplete request", () => {
+    const html = renderToStaticMarkup(<WorkbenchPanel campaignRequest={null} />);
+    expect(html).not.toContain("workbench-campaign-status");
+  });
 });
 
 function session(overrides: Partial<WorkbenchQueueSessionDto> = {}): WorkbenchQueueSessionDto {
