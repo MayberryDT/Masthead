@@ -27,8 +27,8 @@ export function buildWorkbenchHandoff(input: {
   const lines = [
     `Masthead authoring request: ${input.request.handoff.requestId}`,
     `Start: ${input.request.handoff.startCommand}`,
-    'Stop rule: Do not stop until nextAction.kind is "complete" and a request receipt exists.',
-    "Pack finish is not request completion. Always run the returned nextAction.command next."
+    'Stop rule: Do not stop, end, finish, or hand control back until nextAction.kind is "complete", a request receipt exists, and every pack for this request is done.',
+    "Pack finish is not request completion. One pack done is not done. Keep looping nextAction.command (and followUp if present) until all packs complete."
   ];
 
   const sessionCount = input.request.request?.sessionCount;
@@ -40,7 +40,7 @@ export function buildWorkbenchHandoff(input: {
   lines.push(
     "Progress only counts when mastheadctl save/finish succeeds. Local file edits are not progress.",
     'Verification: never set status "passed" with empty evidenceRefs.verification; if no verification evidence, use an honest not-run/boundary claim with refs (empty verification refs hard-reject).',
-    "After every finish, immediately run nextAction (and followUp if present). On hard_reject, read findings before the next pack and fix the pattern."
+    "After every pack finish, immediately claim and run the next pack. On hard_reject, read findings, fix the pattern, and continue — do not stop early."
   );
 
   return lines.join("\n");

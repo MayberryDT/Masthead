@@ -33,12 +33,16 @@ const baseRequest = {
   request: { requestId: "authoring-v5-request:one" }
 };
 
+const STOP_RULE_LINE =
+  'Stop rule: Do not stop, end, finish, or hand control back until nextAction.kind is "complete", a request receipt exists, and every pack for this request is done.';
+const PACK_LOOP_LINE =
+  "Pack finish is not request completion. One pack done is not done. Keep looping nextAction.command (and followUp if present) until all packs complete.";
 const MILESTONE_LINE =
   "Progress only counts when mastheadctl save/finish succeeds. Local file edits are not progress.";
 const VERIFICATION_LINE =
   'Verification: never set status "passed" with empty evidenceRefs.verification; if no verification evidence, use an honest not-run/boundary claim with refs (empty verification refs hard-reject).';
 const LOOP_LINE =
-  "After every finish, immediately run nextAction (and followUp if present). On hard_reject, read findings before the next pack and fix the pattern.";
+  "After every pack finish, immediately claim and run the next pack. On hard_reject, read findings, fix the pattern, and continue — do not stop early.";
 
 test("includes stop-rule lines so the copied prompt restates full-request obligation", () => {
   const text = buildWorkbenchHandoff({
@@ -49,18 +53,16 @@ test("includes stop-rule lines so the copied prompt restates full-request obliga
   expect(text).toBe(
     "Masthead authoring request: authoring-v5-request:one\n" +
       "Start: /opt/masthead/bin/mastheadctl workbench author bootstrap --request 'authoring-v5-request:one' --json\n" +
-      'Stop rule: Do not stop until nextAction.kind is "complete" and a request receipt exists.\n' +
-      "Pack finish is not request completion. Always run the returned nextAction.command next.\n" +
+      `${STOP_RULE_LINE}\n` +
+      `${PACK_LOOP_LINE}\n` +
       `${MILESTONE_LINE}\n` +
       `${VERIFICATION_LINE}\n` +
       LOOP_LINE
   );
-  expect(text).toContain(
-    'Stop rule: Do not stop until nextAction.kind is "complete" and a request receipt exists.'
-  );
-  expect(text).toContain(
-    "Pack finish is not request completion. Always run the returned nextAction.command next."
-  );
+  expect(text).toContain(STOP_RULE_LINE);
+  expect(text).toContain(PACK_LOOP_LINE);
+  expect(text).toContain("until all packs complete");
+  expect(text).toContain("do not stop early");
   expect(text).not.toContain("sessionIds");
   expect(text).not.toContain("guided authoring");
   expect(text).not.toContain("claimSupport");
@@ -121,7 +123,8 @@ test("handoff encodes verification grounding and durable milestones", () => {
   });
   expect(text).toContain("Progress only counts when mastheadctl save/finish succeeds");
   expect(text).toContain('never set status "passed" with empty evidenceRefs.verification');
-  expect(text).toContain("After every finish, immediately run nextAction");
+  expect(text).toContain("After every pack finish, immediately claim and run the next pack");
+  expect(text).toContain("every pack for this request is done");
   expect(text).not.toContain("sessionIds");
   expect(text.toLowerCase()).not.toMatch(/worker|nested agent|sub-agent|multi-agent/);
 });
