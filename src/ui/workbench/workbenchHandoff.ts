@@ -37,5 +37,11 @@ export function buildWorkbenchHandoff(input: {
     lines.push(`Scope: ${sessionCount} sessions in ${packCount} fixed packs (daemon-owned).`);
   }
 
+  lines.push(
+    "Progress only counts when mastheadctl save/finish succeeds. Local file edits are not progress.",
+    'Verification: never set status "passed" with empty evidenceRefs.verification; if no verification evidence, use an honest not-run/boundary claim with refs (empty verification refs hard-reject).',
+    "After every finish, immediately run nextAction (and followUp if present). On hard_reject, read findings before the next pack and fix the pattern."
+  );
+
   return lines.join("\n");
 }
