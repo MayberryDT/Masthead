@@ -195,14 +195,25 @@ export type WorkbenchAuthoringV5RequestDto = {
   completedAt?: string;
 };
 
-/** Lightweight read model for Workbench resume UI (GET /workbench/authoring/v5/requests). */
+/**
+ * Lightweight read model for Workbench resume UI (GET /workbench/authoring/v5/requests).
+ * `sessionsCompleted` remains the attempted session count (do not rename). Prefer UI labels
+ * "Attempted / Published / Rejected" over treating it as published-only progress.
+ */
 export type WorkbenchAuthoringV5IncompleteRequestSummaryDto = {
   requestId: string;
   status: Extract<WorkbenchAuthoringV5RequestStatus, "open" | "active">;
   packsCompleted: number;
   packCount: number;
+  /** Attempted session count (not published-only). */
   sessionsCompleted: number;
   sessionCount: number;
+  publishedSessionCount: number;
+  rejectedSessionCount: number;
+  softFlaggedSessionCount: number;
+  stalled: boolean;
+  idleMs: number;
+  currentPackId?: string;
   handoff: { requestId: string; startCommand: string };
   updatedAt: string;
 };
