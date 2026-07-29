@@ -165,7 +165,7 @@ describe("useWorkbenchController", () => {
     });
     await waitFor(() => latest().campaignRequest?.requestId === "authoring-v5-request:fresh");
 
-    expect(getIncompleteWorkbenchAuthoringRequest.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(vi.mocked(getIncompleteWorkbenchAuthoringRequest).mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(latest().campaignRequest?.requestId).toBe("authoring-v5-request:fresh");
     expect(latest().campaignRequest?.stalled).toBe(false);
   });
