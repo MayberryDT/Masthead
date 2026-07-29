@@ -1,7 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { WorkbenchActionKind, UseWorkbenchControllerResult } from "../../app/workbench/useWorkbenchController";
-import type { WorkbenchAuthoringV5IncompleteRequestSummaryDto } from "../../shared/workbenchAuthoringV5";
-import { evaluateAuthoringCampaignStall } from "../../workbench/authoring/workbenchAuthoringV5Stall";
 import { AppButton } from "../primitives/AppButton";
 import { useNewItemIds } from "../motion/useNewItemIds";
 import {
@@ -16,9 +14,6 @@ import {
   formatCopyAgentPromptTitle
 } from "./workbenchSelectionHonesty";
 
-/** Re-render cadence so stall threshold can cross while Workbench stays open without server churn. */
-const CAMPAIGN_STALL_TICK_MS = 30_000;
-
 type WorkbenchPanelProps = Partial<
   Pick<
     UseWorkbenchControllerResult,
@@ -27,7 +22,6 @@ type WorkbenchPanelProps = Partial<
     | "activity"
     | "agentPromptExcludedCount"
     | "agentPromptSessionCount"
-    | "campaignRequest"
     | "canRun"
     | "clearActionFeedback"
     | "copyAgentPrompt"
@@ -177,7 +171,6 @@ export function WorkbenchPanel({
   activity = EMPTY_ACTIVITY,
   agentPromptExcludedCount = 0,
   agentPromptSessionCount = 0,
-  campaignRequest,
   canRun = defaultCanRun,
   clearActionFeedback,
   copyAgentPrompt,
@@ -490,8 +483,6 @@ export function WorkbenchPanel({
         </section>
       ) : null}
 
-      {campaignRequest ? <CampaignStatusStrip request={campaignRequest} /> : null}
-
       {qualityReviewOpen ? (
         <section
           className="workbench-not-added-panel workbench-quality-review-panel"
@@ -780,6 +771,53 @@ export function WorkbenchPanel({
             <span className="workbench-pagination-range">
               {queueTotal === 0 ? "0 sessions" : `Showing ${rangeStart}–${rangeEnd} of ${queueTotal}`}
             </span>
+            <dl className="workbench-queue-facts" aria-label="Workbench queue facts">
+              <div title="Sessions on the package path waiting for Workbench processing and automatic kind resolution">
+                <dt>Package path</dt>
+                <dd>{publishPathLabel}</dd>
+              </div>
+              <div title="Sessions currently selected for bulk actions. Only compile-ready sessions enter Copy Agent Prompt.">
+                <dt>Selected</dt>
+                <dd>{selectionCount}</dd>
+              </div>
+              {qualityReviewLabel != null ? (
+                <div
+                  className={qualityReviewOpen ? "is-active" : undefined}
+                  title={TOOLTIPS.qualityReview}
+                >
+                  <dt>Quality review</dt>
+                  <dd>
+                    <button
+                      type="button"
+                      className="workbench-fact-toggle"
+                      onClick={toggleQualityReview}
+                      aria-pressed={qualityReviewOpen}
+                      aria-label={`Quality review ${qualityReviewLabel}, ${qualityReviewOpen ? "close" : "open"} list`}
+                      title={TOOLTIPS.qualityReview}
+                    >
+                      {qualityReviewLabel}
+                    </button>
+                  </dd>
+                </div>
+              ) : null}
+              {notAddedLabel != null ? (
+                <div className={notAddedOpen ? "is-active" : undefined} title={TOOLTIPS.notAdded}>
+                  <dt>Not Added</dt>
+                  <dd>
+                    <button
+                      type="button"
+                      className="workbench-fact-toggle"
+                      onClick={toggleNotAdded}
+                      aria-pressed={notAddedOpen}
+                      aria-label={`Not Added ${notAddedLabel}, ${notAddedOpen ? "close" : "open"} review`}
+                      title={TOOLTIPS.notAdded}
+                    >
+                      {notAddedLabel}
+                    </button>
+                  </dd>
+                </div>
+              ) : null}
+            </dl>
             <div className="workbench-pagination-actions">
               <AppButton
                 variant="quiet"
@@ -802,53 +840,6 @@ export function WorkbenchPanel({
               </AppButton>
             </div>
           </div>
-          <dl className="workbench-queue-facts" aria-label="Workbench queue facts">
-            <div title="Sessions on the package path waiting for Workbench processing and automatic kind resolution">
-              <dt>Package path</dt>
-              <dd>{publishPathLabel}</dd>
-            </div>
-            <div title="Sessions currently selected for bulk actions. Only compile-ready sessions enter Copy Agent Prompt.">
-              <dt>Selected</dt>
-              <dd>{selectionCount}</dd>
-            </div>
-            {qualityReviewLabel != null ? (
-              <div
-                className={qualityReviewOpen ? "is-active" : undefined}
-                title={TOOLTIPS.qualityReview}
-              >
-                <dt>Quality review</dt>
-                <dd>
-                  <button
-                    type="button"
-                    className="workbench-fact-toggle"
-                    onClick={toggleQualityReview}
-                    aria-pressed={qualityReviewOpen}
-                    aria-label={`Quality review ${qualityReviewLabel}, ${qualityReviewOpen ? "close" : "open"} list`}
-                    title={TOOLTIPS.qualityReview}
-                  >
-                    {qualityReviewLabel}
-                  </button>
-                </dd>
-              </div>
-            ) : null}
-            {notAddedLabel != null ? (
-              <div className={notAddedOpen ? "is-active" : undefined} title={TOOLTIPS.notAdded}>
-                <dt>Not Added</dt>
-                <dd>
-                  <button
-                    type="button"
-                    className="workbench-fact-toggle"
-                    onClick={toggleNotAdded}
-                    aria-pressed={notAddedOpen}
-                    aria-label={`Not Added ${notAddedLabel}, ${notAddedOpen ? "close" : "open"} review`}
-                    title={TOOLTIPS.notAdded}
-                  >
-                    {notAddedLabel}
-                  </button>
-                </dd>
-              </div>
-            ) : null}
-          </dl>
         </div>
 
         <aside className="workbench-activity-rail" aria-label="Workbench Activity">
@@ -893,83 +884,6 @@ export function WorkbenchPanel({
       </section>
     </section>
   );
-}
-
-function CampaignStatusStrip({
-  request
-}: {
-  request: WorkbenchAuthoringV5IncompleteRequestSummaryDto;
-}) {
-  // Force periodic re-render so idle→stalled can flip while the UI stays open with a frozen
-  // server snapshot (agent dead, workbench revision unchanged). Interval clears on unmount when
-  // campaignRequest becomes null and the strip is not rendered.
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const id = window.setInterval(() => setTick((t) => t + 1), CAMPAIGN_STALL_TICK_MS);
-    return () => window.clearInterval(id);
-  }, []);
-
-  // Always recompute stall from clock math; do not trust server stalled/idleMs for display.
-  const { stalled, idleMs } = evaluateAuthoringCampaignStall({
-    updatedAt: request.updatedAt,
-    nowMs: Date.now()
-  });
-
-  const parts =
-    request.status === "open"
-      ? [
-          "preparing/open",
-          `${request.sessionCount} sessions`,
-          `${request.packCount} packs`
-        ]
-      : [
-          ...(stalled ? ["Stalled"] : []),
-          `${request.packsCompleted}/${request.packCount} packs`,
-          `${request.publishedSessionCount} published`,
-          `${request.rejectedSessionCount} rejected`,
-          `${request.sessionsCompleted} attempted`,
-          ...(stalled ? [`idle ${formatCampaignIdleDuration(idleMs)}`] : []),
-          `updated ${formatCampaignUpdatedAt(request.updatedAt)}`
-        ];
-
-  return (
-    <div
-      className={`workbench-campaign-status${stalled ? " is-stalled" : ""}`}
-      role="status"
-      aria-label="Authoring campaign status"
-      aria-live={stalled ? "polite" : undefined}
-    >
-      <span className="workbench-campaign-status-label">Campaign</span>
-      {parts.map((part, index) => (
-        <span key={`${index}-${part}`} className="workbench-campaign-status-part">
-          <span className="workbench-campaign-status-sep" aria-hidden="true">
-            ·
-          </span>
-          <span
-            className={
-              part === "Stalled" ? "workbench-campaign-status-stalled" : undefined
-            }
-          >
-            {part}
-          </span>
-        </span>
-      ))}
-    </div>
-  );
-}
-
-function formatCampaignIdleDuration(idleMs: number): string {
-  const totalMinutes = Math.max(0, Math.floor(idleMs / 60_000));
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  return `${minutes}m`;
-}
-
-function formatCampaignUpdatedAt(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  return iso.slice(0, 16).replace("T", " ");
 }
 
 function StatusToken({ value, tone, label }: { value: string; tone?: "next"; label?: string }) {

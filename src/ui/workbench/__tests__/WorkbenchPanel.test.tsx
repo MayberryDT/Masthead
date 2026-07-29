@@ -1,10 +1,6 @@
-// @vitest-environment happy-dom
-
 import { readFileSync } from "node:fs";
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import type { WorkbenchActionKind } from "../../../app/workbench/useWorkbenchController";
 import type {
   WorkbenchActivityDto,
@@ -12,26 +8,12 @@ import type {
   WorkbenchQualityReviewSessionDto,
   WorkbenchQueueSessionDto
 } from "../../../shared/workbench";
-import { WORKBENCH_AUTHORING_V5_STALL_MS } from "../../../workbench/authoring/workbenchAuthoringV5Stall";
 import { formatWorkbenchActivityTime } from "../workbenchActivity";
 import {
   buildBulkQualityAcceptConfirmMessage,
   buildBulkQualityFailConfirmMessage,
   WorkbenchPanel
 } from "../WorkbenchPanel";
-
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-
-let campaignContainer: HTMLDivElement | undefined;
-let campaignRoot: Root | undefined;
-
-afterEach(async () => {
-  if (campaignRoot) await act(async () => campaignRoot?.unmount());
-  campaignRoot = undefined;
-  campaignContainer?.remove();
-  campaignContainer = undefined;
-  vi.useRealTimers();
-});
 
 const forbiddenTokenParts = [
   ["mast", "head", "ctl"],
@@ -113,7 +95,7 @@ describe("WorkbenchPanel", () => {
     expect(text).not.toContain("Open import receipt");
   });
 
-  test("keeps queue facts under the session table so Pipeline owns the toolbar", () => {
+  test("keeps queue facts inside the pagination bar so Pipeline owns the toolbar", () => {
     const html = renderToStaticMarkup(
       <WorkbenchPanel
         notAddedSummary={{ ok: true, total: 4, reasons: [{ reason: "confirmed_noise", count: 4 }] }}
@@ -123,13 +105,16 @@ describe("WorkbenchPanel", () => {
     );
     expect(html).toContain("workbench-queue-facts");
     expect(html).not.toContain("workbench-toolbar-facts");
-    // Facts appear after pagination (bottom of the sessions column), not in the ops toolbar.
-    const factsAt = html.indexOf("workbench-queue-facts");
+    expect(html).not.toContain("workbench-campaign-status");
+    // Facts sit inside the pagination bar: range → facts → page actions.
     const paginationAt = html.indexOf("workbench-pagination");
+    const factsAt = html.indexOf("workbench-queue-facts");
+    const actionsAt = html.indexOf("workbench-pagination-actions");
     const toolbarAt = html.indexOf("workbench-toolbar observability-toolbar");
     expect(toolbarAt).toBeGreaterThanOrEqual(0);
     expect(paginationAt).toBeGreaterThan(toolbarAt);
     expect(factsAt).toBeGreaterThan(paginationAt);
+    expect(actionsAt).toBeGreaterThan(factsAt);
 
     const css = readFileSync("src/styles/masthead.css", "utf8");
     expect(mediaRule(css, "(max-width: 640px)")).toMatch(
@@ -855,92 +840,11 @@ describe("WorkbenchPanel", () => {
     expect(acceptMessage).toContain("will not write enrichment prose");
   });
 
-  test("renders campaign status strip when incomplete request present", () => {
-    // Server snapshot may still say not stalled; client recomputes from updatedAt + Date.now().
-    const updatedAt = new Date(Date.now() - 6 * 3600_000).toISOString();
-    const html = renderToStaticMarkup(
-      <WorkbenchPanel
-        campaignRequest={{
-          requestId: "authoring-v5-request:one",
-          status: "active",
-          packsCompleted: 1,
-          packCount: 87,
-          sessionsCompleted: 12,
-          sessionCount: 1039,
-          publishedSessionCount: 0,
-          rejectedSessionCount: 12,
-          softFlaggedSessionCount: 0,
-          stalled: false,
-          idleMs: 0,
-          handoff: { requestId: "authoring-v5-request:one", startCommand: "…" },
-          updatedAt
-        }}
-      />
-    );
-    expect(html).toContain("workbench-campaign-status");
-    expect(html).toContain("Stalled");
-    expect(html).toContain("is-stalled");
-    expect(html).toContain("1/87");
-    expect(html).toContain("0 published");
-    expect(html).toContain("12 rejected");
-    expect(html).toContain("12 attempted");
-    expect(html).not.toMatch(/workbench-activity-rail[\s\S]*workbench-campaign-status/);
-  });
-
-  test("omits campaign status strip when no incomplete request", () => {
-    const html = renderToStaticMarkup(<WorkbenchPanel campaignRequest={null} />);
+  test("does not surface authoring campaign status chrome", () => {
+    const html = renderToStaticMarkup(<WorkbenchPanel total={12} />);
     expect(html).not.toContain("workbench-campaign-status");
-  });
-
-  test("campaign strip flips to Stalled when idle crosses threshold while open", async () => {
-    vi.useFakeTimers();
-    const now = Date.parse("2026-07-28T12:00:00.000Z");
-    vi.setSystemTime(now);
-
-    // Just under the stall threshold; server snapshot still claims not stalled.
-    const updatedAt = new Date(now - (WORKBENCH_AUTHORING_V5_STALL_MS - 1_000)).toISOString();
-    campaignContainer = document.createElement("div");
-    document.body.appendChild(campaignContainer);
-    campaignRoot = createRoot(campaignContainer);
-
-    await act(async () => {
-      campaignRoot!.render(
-        <WorkbenchPanel
-          campaignRequest={{
-            requestId: "authoring-v5-request:tick",
-            status: "active",
-            packsCompleted: 1,
-            packCount: 10,
-            sessionsCompleted: 3,
-            sessionCount: 40,
-            publishedSessionCount: 0,
-            rejectedSessionCount: 3,
-            softFlaggedSessionCount: 0,
-            stalled: false,
-            idleMs: 0,
-            handoff: { requestId: "authoring-v5-request:tick", startCommand: "…" },
-            updatedAt
-          }}
-        />
-      );
-    });
-
-    const strip = () => campaignContainer!.querySelector(".workbench-campaign-status");
-    expect(strip()).not.toBeNull();
-    expect(strip()?.classList.contains("is-stalled")).toBe(false);
-    expect(strip()?.textContent).not.toContain("Stalled");
-
-    // Cross the stall threshold and fire the 30s recompute tick so the open UI updates
-    // without a workbench revision / server refetch.
-    await act(async () => {
-      vi.advanceTimersByTime(2_000);
-    });
-    await act(async () => {
-      vi.advanceTimersByTime(30_000);
-    });
-
-    expect(strip()?.classList.contains("is-stalled")).toBe(true);
-    expect(strip()?.textContent).toContain("Stalled");
+    expect(html).not.toContain("Stalled");
+    expect(html).not.toMatch(/Campaign\s*·/);
   });
 });
 
