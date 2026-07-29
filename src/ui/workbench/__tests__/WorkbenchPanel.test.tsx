@@ -113,11 +113,25 @@ describe("WorkbenchPanel", () => {
     expect(text).not.toContain("Open import receipt");
   });
 
-  test("keeps the responsive action row from collapsing behind queue facts", () => {
-    const css = readFileSync("src/styles/masthead.css", "utf8");
-    expect(mediaRule(css, "(max-width: 1120px)")).toMatch(
-      /\.workbench-toolbar\.observability-toolbar \.workbench-toolbar-actions\s*\{[^}]*flex:\s*0 0 auto;[^}]*min-height:\s*40px;/s
+  test("keeps queue facts under the session table so Pipeline owns the toolbar", () => {
+    const html = renderToStaticMarkup(
+      <WorkbenchPanel
+        notAddedSummary={{ ok: true, total: 4, reasons: [{ reason: "confirmed_noise", count: 4 }] }}
+        qualityReviewSummary={{ ok: true, total: 12, reasons: [{ reason: "insufficient_evidence", count: 12 }] }}
+        total={40}
+      />
     );
+    expect(html).toContain("workbench-queue-facts");
+    expect(html).not.toContain("workbench-toolbar-facts");
+    // Facts appear after pagination (bottom of the sessions column), not in the ops toolbar.
+    const factsAt = html.indexOf("workbench-queue-facts");
+    const paginationAt = html.indexOf("workbench-pagination");
+    const toolbarAt = html.indexOf("workbench-toolbar observability-toolbar");
+    expect(toolbarAt).toBeGreaterThanOrEqual(0);
+    expect(paginationAt).toBeGreaterThan(toolbarAt);
+    expect(factsAt).toBeGreaterThan(paginationAt);
+
+    const css = readFileSync("src/styles/masthead.css", "utf8");
     expect(mediaRule(css, "(max-width: 640px)")).toMatch(
       /\.workbench-toolbar\.observability-toolbar \.workbench-toolbar-actions\s*\{[^}]*width:\s*100%;[^}]*flex-wrap:\s*wrap;/s
     );

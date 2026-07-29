@@ -459,54 +459,6 @@ export function WorkbenchPanel({
             </div>
           </div>
         </div>
-
-        <dl className="workbench-toolbar-facts" aria-label="Workbench queue facts">
-          <div title="Sessions on the package path waiting for Workbench processing and automatic kind resolution">
-            <dt>Package path</dt>
-            <dd>{publishPathLabel}</dd>
-          </div>
-          <div title="Sessions currently selected for bulk actions. Only compile-ready sessions enter Copy Agent Prompt.">
-            <dt>Selected</dt>
-            <dd>{selectionCount}</dd>
-          </div>
-          {qualityReviewLabel != null ? (
-            <div
-              className={qualityReviewOpen ? "is-active" : undefined}
-              title={TOOLTIPS.qualityReview}
-            >
-              <dt>Quality review</dt>
-              <dd>
-                <button
-                  type="button"
-                  className="workbench-fact-toggle"
-                  onClick={toggleQualityReview}
-                  aria-pressed={qualityReviewOpen}
-                  aria-label={`Quality review ${qualityReviewLabel}, ${qualityReviewOpen ? "close" : "open"} list`}
-                  title={TOOLTIPS.qualityReview}
-                >
-                  {qualityReviewLabel}
-                </button>
-              </dd>
-            </div>
-          ) : null}
-          {notAddedLabel != null ? (
-            <div className={notAddedOpen ? "is-active" : undefined} title={TOOLTIPS.notAdded}>
-              <dt>Not Added</dt>
-              <dd>
-                <button
-                  type="button"
-                  className="workbench-fact-toggle"
-                  onClick={toggleNotAdded}
-                  aria-pressed={notAddedOpen}
-                  aria-label={`Not Added ${notAddedLabel}, ${notAddedOpen ? "close" : "open"} review`}
-                  title={TOOLTIPS.notAdded}
-                >
-                  {notAddedLabel}
-                </button>
-              </dd>
-            </div>
-          ) : null}
-        </dl>
       </div>
 
       {toastMessage ? (
@@ -850,6 +802,53 @@ export function WorkbenchPanel({
               </AppButton>
             </div>
           </div>
+          <dl className="workbench-queue-facts" aria-label="Workbench queue facts">
+            <div title="Sessions on the package path waiting for Workbench processing and automatic kind resolution">
+              <dt>Package path</dt>
+              <dd>{publishPathLabel}</dd>
+            </div>
+            <div title="Sessions currently selected for bulk actions. Only compile-ready sessions enter Copy Agent Prompt.">
+              <dt>Selected</dt>
+              <dd>{selectionCount}</dd>
+            </div>
+            {qualityReviewLabel != null ? (
+              <div
+                className={qualityReviewOpen ? "is-active" : undefined}
+                title={TOOLTIPS.qualityReview}
+              >
+                <dt>Quality review</dt>
+                <dd>
+                  <button
+                    type="button"
+                    className="workbench-fact-toggle"
+                    onClick={toggleQualityReview}
+                    aria-pressed={qualityReviewOpen}
+                    aria-label={`Quality review ${qualityReviewLabel}, ${qualityReviewOpen ? "close" : "open"} list`}
+                    title={TOOLTIPS.qualityReview}
+                  >
+                    {qualityReviewLabel}
+                  </button>
+                </dd>
+              </div>
+            ) : null}
+            {notAddedLabel != null ? (
+              <div className={notAddedOpen ? "is-active" : undefined} title={TOOLTIPS.notAdded}>
+                <dt>Not Added</dt>
+                <dd>
+                  <button
+                    type="button"
+                    className="workbench-fact-toggle"
+                    onClick={toggleNotAdded}
+                    aria-pressed={notAddedOpen}
+                    aria-label={`Not Added ${notAddedLabel}, ${notAddedOpen ? "close" : "open"} review`}
+                    title={TOOLTIPS.notAdded}
+                  >
+                    {notAddedLabel}
+                  </button>
+                </dd>
+              </div>
+            ) : null}
+          </dl>
         </div>
 
         <aside className="workbench-activity-rail" aria-label="Workbench Activity">
