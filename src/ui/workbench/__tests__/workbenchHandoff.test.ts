@@ -33,23 +33,32 @@ const baseRequest = {
   request: { requestId: "authoring-v5-request:one" }
 };
 
-test("includes critical all-packs obligation at the top of the handoff", () => {
+test("leads with orchestrator role and bans factories before completion rules", () => {
   const text = buildWorkbenchHandoff({
     capabilities,
     request: baseRequest as never
   });
 
-  expect(text.startsWith("CRITICAL OBLIGATION:")).toBe(true);
-  expect(text).toContain("finish EVERY pack");
-  expect(text).toContain("Stopping after 1 pack, 6 packs, or any partial count is a failure");
-  expect(text).toContain('progress.packsCompleted === progress.packsTotal');
-  expect(text).toContain("Never write a final answer until nextAction.kind is complete");
+  expect(text.startsWith("ROLE:")).toBe(true);
+  expect(text).toContain("ORCHESTRATOR");
+  expect(text).toContain("do NOT write dossier field prose yourself");
+  expect(text).toContain("sub-agent");
+  expect(text).toContain("PURPOSE (for every sub-agent):");
+  expect(text).toContain("Logbook session dossiers");
+  expect(text).toContain("HOW SUB-AGENTS WRITE:");
+  expect(text).toContain("NO FACTORIES:");
+  expect(text).toContain("fill scripts");
+  expect(text).toContain("ORCHESTRATOR LOOP:");
+  expect(text).toContain("COMPLETION:");
+  expect(text).toContain("Finish every pack");
+  expect(text).toContain("progress.packsCompleted === progress.packsTotal");
   expect(text).toContain("authoring-v5-request:one");
   expect(text).not.toContain("sessionIds");
-  expect(text.toLowerCase()).not.toMatch(/worker|nested agent|sub-agent|multi-agent/);
+  expect(text.indexOf("ROLE:")).toBeLessThan(text.indexOf("COMPLETION:"));
+  expect(text.indexOf("NO FACTORIES:")).toBeLessThan(text.indexOf("COMPLETION:"));
 });
 
-test("adds opaque scope counts and pack ownership when available", () => {
+test("adds opaque scope counts and pack orchestration when available", () => {
   const text = buildWorkbenchHandoff({
     capabilities,
     request: {
@@ -62,8 +71,8 @@ test("adds opaque scope counts and pack ownership when available", () => {
     } as never
   });
 
-  expect(text).toContain("Scope: 25 sessions in 3 fixed packs (daemon-owned). You own all 3 packs.");
-  expect(text).toContain("This request has 3 packs covering 25 sessions — all of them.");
+  expect(text).toContain("Scope: 25 sessions in 3 fixed packs (daemon-owned). You orchestrate all 3 packs via sub-agents");
+  expect(text).toContain("This request has 3 packs covering 25 sessions");
   expect(text).not.toContain("sessionIds");
 });
 
@@ -80,10 +89,10 @@ test("omits numeric scope line when packCount is unavailable", () => {
   });
 
   expect(text).not.toMatch(/^Scope:/m);
-  expect(text).toContain("multiple fixed packs — all of them");
+  expect(text).toContain("multiple fixed packs");
 });
 
-test("handoff encodes verification grounding and durable milestones", () => {
+test("handoff encodes verification grounding and pack delegation", () => {
   const text = buildWorkbenchHandoff({
     capabilities,
     request: {
@@ -97,6 +106,6 @@ test("handoff encodes verification grounding and durable milestones", () => {
   });
   expect(text).toContain("Progress only counts when mastheadctl save/finish succeeds");
   expect(text).toContain('never set status "passed" with empty evidenceRefs.verification');
-  expect(text).toContain("Immediately claim and run the next pack");
+  expect(text).toContain("carefully author the next pack");
   expect(text).not.toContain("sessionIds");
 });

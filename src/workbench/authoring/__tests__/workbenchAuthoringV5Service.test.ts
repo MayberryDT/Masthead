@@ -126,6 +126,8 @@ describe("workbench-authoring-v5 loop", () => {
     expect(summary.request!.idleMs).toBe(WORKBENCH_AUTHORING_V5_STALL_MS + 5_000);
     expect(summary.request!.idleMs).toBeGreaterThanOrEqual(WORKBENCH_AUTHORING_V5_STALL_MS);
     expect(summary.request!.currentPackId).toBe(started.pack.packId);
+    expect(summary.request!.activePackIds).toEqual([started.pack.packId]);
+    expect(summary.request!.availablePackCount).toBe(0);
     expect(summary.request!.updatedAt).toBe(updatedAt);
     expect(summary.request!.handoff).toEqual({
       requestId,
@@ -253,6 +255,9 @@ describe("workbench-authoring-v5 loop", () => {
     expect(Object.keys(created.handoff)).toEqual(["requestId", "startCommand"]);
     expect(created.request.packSizes).toHaveLength(2);
     expect(created.request.packSizes.every((size) => size >= 5 && size <= 12)).toBe(true);
+    // Parallel claim model: every pack is available up front (not serial unlock).
+    expect(created.request.availablePackCount).toBe(2);
+    expect(created.request.activePackIds).toEqual([]);
 
     const bootstrap = bootstrapWorkbenchAuthoringV5Request(db, {
       command,
@@ -293,6 +298,7 @@ describe("workbench-authoring-v5 loop", () => {
     });
     expect(bootstrap.skillContract.loop).toContain("claim_next_or_complete");
     expect(bootstrap.skillContract.scaffoldWritesProse).toBe(false);
+    expect(bootstrap.skillContract.authoringMode).toBe("manual_synthesis");
     expect(bootstrap.skillContract.synthesisRule).toMatch(/AGENTS\.md/i);
     expect(bootstrap.skillContract.synthesisRule).toMatch(/system-reminder/i);
     expect(bootstrap.skillContract.synthesisRule).toMatch(/MCP connection prose/i);
@@ -300,9 +306,13 @@ describe("workbench-authoring-v5 loop", () => {
     expect(bootstrap.skillContract.synthesisRule).toMatch(/risk_level/i);
     expect(bootstrap.skillContract.synthesisRule).toMatch(/last substantive user ask/i);
     expect(bootstrap.skillContract.synthesisRule).toMatch(/prose-free/i);
+    expect(bootstrap.skillContract.synthesisRule).toMatch(/fill scripts|synthesizers|pack runners/i);
+    expect(bootstrap.skillContract.synthesisRule).toMatch(/Automating fill is a failed run/i);
+    expect(bootstrap.skillContract.objective).toMatch(/Logbook|future agents|search/i);
     expect(bootstrap.skillContract.objective).toMatch(/last substantive user ask/i);
     expect(bootstrap.skillContract.obligation).toMatch(/request-complete receipt/i);
     expect(bootstrap.skillContract.obligation).toMatch(/approval-JSON/i);
+    expect(bootstrap.skillContract.obligation).toMatch(/manual synthesis|do not invent a fill pipeline/i);
     expect(bootstrap.nextAction.stopRule).toContain("NOT DONE");
     expect(bootstrap.nextAction.stopRule).toContain("packs 0/2");
     expect(bootstrap.nextAction.stopRule).toContain('nextAction.kind === "complete"');
@@ -362,14 +372,16 @@ describe("workbench-authoring-v5 loop", () => {
         ...Array.from({ length: authored.sessions.length - 2 }, () => "publishable" as const)
       ]);
       expect(saved.requestStatus).toBe("active");
-
-      const resumed = startWorkbenchAuthoringV5Pack(db, {
+      // Save returns finish for THIS pack. Do not call start here — with parallel claim,
+      // start would claim another available pack instead of resuming this one.
+      expect(saved.nextAction.kind).toBe("finish");
+      const statusAfterSave = getWorkbenchAuthoringV5RequestStatus(db, {
         command,
-        currentIdentity: identity,
-        expectedIdentity: identity,
         requestId: created.request.requestId
       });
-      expect(resumed).toMatchObject({ pack: { packId }, nextAction: { kind: "finish" } });
+      // Request-level nextAction prefers in-flight pack work over claiming.
+      expect(statusAfterSave.nextAction.kind).toBe("finish");
+      expect(statusAfterSave.nextAction.command).toContain(packId);
 
       const finished = finishWorkbenchAuthoringV5Pack(db, {
         command,
@@ -472,7 +484,7 @@ describe("workbench-authoring-v5 loop", () => {
         );
         expect(finished.nextAction.reason).toMatch(/NOT DONE/);
         expect(finished.nextAction.reason).toMatch(/1\/2 packs/);
-        expect(finished.nextAction.reason).toMatch(/Immediately run nextAction\.command/);
+        expect(finished.nextAction.reason).toMatch(/Run nextAction\.command/);
         expect(finished.nextAction.reason).toMatch(/Do not report success/);
         expect(finished).not.toHaveProperty("requestReceipt");
       } else {
@@ -540,6 +552,86 @@ describe("workbench-authoring-v5 loop", () => {
     db.close();
   });
 
+  test("claims all packs in parallel; request completes only after the last pack finishes", async () => {
+    const db = await testDatabase();
+    const sessionIds = Array.from({ length: 20 }, (_, index) => `session:v5:parallel:${index + 1}`);
+    for (const sessionId of sessionIds) seedCompileReadySession(db, sessionId);
+    const created = createWorkbenchAuthoringV5Request(db, {
+      actorId: "agent:test",
+      command,
+      currentIdentity: identity,
+      expectedIdentity: identity,
+      sessionIds
+    });
+    const requestId = created.request.requestId;
+    expect(created.request.packSizes).toEqual([10, 10]);
+    expect(created.request.availablePackCount).toBe(2);
+    expect(created.request.activePackIds).toEqual([]);
+
+    const packA = startWorkbenchAuthoringV5Pack(db, {
+      command, currentIdentity: identity, expectedIdentity: identity, requestId
+    });
+    if (!("pack" in packA)) throw new Error("expected_pack_a");
+    const packB = startWorkbenchAuthoringV5Pack(db, {
+      command, currentIdentity: identity, expectedIdentity: identity, requestId
+    });
+    if (!("pack" in packB)) throw new Error("expected_pack_b");
+    expect(packA.pack.packId).not.toBe(packB.pack.packId);
+    expect(packA.pack.status).toBe("active");
+    expect(packB.pack.status).toBe("active");
+
+    const mid = getWorkbenchAuthoringV5RequestStatus(db, { command, requestId });
+    expect(mid.request.availablePackCount).toBe(0);
+    expect(new Set(mid.request.activePackIds)).toEqual(new Set([packA.pack.packId, packB.pack.packId]));
+    // With nothing free, start resumes the lowest-ordinal in-flight pack (crash recovery).
+    const resumed = startWorkbenchAuthoringV5Pack(db, {
+      command, currentIdentity: identity, expectedIdentity: identity, requestId
+    });
+    if (!("pack" in resumed)) throw new Error("expected_resume");
+    expect([packA.pack.packId, packB.pack.packId]).toContain(resumed.pack.packId);
+
+    await inspectWholePack(db, packA.pack.packId);
+    await inspectWholePack(db, packB.pack.packId);
+    const draftA = authorDraft(buildWorkbenchAuthoringV5Scaffold(db, { command, packId: packA.pack.packId }).draft);
+    const draftB = authorDraft(buildWorkbenchAuthoringV5Scaffold(db, { command, packId: packB.pack.packId }).draft);
+    saveWorkbenchAuthoringV5Draft(db, {
+      command, currentIdentity: identity, expectedIdentity: identity, packId: packA.pack.packId, draft: draftA
+    });
+    saveWorkbenchAuthoringV5Draft(db, {
+      command, currentIdentity: identity, expectedIdentity: identity, packId: packB.pack.packId, draft: draftB
+    });
+
+    const finishedA = finishWorkbenchAuthoringV5Pack(db, {
+      command, currentIdentity: identity, expectedIdentity: identity, packId: packA.pack.packId
+    });
+    expect(finishedA.nextAction.kind).toBe("claim_next");
+    expect(finishedA.requestReceipt).toBeUndefined();
+    expect(finishedA.nextAction.progress).toMatchObject({
+      packsCompleted: 1, packsTotal: 2, requestComplete: false
+    });
+    const afterA = getWorkbenchAuthoringV5RequestStatus(db, { command, requestId });
+    expect(afterA.request.status).toBe("active");
+    expect(afterA).not.toHaveProperty("receipt");
+    // Pack B still in flight — request nextAction prefers finishing it over claiming.
+    expect(afterA.nextAction.kind).toBe("finish");
+    expect(afterA.nextAction.command).toContain(packB.pack.packId);
+
+    const finishedB = finishWorkbenchAuthoringV5Pack(db, {
+      command, currentIdentity: identity, expectedIdentity: identity, packId: packB.pack.packId
+    });
+    expect(finishedB.nextAction.kind).toBe("complete");
+    expect(finishedB.requestReceipt).toMatchObject({
+      receiptVersion: "workbench-authoring-v5-request-receipt-v1",
+      requestId,
+      counts: { attempted: 20, published: 20 }
+    });
+    const done = getWorkbenchAuthoringV5RequestStatus(db, { command, requestId });
+    expect(done.nextAction.kind).toBe("complete");
+    expect(done.request.availablePackCount).toBe(0);
+    expect(done.request.activePackIds).toEqual([]);
+    db.close();
+  });
+
   test("non-final finish embeds followUp start payload without auto-claiming the next pack", async () => {
     const db = await testDatabase();
     const sessionIds = Array.from({ length: 20 }, (_, index) => `session:v5:followup:${index + 1}`);
@@ -589,7 +681,7 @@ describe("workbench-authoring-v5 loop", () => {
     expect(finished.followUp).toEqual({
       kind: "start",
       command: expectedStartCommand,
-      reason: expect.stringMatching(/incomplete|next fixed pack|do not report success/i)
+      reason: expect.stringMatching(/NOT DONE|next pack|manual natural-language|do not report success/i)
     });
     expect(finished.followUp!.command).toContain("workbench author start --request");
     expect(finished.followUp!.command).toBe(finished.nextAction.command);
@@ -820,12 +912,12 @@ describe("workbench-authoring-v5 loop", () => {
     expect(finished.nextAction.reason).toContain("NOT DONE");
     expect(finished.nextAction.reason).toContain("1/2 packs");
     expect(finished.nextAction.reason).toContain("10/20 sessions");
-    expect(finished.nextAction.reason).toContain("Immediately run nextAction.command");
+    expect(finished.nextAction.reason).toContain("Run nextAction.command");
     expect(finished.nextAction.reason).toContain("Do not report success");
     expect(finished.followUp).toEqual({
       kind: "start",
       command: finished.nextAction.command,
-      reason: expect.stringMatching(/NOT DONE|next fixed pack|do not report success/i)
+      reason: expect.stringMatching(/NOT DONE|next pack|manual natural-language|do not report success/i)
     });
     const midStatus = getWorkbenchAuthoringV5RequestStatus(db, {
       command,

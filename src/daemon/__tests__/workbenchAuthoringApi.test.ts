@@ -714,12 +714,12 @@ function authorGuidedScaffold(
 
 function authorV5Scaffold(draft: WorkbenchAuthoringV5Draft): WorkbenchAuthoringV5Draft {
   const authored = structuredClone(draft);
-  for (const session of authored.sessions) {
+  authored.sessions.forEach((session, index) => {
     const evidenceRef = session.evidenceCatalog[0]?.id;
     if (!evidenceRef) throw new Error("expected_v5_evidence_catalog");
     session.fields = {
       decisions: ["Keep callback state bound to the signed request."],
-      description: "Repaired OAuth callback state handling and covered the stable transition with a regression test.",
+      description: `Repaired OAuth callback state handling for session ${index + 1} and covered the stable transition with a regression test.`,
       evidenceRefs: {
         description: [evidenceRef],
         keyWork: [evidenceRef],
@@ -732,10 +732,11 @@ function authorV5Scaffold(draft: WorkbenchAuthoringV5Draft): WorkbenchAuthoringV
       keywords: ["oauth", "callback", "state transition"],
       outcome: "The callback now preserves validated state through authentication.",
       purpose: "Fix the OAuth authentication callback without weakening request validation.",
-      title: "Repair OAuth callback state handling",
+      // Distinct titles required — pack-level duplicate_pack_title hard-rejects clones.
+      title: `Repair OAuth callback state handling (${index + 1})`,
       verification: { status: "passed", summary: "The focused callback regression test passes." }
     };
-  }
+  });
   const evidenceRef = authored.sessions[0]?.evidenceCatalog[0]?.id;
   authored.optionalConsiderations = [{
     decision: "no",

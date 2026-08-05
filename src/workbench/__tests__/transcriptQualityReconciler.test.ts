@@ -169,6 +169,69 @@ describe("transcript quality reconciliation", () => {
     });
     db.close();
   });
+
+  test("finalizes Grok session-start shells even when finalizeNoise is false (live ingest)", async () => {
+    const db = await testDb();
+    const sessionId = "session:grok-heartbeat";
+    seedSession(db, {
+      lifecycle: "running",
+      model: "grok",
+      project: "Masthead",
+      sessionId,
+      title: "Grok Build: session start"
+    });
+    removeEvidence(db, sessionId);
+    insertMessage(db, sessionId, 0, "system", "Grok Build: session start");
+
+    const result = reconcileImportedTranscript(db, sessionId, { finalizeNoise: false });
+
+    expect(result.quality).toMatchObject({ disposition: "suppress", reason: "session_start_only" });
+    expect(readWorkbenchSessionState(db, sessionId)).toMatchObject({
+      nonPublicationReason: "session_start_only",
+      publicationStatus: "not_added_to_logbook",
+      qualityStatus: "failed",
+      suppressionCategory: "confirmed_noise"
+    });
+    db.close();
+  });
+
+  test("suppressDefinitiveNoiseOnPublishPath repairs corrupt session-start rows still on package path", async () => {
+    const { suppressDefinitiveNoiseOnPublishPath } = await import("../transcriptQualityReconciler.ts");
+    const db = await testDb();
+    const sessionId = "session:corrupt-shell";
+    seedSession(db, {
+      lifecycle: "running",
+      model: "grok",
+      project: "Masthead",
+      sessionId,
+      title: "Grok Build: session start"
+    });
+    removeEvidence(db, sessionId);
+    insertMessage(db, sessionId, 0, "system", "Grok Build: session start");
+    // Corrupt state seen in e2e: reason says suppress but still publish_path + passed
+    db.prepare(
+      `INSERT INTO workbench_session_state (
+         session_id, publication_status, next_action, transcript_status, quality_status,
+         session_enrichment_status, session_dossier_status, bug_fix_trace_status,
+         non_publication_reason, suppression_category, quality_decision_source,
+         created_at, updated_at
+       ) VALUES (?, 'publish_path', 'create_dossier', 'unchecked', 'passed',
+         'missing', 'missing', 'unknown',
+         'session_start_only', 'confirmed_noise', 'automatic',
+         ?, ?)`
+    ).run(sessionId, "2026-07-28T00:00:00.000Z", "2026-07-28T00:00:00.000Z");
+
+    const result = suppressDefinitiveNoiseOnPublishPath(db, { limit: 50 });
+
+    expect(result.suppressed).toBeGreaterThanOrEqual(1);
+    expect(result.sessionIds).toContain(sessionId);
+    expect(readWorkbenchSessionState(db, sessionId)).toMatchObject({
+      publicationStatus: "not_added_to_logbook",
+      qualityStatus: "failed",
+      nonPublicationReason: "session_start_only"
+    });
+    db.close();
+  });
 });
 
 async function testDb(): Promise<MastheadDatabase> {
@@ -206,7 +269,7 @@ function insertMessage(
   db: MastheadDatabase,
   sessionId: string,
   index: number,
-  role: "assistant" | "user",
+  role: "assistant" | "user" | "system",
   text: string
 ): void {
   db.prepare(
