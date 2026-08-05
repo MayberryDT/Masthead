@@ -41,6 +41,8 @@ export const WORKBENCH_AUTHORING_V5_HARD_REJECT_CODES = [
   "empty_keywords",
   "insufficient_keywords",
   "metadata_or_tool_keywords",
+  "generic_keyword_bag",
+  "duplicate_pack_title",
   "purpose_not_user_ask",
   "missing_core_field_grounding",
   "unknown_canonical_evidence_ref"
@@ -208,6 +210,11 @@ export type WorkbenchAuthoringV5RequestDto = {
   rejectedSessionCount: number;
   packCount: number;
   packSizes: number[];
+  /** Packs currently claimed (active or saved draft). Parallel workers each own one. */
+  activePackIds: string[];
+  /** Unclaimed packs remaining; parent may call start once per count. */
+  availablePackCount: number;
+  /** First in-flight pack id (active/saved), if any — UI resume convenience. */
   currentPackId?: string;
   createdAt: string;
   updatedAt: string;
@@ -232,6 +239,8 @@ export type WorkbenchAuthoringV5IncompleteRequestSummaryDto = {
   softFlaggedSessionCount: number;
   stalled: boolean;
   idleMs: number;
+  activePackIds?: string[];
+  availablePackCount?: number;
   currentPackId?: string;
   handoff: { requestId: string; startCommand: string };
   updatedAt: string;

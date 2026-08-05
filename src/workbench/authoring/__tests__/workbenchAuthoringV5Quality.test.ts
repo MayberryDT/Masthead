@@ -12,7 +12,10 @@ import {
   INSTRUCTION_OR_POLICY_TITLE_BAD,
   INSTRUCTION_OR_POLICY_TITLE_GOOD
 } from "../__fixtures__/v5InstructionAndJsonQuality.ts";
-import { classifyWorkbenchAuthoringV5Session } from "../workbenchAuthoringV5Quality.ts";
+import {
+  applyWorkbenchAuthoringV5PackTitleDiversity,
+  classifyWorkbenchAuthoringV5Session
+} from "../workbenchAuthoringV5Quality.ts";
 
 const EVIDENCE_ID = "ev:user:1";
 
@@ -149,6 +152,101 @@ describe("workbenchAuthoringV5Quality — Q3 context/metadata title heuristics",
   );
 });
 
+describe("workbenchAuthoringV5Quality — mechanical fill / factory sludge (2026-07-29)", () => {
+  test("hard-rejects the factory fallback title used by masthead-fill-pack.mjs", () => {
+    const outcome = classifyWorkbenchAuthoringV5Session(
+      groundedSession({
+        title: "Review the recorded implementation and approval work for the named project",
+        description:
+          "Recorded work: Review the recorded implementation and approval work for the named project",
+        purpose:
+          "Address the substantive request captured in the session: Review the recorded implementation and approval work for the named project",
+        outcome: "The session retained the implementation or review outcome in its canonical transcript.",
+        keywords: ["implementation", "evidence", "verification"],
+        keyWork: [
+          "Review the recorded implementation and approval work for the named project",
+          "The session retained the implementation or review outcome in its canonical transcript."
+        ]
+      })
+    );
+    expect(outcome.disposition).toBe("hard_reject");
+    const codes = outcome.findings.map(({ code }) => code);
+    expect(codes).toContain("empty_or_generic_title");
+    expect(codes).toContain("templated_request_echo");
+    expect(codes).toContain("generic_keyword_bag");
+  });
+
+  test("hard-rejects Resolve the documented/reported implementation issue fallbacks", () => {
+    for (const title of [
+      "Resolve the documented project implementation issue",
+      "Resolve the reported implementation issue"
+    ]) {
+      expect(codesOf(groundedSession({ title }))).toContain("empty_or_generic_title");
+    }
+  });
+
+  test("hard-rejects Recorded work: / Address the substantive request template prose", () => {
+    const outcome = classifyWorkbenchAuthoringV5Session(
+      groundedSession({
+        title: "Repair OAuth callback token validation",
+        description: "Recorded work: Repair OAuth callback token validation",
+        purpose: "Address the substantive request captured in the session: Repair OAuth callback token validation",
+        outcome: "The session retained the implementation or review outcome in its canonical transcript."
+      })
+    );
+    expect(outcome.disposition).toBe("hard_reject");
+    expect(outcome.findings.map(({ code }) => code)).toContain("templated_request_echo");
+  });
+
+  test("hard-rejects the fixed implementation|evidence|verification keyword bag", () => {
+    const outcome = classifyWorkbenchAuthoringV5Session(
+      groundedSession({
+        keywords: ["implementation", "evidence", "verification"]
+      })
+    );
+    expect(outcome.disposition).toBe("hard_reject");
+    expect(outcome.findings.map(({ code }) => code)).toContain("generic_keyword_bag");
+  });
+
+  test("pack-level duplicate titles hard-reject when three or more sessions share a title", () => {
+    const sessions = [1, 2, 3, 4].map((n) =>
+      groundedSession({
+        sessionId: `session:dup:${n}`,
+        title: n < 4 ? "Harden Workbench package-path clearance after hard reject" : "Ship Logbook search ranking fix",
+        description:
+          n < 4
+            ? "Harden Workbench package-path clearance so hard-rejected sessions leave enrich."
+            : "Ship Logbook search ranking so published artifacts surface first.",
+        purpose:
+          n < 4
+            ? "Stop hard-rejected sessions from reappearing on the package path."
+            : "Improve Logbook ranking for published artifacts.",
+        outcome:
+          n < 4
+            ? "Hard-reject clearance removes sessions from the package path."
+            : "Published artifacts rank above draft candidates.",
+        keywords:
+          n < 4
+            ? ["workbench", "package-path", "hard-reject"]
+            : ["logbook", "search", "ranking"]
+      })
+    );
+    const baseOutcomes = sessions.map((session) => classifyWorkbenchAuthoringV5Session(session));
+    // Without pack diversity, distinct good fields would be publishable.
+    expect(baseOutcomes.filter((o) => o.disposition === "publishable").length).toBeGreaterThanOrEqual(3);
+
+    const diversified = applyWorkbenchAuthoringV5PackTitleDiversity(baseOutcomes, sessions);
+    const dupes = diversified.filter((o) => o.sessionId.startsWith("session:dup:") && o.sessionId !== "session:dup:4");
+    expect(dupes).toHaveLength(3);
+    for (const outcome of dupes) {
+      expect(outcome.disposition).toBe("hard_reject");
+      expect(outcome.findings.map(({ code }) => code)).toContain("duplicate_pack_title");
+    }
+    const unique = diversified.find((o) => o.sessionId === "session:dup:4");
+    expect(unique?.findings.map(({ code }) => code) ?? []).not.toContain("duplicate_pack_title");
+  });
+});
+
 describe("workbenchAuthoringV5Quality — Q4 hard-reject code list sync", () => {
   test("shared hard-reject list includes Q1/Q2 codes and is the sole classifier source", () => {
     expect(WORKBENCH_AUTHORING_V5_HARD_REJECT_CODES).toEqual(
@@ -156,7 +254,9 @@ describe("workbenchAuthoringV5Quality — Q4 hard-reject code list sync", () => 
         "instruction_or_policy_title",
         "approval_or_json_payload_description",
         "context_or_metadata_title",
-        "empty_or_generic_title"
+        "empty_or_generic_title",
+        "generic_keyword_bag",
+        "duplicate_pack_title"
       ])
     );
     expect(WORKBENCH_AUTHORING_V5_SOFT_FLAG_CODES).not.toContain("instruction_or_policy_title");

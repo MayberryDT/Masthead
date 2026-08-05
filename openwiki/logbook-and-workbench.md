@@ -68,10 +68,26 @@ a V5 save **hard reject** (reason `authoring_hard_reject` — see clearance belo
 
 Not Added and quality review are independent. A large import corpus can show **Not Added = 0** while
 hundreds of sessions sit in **quality review** on the package path. Package-path counts include
-those review rows. **Select-all for authoring** (and **Copy Agent Prompt**) uses **compile-ready
-only** and discloses how many review-needed sessions were left out — review-only rows never join
-the V5 request. That is intentional: Masthead does not silently force review sessions into
-authoring without a quality decision.
+those review rows.
+
+**Package path is work.** Rows on the default Workbench queue must be dealable: author into
+Logbook, hard-reject, or dismiss to Not Added. Empty shells must not linger.
+
+**Grok / harness session-start shells** (system-only “session start” heartbeats with no user or
+assistant work) are **definitive noise**. Capture precheck disposition `suppress` /
+`session_start_only` finalizes them to **Not Added** even during live partial ingest, so they are
+not counted as Workbench work.
+
+**Select-all + Copy Agent Prompt** sends the **full selection** to request create:
+
+- compile-ready sessions enter the V5 pack for dossier authoring;
+- excluded definitive noise is **dismissed to Not Added** during preparation (leaves package path);
+- mid-import rows (transcript still hydrating) keep their pipeline action;
+- other non-ready selected rows are dismissed when they are not mid-import so the handoff does not
+  leave undealable Workbench leftovers.
+
+The handoff text reports eligible vs excluded counts. Inside the pack, **hard_reject** remains the
+agent path to remove empty/meta sessions from package path without publishing.
 
 ### Operator disposition (intended)
 

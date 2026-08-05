@@ -376,7 +376,10 @@ describe("useWorkbenchController", () => {
     await act(async () => {
       await latest().copyAgentPrompt();
     });
-    expect(vi.mocked(createGuidedAuthoringRequest).mock.calls.at(-1)?.[1].sessionIds).toEqual(["session:page-2"]);
+    expect(vi.mocked(createGuidedAuthoringRequest).mock.calls.at(-1)?.[1].sessionIds).toEqual(
+      expect.arrayContaining(["session:page-1", "session:page-2"])
+    );
+    expect(vi.mocked(createGuidedAuthoringRequest).mock.calls.at(-1)?.[1].sessionIds).toHaveLength(2);
 
     firstPageReady = true;
     await rerenderHarness({ active: true, activeProjectionUrl: baseUrl, isLive: true, refreshKey: 3 });
@@ -392,7 +395,7 @@ describe("useWorkbenchController", () => {
       .toEqual(["session:page-1", "session:page-2"]);
   });
 
-  test("uses the compile-ready subset of a V4 selection for Copy Agent Prompt", async () => {
+  test("hands off the full selection for Copy Agent Prompt (server excludes/dismisses non-ready)", async () => {
     mockWorkbenchResponse([
       session("session:ready", "Ready", { nextAction: "enrich", qualityStatus: "passed", transcriptStatus: "imported" }),
       session("session:available", "Available", { qualityStatus: "passed", transcriptStatus: "available" }),
@@ -404,7 +407,8 @@ describe("useWorkbenchController", () => {
 
     expect(latest().canRun("copy_agent_prompt")).toBe(false);
     await select("session:not-ready");
-    expect(latest().canRun("copy_agent_prompt")).toBe(false);
+    // Non-ready alone is still a valid handoff (server dismisses noise / excludes mid-import).
+    expect(latest().canRun("copy_agent_prompt")).toBe(true);
     await act(async () => {
       latest().toggleSession("session:ready");
       await Promise.resolve();
@@ -416,7 +420,10 @@ describe("useWorkbenchController", () => {
     await act(async () => {
       await latest().copyAgentPrompt();
     });
-    expect(vi.mocked(createGuidedAuthoringRequest).mock.calls.at(-1)?.[1].sessionIds).toEqual(["session:ready"]);
+    expect(vi.mocked(createGuidedAuthoringRequest).mock.calls.at(-1)?.[1].sessionIds).toEqual(
+      expect.arrayContaining(["session:ready", "session:not-ready"])
+    );
+    expect(vi.mocked(createGuidedAuthoringRequest).mock.calls.at(-1)?.[1].sessionIds).toHaveLength(2);
     await act(async () => {
       latest().toggleSession("session:not-ready");
       await Promise.resolve();
@@ -432,7 +439,7 @@ describe("useWorkbenchController", () => {
       await latest().copyAgentPrompt();
     });
     expect(vi.mocked(createGuidedAuthoringRequest).mock.calls.at(-1)?.[1].sessionIds)
-      .toEqual(["session:ready", "session:available"]);
+      .toEqual(expect.arrayContaining(["session:ready", "session:available"]));
   });
 
   test("keeps Copy Agent Prompt disabled for legacy authoring capabilities", async () => {
@@ -592,10 +599,11 @@ describe("useWorkbenchController", () => {
     await act(async () => {
       await latest().copyAgentPrompt();
     });
+    // Final selection is only session:b (a was toggled off before b).
     expect(vi.mocked(createGuidedAuthoringRequest).mock.calls.at(-1)?.[1].sessionIds).toEqual(["session:b"]);
   });
 
-  test("selectAll preserves a mixed selection while handing off only compile-ready sessions", async () => {
+  test("selectAll preserves a mixed selection and hands off the full selection for server-side dealing", async () => {
     vi.mocked(getWorkbenchAuthoringCapabilities).mockResolvedValue(
       authoringCapabilities("database:test", "/home/test/.local/bin/mastheadctl")
     );
@@ -635,7 +643,11 @@ describe("useWorkbenchController", () => {
     await act(async () => {
       await latest().copyAgentPrompt();
     });
-    expect(vi.mocked(createGuidedAuthoringRequest).mock.calls.at(-1)?.[1].sessionIds).toEqual(["session:b"]);
+    // Full selection is sent; server excludes non-ready and dismisses noise.
+    expect(vi.mocked(createGuidedAuthoringRequest).mock.calls.at(-1)?.[1].sessionIds).toEqual(
+      expect.arrayContaining(["session:a", "session:b"])
+    );
+    expect(vi.mocked(createGuidedAuthoringRequest).mock.calls.at(-1)?.[1].sessionIds).toHaveLength(2);
   });
 
   test("retries after a failed load", async () => {
@@ -733,7 +745,8 @@ describe("useWorkbenchController", () => {
     expect(latest().canRun("quality_pass")).toBe(false);
     expect(latest().canRun("claim")).toBe(true);
     expect(latest().canRun("release")).toBe(false);
-    expect(latest().canRun("copy_agent_prompt")).toBe(false);
+    // Full selection handoff is available for any selection (noise dismissed server-side).
+    expect(latest().canRun("copy_agent_prompt")).toBe(true);
 
     await select("session:import");
     expect(latest().canRun("import_transcript")).toBe(true);
@@ -1520,6 +1533,8 @@ function guidedRequestResult(requestId: string) {
       rejectedSessionCount: 0,
       packCount: 1,
       packSizes: [2],
+      activePackIds: ["authoring-v5-pack:one"],
+      availablePackCount: 0,
       currentPackId: "authoring-v5-pack:one",
       createdAt: "2026-07-20T12:00:00.000Z",
       updatedAt: "2026-07-20T12:00:00.000Z"

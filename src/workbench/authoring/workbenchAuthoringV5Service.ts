@@ -2,8 +2,9 @@ import { createHash, randomUUID } from "node:crypto";
 import { stableRecordId } from "../../daemon/identity.ts";
 import {
   activeOrAvailableWorkbenchAuthoringV5Pack,
-  activateWorkbenchAuthoringV5Pack,
+  claimNextAvailableWorkbenchAuthoringV5Pack,
   completeWorkbenchAuthoringV5PackRecord,
+  incompleteWorkbenchAuthoringV5Pack,
   getWorkbenchAuthoringV5EvidenceSnapshot,
   getSavedWorkbenchAuthoringV5Pack,
   getWorkbenchAuthoringV5PackReceipt,
@@ -26,7 +27,7 @@ import {
   recordWorkbenchAuthoringV5PreparedSession,
   recordWorkbenchAuthoringV5PreparationSelection,
   recordWorkbenchAuthoringV5EvidenceAccess,
-  releaseFirstWorkbenchAuthoringV5Pack,
+  releaseAllWorkbenchAuthoringV5Packs,
   retryWorkbenchAuthoringV5Preparation,
   requestBindingForWorkbenchAuthoringV5Pack,
   requireWorkbenchAuthoringV5Pack,
@@ -42,6 +43,7 @@ import {
 } from "../../daemon/db/sessionTranscriptRepository.ts";
 import {
   markWorkbenchQuality,
+  readWorkbenchSessionState,
   recordWorkbenchActivity
 } from "../../daemon/db/workbenchPipelineRepository.ts";
 import type { EvidenceRef } from "../../core/types.ts";
@@ -78,6 +80,7 @@ import {
 } from "../../shared/instanceIdentity.ts";
 import * as evidenceCatalog from "./evidenceCatalog.ts";
 import { workbenchAuthoringV5ReadinessReason } from "./guidedAuthoringPreflight.ts";
+import { runCaptureQualityPrecheck } from "../qualityPrecheck.ts";
 import * as workbenchAuthoringV5Quality from "./workbenchAuthoringV5Quality.ts";
 import { evaluateAuthoringCampaignStall } from "./workbenchAuthoringV5Stall.ts";
 import {
@@ -304,7 +307,7 @@ function finalizeWorkbenchAuthoringV5Preparation(db: MastheadDatabase, requestId
       insertWorkbenchAuthoringV5Pack(db, requestId, requestInput.packs[storedPackCount]!, false);
       return false;
     }
-    releaseFirstWorkbenchAuthoringV5Pack(db, requestId);
+    releaseAllWorkbenchAuthoringV5Packs(db, requestId);
     completeWorkbenchAuthoringV5Preparation(db, requestId, selection);
     bumpDataRevisionInTransaction(db, "workbench");
     return true;
@@ -331,19 +334,27 @@ export function bootstrapWorkbenchAuthoringV5Request(
     skillContract: {
       owner: "agent" as const,
       objective:
-        "Author specific, evidence-grounded session knowledge for every session in the request. Prefer the last substantive user ask and the retained outcome of assistant work—not AGENTS.md, skill dumps, system-reminder, MCP connection prose, or first-row metadata.",
+        "Write natural-language session dossiers for Logbook: published knowledge that humans and future agents can search and reuse. " +
+        "Prefer the last substantive user ask and the retained outcome of assistant work—not AGENTS.md, skill dumps, system-reminder, MCP connection prose, or first-row metadata.",
       scaffoldWritesProse: false as const,
+      authoringMode: "manual_synthesis" as const,
       authoredFields: ["title", "description", "keywords", "purpose", "outcome", "keyWork", "decisions", "verification"],
       synthesisRule:
+        "You write dossier field prose yourself after reading inspected evidence. " +
         "Synthesize each dossier from the last substantive user ask and the retained outcome of assistant work. " +
+        "Titles are short specific names of the work; descriptions are 1–3 searchable sentences; keywords aid retrieval. " +
         "Never use AGENTS.md, skill dumps, system-reminder text, or MCP connection prose as the title or primary ask. " +
         "Never paste approval JSON (risk_level, outcome allow/deny, or similar gate payloads) into description or other authored fields. " +
         "Do not treat environment, monitor, protocol, path, timestamp, timezone, or tool rows as the primary ask, and do not extract first-message text, paths, timestamps, or tool tokens deterministically. " +
-        "Masthead scaffold remains prose-free: blank skill fields only—agents write all enrichment.",
+        "Masthead scaffold remains prose-free: blank skill fields only. " +
+        "Do not write or run fill scripts, synthesizers, pack runners, regex factories, or any program that generates dossier prose. " +
+        "Shell may only execute daemon-returned nextAction commands. Automating fill is a failed run even if packs complete.",
       loop: ["start", "inspect", "scaffold", "save", "finish", "claim_next_or_complete"],
       obligation:
         "Continue until the immutable request-complete receipt is returned. Resume is only crash recovery. " +
-        "Do not stop after pack finish. Reject instruction-file titles, system-reminder titles, MCP boilerplate as title/ask, and approval-JSON descriptions before save."
+        "Do not stop after pack finish. Author every remaining pack with the same manual synthesis standard. " +
+        "Reject instruction-file titles, system-reminder titles, MCP boilerplate as title/ask, and approval-JSON descriptions before save. " +
+        "Quality over speed: if save hard-rejects, rewrite those sessions with real synthesis — do not invent a fill pipeline."
     },
     packPolicy: {
       minimumSessions: MINIMUM_PACK_SIZE,
@@ -389,11 +400,12 @@ export function startWorkbenchAuthoringV5Pack(
     };
   }
   return withImmediateTransaction(db, () => {
-    const candidate = activeOrAvailableWorkbenchAuthoringV5Pack(db, request.requestId);
-    if (!candidate) throw new Error("authoring_v5_no_pack_available");
-    const newlyClaimed = candidate.status === "available";
-    const pack = activateWorkbenchAuthoringV5Pack(db, candidate.packId);
-    if (newlyClaimed) {
+    // Prefer claiming a free pack so parallel parents can start many workers.
+    // If none free, resume the lowest-ordinal in-flight pack (sequential crash recovery).
+    const claimed = claimNextAvailableWorkbenchAuthoringV5Pack(db, request.requestId);
+    const pack = claimed ?? incompleteWorkbenchAuthoringV5Pack(db, request.requestId);
+    if (!pack) throw new Error("authoring_v5_no_pack_available");
+    if (claimed) {
       for (const sessionId of pack.sessionIds) {
         recordWorkbenchActivity(db, {
           actor: { id: request.actorId, kind: "agent" },
@@ -534,10 +546,14 @@ export function saveWorkbenchAuthoringV5Draft(
     if (pack.status !== "active" && pack.status !== "saved") throw new Error("authoring_v5_pack_not_saveable");
     assertFrozenOrCurrentEvidenceAvailable(db, pack);
     const draft = parseWorkbenchAuthoringV5Draft(db, input.draft, pack);
-    const outcomes = draft.sessions.map((session) => classifySessionDraft(
+    const perSessionOutcomes = draft.sessions.map((session) => classifySessionDraft(
       session,
       evidenceForPackSession(db, pack, session.sessionId)
     ));
+    const outcomes = workbenchAuthoringV5Quality.applyWorkbenchAuthoringV5PackTitleDiversity(
+      perSessionOutcomes,
+      draft.sessions
+    );
     const saved = saveWorkbenchAuthoringV5PackDraft(db, {
       draft: toWorkbenchAuthoringV5AuthoredDraft(draft),
       outcomes,
@@ -627,16 +643,22 @@ export function finishWorkbenchAuthoringV5Pack(
     const completedReceipts = allPacks
       .map(({ packId }) => getWorkbenchAuthoringV5PackReceipt(db, packId))
       .filter((receipt): receipt is WorkbenchAuthoringV5PackReceipt => Boolean(receipt));
-    const laterPacks = allPacks.filter(({ ordinal, status }) => ordinal > pack.ordinal && status === "pending");
-    const hasLaterPack = laterPacks.length > 0;
-    const requestReceipt = hasLaterPack ? undefined : requestReceiptFrom([...completedReceipts, packReceipt], completedAt, pack.requestId);
+    // Request completes only when every other pack is already completed (this pack finishes last).
+    // Do not key off serial "pending" unlock — all packs may be available/active in parallel.
+    const otherIncomplete = allPacks.filter(
+      ({ packId, status }) => packId !== pack.packId && status !== "completed"
+    );
+    const requestComplete = otherIncomplete.length === 0;
+    const requestReceipt = requestComplete
+      ? requestReceiptFrom([...completedReceipts, packReceipt], completedAt, pack.requestId)
+      : undefined;
     const packsCompletedAfter = completedReceipts.length + 1;
     const sessionsAttemptedAfter =
       completedReceipts.reduce((sum, prior) => sum + prior.counts.attempted, 0) + packReceipt.counts.attempted;
     recordFinishActivity(db, request.actorId, packReceipt, draft, {
       requestComplete: Boolean(requestReceipt),
-      remainingPacks: laterPacks.length,
-      remainingSessions: laterPacks.reduce((sum, later) => sum + later.sessionIds.length, 0),
+      remainingPacks: otherIncomplete.length,
+      remainingSessions: otherIncomplete.reduce((sum, later) => sum + later.sessionIds.length, 0),
       packsCompleted: packsCompletedAfter,
       packsTotal: request.packCount,
       sessionsAttempted: sessionsAttemptedAfter,
@@ -696,6 +718,8 @@ export function getIncompleteWorkbenchAuthoringV5RequestSummary(
       softFlaggedSessionCount: request.softFlaggedSessionCount,
       stalled: stall.stalled,
       idleMs: stall.idleMs,
+      activePackIds: request.activePackIds,
+      availablePackCount: request.availablePackCount,
       ...(request.currentPackId ? { currentPackId: request.currentPackId } : {}),
       handoff: {
         requestId: request.requestId,
@@ -768,6 +792,81 @@ function recordPreparationExclusionActivity(
     relatedRunId: requestId,
     sessionId,
     summary: "Session excluded from V5 authoring request"
+  });
+  // Select-all / handoff contract: every selected session is dealt with.
+  // Non-authorable noise leaves package path (Not Added) instead of lingering on Workbench.
+  disposeExcludedSessionFromPackagePath(db, {
+    actorId,
+    reason,
+    requestId,
+    sessionId
+  });
+}
+
+function disposeExcludedSessionFromPackagePath(
+  db: MastheadDatabase,
+  input: {
+    actorId: string;
+    reason: WorkbenchAuthoringV5SelectionDto["excludedSessions"][number]["reason"];
+    requestId: string;
+    sessionId: string;
+  }
+): void {
+  const state = readWorkbenchSessionState(db, input.sessionId);
+  if (!state || state.publicationStatus !== "publish_path") return;
+  // User-held Not Added rows are not re-dismissed by automatic selection dealing.
+  if (state.qualityDecisionSource === "user") return;
+
+  // Prefer capture precheck for definitive noise (session-start shells, empty, etc.).
+  const quality = runCaptureQualityPrecheck(db, input.sessionId);
+  const evidenceRevision = evidenceCatalog.authoringEvidenceRevision(db, [input.sessionId]);
+  if (quality.disposition === "suppress") {
+    markWorkbenchQuality(db, {
+      actor: { id: input.actorId, kind: "agent" },
+      evidenceRevision,
+      qualityDecisionSource: "automatic",
+      reason: quality.reason,
+      sessionId: input.sessionId,
+      status: "failed",
+      suppressionCategory: "confirmed_noise"
+    });
+    recordWorkbenchActivity(db, {
+      actor: { id: input.actorId, kind: "agent" },
+      details: { reason: quality.reason, requestId: input.requestId, exclusionReason: input.reason },
+      eventType: "authoring_request_session_dismissed",
+      relatedRunId: input.requestId,
+      sessionId: input.sessionId,
+      summary: "Excluded noise session dismissed from Workbench (Not Added)"
+    });
+    return;
+  }
+
+  // Remaining non-ready package-path rows selected for handoff: operator intent is "deal with these."
+  // Leave true review-hold rows that still have a quality decision path only when precheck says review
+  // *and* transcript is not yet imported — otherwise dismiss so Workbench does not retain undealable work.
+  const transcriptReady =
+    state.transcriptStatus === "imported" || state.transcriptStatus === "available";
+  if (quality.disposition === "review" && !transcriptReady) {
+    // Still hydrating — keep check_transcript/import path; do not mass-dismiss mid-import.
+    return;
+  }
+
+  markWorkbenchQuality(db, {
+    actor: { id: input.actorId, kind: "agent" },
+    evidenceRevision,
+    qualityDecisionSource: "automatic",
+    reason: `handoff_excluded_${input.reason}`,
+    sessionId: input.sessionId,
+    status: "failed",
+    suppressionCategory: quality.disposition === "review" ? "insufficient_evidence" : "confirmed_noise"
+  });
+  recordWorkbenchActivity(db, {
+    actor: { id: input.actorId, kind: "agent" },
+    details: { reason: input.reason, requestId: input.requestId },
+    eventType: "authoring_request_session_dismissed",
+    relatedRunId: input.requestId,
+    sessionId: input.sessionId,
+    summary: "Excluded session dismissed from Workbench (Not Added) during authoring handoff"
   });
 }
 
@@ -1218,8 +1317,8 @@ function followUpStartAction(
     kind: "start",
     command: startCommand,
     reason:
-      `NOT DONE after pack finish.${progressBit} Immediately run this start command to claim the next fixed pack. ` +
-      "Do not report success, stop, or hand control back until every pack is complete."
+      `NOT DONE after pack finish.${progressBit} Run this start command to claim the next pack, then author it with the same manual natural-language synthesis — do not script the fill. ` +
+      "Do not report success, stop, or hand control back until every pack is complete with quality dossiers."
   };
 }
 
@@ -1269,7 +1368,9 @@ function startAction(db: MastheadDatabase, command: string, requestId: string): 
   return withRequestProgress(db, requestId, {
     kind: "start",
     command: `${command} workbench author start --request ${shellQuote(requestId)} --json`,
-    reason: "Start or resume the next fixed pack."
+    reason:
+      "Claim the next available pack (safe to call once per free pack for parallel workers). " +
+      "If no free pack remains, start resumes the lowest-ordinal in-flight pack."
   });
 }
 
@@ -1308,13 +1409,20 @@ function finishAction(db: MastheadDatabase, command: string, packId: string): Wo
 function claimNextAction(db: MastheadDatabase, command: string, requestId: string): WorkbenchAuthoringV5NextAction {
   const progress = requestProgress(db, requestId);
   const remainingPacks = Math.max(0, progress.packsTotal - progress.packsCompleted);
+  const request = requireWorkbenchAuthoringV5Request(db, requestId);
+  const availableBit =
+    request.availablePackCount > 0
+      ? ` ${request.availablePackCount} pack(s) still available to claim (parallel start is allowed).`
+      : request.activePackIds.length > 0
+        ? ` ${request.activePackIds.length} pack(s) still in flight.`
+        : "";
   return {
     kind: "claim_next",
     command: `${command} workbench author start --request ${shellQuote(requestId)} --json`,
     reason:
       `NOT DONE — ${progress.packsCompleted}/${progress.packsTotal} packs finished, ${remainingPacks} packs remaining ` +
-      `(${progress.sessionsAttempted}/${progress.sessionsTotal} sessions). ` +
-      "Immediately run nextAction.command to claim the next pack. Do not report success, stop, or hand control back.",
+      `(${progress.sessionsAttempted}/${progress.sessionsTotal} sessions).${availableBit} ` +
+      "Run nextAction.command to claim the next pack and author it carefully in natural language. Do not report success, stop, or hand control back.",
     progress: { ...progress, requestComplete: false },
     stopRule: workbenchAuthoringV5IncompleteStopRule(progress)
   };

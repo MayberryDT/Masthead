@@ -12,7 +12,7 @@ export function formatCopyAgentPromptLabel(_args?: {
   return "Copy Agent Prompt";
 }
 
-/** Tooltip / title for Copy Agent Prompt (ready vs left-out review). */
+/** Tooltip / title for Copy Agent Prompt (ready vs non-ready selection). */
 export function formatCopyAgentPromptTitle(args: {
   selectionCount: number;
   ready: number;
@@ -22,14 +22,16 @@ export function formatCopyAgentPromptTitle(args: {
   if (args.selectionCount === 0) return args.defaultTitle;
   if (args.ready === 0) {
     return (
-      `No selected sessions are ready for agent enrichment. ` +
-      `${args.excluded} need quality review and will not be included in the handoff.`
+      `No selected sessions are compile-ready for dossier authoring. ` +
+      `Copy still processes the selection: definitive noise is dismissed to Not Added; ` +
+      `${args.excluded} non-ready session${args.excluded === 1 ? "" : "s"} will be excluded from the pack.`
     );
   }
   if (args.excluded > 0) {
     return (
       `Copy for ${args.ready} ready session${args.ready === 1 ? "" : "s"}. ` +
-      `${args.excluded} still need quality review and will be left out.`
+      `${args.excluded} non-ready session${args.excluded === 1 ? "" : "s"} will be excluded from the pack ` +
+      `(noise dismissed from Workbench; mid-import rows keep their pipeline action).`
     );
   }
   return args.defaultTitle;

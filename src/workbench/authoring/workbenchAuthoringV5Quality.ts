@@ -6,10 +6,25 @@ import { WORKBENCH_AUTHORING_V5_HARD_REJECT_CODES } from "../../shared/workbench
 
 const HARD_FINDING_CODES = new Set<string>(WORKBENCH_AUTHORING_V5_HARD_REJECT_CODES);
 
+/** ≥ this many sessions in one pack with the same normalized title → hard-reject those sessions. */
+export const WORKBENCH_AUTHORING_V5_PACK_DUPLICATE_TITLE_THRESHOLD = 3;
+
 const GENERIC_TITLES = new Set([
   "codex session", "current work", "done", "masthead session", "new session", "recent activity", "selected session evidence review",
-  "session", "session narrative", "session work", "untitled session", "work completed"
+  "session", "session narrative", "session work", "untitled session", "work completed",
+  // Mechanical fill-script fallbacks observed 2026-07-29 (masthead-fill-pack.mjs).
+  "review the recorded implementation and approval work for the named project",
+  "resolve the documented project implementation issue",
+  "resolve the reported implementation issue"
 ]);
+
+/** Title/phrase shapes produced by bulk regex fillers — not exact-only. */
+const MECHANICAL_FILL_TITLE_PATTERNS: readonly RegExp[] = [
+  /\brecorded implementation and approval work\b/i,
+  /\bfor the named project\b/i,
+  /\bresolve the (?:documented|reported)(?: project)? implementation issue\b/i,
+  /\breview the recorded\b/i
+];
 
 const GENERIC_DESCRIPTIONS = new Set([
   "changes made", "implemented changes", "session completed", "task completed", "updated code", "work completed"
@@ -18,6 +33,12 @@ const GENERIC_DESCRIPTIONS = new Set([
 const GENERIC_DESCRIPTION_TOKENS = new Set([
   "change", "changed", "changes", "code", "complete", "completed", "did", "done", "implemented", "made",
   "request", "requested", "session", "some", "task", "the", "update", "updated", "updates", "work"
+]);
+
+/** Keywords that carry almost no session specificity when they dominate the bag. */
+const GENERIC_KEYWORD_BAG = new Set([
+  "approval", "canonical", "dossier", "evidence", "implementation", "project", "recorded",
+  "review", "session", "transcript", "verification", "work"
 ]);
 
 const PURPOSE_DOMAINS = {
@@ -83,10 +104,13 @@ export function classifyWorkbenchAuthoringV5Session(
       message: "Summary and purpose must describe the user's work, not authoring protocol, compaction, or pack mechanics."
     });
   }
-  if ([session.fields.description, session.fields.purpose].some(isTemplatedRequestEcho)) {
+  if (
+    [session.fields.description, session.fields.purpose, session.fields.outcome].some(isTemplatedRequestEcho) ||
+    session.fields.keyWork.some(isTemplatedRequestEcho)
+  ) {
     findings.push({
       code: "templated_request_echo",
-      message: "Description and purpose must synthesize the substantive request and outcome, not echo a request template."
+      message: "Description, purpose, and outcome must synthesize the substantive request and result, not echo a fill-script template."
     });
   }
   const keywordCount = new Set(session.fields.keywords.map((keyword) => keyword.trim().toLowerCase()).filter(Boolean)).size;
@@ -105,6 +129,12 @@ export function classifyWorkbenchAuthoringV5Session(
     findings.push({
       code: "metadata_or_tool_keywords",
       message: "Keywords must describe the substantive work rather than paths, timestamps, tool operations, or title filler."
+    });
+  }
+  if (isGenericKeywordBag(session.fields.keywords)) {
+    findings.push({
+      code: "generic_keyword_bag",
+      message: "Keywords must include session-specific terms, not only generic bags like implementation/evidence/verification."
     });
   }
   if (purposeClearlyMissesUserAsk(session)) {
@@ -205,7 +235,8 @@ function isThinKeyWork(keyWork: string[]): boolean {
 function isEmptyOrGenericTitle(value: string, sessionId: string): boolean {
   const normalized = value.replace(/\s+/g, " ").trim().toLowerCase().replace(/[.!?]+$/g, "");
   return !/[a-z0-9]/i.test(normalized) || normalized === sessionId.toLowerCase() || GENERIC_TITLES.has(normalized) ||
-    /^(?:codex|claude|cursor|masthead)?\s*(?:work\s*)?session\s*\d*$/i.test(normalized);
+    /^(?:codex|claude|cursor|masthead)?\s*(?:work\s*)?session\s*\d*$/i.test(normalized) ||
+    MECHANICAL_FILL_TITLE_PATTERNS.some((pattern) => pattern.test(value));
 }
 
 /**
@@ -276,7 +307,68 @@ function isConversationalFillerTitle(value: string): boolean {
 
 function isTemplatedRequestEcho(value: string): boolean {
   const normalized = value.replace(/\s+/g, " ").trim();
-  return /^(?:(?:worked on|complete) (?:the )?(?:user'?s )?request to|addressed the recorded request\b)/i.test(normalized);
+  return (
+    /^(?:(?:worked on|complete) (?:the )?(?:user'?s )?request to|addressed the recorded request\b)/i.test(normalized) ||
+    // Mechanical fill-script templates observed 2026-07-29.
+    /^recorded work\s*:/i.test(normalized) ||
+    /^documented work\s*:/i.test(normalized) ||
+    /^address the substantive request captured in the session\b/i.test(normalized) ||
+    /^address the substantive request to\b/i.test(normalized) ||
+    /\bthe session retained the implementation or review outcome\b/i.test(normalized) ||
+    /\bin its canonical transcript\b/i.test(normalized)
+  );
+}
+
+function isGenericKeywordBag(keywords: string[]): boolean {
+  const terms = [...new Set(keywords.map((keyword) => keyword.trim().toLowerCase()).filter(Boolean))];
+  if (terms.length < 3) return false;
+  return terms.every((term) => GENERIC_KEYWORD_BAG.has(term));
+}
+
+/**
+ * Pack-level diversity gate: when ≥ threshold sessions share the same normalized title,
+ * hard-reject each of those sessions with `duplicate_pack_title` so bulk fill factories cannot publish.
+ */
+export function applyWorkbenchAuthoringV5PackTitleDiversity(
+  outcomes: WorkbenchAuthoringV5SessionOutcome[],
+  sessions: WorkbenchAuthoringV5Draft["sessions"]
+): WorkbenchAuthoringV5SessionOutcome[] {
+  const titleBySession = new Map(
+    sessions.map((session) => [
+      session.sessionId,
+      session.fields.title.replace(/\s+/g, " ").trim().toLowerCase()
+    ] as const)
+  );
+  const counts = new Map<string, number>();
+  for (const title of titleBySession.values()) {
+    if (!title) continue;
+    counts.set(title, (counts.get(title) ?? 0) + 1);
+  }
+  const duplicated = new Set(
+    [...counts.entries()]
+      .filter(([, count]) => count >= WORKBENCH_AUTHORING_V5_PACK_DUPLICATE_TITLE_THRESHOLD)
+      .map(([title]) => title)
+  );
+  if (duplicated.size === 0) return outcomes;
+
+  return outcomes.map((outcome) => {
+    const title = titleBySession.get(outcome.sessionId) ?? "";
+    if (!duplicated.has(title)) return outcome;
+    if (outcome.findings.some(({ code }) => code === "duplicate_pack_title")) return outcome;
+    const findings = [
+      ...outcome.findings,
+      {
+        code: "duplicate_pack_title" as const,
+        message:
+          `Title is reused across ${counts.get(title)} sessions in this pack; each session needs a distinct, evidence-specific title.`
+      }
+    ];
+    return {
+      ...outcome,
+      disposition: findings.some(({ code }) => HARD_FINDING_CODES.has(code)) ? "hard_reject" : outcome.disposition,
+      findings
+    };
+  });
 }
 
 function hasMetadataOrToolDominatedKeywords(keywords: string[], title: string): boolean {

@@ -284,12 +284,15 @@ export function useWorkbenchController({
   const qualityReviewSelectedCount = qualityReviewSelectedIds.length;
   const copyAgentPrompt = useCallback((): Promise<string> => {
     if (copyRequestInFlightRef.current) return copyRequestInFlightRef.current;
-    if (!isLive || actionBusy || !authoringCapabilities || agentPromptSessionIds.length === 0) {
+    // Handoff the full selection (not only compile-ready). Server excludes non-ready rows from
+    // the V5 pack and dismisses definitive noise / undealable selected rows from package path.
+    const handoffSessionIds = Array.from(selectedSessionIds);
+    if (!isLive || actionBusy || !authoringCapabilities || handoffSessionIds.length === 0) {
       return Promise.reject(new Error("Guided authoring is unavailable for this selection"));
     }
 
     const capabilities = authoringCapabilities;
-    const sessionIds = [...agentPromptSessionIds];
+    const sessionIds = handoffSessionIds;
     const creationFingerprint = JSON.stringify({
       databaseId: capabilities.databaseId,
       buildSha: capabilities.buildSha,
@@ -313,6 +316,7 @@ export function useWorkbenchController({
         });
         if (copyCreationRef.current?.token === creationToken) copyCreationRef.current = undefined;
         // New campaign should appear on the status strip without waiting for the next queue poll.
+        // Queue refresh follows data-revision / next poll (create may dismiss noise off package path).
         void loadCampaignRequest();
         return buildWorkbenchHandoff({ capabilities, request });
       } catch (copyError) {
@@ -327,14 +331,16 @@ export function useWorkbenchController({
       if (copyRequestInFlightRef.current === operation) copyRequestInFlightRef.current = null;
     }).catch(() => undefined);
     return operation;
-  }, [actionBusy, activeProjectionUrl, agentPromptSessionIds, authoringCapabilities, isLive, loadCampaignRequest]);
+  }, [actionBusy, activeProjectionUrl, authoringCapabilities, isLive, loadCampaignRequest, selectedSessionIds]);
 
   const canRun = useCallback(
     (kind: WorkbenchActionKind): boolean => {
       if (!isLive || actionBusy) return false;
       if (kind === "enroll_missing") return true;
       if (kind === "copy_agent_prompt") {
-        return Boolean(authoringCapabilities) && agentPromptSessionCount > 0;
+        // Allow handoff whenever anything is selected: ready rows enter the pack;
+        // non-ready selected noise is dismissed from package path during create.
+        return Boolean(authoringCapabilities) && selectedSessionIds.size > 0;
       }
       // Quality disposition tracks review IDs across pages / Quality review panel (not only current page).
       if (kind === "quality_pass" || kind === "quality_fail" || kind === "quality_precheck") {

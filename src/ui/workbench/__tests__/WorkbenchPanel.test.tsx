@@ -438,7 +438,7 @@ describe("WorkbenchPanel", () => {
     expect(text).not.toContain("package-path ·");
     expect(copyButtonOpen).not.toContain("disabled");
     expect(copyButtonOpen).toContain(
-      "title=\"Copy for 1 ready session. 2 still need quality review and will be left out.\""
+      "title=\"Copy for 1 ready session. 2 non-ready sessions will be excluded from the pack (noise dismissed from Workbench; mid-import rows keep their pipeline action).\""
     );
     expect(copyButtonBlock).toContain("Copy Agent Prompt");
     expect(copyButtonBlock).not.toContain("ready)");
@@ -466,7 +466,7 @@ describe("WorkbenchPanel", () => {
     expect(text).not.toContain("need quality review");
     expect(copyButtonOpen).toContain("disabled");
     expect(copyButtonOpen).toContain(
-      "title=\"No selected sessions are ready for agent enrichment. 2 need quality review and will not be included in the handoff.\""
+      "title=\"No selected sessions are compile-ready for dossier authoring. Copy still processes the selection: definitive noise is dismissed to Not Added; 2 non-ready sessions will be excluded from the pack.\""
     );
     expect(html).toContain("Copy Agent Prompt");
     expect(html).not.toContain("Copy Agent Prompt (");

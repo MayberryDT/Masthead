@@ -289,8 +289,9 @@ export function insertWorkbenchAuthoringV5Request(
 ): WorkbenchAuthoringV5RequestDto {
   insertWorkbenchAuthoringV5RequestShell(db, input);
   insertWorkbenchAuthoringV5RequestSessions(db, input.requestId, input.sessions);
-  for (const [packIndex, pack] of input.packs.entries()) {
-    insertWorkbenchAuthoringV5Pack(db, input.requestId, pack, packIndex === 0);
+  for (const pack of input.packs) {
+    // All packs are claimable up front so parallel workers can start concurrently.
+    insertWorkbenchAuthoringV5Pack(db, input.requestId, pack, true);
   }
   return requireWorkbenchAuthoringV5Request(db, input.requestId);
 }
@@ -346,10 +347,16 @@ export function insertWorkbenchAuthoringV5Pack(
   pack.sessionIds.forEach((sessionId, ordinal) => insertMembership.run(pack.packId, requestId, sessionId, ordinal));
 }
 
+/** @deprecated Prefer releaseAllWorkbenchAuthoringV5Packs — serial release is no longer the request model. */
 export function releaseFirstWorkbenchAuthoringV5Pack(db: MastheadDatabase, requestId: string): void {
+  releaseAllWorkbenchAuthoringV5Packs(db, requestId);
+}
+
+/** Mark every pending pack available so callers may claim any number of packs in parallel. */
+export function releaseAllWorkbenchAuthoringV5Packs(db: MastheadDatabase, requestId: string): void {
   db.prepare(
     `UPDATE workbench_authoring_v5_packs SET status = 'available', updated_at = ?
-     WHERE request_id = ? AND ordinal = 0 AND status = 'pending'`
+     WHERE request_id = ? AND status = 'pending'`
   ).run(new Date().toISOString(), requestId);
 }
 
@@ -505,7 +512,10 @@ export function getWorkbenchAuthoringV5Request(
       SUM(CASE WHEN state = 'rejected' THEN 1 ELSE 0 END) AS rejected
      FROM workbench_authoring_v5_request_sessions WHERE request_id = ?`
   ).get(requestId) as Record<string, number | null>;
-  const current = packs.find(({ status }) => status === "active" || status === "saved");
+  const inFlight = packs.filter(({ status }) => status === "active" || status === "saved");
+  const availablePackCount = packs.filter(({ status }) => status === "available").length;
+  const activePackIds = inFlight.map(({ packId }) => packId);
+  const current = inFlight[0];
   return {
     requestId: row.requestId,
     actorId: row.actorId,
@@ -523,6 +533,8 @@ export function getWorkbenchAuthoringV5Request(
     rejectedSessionCount: Number(counts.rejected ?? 0),
     packCount: packs.length,
     packSizes: packs.map(({ sessionIds }) => sessionIds.length),
+    availablePackCount,
+    activePackIds,
     ...(current ? { currentPackId: current.packId } : {}),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -551,14 +563,57 @@ export function requireWorkbenchAuthoringV5Pack(db: MastheadDatabase, packId: st
   return pack;
 }
 
+/**
+ * Prefer in-flight pack (active/saved) for status/resume routing; otherwise next available.
+ * Used for request-level nextAction so sequential agents finish an open pack before claiming another.
+ */
 export function activeOrAvailableWorkbenchAuthoringV5Pack(
   db: MastheadDatabase,
   requestId: string
 ): WorkbenchAuthoringV5PackDto | undefined {
+  const inFlight = db.prepare(
+    `${packSelect} WHERE request_id = ? AND status IN ('active','saved') ORDER BY ordinal LIMIT 1`
+  ).get(requestId) as PackRow | undefined;
+  if (inFlight) return packDto(db, inFlight);
+  const available = db.prepare(
+    `${packSelect} WHERE request_id = ? AND status = 'available' ORDER BY ordinal LIMIT 1`
+  ).get(requestId) as PackRow | undefined;
+  return available ? packDto(db, available) : undefined;
+}
+
+/** Lowest-ordinal pack still in progress (active or saved). */
+export function incompleteWorkbenchAuthoringV5Pack(
+  db: MastheadDatabase,
+  requestId: string
+): WorkbenchAuthoringV5PackDto | undefined {
   const row = db.prepare(
-    `${packSelect} WHERE request_id = ? AND status IN ('active','saved','available') ORDER BY ordinal LIMIT 1`
+    `${packSelect} WHERE request_id = ? AND status IN ('active','saved') ORDER BY ordinal LIMIT 1`
   ).get(requestId) as PackRow | undefined;
   return row ? packDto(db, row) : undefined;
+}
+
+/** Next unclaimed pack (available only). Does not resume in-flight packs. */
+export function nextAvailableWorkbenchAuthoringV5Pack(
+  db: MastheadDatabase,
+  requestId: string
+): WorkbenchAuthoringV5PackDto | undefined {
+  const row = db.prepare(
+    `${packSelect} WHERE request_id = ? AND status = 'available' ORDER BY ordinal LIMIT 1`
+  ).get(requestId) as PackRow | undefined;
+  return row ? packDto(db, row) : undefined;
+}
+
+/**
+ * Atomically claim the next available pack for parallel or sequential start.
+ * Returns undefined when no pack is available to claim.
+ */
+export function claimNextAvailableWorkbenchAuthoringV5Pack(
+  db: MastheadDatabase,
+  requestId: string
+): WorkbenchAuthoringV5PackDto | undefined {
+  const candidate = nextAvailableWorkbenchAuthoringV5Pack(db, requestId);
+  if (!candidate) return undefined;
+  return activateWorkbenchAuthoringV5Pack(db, candidate.packId);
 }
 
 export function activateWorkbenchAuthoringV5Pack(db: MastheadDatabase, packId: string): WorkbenchAuthoringV5PackDto {
@@ -566,8 +621,13 @@ export function activateWorkbenchAuthoringV5Pack(db: MastheadDatabase, packId: s
   if (pack.status === "active" || pack.status === "saved") return pack;
   if (pack.status !== "available") throw new Error("authoring_v5_pack_not_available");
   const now = new Date().toISOString();
-  db.prepare("UPDATE workbench_authoring_v5_packs SET status = 'active', updated_at = ? WHERE pack_id = ? AND status = 'available'")
-    .run(now, packId);
+  const result = db.prepare(
+    "UPDATE workbench_authoring_v5_packs SET status = 'active', updated_at = ? WHERE pack_id = ? AND status = 'available'"
+  ).run(now, packId);
+  if (result.changes !== 1) {
+    // Lost a race to another claim; surface as not available rather than returning a stale pack.
+    throw new Error("authoring_v5_pack_not_available");
+  }
   db.prepare("UPDATE workbench_authoring_v5_requests SET status = 'active', updated_at = ? WHERE request_id = ? AND status IN ('open','active')")
     .run(now, pack.requestId);
   db.prepare(
@@ -670,18 +730,14 @@ export function completeWorkbenchAuthoringV5PackRecord(
        WHERE request_id = ? AND session_id = ? AND state = 'assigned'`
     ).run(state, packReceipt.requestId, outcome.sessionId);
   }
-  const next = db.prepare(
-    `SELECT pack_id AS packId FROM workbench_authoring_v5_packs
-     WHERE request_id = ? AND ordinal > (
-       SELECT ordinal FROM workbench_authoring_v5_packs WHERE pack_id = ?
-     ) AND status = 'pending' ORDER BY ordinal LIMIT 1`
-  ).get(packReceipt.requestId, packReceipt.packId) as { packId: string } | undefined;
-  if (next) {
-    db.prepare("UPDATE workbench_authoring_v5_packs SET status = 'available', updated_at = ? WHERE pack_id = ?")
-      .run(now, next.packId);
-    db.prepare("UPDATE workbench_authoring_v5_requests SET status = 'active', updated_at = ? WHERE request_id = ?")
-      .run(now, packReceipt.requestId);
-  } else if (input.requestReceipt) {
+  // Legacy serial unlock: any remaining pending packs become available (no-op when all were released up front).
+  db.prepare(
+    `UPDATE workbench_authoring_v5_packs SET status = 'available', updated_at = ?
+     WHERE request_id = ? AND status = 'pending'`
+  ).run(now, packReceipt.requestId);
+  db.prepare("UPDATE workbench_authoring_v5_requests SET status = 'active', updated_at = ? WHERE request_id = ? AND status IN ('open','active')")
+    .run(now, packReceipt.requestId);
+  if (input.requestReceipt) {
     db.prepare(
       `UPDATE workbench_authoring_v5_requests
        SET status = 'completed', receipt_json = ?, completed_at = ?, updated_at = ? WHERE request_id = ?`
