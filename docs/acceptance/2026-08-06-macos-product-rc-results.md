@@ -1,10 +1,10 @@
 # macOS product RC results — 2026-08-06 (remote macOS rental)
 
 **Operator:** agent (SSH + daemon HTTP API; no RDP visual pass)  
-**Host:** `remote-mac` / remote-host  
+**Host:** remote macOS arm64 dogfood host  
 **Artifact:** DMG → `~/Applications/Masthead.app` (from `~/src/Masthead/out/make/Masthead.dmg`)  
 **Checklist:** [macos-product-rc-checklist.md](./macos-product-rc-checklist.md)  
-**Inventory:** [macos-remote-mac-host-inventory.md](./macos-remote-mac-host-inventory.md)
+**Inventory:** [macos-macincloud-host-inventory.md](./macos-macincloud-host-inventory.md)
 
 ## Overall
 

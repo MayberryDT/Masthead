@@ -13,7 +13,7 @@ That run proved install + fixture import + synthetic ingest. This plan is the fu
 **Related**
 
 - [macos-product-rc-checklist.md](./macos-product-rc-checklist.md) — surface checklist skeleton  
-- [macos-remote-mac-host-inventory.md](./macos-remote-mac-host-inventory.md) — Mac empty baseline  
+- [macos-macincloud-host-inventory.md](./macos-macincloud-host-inventory.md) — Mac empty baseline  
 - [sources-v2.md](../reference/sources-v2.md) — Discover → Enable → Activate → Test → Ready  
 - [product-release-gate.md](./product-release-gate.md) — release identity / V5 rules  
 

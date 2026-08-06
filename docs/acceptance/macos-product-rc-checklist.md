@@ -2,7 +2,7 @@
 
 **Purpose:** Prove Masthead’s **product loop on macOS** — discover harnesses, import/live capture, Now, Workbench, Logbook — not packaging.
 
-**Host baseline:** [macos-remote-mac-host-inventory.md](./macos-remote-mac-host-inventory.md)  
+**Host baseline:** [macos-macincloud-host-inventory.md](./macos-macincloud-host-inventory.md)  
 **Sources contract:** [sources-v2.md](../reference/sources-v2.md)  
 **Data paths:** [data-paths.md](../architecture/data-paths.md)  
 **Packaging only:** [macos-release-build.md](../reference/macos-release-build.md)
@@ -15,7 +15,7 @@
 | Build version / git SHA | |
 | Artifact | DMG path / Applications path |
 | Operator | |
-| Host | remote Mac / remote-host |
+| Host | remote macOS arm64 dogfood host |
 
 **Rules**
 

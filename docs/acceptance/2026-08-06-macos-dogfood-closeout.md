@@ -3,7 +3,7 @@
 **Status:** Closed — good enough to stop remote macOS dogfood.  
 **Host:** Remote macOS arm64 rental (session ended after teardown; vendor hostname private).  
 **Branch / code:** `macos/packaging-and-identity` (merged; packaging, DMG, Node layout, release identity).  
-**Prior evidence:** [in-depth results](./2026-08-06-macos-in-depth-results.md), [RC checklist](./macos-product-rc-checklist.md), [host inventory template](./macos-remote-mac-host-inventory.md).
+**Prior evidence:** [in-depth results](./2026-08-06-macos-in-depth-results.md), [RC checklist](./macos-product-rc-checklist.md), [host inventory template](./macos-macincloud-host-inventory.md).
 
 ## Verdict
 
