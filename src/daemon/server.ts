@@ -172,6 +172,7 @@ import {
 import { collectGitSnapshot, gitSnapshotSignature } from "./gitSnapshots.ts";
 import { createLiveIngestQueue } from "./liveIngestQueue.ts";
 import { buildMastheadHealth } from "./healthService.ts";
+import { resolveReleaseIdentity } from "./releaseIdentity.ts";
 import { recentHookEventsWithTranscriptPathsForSessions } from "./hookTranscriptRecovery.ts";
 import { coerceMcpLaunchConfig, getMcpLaunchConfig, getMcpStatus, listMcpTools, testMcpConnection, validateMcpLaunchConfig } from "./mcpStatusService.ts";
 import { createSettingsBackedEnrichmentProvider, effectiveLlmProvider, listLlmProviderModels, updateLlmProviderSettings } from "./llmSettings.ts";
@@ -401,7 +402,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     );
     const instanceManifestPath = resolve(process.env.MASTHEAD_INSTANCE_MANIFEST || instancePaths.instanceManifest);
     const authoringCommand = resolve(process.env.MASTHEAD_CLI_COMMAND || instancePaths.launcherPath);
-    const buildSha = process.env.MASTHEAD_BUILD_SHA || "development";
+    const buildSha = resolveReleaseIdentity().gitSha;
     const databaseId = getOrCreateDatabaseIdentity(database);
     let instanceManifestPublished = false;
     let instanceManifestPublishPromise: Promise<MastheadInstanceManifest> | undefined;

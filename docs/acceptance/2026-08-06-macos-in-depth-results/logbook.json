@@ -1,0 +1,70 @@
+{
+  "ok": true,
+  "artifacts": [
+    {
+      "artifactId": "session_artifact:21ad9d8897be50cd6acd038668e49fc4",
+      "confidence": "medium",
+      "highlight": "Evidence catalog contains transcript items referenced by evidenceRefs; Workbench compile-ready before publish.",
+      "kind": "session_dossier",
+      "project": "Masthead",
+      "provenanceLabel": "1 session",
+      "provenanceSize": 1,
+      "publishedAt": "2026-08-06T19:37:00.494Z",
+      "status": "current",
+      "summary": "Work captured from local harness evidence on macOS: Reply only with: OMP live smoke",
+      "title": "Reply only with: OMP live smoke"
+    },
+    {
+      "artifactId": "session_artifact:03f4636467952e9e0cad7d3c12644f08",
+      "confidence": "medium",
+      "highlight": "Evidence catalog contains transcript items referenced by evidenceRefs; Workbench compile-ready before publish.",
+      "kind": "session_dossier",
+      "project": "Masthead",
+      "provenanceLabel": "1 session",
+      "provenanceSize": 1,
+      "publishedAt": "2026-08-06T19:37:00.490Z",
+      "status": "current",
+      "summary": "Work captured from local harness evidence on macOS: Hey, I'm going to brain dump some problems for you about masthead, and I want yo",
+      "title": "Hey, I'm going to brain dump some problems for you about masthead, and I want you to come up with a plan. Ryan, I want y"
+    },
+    {
+      "artifactId": "session_artifact:ece4dab8976f8ca664e9a9ae95eaa46a",
+      "confidence": "medium",
+      "highlight": "Evidence catalog contains transcript items referenced by evidenceRefs; Workbench compile-ready before publish.",
+      "kind": "session_dossier",
+      "provenanceLabel": "1 session",
+      "provenanceSize": 1,
+      "publishedAt": "2026-08-06T19:37:00.487Z",
+      "status": "current",
+      "summary": "Work captured from local harness evidence on macOS: Client said all review stage blood are in error. What happened?",
+      "title": "Client said all review stage blood are in error. What happened?"
+    },
+    {
+      "artifactId": "session_artifact:8437dbe86237c9543407903d42f31632",
+      "confidence": "medium",
+      "highlight": "Evidence catalog contains transcript items referenced by evidenceRefs; Workbench compile-ready before publish.",
+      "kind": "session_dossier",
+      "project": "tyler",
+      "provenanceLabel": "1 session",
+      "provenanceSize": 1,
+      "publishedAt": "2026-08-06T19:37:00.486Z",
+      "status": "current",
+      "summary": "Work captured from local harness evidence on macOS: Hey buddy, how's it going?",
+      "title": "Hey buddy, how's it going?"
+    },
+    {
+      "artifactId": "session_artifact:b4bdea7f28228f43eaa6dd2b280db995",
+      "confidence": "medium",
+      "highlight": "Evidence catalog contains transcript items referenced by evidenceRefs; Workbench compile-ready before publish.",
+      "kind": "session_dossier",
+      "project": "Masthead Website",
+      "provenanceLabel": "1 session",
+      "provenanceSize": 1,
+      "publishedAt": "2026-08-06T19:37:00.482Z",
+      "status": "current",
+      "summary": "Work captured from local harness evidence on macOS: # Files mentioned by the user:",
+      "title": "# Files mentioned by the user:"
+    }
+  ],
+  "total": 5
+}

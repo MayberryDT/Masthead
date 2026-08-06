@@ -1,0 +1,147 @@
+{
+  "ok": true,
+  "generatedAt": "2026-08-06T19:29:28.725Z",
+  "summary": {
+    "ready": 1,
+    "needsAction": 2,
+    "notInstalled": 5,
+    "notFound": 2,
+    "error": 0
+  },
+  "connectors": [
+    {
+      "runtime": "codex",
+      "label": "Codex",
+      "presence": "found",
+      "live": "ready",
+      "configPath": "/Users/user945425/.codex/hooks.json",
+      "endpoint": "http://127.0.0.1:17373/ingest?runtime=codex",
+      "stateEndpoint": "http://127.0.0.1:17373/live/state",
+      "checkedPaths": [
+        "/Users/user945425/.codex"
+      ],
+      "diagnostics": [],
+      "supportsActions": true,
+      "historyFound": true,
+      "historySessionCount": 508,
+      "historySourceUnitCount": 508
+    },
+    {
+      "runtime": "claude_code",
+      "label": "Claude Code",
+      "presence": "found",
+      "live": "needs_action",
+      "actionRequired": "repair",
+      "actionMessage": "Live connector files need repair.",
+      "configPath": "/Users/user945425/.claude/settings.json",
+      "endpoint": "http://127.0.0.1:17373/ingest?runtime=claude_code",
+      "stateEndpoint": "http://127.0.0.1:17373/live/state",
+      "checkedPaths": [
+        "/Users/user945425/.claude"
+      ],
+      "diagnostics": [],
+      "supportsActions": true,
+      "historyFound": true,
+      "historySessionCount": 15,
+      "historySourceUnitCount": 15
+    },
+    {
+      "runtime": "cursor",
+      "label": "Cursor",
+      "presence": "found",
+      "live": "not_installed",
+      "configPath": "/Users/user945425/.cursor/hooks.json",
+      "endpoint": "http://127.0.0.1:17373/ingest?runtime=cursor",
+      "stateEndpoint": "http://127.0.0.1:17373/live/state",
+      "checkedPaths": [],
+      "diagnostics": [],
+      "supportsActions": true,
+      "historyFound": true,
+      "historySessionCount": 1,
+      "historySourceUnitCount": 1
+    },
+    {
+      "runtime": "grok",
+      "label": "Grok Build",
+      "presence": "found",
+      "live": "needs_action",
+      "actionRequired": "repair",
+      "actionMessage": "Live connector files need repair.",
+      "configPath": "/Users/user945425/.grok/hooks/masthead.json",
+      "endpoint": "http://127.0.0.1:17373/ingest?runtime=grok",
+      "stateEndpoint": "http://127.0.0.1:17373/live/state",
+      "checkedPaths": [
+        "/Users/user945425/.grok"
+      ],
+      "diagnostics": [],
+      "supportsActions": true,
+      "historyFound": true,
+      "historySessionCount": 10,
+      "historySourceUnitCount": 10
+    },
+    {
+      "runtime": "opencode",
+      "label": "OpenCode",
+      "presence": "not_found",
+      "live": "not_installed",
+      "configPath": "/Users/user945425/.config/opencode/plugins/masthead-live.js",
+      "endpoint": "http://127.0.0.1:17373/ingest?runtime=opencode",
+      "stateEndpoint": "http://127.0.0.1:17373/live/state",
+      "checkedPaths": [],
+      "diagnostics": [],
+      "supportsActions": true,
+      "historyFound": false,
+      "historySessionCount": 0,
+      "historySourceUnitCount": 0
+    },
+    {
+      "runtime": "omp",
+      "label": "Oh My Pi",
+      "presence": "found",
+      "live": "not_installed",
+      "configPath": "/Users/user945425/.omp/agent/extensions/masthead-live.js",
+      "endpoint": "http://127.0.0.1:17373/ingest?runtime=omp",
+      "stateEndpoint": "http://127.0.0.1:17373/live/state",
+      "checkedPaths": [
+        "/Users/user945425/.omp"
+      ],
+      "diagnostics": [],
+      "supportsActions": true,
+      "historyFound": true,
+      "historySessionCount": 40,
+      "historySourceUnitCount": 40
+    },
+    {
+      "runtime": "pi",
+      "label": "Pi",
+      "presence": "not_found",
+      "live": "not_installed",
+      "configPath": "/Users/user945425/.pi/agent/extensions/masthead-live.js",
+      "endpoint": "http://127.0.0.1:17373/ingest?runtime=pi",
+      "stateEndpoint": "http://127.0.0.1:17373/live/state",
+      "checkedPaths": [],
+      "diagnostics": [],
+      "supportsActions": true,
+      "historyFound": false,
+      "historySessionCount": 0,
+      "historySourceUnitCount": 0
+    },
+    {
+      "runtime": "hermes",
+      "label": "Hermes",
+      "presence": "found",
+      "live": "not_installed",
+      "configPath": "/Users/user945425/.hermes/plugins/masthead-live/plugin.yaml",
+      "endpoint": "http://127.0.0.1:17373/ingest?runtime=hermes",
+      "stateEndpoint": "http://127.0.0.1:17373/live/state",
+      "checkedPaths": [
+        "/Users/user945425/.hermes"
+      ],
+      "diagnostics": [],
+      "supportsActions": true,
+      "historyFound": true,
+      "historySessionCount": 10,
+      "historySourceUnitCount": 10
+    }
+  ]
+}

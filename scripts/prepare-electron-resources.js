@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
+import { createWriteStream } from "node:fs";
 import { constants } from "node:fs";
-import { access, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { basename, resolve } from "node:path";
+import { access, chmod, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, join, resolve } from "node:path";
+import { pipeline } from "node:stream/promises";
 
 const resourceRoot = resolve(".electron-resources/daemon");
 const nodeTarget = resolve(resourceRoot, process.platform === "win32" ? "node.exe" : "node");
@@ -30,7 +33,7 @@ await rm(resourceRoot, { force: true, recursive: true });
 await mkdir(resourceRoot, { recursive: true });
 await mkdir(resolve(resourceRoot, "scripts"), { recursive: true });
 await writeFile(resolve(resourceRoot, "README.txt"), "Generated daemon resources are copied here by `npm run prepare:electron-resources`.\n");
-await cp(process.execPath, nodeTarget);
+await bundleRelocatableNode(nodeTarget);
 await cp(resolve("dist/daemon"), distTarget, { recursive: true });
 await cp(resolve("scripts/masthead-hook.js"), hookScriptTarget);
 await cp(resolve("scripts/masthead-production.js"), productionScriptTarget);
@@ -48,6 +51,7 @@ await access(privateDisplayScriptTarget, constants.R_OK);
 await access(coldActivationScriptTarget, constants.R_OK);
 await access(manifestScriptTarget, constants.R_OK);
 await access(releaseTarget, constants.R_OK);
+assertNodeRunsStandalone(nodeTarget);
 
 console.log(`Prepared Electron daemon resources in ${resourceRoot}`);
 console.log(`Bundled Node runtime as ${basename(nodeTarget)}`);
@@ -57,3 +61,89 @@ console.log(`Bundled private display guard as ${basename(privateDisplayScriptTar
 console.log(`Bundled content manifest verifier as ${basename(manifestScriptTarget)}`);
 console.log(`Bundled release identity ${packageJson.version} ${gitSha}`);
 console.log(`Bundled dev icon resource as ${basename(devIconTarget)}`);
+
+/**
+ * Prefer copying the build host Node when it is relocatable (typical Linux/official
+ * installs). Homebrew Node is a thin stub that needs Cellar dylibs, so on failure
+ * (and always when forced) fetch the official Node.js binary for this platform.
+ */
+async function bundleRelocatableNode(targetPath) {
+  await cp(process.execPath, targetPath);
+  if (process.platform !== "win32") await chmod(targetPath, 0o755);
+  if (nodeRunsStandalone(targetPath)) {
+    console.log(`Bundled relocatable Node from process.execPath (${process.version})`);
+    return;
+  }
+  console.log(
+    `Host Node at ${process.execPath} is not relocatable (common with Homebrew); downloading official Node ${process.version} for packaging.`
+  );
+  await rm(targetPath, { force: true });
+  await installOfficialNodeBinary(targetPath);
+  if (!nodeRunsStandalone(targetPath)) {
+    throw new Error(`Bundled Node runtime does not execute standalone: ${targetPath}`);
+  }
+  console.log(`Bundled official Node binary at ${targetPath}`);
+}
+
+function nodeRunsStandalone(nodePath) {
+  try {
+    assertNodeRunsStandalone(nodePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function assertNodeRunsStandalone(nodePath) {
+  // Minimal PATH so a copied Homebrew stub cannot silently pick up Cellar libs via luck.
+  execFileSync(nodePath, ["-e", "process.exit(0)"], {
+    encoding: "utf8",
+    env: {
+      PATH: "/usr/bin:/bin",
+      HOME: process.env.HOME || tmpdir()
+    },
+    stdio: "ignore",
+    timeout: 15_000
+  });
+}
+
+async function installOfficialNodeBinary(targetPath) {
+  const version = process.version;
+  if (!/^v\d+\.\d+\.\d+$/u.test(version)) {
+    throw new Error(`Cannot resolve official Node download for process.version=${version}`);
+  }
+  const arch = process.arch === "arm64" ? "arm64" : process.arch === "x64" ? "x64" : null;
+  if (!arch) throw new Error(`Unsupported arch for official Node packaging: ${process.arch}`);
+
+  if (process.platform === "win32") {
+    throw new Error(
+      "Host node.exe is not relocatable and automatic official Windows Node fetch is not implemented; install a standalone Node distribution before packaging."
+    );
+  }
+
+  const platform = process.platform === "darwin" ? "darwin" : process.platform === "linux" ? "linux" : null;
+  if (!platform) throw new Error(`Unsupported platform for official Node packaging: ${process.platform}`);
+
+  const baseName = `node-${version}-${platform}-${arch}`;
+  const url = `https://nodejs.org/dist/${version}/${baseName}.tar.gz`;
+  const workDir = await mkdtemp(join(tmpdir(), "masthead-node-bundle-"));
+  const archivePath = join(workDir, `${baseName}.tar.gz`);
+  try {
+    await downloadFile(url, archivePath);
+    execFileSync("tar", ["-xzf", archivePath, "-C", workDir], { stdio: "ignore" });
+    const extractedNode = join(workDir, baseName, "bin", "node");
+    await access(extractedNode, constants.R_OK);
+    await cp(extractedNode, targetPath);
+    await chmod(targetPath, 0o755);
+  } finally {
+    await rm(workDir, { force: true, recursive: true });
+  }
+}
+
+async function downloadFile(url, destination) {
+  const response = await fetch(url, { redirect: "follow" });
+  if (!response.ok || !response.body) {
+    throw new Error(`Failed to download ${url}: HTTP ${response.status}`);
+  }
+  await pipeline(response.body, createWriteStream(destination));
+}

@@ -1,0 +1,16 @@
+{
+  "total": 494,
+  "byRuntime": {
+    "omp": 7,
+    "hermes": 10,
+    "grok": 10,
+    "claude_code": 14,
+    "cursor": 2,
+    "codex": 451
+  },
+  "compileReady": 481,
+  "quality": {
+    "passed": 481,
+    "unchecked": 13
+  }
+}

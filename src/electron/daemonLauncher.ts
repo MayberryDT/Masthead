@@ -19,6 +19,7 @@ import { isWorkbenchAuthoringV5CapabilitiesDto } from "../shared/workbenchAuthor
 import { packagedDaemonPaths } from "./pathPolicy";
 import { renderLiveDevInstanceLauncher } from "../core/liveDevLauncher";
 import { classifyDaemonHealth } from "../shared/protocol";
+import { readReleaseJsonFile, releaseJsonPathBesideMcpEntry } from "../daemon/releaseIdentity.ts";
 
 const DEFAULT_CONNECTOR_PORT = 17373;
 export const DAEMON_STARTUP_HEALTH_TIMEOUT_MS = 300_000;
@@ -192,7 +193,12 @@ export function buildDaemonEnv(input: {
   port: number;
   instanceDir: string;
   instanceManifest: string;
+  /** Packaged daemon root containing release.json (resources/daemon). */
+  releaseJsonPath?: string;
 }): Record<string, string> {
+  const release = input.releaseJsonPath
+    ? readReleaseJsonFile(input.releaseJsonPath)
+    : readReleaseJsonFile(releaseJsonPathBesideMcpEntry(input.mcpEntry));
   return {
     MASTHEAD_ALLOWED_ORIGINS: input.allowedOrigins.join(","),
     MASTHEAD_CLI_COMMAND: input.cliCommand,
@@ -206,7 +212,14 @@ export function buildDaemonEnv(input: {
     MASTHEAD_MCP_COMMAND: input.mcpCommand,
     MASTHEAD_MCP_ENTRY: input.mcpEntry,
     MASTHEAD_PORT: String(input.port),
-    MASTHEAD_STORE_PATH: input.legacyStorePath
+    MASTHEAD_STORE_PATH: input.legacyStorePath,
+    ...(release
+      ? {
+          MASTHEAD_BUILD_SHA: release.gitSha,
+          MASTHEAD_BUILD_VERSION: release.version,
+          MASTHEAD_RELEASE_JSON: input.releaseJsonPath || releaseJsonPathBesideMcpEntry(input.mcpEntry)
+        }
+      : {})
   };
 }
 
@@ -286,7 +299,8 @@ export async function startLiveConnector(
     legacyStorePath: target.legacyStorePath,
     mcpCommand: target.nodePath,
     mcpEntry: target.mcpEntry,
-    port
+    port,
+    releaseJsonPath: releaseJsonPathBesideMcpEntry(target.mcpEntry)
   });
   const child = (options.spawnChild ?? spawn)(target.nodePath, [target.entryPath], {
     cwd: target.cwd,

@@ -26,6 +26,10 @@ export interface PackagedBundleManifest {
 export const PACKAGED_BUNDLE_MANIFEST: "release-manifest.json";
 
 export function resolvePackagedBundleLayout(outputPath: string, platform: string): Promise<PackagedBundleLayout>;
+export function resolvePackagedExecutableLayout(
+  executableOrAppPath: string,
+  platform?: string
+): Promise<PackagedBundleLayout>;
 export function verifyPackagedBundleManifest(input: PackagedBundleLayout): Promise<PackagedBundleManifest>;
 export function writeForgePackagedBundleManifests(packageResult: {
   outputPaths: string[];
