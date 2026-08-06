@@ -6,9 +6,11 @@
 **Evidence on Mac:** `~/masthead-rc-evidence/` (~40M) + `~/masthead-rc-seed/` (~1.7G, kept for dogfood)  
 **Repo samples:** `docs/acceptance/2026-08-06-macos-in-depth-results/`
 
-## Overall grade: **Conditional ship-confidence for macOS dogfood**
+## Overall grade: **Closed — ship-confidence for macOS dogfood**
 
-Multi-harness **Discover / Enable / Test / Import / Workbench / Live synthetic / V5 publish / Logbook / MCP / identity / relaunch** all exercised successfully. Gaps: real Codex hook trust + interactive agent session (still `trust_hooks`), RDP visual pass not run, OpenCode not seeded, full LLM agent authoring not used (evidence-grounded scripted drafts).
+Multi-harness **Discover / Enable / Test / Import / Workbench / Live / V5 publish / Logbook / MCP / identity / relaunch** exercised successfully on TX089. Later same-day closeout closed the earlier gaps for Codex hook trust, live agent authoring, and visual pass. See [2026-08-06-macos-dogfood-closeout.md](./2026-08-06-macos-dogfood-closeout.md).
+
+**Still out of scope / skipped:** OpenCode seed, finishing all 40 authoring packs, paid Developer ID signing.
 
 ---
 
