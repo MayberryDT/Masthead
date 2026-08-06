@@ -1,4 +1,4 @@
-# macOS product RC checklist (MacinCloud)
+# macOS product RC checklist (cloud Mac vendor)
 
 **Purpose:** Prove Masthead’s **product loop on macOS** — discover harnesses, import/live capture, Now, Workbench, Logbook — not packaging.
 
@@ -15,7 +15,7 @@
 | Build version / git SHA | |
 | Artifact | DMG path / Applications path |
 | Operator | |
-| Host | `macincloud` / TX089 |
+| Host | remote macOS arm64 dogfood host |
 
 **Rules**
 
@@ -30,7 +30,7 @@
 
 Use inventory doc; re-probe if image may have changed.
 
-- [ ] SSH `macincloud` works; `export PATH="/opt/homebrew/bin:$PATH"`
+- [ ] SSH remote Mac works; `export PATH="/opt/homebrew/bin:$PATH"`
 - [ ] Free disk ≥ 10 GB on home volume
 - [ ] DMG under test present (e.g. `~/src/Masthead/out/make/Masthead.dmg`)
 - [ ] Known harness state recorded:
@@ -42,7 +42,7 @@ Use inventory doc; re-probe if image may have changed.
 
 | Lane | When |
 | --- | --- |
-| **A. Empty host honesty** | No harness homes / no history (current TX089 default) |
+| **A. Empty host honesty** | No harness homes / no history (current remote-host default) |
 | **B. Import** | At least one harness history root with real or fixture sessions |
 | **C. Live capture** | Harness installable + Enable/Activate + real or proven live event |
 | **D. Publish path** | After B and/or C have sessions in Workbench |
@@ -83,7 +83,7 @@ Goal: catalog rows and presence match reality (Sources V2).
 - [ ] No silent install of hooks/plugins on Discover alone
 - [ ] Summary chips (found / needs action / not found) are not nonsense
 
-**If apps are installed but homes empty (TX089):** note whether UI distinguishes “app on disk” vs “Masthead candidate path found.” Failure mode to watch: claiming Codex is ready because Codex.app exists while `~/.codex` is missing.
+**If apps are installed but homes empty (remote-host):** note whether UI distinguishes “app on disk” vs “Masthead candidate path found.” Failure mode to watch: claiming Codex is ready because Codex.app exists while `~/.codex` is missing.
 
 ---
 
@@ -105,7 +105,7 @@ Goal: product does not invent sessions or sources.
 
 Do not skip if claiming import or live works on this Mac.
 
-### 3a. Codex (recommended primary on TX089)
+### 3a. Codex (recommended primary on remote-host)
 
 - [ ] Put Codex CLI on PATH **or** document use of  
       `/Applications/Codex.app/Contents/Resources/codex`

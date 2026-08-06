@@ -1,8 +1,8 @@
-# macOS release build (MacinCloud)
+# macOS release build
 
-How to produce and test an **arm64** Masthead desktop build on a remote Mac
-(for example MacinCloud host `macincloud` / TX089). This path is **adhoc-signed only**
-until a paid Apple Developer ID Application certificate is available.
+How to produce and test an **arm64** Masthead desktop build on macOS.
+This path is **adhoc-signed only** until a paid Apple Developer ID Application
+certificate is configured for the build host.
 
 ## Product identity
 
@@ -19,127 +19,76 @@ until a paid Apple Developer ID Application certificate is available.
 - macOS with Xcode CLT / Xcode (Forge / Electron packaging)
 - Homebrew or other Node matching `package.json` engines (`>=24.15.0`) for **building**
 - Network access to `nodejs.org` during `prepare:electron-resources` when the host
-  Node is not relocatable (Homebrew Node is a thin stub that needs Cellar dylibs;
+  Node is not relocatable (Homebrew Node is often a thin stub that needs Cellar dylibs;
   packaging downloads the official Node binary for the same `process.version`)
-- SSH from the Linux dev host: `ssh macincloud`
-- Optional RDP on MacinCloud port `6000` for UI checks
-
-On TX089:
 
 ```bash
 export PATH="/opt/homebrew/bin:$PATH"
-node -v   # e.g. v25.x
+node -v
 ```
 
-## Sync source from Veelox
+## Get source on the Mac
 
-The Mac may not have a GitHub deploy key. Prefer rsync from the Linux checkout:
+Prefer a normal clone when the Mac has GitHub access:
 
 ```bash
-# From the Masthead repo on Veelox:
+git clone https://github.com/MayberryDT/Masthead.git
+cd Masthead
+git checkout <branch-or-tag>
+```
+
+If you must copy from another machine without GitHub credentials:
+
+```bash
+# From a Linux/dev checkout of this repo:
 rsync -az --delete \
   --exclude node_modules --exclude dist --exclude out --exclude .vite \
   --exclude 'authoring-v5-pack*' \
   --exclude '.electron-resources' \
-  ./ macincloud:~/src/Masthead/
+  ./ mac-user@mac-host:~/src/Masthead/
 
 # prepare-electron-resources needs a full 40-hex git SHA
-rsync -az ./.git/ macincloud:~/src/Masthead/.git/
+rsync -az ./.git/ mac-user@mac-host:~/src/Masthead/.git/
 ```
 
 ## Build (adhoc)
 
 ```bash
-ssh macincloud
 export PATH="/opt/homebrew/bin:$PATH"
-cd ~/src/Masthead
+cd ~/src/Masthead   # or your clone path
 npm ci
 npm run build:electron
 ```
 
 Expected outputs (version from `package.json`):
 
-- App: `out/Masthead-darwin-arm64/Masthead.app`
-- Zip: `out/make/zip/darwin/arm64/Masthead-darwin-arm64-<version>.zip`
-- DMG: `out/make/Masthead-<arch>.dmg` or under `out/make/` (maker-dmg default)
+- `out/make/*.dmg`
+- zip maker artifacts under `out/make/zip/darwin/arm64/` (layout may vary by Forge version)
+- packaged app under `out/Masthead-darwin-arm64/Masthead.app` (name may include arch)
 
-Package only (no makers):
-
-```bash
-npm run package:electron
-```
-
-Zip + DMG only after package:
+Install for manual test:
 
 ```bash
-npx electron-forge make --targets=@electron-forge/maker-zip,@electron-forge/maker-dmg
+# Example: copy packaged app into ~/Applications
+cp -R out/Masthead-darwin-arm64/Masthead.app ~/Applications/
+open ~/Applications/Masthead.app
 ```
 
-## Codesign expectation (no paid identity)
+## Verify identity
+
+With the packaged app running, health should report the package version and a real git SHA—not `development`:
 
 ```bash
-codesign -dv --verbose=4 out/Masthead-darwin-arm64/Masthead.app
+curl -sS http://127.0.0.1:17373/health | jq '{buildVersion, buildSha, product, ok}'
 ```
 
-Expect **adhoc** (`Signature=adhoc`, no TeamIdentifier). That is correct for local RC
-on this Mac. **Do not** gate Phase-1 on `spctl` acceptance or notarization.
+## Dogfood notes
 
-Gatekeeper on **other** Macs will block double-click install until Developer ID +
-notarization are wired (see “Later: paid signing”).
+Historical multi-harness dogfood and closeout writeups live under `docs/acceptance/`
+(for example `2026-08-06-macos-dogfood-closeout.md`). Those documents are operator
+evidence from a specific rental Mac; they are not required for a normal contributor build.
 
-## Automated smoke
+## Related
 
-```bash
-export PATH="/opt/homebrew/bin:$PATH"
-cd ~/src/Masthead
-# Uses resolvePackagedExecutableLayout so Contents/Resources is correct on darwin
-node scripts/masthead-electron-packaged-smoke.js
-# or
-MASTHEAD_ELECTRON_PACKAGED_BIN=out/Masthead-darwin-arm64/Masthead.app \
-  node scripts/masthead-electron-packaged-smoke.js
-```
-
-Also useful:
-
-```bash
-npm run typecheck
-npm run test:electron -- --run
-```
-
-## Manual install + UI RC (this Mac only)
-
-1. Quit any running Masthead.
-2. Mount the DMG; copy `Masthead.app` to `~/Applications` or `/Applications`.
-3. First open may need **right-click → Open** (quarantine / adhoc).
-4. Confirm cold start, daemon health, and surfaces: Now, Workbench, Logbook, Sources, Settings.
-5. Data lives under macOS Application Support (see `docs/architecture/data-paths.md`).
-
-## Product testing (not this doc)
-
-Packaging success is not product proof. For harness discover, import, live capture,
-Now / Workbench / Logbook on MacinCloud, use:
-
-- [Host inventory](../acceptance/macos-macincloud-host-inventory.md)
-- [macOS product RC checklist](../acceptance/macos-product-rc-checklist.md)
-
-## Later: paid signing (not Phase 1)
-
-When a Developer ID Application cert and App Store Connect API key exist:
-
-1. Import the cert into the Mac login keychain.
-2. Set env for Forge (do not commit secrets):
-
-   - `APPLE_TEAM_ID`
-   - API key path + key id + issuer (preferred for `notarytool`)
-3. Enable `packagerConfig.osxSign` (hardened runtime + entitlements) and
-   `packagerConfig.osxNotarize` in `forge.config.ts`.
-4. Rebuild; verify:
-
-   ```bash
-   codesign --verify --deep --strict --verbose=2 Masthead.app
-   spctl -a -vvv --type execute Masthead.app
-   xcrun stapler validate Masthead.app
-   ```
-
-Until then, keep builds adhoc and limit distribution to machines you control
-(or document the Gatekeeper bypass).
+- [Soft open-source notes](../OPEN_SOURCE.md)
+- [Product release gate](../acceptance/product-release-gate.md)

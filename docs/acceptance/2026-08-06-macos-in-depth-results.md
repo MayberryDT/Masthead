@@ -1,14 +1,14 @@
 # macOS in-depth product dogfood — results (2026-08-06)
 
-**Host:** MacinCloud TX089 (`ssh macincloud`)  
+**Host:** Remote macOS arm64 dogfood machine (rental; details private)  
 **Plan:** [2026-08-06-macos-in-depth-product-test-plan.md](./2026-08-06-macos-in-depth-product-test-plan.md)  
 **Artifact:** DMG → `~/Applications/Masthead.app` (rebuilt with identity fix)  
-**Evidence on Mac:** `~/masthead-rc-evidence/` (~40M) + `~/masthead-rc-seed/` (~1.7G, kept for dogfood)  
+**Evidence on host (deleted at teardown):** `~/masthead-rc-evidence/` (~40M) + `~/masthead-rc-seed/` (~1.7G)  
 **Repo samples:** `docs/acceptance/2026-08-06-macos-in-depth-results/`
 
 ## Overall grade: **Closed — ship-confidence for macOS dogfood**
 
-Multi-harness **Discover / Enable / Test / Import / Workbench / Live / V5 publish / Logbook / MCP / identity / relaunch** exercised successfully on TX089. Later same-day closeout closed the earlier gaps for Codex hook trust, live agent authoring, and visual pass. See [2026-08-06-macos-dogfood-closeout.md](./2026-08-06-macos-dogfood-closeout.md).
+Multi-harness **Discover / Enable / Test / Import / Workbench / Live / V5 publish / Logbook / MCP / identity / relaunch** exercised successfully on a remote macOS host. Later same-day closeout closed the earlier gaps for Codex hook trust, live agent authoring, and visual pass. See [2026-08-06-macos-dogfood-closeout.md](./2026-08-06-macos-dogfood-closeout.md).
 
 **Still out of scope / skipped:** OpenCode seed, finishing all 40 authoring packs, paid Developer ID signing.
 
@@ -33,7 +33,7 @@ buildSha 58c7e0fbcc91427bef232ead0edc50196e867cf1
 
 ---
 
-## Seed from Veelox
+## Seed from the Linux donor machine
 
 | Source | Staged on Mac |
 | --- | --- |
@@ -87,7 +87,7 @@ compileReady **481** / quality passed **481** / unchecked **13**
 
 ## What still needs human / follow-up
 
-1. **RDP visual pass** (MacinCloud :6000) — surfaces/chrome not eyeballed this run.  
+1. **RDP visual pass** (cloud Mac vendor :6000) — surfaces/chrome not eyeballed this run.  
 2. **Real Codex live:** open Codex.app, trust Masthead hooks (`/hooks`), run a real short session (auth files are already on the Mac).  
 3. Optional **LLM agent authoring** instead of scripted grounded drafts (OPENAI key is on Mac seed env).  
 4. Optional OpenCode history seed.  
@@ -110,7 +110,7 @@ compileReady **481** / quality passed **481** / unchecked **13**
 ## How to resume dogfood on the Mac
 
 ```bash
-ssh macincloud
+ssh remote-mac
 export PATH="/opt/homebrew/bin:$PATH"
 open ~/Applications/Masthead.app
 curl -sS http://127.0.0.1:17373/health | python3 -m json.tool | head

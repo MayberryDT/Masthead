@@ -1,7 +1,7 @@
-# macOS product RC results — 2026-08-06 (MacinCloud TX089)
+# macOS product RC results — 2026-08-06 (remote macOS rental)
 
 **Operator:** agent (SSH + daemon HTTP API; no RDP visual pass)  
-**Host:** `macincloud` / TX089  
+**Host:** remote macOS arm64 dogfood host  
 **Artifact:** DMG → `~/Applications/Masthead.app` (from `~/src/Masthead/out/make/Masthead.dmg`)  
 **Checklist:** [macos-product-rc-checklist.md](./macos-product-rc-checklist.md)  
 **Inventory:** [macos-macincloud-host-inventory.md](./macos-macincloud-host-inventory.md)
@@ -87,8 +87,8 @@
 
 ### Blocked on human / credentials
 
-1. **RDP UI pass** on MacinCloud (`:6000`): Now, Workbench, Logbook, Sources, Settings at desktop + narrow.
-2. **`codex login`** (or API key) on TX089, then:
+1. **RDP UI pass** on cloud Mac vendor (`:6000`): Now, Workbench, Logbook, Sources, Settings at desktop + narrow.
+2. **`codex login`** (or API key) on remote-host, then:
    - Trust Masthead hooks in Codex (`/hooks`)
    - Real short agent session
    - Prove Now updates from real hooks (not only synthetic ingest)
@@ -97,7 +97,7 @@
 ### Product engineering
 
 4. **Fix packaged build identity** so health/capabilities/ctl report `0.1.15` + full git SHA from `release.json`.
-5. **Commit** packaging + acceptance docs from this Mac work (still uncommitted on Veelox).
+5. **Commit** packaging + acceptance docs from this Mac work (still uncommitted on donor Linux host).
 6. **Authoring end-to-end on Mac:** run `start` → inspect → scaffold → save → finish for the open V5 request (needs agent or hand-authored draft JSON) until Logbook has ≥1 published dossier.
 7. Re-evaluate Codex ready transition after real trust + real event.
 
@@ -111,7 +111,7 @@
 ## How to resume on the Mac
 
 ```bash
-ssh macincloud
+ssh remote-mac
 export PATH="/opt/homebrew/bin:$PATH"
 # App should be in ~/Applications; daemon http://127.0.0.1:17373
 curl -sS http://127.0.0.1:17373/health | python3 -m json.tool | head
@@ -123,4 +123,4 @@ curl -sS http://127.0.0.1:17373/workbench/sessions?limit=20 | python3 -m json.to
   --request 'authoring-v5-request:eaae63b5-d682-442d-b766-edb1f8f17be8' --json
 ```
 
-RDP: connect to TX089 RDP port **6000** (per SSH config notes) for visual surface pass.
+RDP: connect to remote-host RDP port **6000** (per SSH config notes) for visual surface pass.
