@@ -77,6 +77,44 @@ export async function resolvePackagedBundleLayout(outputPath, platform) {
   };
 }
 
+/**
+ * Resolve layout from a packaged executable path or a darwin `.app` bundle path.
+ * Used by packaged smoke so Linux (`…/masthead` + `resources/`) and macOS
+ * (`Masthead.app/Contents/MacOS/masthead` + `Contents/Resources`) share one path.
+ */
+export async function resolvePackagedExecutableLayout(executableOrAppPath, platform = process.platform) {
+  const resolved = resolve(executableOrAppPath);
+  if (platform === "darwin" || platform === "mas") {
+    let executablePath = resolved;
+    if (resolved.endsWith(".app")) {
+      executablePath = join(resolved, "Contents", "MacOS", "masthead");
+    }
+    const macOSDir = dirname(executablePath);
+    const contentsDir = dirname(macOSDir);
+    const bundleRoot = dirname(contentsDir);
+    if (basename(macOSDir) !== "MacOS" || basename(contentsDir) !== "Contents" || !basename(bundleRoot).endsWith(".app")) {
+      throw new Error(
+        `Expected a darwin packaged executable under Something.app/Contents/MacOS/, got ${executableOrAppPath}`
+      );
+    }
+    return {
+      bundleRoot,
+      executablePath,
+      nodePath: join(bundleRoot, "Contents", "Resources", "daemon", "node"),
+      resourcesPath: join(bundleRoot, "Contents", "Resources")
+    };
+  }
+  const executablePath = resolved;
+  const bundleRoot = dirname(executablePath);
+  const resourcesPath = join(bundleRoot, "resources");
+  return {
+    bundleRoot,
+    executablePath,
+    nodePath: join(resourcesPath, "daemon", platform === "win32" ? "node.exe" : "node"),
+    resourcesPath
+  };
+}
+
 function normalizeLayout(input) {
   const bundleRoot = resolve(input.bundleRoot);
   const executablePath = resolve(input.executablePath);

@@ -2,9 +2,11 @@ import { join } from "node:path";
 
 export type PackagedDaemonPaths = {
   daemonEntry: string;
+  daemonRoot: string;
   hookScript: string;
   mcpEntry: string;
   nodePath: string;
+  releaseJson: string;
 };
 
 export function isMastheadOwnedDirectory(path: string): boolean {
@@ -16,10 +18,13 @@ export function isMastheadOwnedDirectory(path: string): boolean {
 
 export function packagedDaemonPaths(resourcesPath: string): PackagedDaemonPaths {
   const nodeName = process.platform === "win32" ? "node.exe" : "node";
+  const daemonRoot = join(resourcesPath, "daemon");
   return {
-    nodePath: join(resourcesPath, "daemon", nodeName),
-    daemonEntry: join(resourcesPath, "daemon", "dist", "src", "daemon", "main.js"),
-    hookScript: join(resourcesPath, "daemon", "scripts", "masthead-hook.js"),
-    mcpEntry: join(resourcesPath, "daemon", "dist", "src", "mcp", "server.js")
+    daemonRoot,
+    nodePath: join(daemonRoot, nodeName),
+    daemonEntry: join(daemonRoot, "dist", "src", "daemon", "main.js"),
+    hookScript: join(daemonRoot, "scripts", "masthead-hook.js"),
+    mcpEntry: join(daemonRoot, "dist", "src", "mcp", "server.js"),
+    releaseJson: join(daemonRoot, "release.json")
   };
 }

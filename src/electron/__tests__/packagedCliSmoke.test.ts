@@ -13,6 +13,10 @@ describe("packaged authoring CLI smoke coverage", () => {
     expect(source).toContain("packaged-bundle-manifest.js");
     expect(source).toContain("release.json");
     expect(source).toContain('execFileSync("git", ["rev-parse", "HEAD"]');
+    expect(source).toContain("bundleRelocatableNode");
+    expect(source).toContain("installOfficialNodeBinary");
+    expect(source).toContain("assertNodeRunsStandalone");
+    expect(source).toContain("nodejs.org/dist");
   });
 
   test("packaged smoke invokes the capability-reported launcher from the isolated instance directory", async () => {
@@ -51,6 +55,7 @@ describe("packaged authoring CLI smoke coverage", () => {
     expect(source).toContain('join(resources, "release.json")');
     expect(source).toContain("productionTransitionMaintenance.js");
     expect(source).toContain("verifyPackagedBundleManifest");
+    expect(source).toContain("resolvePackagedExecutableLayout");
     expect(source).toContain("release-manifest.json");
     expect(source).toContain("health?.buildVersion");
     expect(source).toContain("health?.buildSha");
@@ -61,5 +66,8 @@ describe("packaged authoring CLI smoke coverage", () => {
 
     expect(source).toContain("writeForgePackagedBundleManifests");
     expect(source).toContain("postPackage");
+    expect(source).toContain('appBundleId: "ai.animas.masthead"');
+    expect(source).toContain("@electron-forge/maker-dmg");
+    expect(source).toContain('platforms: ["darwin"]');
   });
 });

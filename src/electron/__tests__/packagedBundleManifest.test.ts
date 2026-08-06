@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import {
   resolvePackagedBundleLayout,
+  resolvePackagedExecutableLayout,
   verifyPackagedBundleManifest,
   writePackagedBundleManifest
 } from "../../../scripts/packaged-bundle-manifest.js";
@@ -50,6 +51,39 @@ describe("packaged bundle manifest", () => {
       executablePath: join(bundleRoot, "masthead.exe"),
       nodePath: join(bundleRoot, "resources", "daemon", "node.exe"),
       resourcesPath: join(bundleRoot, "resources")
+    });
+  });
+
+  test("resolves layout from a linux packaged executable path", async () => {
+    const bundleRoot = await mkdtemp(join(tmpdir(), "masthead-packaged-exec-linux-"));
+    cleanup.push(bundleRoot);
+    const executablePath = join(bundleRoot, "masthead");
+
+    await expect(resolvePackagedExecutableLayout(executablePath, "linux")).resolves.toEqual({
+      bundleRoot,
+      executablePath,
+      nodePath: join(bundleRoot, "resources", "daemon", "node"),
+      resourcesPath: join(bundleRoot, "resources")
+    });
+  });
+
+  test("resolves layout from a darwin .app or MacOS executable path", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "masthead-packaged-exec-darwin-"));
+    cleanup.push(parent);
+    const bundleRoot = join(parent, "Masthead.app");
+    const executablePath = join(bundleRoot, "Contents", "MacOS", "masthead");
+
+    await expect(resolvePackagedExecutableLayout(executablePath, "darwin")).resolves.toEqual({
+      bundleRoot,
+      executablePath,
+      nodePath: join(bundleRoot, "Contents", "Resources", "daemon", "node"),
+      resourcesPath: join(bundleRoot, "Contents", "Resources")
+    });
+    await expect(resolvePackagedExecutableLayout(bundleRoot, "darwin")).resolves.toEqual({
+      bundleRoot,
+      executablePath,
+      nodePath: join(bundleRoot, "Contents", "Resources", "daemon", "node"),
+      resourcesPath: join(bundleRoot, "Contents", "Resources")
     });
   });
 

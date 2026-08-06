@@ -11,18 +11,33 @@ const config: ForgeConfig = {
   },
   packagerConfig: {
     asar: true,
+    appBundleId: "ai.animas.masthead",
+    appCategoryType: "public.app-category.developer-tools",
     executableName: "masthead",
     extraResource: [".electron-resources/daemon", "public/assets/masthead-logo-sail.png"],
     icon: "public/assets/masthead-logo-sail",
     name: "Masthead"
+    // Adhoc codesign only until a paid Apple Developer ID is available.
+    // Wire packagerConfig.osxSign / osxNotarize later (see docs/reference/macos-release-build.md).
   },
   makers: [
     {
       name: "@electron-forge/maker-zip",
+      platforms: ["darwin", "linux"],
       config: {}
     },
     {
+      name: "@electron-forge/maker-dmg",
+      platforms: ["darwin"],
+      config: {
+        name: "Masthead",
+        icon: "public/assets/masthead-logo-sail.png",
+        format: "ULFO"
+      }
+    },
+    {
       name: "@electron-forge/maker-deb",
+      platforms: ["linux"],
       config: {
         options: {
           categories: ["Development"],
@@ -35,6 +50,7 @@ const config: ForgeConfig = {
       ? [
           {
             name: "@electron-forge/maker-rpm",
+            platforms: ["linux"],
             config: {
               options: {
                 categories: ["Development"],

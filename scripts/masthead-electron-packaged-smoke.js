@@ -5,10 +5,13 @@ import { constants } from "node:fs";
 import { access, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, relative, win32 } from "node:path";
+import { isAbsolute, join, relative, win32 } from "node:path";
 import { FuseV1Options, getCurrentFuseWire } from "@electron/fuses";
 import { buildPackagedCliInvocation } from "./packaged-cli-command.js";
-import { verifyPackagedBundleManifest } from "./packaged-bundle-manifest.js";
+import {
+  resolvePackagedExecutableLayout,
+  verifyPackagedBundleManifest
+} from "./packaged-bundle-manifest.js";
 import {
   buildWindowsProcessSnapshotInvocation,
   buildWindowsTaskkillInvocation,
@@ -25,15 +28,18 @@ try {
 }
 
 async function main() {
-  const binary = process.env.MASTHEAD_ELECTRON_PACKAGED_BIN || process.argv[2] || (await findPackagedBinary());
-  if (!binary) {
+  const binaryHint = process.env.MASTHEAD_ELECTRON_PACKAGED_BIN || process.argv[2] || (await findPackagedBinary());
+  if (!binaryHint) {
     throw new Error(
       "Could not find packaged Masthead binary. Pass a path, set MASTHEAD_ELECTRON_PACKAGED_BIN, or run npm run build:desktop first."
     );
   }
 
-  const resourceRoot = join(dirname(binary), "resources");
+  const layout = await resolvePackagedExecutableLayout(binaryHint, process.platform);
+  const binary = layout.executablePath;
+  const resourceRoot = layout.resourcesPath;
   const resources = join(resourceRoot, "daemon");
+  await access(binary, constants.X_OK);
   await access(join(resourceRoot, "masthead-logo-sail.png"), constants.R_OK);
   await access(join(resources, process.platform === "win32" ? "node.exe" : "node"), constants.X_OK);
   await access(join(resources, "dist", "src", "daemon", "main.js"), constants.R_OK);
@@ -49,11 +55,7 @@ async function main() {
   if (!/^[a-f0-9]{40}$/u.test(release.gitSha) || typeof release.version !== "string" || !release.version) {
     throw new Error(`Packaged release identity is invalid: ${JSON.stringify(release)}`);
   }
-  await verifyPackagedBundleManifest({
-    bundleRoot: dirname(binary),
-    executablePath: binary,
-    resourcesPath: resourceRoot
-  });
+  await verifyPackagedBundleManifest(layout);
 
   const fuseWire = await getCurrentFuseWire(binary);
   assertFuse(fuseWire, FuseV1Options.RunAsNode, false, "RunAsNode");

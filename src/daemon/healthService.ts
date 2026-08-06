@@ -1,10 +1,10 @@
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname } from "node:path";
 import type { MastheadCapability, MastheadHealthDto } from "../shared/protocol.ts";
 import { MASTHEAD_API_VERSION, MASTHEAD_PRODUCT } from "../shared/protocol.ts";
 import type { DaemonConfig } from "./config.ts";
 import { CURRENT_SCHEMA_VERSION, getOrCreateDatabaseIdentity } from "./db/schema.ts";
 import type { MastheadDatabase } from "./db/sqlite.ts";
+import { resolveReleaseIdentity } from "./releaseIdentity.ts";
 
 const capabilities: MastheadCapability[] = [
   "live_projection",
@@ -45,13 +45,14 @@ export function buildMastheadHealth(
   runtime: HealthServiceRuntime,
   live: LiveHealthCounts
 ): MastheadHealthDto {
+  const release = resolveReleaseIdentity();
   return {
     ok: true,
     product: MASTHEAD_PRODUCT,
     apiVersion: MASTHEAD_API_VERSION,
     schemaVersion: CURRENT_SCHEMA_VERSION,
-    buildVersion: buildVersion(),
-    buildSha: process.env.MASTHEAD_BUILD_SHA || "development",
+    buildVersion: release.version,
+    buildSha: release.gitSha,
     capabilities,
     runtime: {
       daemonInstanceId: runtime.daemonInstanceId,
@@ -78,17 +79,4 @@ export function buildMastheadHealth(
     },
     live
   };
-}
-
-function buildVersion(): string {
-  if (process.env.MASTHEAD_BUILD_VERSION) return process.env.MASTHEAD_BUILD_VERSION;
-
-  try {
-    const packageJson = JSON.parse(readFileSync(resolve("package.json"), "utf8")) as { version?: unknown };
-    if (typeof packageJson.version === "string" && packageJson.version.trim()) return packageJson.version;
-  } catch {
-    // Development and tests may run from a compiled output directory without package metadata.
-  }
-
-  return "development";
 }
