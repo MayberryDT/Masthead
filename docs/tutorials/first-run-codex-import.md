@@ -1,6 +1,6 @@
 # First Run: Codex Import
 
-This tutorial proves the first Masthead vertical slice: discover Codex history, import it into local SQLite, search it in Logbook, and expose it through read-only MCP.
+This tutorial proves a first Masthead vertical slice: discover Codex history, import it into local SQLite, work sessions in Workbench, publish artifacts to Logbook, and expose knowledge through read-only MCP.
 
 ## 1. Install
 

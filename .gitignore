@@ -10,3 +10,28 @@ out/
 .masthead/
 
 .worktrees/
+
+# Local Workbench authoring dumps (never commit)
+authoring-v5-pack:*
+*.scaffold.json
+
+# Local databases and runtime residue
+*.sqlite
+*.sqlite-*
+*.sqlite.backup*
+masthead.sqlite*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Logs and coverage
+*.log
+npm-debug.log*
+coverage/
+.nyc_output/

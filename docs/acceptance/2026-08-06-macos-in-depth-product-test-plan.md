@@ -1,10 +1,10 @@
-# macOS in-depth product test plan (MacinCloud)
+# macOS in-depth product test plan (cloud Mac vendor)
 
 **Status:** plan only — no execution in this document  
 **Date:** 2026-08-06  
 **Goal:** Prove Masthead on macOS as a **real multi-harness product**, not packaging or a thin API smoke.  
-**Host under test:** MacinCloud TX089 (`ssh macincloud`)  
-**Donor machine:** Veelox (this Linux workstation) + artificial fixtures where donor data is thin  
+**Host under test:** remote macOS arm64 dogfood host  
+**Donor machine:** Linux development workstation + artificial fixtures where donor data is thin  
 
 **Supersedes for depth:** the shallow 2026-08-06 RC run  
 ([2026-08-06-macos-product-rc-results.md](./2026-08-06-macos-product-rc-results.md)).  
@@ -13,7 +13,7 @@ That run proved install + fixture import + synthetic ingest. This plan is the fu
 **Related**
 
 - [macos-product-rc-checklist.md](./macos-product-rc-checklist.md) — surface checklist skeleton  
-- [macos-macincloud-host-inventory.md](./macos-macincloud-host-inventory.md) — Mac empty baseline  
+- [macos-remote-mac-host-inventory.md](./macos-remote-mac-host-inventory.md) — Mac empty baseline  
 - [sources-v2.md](../reference/sources-v2.md) — Discover → Enable → Activate → Test → Ready  
 - [product-release-gate.md](./product-release-gate.md) — release identity / V5 rules  
 
@@ -38,7 +38,7 @@ tracked.
 
 ---
 
-## 2. Donor reality on Veelox (what we can move)
+## 2. Donor reality on the donor Linux host (what we can move)
 
 Point-in-time inventory (2026-08-06). Re-probe before transfer.
 
@@ -53,7 +53,7 @@ Point-in-time inventory (2026-08-06). Re-probe before transfer.
 | **OpenCode** | `~/.config/opencode`, `~/.local/share/opencode`, `~/.opencode` | Mixed | config/plugins | Import if history present; else fixture |
 | **Pi** | `~/.pi` (~48K) | Thin | — | Discover honesty + synthetic if needed |
 
-**Also on Veelox:** production/dev Masthead DBs under `~/.config/masthead*` / `~/.local/share/masthead-dev` — useful for **reference counts / SQL probes**, not as the Mac product DB (path/layout differ; prefer re-import on Mac).
+**Also on the donor Linux host:** production/dev Masthead DBs under `~/.config/masthead*` / `~/.local/share/masthead-dev` — useful for **reference counts / SQL probes**, not as the Mac product DB (path/layout differ; prefer re-import on Mac).
 
 **Mac today:** Codex.app / Claude.app / Cursor.app installed; almost no harness homes until we seed them.
 
@@ -65,7 +65,7 @@ Point-in-time inventory (2026-08-06). Re-probe before transfer.
 2. **Multi-harness by design** — at least **four** runtimes with real or faithful history (target: Codex, Claude Code, Cursor, plus Grok **or** Hermes **or** OMP).  
 3. **Two import depths** — (a) curated **sample** for speed, (b) **stress** subset large enough to hurt (time, disk, quality).  
 4. **Live is not optional for the primary harness** — at least one runtime must go Enable → Activate → real or high-fidelity hook traffic → Now.  
-5. **Secrets are explicit** — transfer auth only with a written allow-list; MacinCloud is a managed third-party host. Prefer short-lived copies, wipe protocol at end.  
+5. **Secrets are explicit** — transfer auth only with a written allow-list; cloud Mac vendor is a managed third-party host. Prefer short-lived copies, wipe protocol at end.  
 6. **Evidence or it did not happen** — command outputs, counts, request IDs, screenshots (RDP), sqlite queries in a results file.  
 7. **Disk hygiene** — do **not** rsync entire 26G Codex home by default; stage tiers. Prefer delete over archive on Mac after the run (AGENTS local disk rules).  
 8. **Fix blockers that invalidate the dogfood** — e.g. packaged `buildSha=development` must be fixed **before** claiming release identity, or the test plan includes a required pre-step fix.
@@ -105,7 +105,7 @@ Where we cannot use real auth:
 
 ---
 
-## 5. Data staging plan (Veelox → Mac)
+## 5. Data staging plan (Linux → Mac)
 
 ### 5.1 Tier A — Curated multi-harness sample (must ship first)
 
@@ -123,7 +123,7 @@ Where we cannot use real auth:
 
 **Also copy (structure only, rewrite paths on Mac):**
 
-- Example `hooks.json` templates from donor **after** path rewrite to Mac packaged node + hook script (do not leave Veelox absolute paths).
+- Example `hooks.json` templates from donor **after** path rewrite to Mac packaged node + hook script (do not leave the donor host absolute paths).
 
 ### 5.2 Tier B — Codex stress import (after Tier A green)
 
@@ -161,14 +161,14 @@ Artificial data **supplements** Tier A; it does not replace multi-harness real h
 ### 5.5 Transfer commands (sketch — execute later)
 
 ```text
-# From Veelox — example pattern (paths finalized at execute time)
+# From the donor Linux host — example pattern (paths finalized at execute time)
 rsync -a --relative \
   .codex/auth.json .codex/config.toml \
-  macincloud:~/masthead-rc-seed/
+  remote-mac:~/masthead-rc-seed/
 
 # Sampled sessions: list file → rsync --files-from
 # Cursor DB:
-rsync -a ~/.config/Cursor/User/globalStorage/state.vscdb* macincloud:~/masthead-rc-seed/cursor/
+rsync -a ~/.config/Cursor/User/globalStorage/state.vscdb* remote-mac:~/masthead-rc-seed/cursor/
 ```
 
 Prefer **one seed tree + install script** on Mac that maps into final homes atomically.
@@ -183,7 +183,7 @@ Prefer **one seed tree + install script** on Mac that maps into final homes atom
 4. PATH: Homebrew node for tooling; Codex CLI via `/Applications/Codex.app/Contents/Resources/codex` symlink into `~/bin`.  
 5. Install CLIs as needed: Claude Code CLI if desktop-only is insufficient; `rg` if Codex doctor requires it.  
 6. Free disk: keep **≥ 20 GB** free before Tier B.  
-7. RDP available for visual phases (MacinCloud **:6000**).
+7. RDP available for visual phases (cloud Mac vendor **:6000**).
 
 ---
 
@@ -213,8 +213,8 @@ Phase 12 Teardown / secret wipe / report
 
 ### Phase 0 — Preflight + seed
 
-- [ ] Re-inventory Veelox sizes; build Tier A file lists  
-- [ ] User confirm: **which auth files may leave Veelox**  
+- [ ] Re-inventory donor Linux host sizes; build Tier A file lists  
+- [ ] User confirm: **which auth files may leave the donor host**  
 - [ ] Transfer seed; verify modes 600 on secrets  
 - [ ] Install script places catalog paths  
 - [ ] Record seed manifest (file counts, total bytes, runtimes) — no secret bodies  
@@ -426,7 +426,7 @@ Call out so execute session is not surprised:
 
 | # | Decision | Choice |
 | --- | --- | --- |
-| 1 | **Auth** | Any auth files may be copied to MacinCloud (Codex / Claude / Grok / Hermes / etc.). Handle carefully (mode 600, no git, no log dumps of contents). |
+| 1 | **Auth** | Any auth files may be copied to cloud Mac vendor (Codex / Claude / Grok / Hermes / etc.). Handle carefully (mode 600, no git, no log dumps of contents). |
 | 2 | **Tier B Codex stress** | **~500 session files** (not full 8.9G corpus). |
 | 3 | **Authoring** | Prefer **agent with keys on the Mac** when possible; fall back to scripted V5 drafts only if agent path is blocked. |
 | 4 | **Data retention** | **Keep** seed + Masthead DB on Mac after the run for ongoing dogfood (no mandatory wipe of product data). Still avoid committing secrets to git. |
@@ -469,8 +469,8 @@ So the product’s own “who am I?” APIs did **not** match the release file b
 
 Decisions in §14 are locked.
 
-1. Build Tier A multi-harness file lists + ~500-file Codex Tier B list on Veelox.  
-2. Transfer seed (including allowed auth) to MacinCloud; install into catalog paths.  
+1. Build Tier A multi-harness file lists + ~500-file Codex Tier B list on the donor Linux host.  
+2. Transfer seed (including allowed auth) to cloud Mac vendor; install into catalog paths.  
 3. Execute Phases 1–12 with continuous evidence; keep Mac data for dogfood.  
 4. Prefer agent+keys for authoring publish; keep results under `docs/acceptance/`.
 

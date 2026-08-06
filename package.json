@@ -1,7 +1,7 @@
 {
   "name": "masthead",
   "version": "0.1.15",
-  "description": "Local-first session data layer and session manager.",
+  "description": "Local-first session data layer and session manager for AI coding agents.",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -9,6 +9,25 @@
   "bin": {
     "mastheadctl": "dist/daemon/src/cli/mastheadctl.js"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MayberryDT/Masthead.git"
+  },
+  "bugs": {
+    "url": "https://github.com/MayberryDT/Masthead/issues"
+  },
+  "homepage": "https://github.com/MayberryDT/Masthead#readme",
+  "keywords": [
+    "masthead",
+    "local-first",
+    "session-data",
+    "ai-agents",
+    "codex",
+    "mcp",
+    "workbench",
+    "logbook",
+    "electron"
+  ],
   "engines": {
     "node": ">=24.15.0"
   },

@@ -14,11 +14,11 @@
       "label": "Codex",
       "presence": "found",
       "live": "ready",
-      "configPath": "/Users/user945425/.codex/hooks.json",
+      "configPath": "$HOME/.codex/hooks.json",
       "endpoint": "http://127.0.0.1:17373/ingest?runtime=codex",
       "stateEndpoint": "http://127.0.0.1:17373/live/state",
       "checkedPaths": [
-        "/Users/user945425/.codex"
+        "$HOME/.codex"
       ],
       "diagnostics": [],
       "supportsActions": true,
@@ -33,11 +33,11 @@
       "live": "needs_action",
       "actionRequired": "repair",
       "actionMessage": "Live connector files need repair.",
-      "configPath": "/Users/user945425/.claude/settings.json",
+      "configPath": "$HOME/.claude/settings.json",
       "endpoint": "http://127.0.0.1:17373/ingest?runtime=claude_code",
       "stateEndpoint": "http://127.0.0.1:17373/live/state",
       "checkedPaths": [
-        "/Users/user945425/.claude"
+        "$HOME/.claude"
       ],
       "diagnostics": [],
       "supportsActions": true,
@@ -50,7 +50,7 @@
       "label": "Cursor",
       "presence": "found",
       "live": "not_installed",
-      "configPath": "/Users/user945425/.cursor/hooks.json",
+      "configPath": "$HOME/.cursor/hooks.json",
       "endpoint": "http://127.0.0.1:17373/ingest?runtime=cursor",
       "stateEndpoint": "http://127.0.0.1:17373/live/state",
       "checkedPaths": [],
@@ -67,11 +67,11 @@
       "live": "needs_action",
       "actionRequired": "repair",
       "actionMessage": "Live connector files need repair.",
-      "configPath": "/Users/user945425/.grok/hooks/masthead.json",
+      "configPath": "$HOME/.grok/hooks/masthead.json",
       "endpoint": "http://127.0.0.1:17373/ingest?runtime=grok",
       "stateEndpoint": "http://127.0.0.1:17373/live/state",
       "checkedPaths": [
-        "/Users/user945425/.grok"
+        "$HOME/.grok"
       ],
       "diagnostics": [],
       "supportsActions": true,
@@ -84,7 +84,7 @@
       "label": "OpenCode",
       "presence": "not_found",
       "live": "not_installed",
-      "configPath": "/Users/user945425/.config/opencode/plugins/masthead-live.js",
+      "configPath": "$HOME/.config/opencode/plugins/masthead-live.js",
       "endpoint": "http://127.0.0.1:17373/ingest?runtime=opencode",
       "stateEndpoint": "http://127.0.0.1:17373/live/state",
       "checkedPaths": [],
@@ -99,11 +99,11 @@
       "label": "Oh My Pi",
       "presence": "found",
       "live": "not_installed",
-      "configPath": "/Users/user945425/.omp/agent/extensions/masthead-live.js",
+      "configPath": "$HOME/.omp/agent/extensions/masthead-live.js",
       "endpoint": "http://127.0.0.1:17373/ingest?runtime=omp",
       "stateEndpoint": "http://127.0.0.1:17373/live/state",
       "checkedPaths": [
-        "/Users/user945425/.omp"
+        "$HOME/.omp"
       ],
       "diagnostics": [],
       "supportsActions": true,
@@ -116,7 +116,7 @@
       "label": "Pi",
       "presence": "not_found",
       "live": "not_installed",
-      "configPath": "/Users/user945425/.pi/agent/extensions/masthead-live.js",
+      "configPath": "$HOME/.pi/agent/extensions/masthead-live.js",
       "endpoint": "http://127.0.0.1:17373/ingest?runtime=pi",
       "stateEndpoint": "http://127.0.0.1:17373/live/state",
       "checkedPaths": [],
@@ -131,11 +131,11 @@
       "label": "Hermes",
       "presence": "found",
       "live": "not_installed",
-      "configPath": "/Users/user945425/.hermes/plugins/masthead-live/plugin.yaml",
+      "configPath": "$HOME/.hermes/plugins/masthead-live/plugin.yaml",
       "endpoint": "http://127.0.0.1:17373/ingest?runtime=hermes",
       "stateEndpoint": "http://127.0.0.1:17373/live/state",
       "checkedPaths": [
-        "/Users/user945425/.hermes"
+        "$HOME/.hermes"
       ],
       "diagnostics": [],
       "supportsActions": true,
