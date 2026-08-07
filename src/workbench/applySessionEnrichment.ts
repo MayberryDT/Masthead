@@ -152,7 +152,7 @@ function capsuleFromOutput(output: SessionEnrichmentOutput, generatedAt: string)
 function verificationFromSummary(
   summary: string | undefined,
   evidenceRefs: Array<{ id: string; kind: "event"; observedAt: string; source: string }>
-): SessionCapsule["sessionDossier"]["verification"] {
+): NonNullable<SessionCapsule["sessionDossier"]>["verification"] {
   const text = summary?.trim() ?? "";
   if (!text) {
     return { commands: [], evidenceRefs, failures: [], status: "unknown", summary: "" };

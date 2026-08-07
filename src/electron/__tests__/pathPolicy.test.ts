@@ -18,13 +18,14 @@ afterEach(async () => {
 
 describe("Electron path policy", () => {
   test("accepts only Masthead-owned data directories", () => {
-    expect(isMastheadOwnedDirectory("/home/tyler/.local/share/masthead-dev")).toBe(true);
+    const homeDir = "/home/test";
+    expect(isMastheadOwnedDirectory(`${homeDir}/.local/share/masthead-dev`, { homeDir })).toBe(true);
     expect(isMastheadOwnedDirectory("/tmp/masthead-doctor-acceptance")).toBe(true);
     expect(isMastheadOwnedDirectory("/tmp/masthead-doctor-acceptance/nested")).toBe(true);
-    expect(isMastheadOwnedDirectory("/home/tyler/Documents")).toBe(false);
+    expect(isMastheadOwnedDirectory(`${homeDir}/Documents`, { homeDir })).toBe(false);
     expect(isMastheadOwnedDirectory("/tmp/project")).toBe(false);
     expect(isMastheadOwnedDirectory("/tmp/not-masthead-at-all")).toBe(false);
-    expect(isMastheadOwnedDirectory("/home/tyler/Documents/masthead-secret")).toBe(false);
+    expect(isMastheadOwnedDirectory(`${homeDir}/Documents/masthead-secret`, { homeDir })).toBe(false);
   });
 
   test("known roots include env override and platform defaults", () => {
