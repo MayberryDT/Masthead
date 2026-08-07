@@ -43,13 +43,14 @@ jobs:
       - run: npm run build:desktop
       - name: Collect Linux artifacts
         run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
           mkdir -p release-assets
-          find out/make -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.zip' -o -name '*.AppImage' \) -print0 \
-            | xargs -0 -I{} cp -v {} release-assets/ || true
-          # Packaged directory zip fallback if makers only left zip under out/
+          find out/make -type f \( -name "*${VERSION}*.deb" -o -name "*${VERSION}*.rpm" -o -name "*${VERSION}*.zip" -o -name '*AppImage' \) -print0 \
+            | xargs -0 -I{} cp -v {} release-assets/
           if [ -z "$(ls -A release-assets 2>/dev/null)" ]; then
-            echo "No maker artifacts found under out/make; packaging zip of out tree heads" >&2
-            find out -maxdepth 2 -type d -name 'Masthead-*' -print
+            echo "No maker artifacts found for version ${VERSION} under out/make" >&2
+            find out/make -type f | head -50
             exit 1
           fi
           ls -lah release-assets
@@ -79,12 +80,14 @@ jobs:
 
       - name: Collect macOS artifacts
         run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
           mkdir -p release-assets
-          find out/make -type f \( -name '*.dmg' -o -name '*.zip' \) -print0 \
-            | xargs -0 -I{} cp -v {} release-assets/ || true
+          find out/make -type f \( -name '*.dmg' -o -name "*${VERSION}*.zip" \) -print0 \
+            | xargs -0 -I{} cp -v {} release-assets/
           if [ -z "$(ls -A release-assets 2>/dev/null)" ]; then
-            echo "No macOS maker artifacts found under out/make" >&2
-            find out -type f | head -50
+            echo "No macOS maker artifacts found for version ${VERSION} under out/make" >&2
+            find out/make -type f | head -50
             exit 1
           fi
           ls -lah release-assets
