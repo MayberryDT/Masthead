@@ -4,6 +4,14 @@ All notable changes to Masthead are documented in this file.
 The format is inspired by [Keep a Changelog](https://keepachangelog.com/).
 Versions follow the `package.json` source of truth.
 
+## [Unreleased]
+
+### Security
+
+- Application hardening from Deepsec review: read-only worktree bridge no longer proxies process-spawn or model-discovery SSRF routes; MCP test-connection uses canonical launch config only; packaged bundle digest covers the full tree and rejects symlink escapes; provider fetch redirect/SSRF guards; non-loopback daemon bind rejected; key-aware secret redaction; V5 session enrichment secret gate; GitHub release workflow least privilege.
+- Dependency hygiene: npm `overrides` for previously noisy build-toolchain advisories (`tar`, `undici`, `tmp`, `postcss`, `fast-uri`, `ip-address`, `brace-expansion`); Electron bumped within 42.x; `npm run audit:runtime` and full-tree `npm audit` clean on the gated set.
+- Installer clarity: `npm run audit:report`, `docs/reference/dependency-security.md`, SECURITY/README/CONTRIBUTING notes distinguishing GitHub Releases vs source build vs full-tree audit; CI security workflow always fails on runtime high+.
+
 ## [0.1.15] — 2026-08-06
 
 ### Changed

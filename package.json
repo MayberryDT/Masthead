@@ -83,7 +83,9 @@
     "dogfood:live": "node scripts/masthead-dogfood.js --live",
     "ingest": "npm run build:daemon && node dist/daemon/src/daemon/main.js",
     "mcp": "npm run build:daemon && node dist/daemon/src/mcp/server.js",
-    "demo:hook": "node scripts/masthead-demo.js"
+    "demo:hook": "node scripts/masthead-demo.js",
+    "audit:all": "npm audit --audit-level=critical",
+    "audit:report": "node scripts/security-audit-report.js"
   },
   "dependencies": {
     "@fontsource/ibm-plex-mono": "^5.2.7",
@@ -104,10 +106,19 @@
     "@types/node": "24.10.2",
     "@types/react": "19.2.7",
     "@types/react-dom": "19.2.3",
-    "electron": "^42.5.0",
+    "electron": "^42.8.1",
     "happy-dom": "^20.10.6",
     "typescript": "5.9.3",
     "vite": "8.0.16",
     "vitest": "4.1.9"
+  },
+  "overrides": {
+    "tar": "^7.5.22",
+    "undici": "^7.29.0",
+    "tmp": "^0.2.7",
+    "brace-expansion": "^2.0.2",
+    "postcss": "^8.5.23",
+    "fast-uri": "^3.1.5",
+    "ip-address": "^10.3.1"
   }
 }

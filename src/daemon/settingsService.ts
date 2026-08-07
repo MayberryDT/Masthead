@@ -345,7 +345,7 @@ export async function getLiveHookSettings(db: MastheadDatabase, config: DaemonCo
       mismatchedEvents: connectorEvents(connectors, "mismatchedEvents"),
       missingEvents: connectorEvents(connectors, "missingEvents"),
       stateEndpoint: primaryConnector.stateEndpoint,
-      stateEndpointHealthy: true
+      stateEndpointHealthy: stateEndpointLooksHealthy(primaryConnector, primaryState, lastTest)
     },
     connectors,
     latestStates
@@ -387,7 +387,7 @@ function liveConnectorIntegration(connector: LiveConnectorSettings, latestStates
     label: connector.label,
     runtime: connector.runtime,
     stateEndpoint: connector.stateEndpoint,
-    stateEndpointHealthy: true,
+    stateEndpointHealthy: stateEndpointLooksHealthy(connector, latestState, undefined),
     status: connectorCaptureStatus(connector),
     supportsActions: true
   };
@@ -417,7 +417,7 @@ function harnessCaptureIntegration(
       label: entry.label,
       runtime: entry.runtime,
       stateEndpoint: connector.stateEndpoint,
-      stateEndpointHealthy: true,
+      stateEndpointHealthy: stateEndpointLooksHealthy(connector, latestState, undefined),
       status: connectorCaptureStatus(connector),
       supportsActions: true
     };
@@ -647,7 +647,7 @@ function hookSettingsForConnector(
       mismatchedEvents: connector.mismatchedEvents,
       missingEvents: connector.missingEvents,
       stateEndpoint: connector.stateEndpoint,
-      stateEndpointHealthy: true
+      stateEndpointHealthy: stateEndpointLooksHealthy(connector, latestState, lastTest)
     },
     connectors,
     latestStates
@@ -662,4 +662,16 @@ function connectorByRuntime(connectors: LiveConnectorSettings[], runtime: LiveCo
 
 function connectorEvents(connectors: LiveConnectorSettings[], key: "mismatchedEvents" | "missingEvents"): string[] {
   return connectors.flatMap((connector) => connector[key].map((eventName) => `${connector.runtime}:${eventName}`));
+}
+
+function stateEndpointLooksHealthy(
+  connector: Pick<LiveConnectorSettings, "error" | "stateEndpoint">,
+  latestState: LatestRuntimeState | undefined,
+  lastTest: HookLastTestDto | undefined
+): boolean {
+  if (!connector.stateEndpoint) return false;
+  if (connector.error) return false;
+  if (lastTest?.status === "failed") return false;
+  if (lastTest?.status === "passed") return true;
+  return Boolean(latestState?.observedAt);
 }

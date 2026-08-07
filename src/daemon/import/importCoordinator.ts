@@ -102,6 +102,9 @@ export function resumeImportJob(
 ): ImportJobDto {
   const job = getImportJob(db, importJobId);
   if (!job) throw new Error(`Import job not found: ${importJobId}`);
+  if (job.status === "cancelling") {
+    throw new Error(`Import job cannot be resumed while cancelling: ${importJobId}`);
+  }
   if (activeImportJobs.has(importJobId)) return job;
   const resumed = updateImportJob(db, importJobId, {
     currentPath: null,
@@ -157,42 +160,71 @@ export function markInterruptedImportJobs(db: MastheadDatabase, now = () => new 
 
 export function recoverInterruptedImportJobs(db: MastheadDatabase, now = () => new Date().toISOString()): string[] {
   const rows = db
-    .prepare("SELECT import_job_id AS importJobId FROM import_jobs WHERE status IN ('queued', 'running', 'cancelling') ORDER BY updated_at, import_job_id")
-    .all() as Array<{ importJobId: string }>;
+    .prepare("SELECT import_job_id AS importJobId, status FROM import_jobs WHERE status IN ('queued', 'running', 'cancelling') ORDER BY updated_at, import_job_id")
+    .all() as Array<{ importJobId: string; status: string }>;
   if (rows.length === 0) return [];
-  const interrupted = db
-    .prepare("SELECT COUNT(*) AS count FROM import_jobs WHERE status IN ('queued', 'running', 'cancelling')")
-    .get() as { count: number };
   const interruptedAt = now();
+  const resumableIds = rows.filter((row) => row.status !== "cancelling").map((row) => row.importJobId);
+  const cancelledIds = rows.filter((row) => row.status === "cancelling").map((row) => row.importJobId);
 
-  db.prepare(
-    `UPDATE import_work_units
-     SET status = 'queued',
-       status_reason = 'Recovered after daemon restart.',
-       heartbeat_at = NULL,
-       finished_at = NULL,
-       failure_group_id = NULL
-     WHERE import_job_id IN (SELECT import_job_id FROM import_jobs WHERE status IN ('queued', 'running', 'cancelling'))
-       AND status = 'running'`
-  ).run();
-  db.prepare(
-    `UPDATE import_jobs
-    SET status = 'queued',
-      current_path = NULL,
-      failure_message = NULL,
-      finished_at = NULL,
-      heartbeat_at = ?,
-      updated_at = ?
-    WHERE status IN ('queued', 'running', 'cancelling')`
-  ).run(interruptedAt, interruptedAt);
+  if (resumableIds.length > 0) {
+    const placeholders = resumableIds.map(() => "?").join(", ");
+    db.prepare(
+      `UPDATE import_work_units
+       SET status = 'queued',
+         status_reason = 'Recovered after daemon restart.',
+         heartbeat_at = NULL,
+         finished_at = NULL,
+         failure_group_id = NULL
+       WHERE import_job_id IN (${placeholders})
+         AND status = 'running'`
+    ).run(...resumableIds);
+    db.prepare(
+      `UPDATE import_jobs
+      SET status = 'queued',
+        current_path = NULL,
+        failure_message = NULL,
+        finished_at = NULL,
+        heartbeat_at = ?,
+        updated_at = ?
+      WHERE import_job_id IN (${placeholders})`
+    ).run(interruptedAt, interruptedAt, ...resumableIds);
+  }
+
+  if (cancelledIds.length > 0) {
+    const placeholders = cancelledIds.map(() => "?").join(", ");
+    db.prepare(
+      `UPDATE import_work_units
+       SET status = 'cancelled',
+         status_reason = 'Cancelled before daemon restart completed.',
+         heartbeat_at = NULL,
+         finished_at = COALESCE(finished_at, ?),
+         failure_group_id = NULL
+       WHERE import_job_id IN (${placeholders})
+         AND status IN ('queued', 'running')`
+    ).run(interruptedAt, ...cancelledIds);
+    db.prepare(
+      `UPDATE import_jobs
+      SET status = 'cancelled',
+        current_path = NULL,
+        failure_message = NULL,
+        finished_at = COALESCE(finished_at, ?),
+        heartbeat_at = ?,
+        updated_at = ?
+      WHERE import_job_id IN (${placeholders})`
+    ).run(interruptedAt, interruptedAt, interruptedAt, ...cancelledIds);
+  }
 
   recordRuntimeDiagnostic({
-    details: { interruptedJobs: interrupted.count },
+    details: {
+      cancelledJobs: cancelledIds.length,
+      interruptedJobs: resumableIds.length
+    },
     kind: "import_jobs_interrupted",
-    message: `Recovered ${interrupted.count} interrupted import jobs from a previous daemon run`,
+    message: `Recovered ${resumableIds.length} interrupted import jobs and finalized ${cancelledIds.length} cancelled jobs from a previous daemon run`,
     severity: "info"
   });
-  return rows.map((row) => row.importJobId);
+  return resumableIds;
 }
 
 function scheduleImportDrain(): void {

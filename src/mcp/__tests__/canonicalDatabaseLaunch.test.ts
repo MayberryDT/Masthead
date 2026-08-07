@@ -48,6 +48,7 @@ describe("canonical database MCP launch", () => {
       entry,
       [
         "if (!process.env.MASTHEAD_DB_PATH) { console.error('missing database'); process.exit(1); }",
+        "if (process.env.EVIL) { console.error('attacker env leaked'); process.exit(1); }",
         "const tools = ['search_knowledge','list_knowledge','get_knowledge','get_provenance','get_evidence_excerpt','get_evidence_transcript','get_corpus_stats','search_artifacts','get_artifact','search_sessions','get_session','get_session_excerpt','get_session_transcript','list_project_sessions','get_project_history','get_masthead_coverage'];",
         "let buffer = '';",
         "process.stdin.setEncoding('utf8');",
@@ -69,27 +70,28 @@ describe("canonical database MCP launch", () => {
       ].join("\n")
     );
 
-    await expect(
-      testMcpConnection(
-        {
-          args: [entry],
-          command: process.execPath,
-          env: { MASTHEAD_DB_PATH: activeDatabase }
-        },
-        activeDatabase,
-        1_000
-      )
-    ).resolves.toMatchObject({
-      ok: true,
-      serverInfo: { name: "masthead", version: "test" },
-      toolCount: 16,
-      toolNames: expect.arrayContaining(["search_knowledge", "search_sessions"]),
-      validation: {
-        commandExists: true,
-        databaseMatches: true,
-        entryExists: true,
-        ready: true
-      }
-    });
+    const originalMcpEntry = process.env.MASTHEAD_MCP_ENTRY;
+    const originalMcpCommand = process.env.MASTHEAD_MCP_COMMAND;
+    process.env.MASTHEAD_MCP_ENTRY = entry;
+    process.env.MASTHEAD_MCP_COMMAND = process.execPath;
+    try {
+      await expect(testMcpConnection(activeDatabase, undefined, 1_000)).resolves.toMatchObject({
+        ok: true,
+        serverInfo: { name: "masthead", version: "test" },
+        toolCount: 16,
+        toolNames: expect.arrayContaining(["search_knowledge", "search_sessions"]),
+        validation: {
+          commandExists: true,
+          databaseMatches: true,
+          entryExists: true,
+          ready: true
+        }
+      });
+    } finally {
+      if (originalMcpEntry === undefined) delete process.env.MASTHEAD_MCP_ENTRY;
+      else process.env.MASTHEAD_MCP_ENTRY = originalMcpEntry;
+      if (originalMcpCommand === undefined) delete process.env.MASTHEAD_MCP_COMMAND;
+      else process.env.MASTHEAD_MCP_COMMAND = originalMcpCommand;
+    }
   });
 });

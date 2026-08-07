@@ -1341,7 +1341,7 @@ function displayPath(path: string): string {
   return path || "Workbench authoring bundle";
 }
 
-function containsUnredactedSecret(value: unknown): boolean {
+export function containsUnredactedSecret(value: unknown): boolean {
   const serialized = JSON.stringify(value, (key, entry) =>
     key === "evidenceRefs" && Array.isArray(entry)
       ? entry.map(() => "[canonical-evidence-ref]")

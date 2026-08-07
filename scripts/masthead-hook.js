@@ -49,7 +49,7 @@ async function main() {
     processPath: process.execPath,
     argv: process.argv
   });
-  const body = redactText(raw);
+  const body = JSON.stringify(redactJsonValue(payload));
   const baseUrl = process.env.MASTHEAD_INGEST_URL || DEFAULT_URL;
   const url = withRuntimeOnIngestUrl(baseUrl, resolvedRuntime);
   const stateUrl = process.env.MASTHEAD_STATE_URL || stateUrlFromIngestUrl(url);
@@ -232,5 +232,60 @@ function redactText(input) {
       /\b(AWS|GOOGLE|OPENAI|ANTHROPIC|SUPABASE|GITHUB)?_?(SECRET|TOKEN|KEY|PASSWORD)[A-Z0-9_]*\s*=\s*[^\s\n\r]+/gi,
       "[SECRET:env_secret]"
     )
+    .replace(
+      /(?:^|[\s"'`])(?:--?(?:password|passwd|pass|token|secret|api[-_]?key|access[-_]?key|private[-_]?key|authorization|auth-token|cookie|credentials?))\b(?:\s*(?:=|\s)\s*[^\s"'`]+)?/gi,
+      " [SECRET:cli_flag]"
+    )
     .replace(/(https?:\/\/)([^/\s:@]+):([^/\s@]+)@/gi, "$1[SECRET:credentials]@");
+}
+
+function isSensitiveKey(key) {
+  const tokens = String(key)
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z])([A-Z][a-z])/g, "$1 $2")
+    .toLowerCase()
+    .match(/[a-z0-9]+/g);
+  if (!tokens || tokens.length === 0) return false;
+  const sensitive = {
+    password: true,
+    passwd: true,
+    pwd: true,
+    secret: true,
+    token: true,
+    cookie: true,
+    cookies: true,
+    credential: true,
+    credentials: true,
+    authorization: true,
+    auth: true,
+    privatekey: true,
+    accesskey: true,
+    apikey: true,
+    sessioncookie: true,
+    setcookie: true
+  };
+  const keyModifiers = {
+    api: true,
+    private: true,
+    access: true,
+    secret: true,
+    auth: true,
+    session: true
+  };
+  const compact = tokens.join("");
+  if (sensitive[compact]) return true;
+  if (tokens.some((token) => sensitive[token])) return true;
+  if (tokens.includes("key") && tokens.some((token) => keyModifiers[token])) return true;
+  return false;
+}
+
+function redactJsonValue(value) {
+  if (typeof value === "string") return redactText(value);
+  if (Array.isArray(value)) return value.map(redactJsonValue);
+  if (!value || typeof value !== "object") return value;
+  const output = {};
+  for (const [key, entry] of Object.entries(value)) {
+    output[key] = isSensitiveKey(key) ? "[SECRET:json_field]" : redactJsonValue(entry);
+  }
+  return output;
 }

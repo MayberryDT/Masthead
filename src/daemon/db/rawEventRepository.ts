@@ -1,5 +1,12 @@
 import { createHash } from "node:crypto";
-import { applyRetentionPolicy, retentionPruneResult } from "../../core/retention.ts";
+import {
+  latestRecordIds,
+  matchesRetentionRecordType,
+  retentionPruneResult,
+  shouldPruneRecord,
+  unresolvedAttentionRecordIds,
+  validateRetentionPolicy,
+} from "../../core/retention.ts";
 import type { ClearLocalDataResult, StoreRecord } from "../../core/store.ts";
 import type { PruneLocalDataResult, RetentionPolicy } from "../../core/retention.ts";
 import type { MastheadDatabase } from "./sqlite.ts";
@@ -126,8 +133,33 @@ export function createRawEventRepository(db: MastheadDatabase, source: RawEventS
   };
 
   const pruneStoreRecords = (policy: RetentionPolicy): PruneLocalDataResult => {
-    const records = selectRows(undefined, Number.MAX_SAFE_INTEGER).map((row) => JSON.parse(row.payload_json) as StoreRecord);
-    const { retainedRecords, removedRecords } = applyRetentionPolicy(records, policy);
+    const validated = validateRetentionPolicy(policy);
+    const pageSize = 500;
+    const selected: StoreRecord[] = [];
+    const allRecordIds: string[] = [];
+    let cursor: DecodedCursor | undefined;
+    for (;;) {
+      const rows = selectRows(cursor, pageSize);
+      if (rows.length === 0) break;
+      for (const row of rows) {
+        const record = JSON.parse(row.payload_json) as StoreRecord;
+        allRecordIds.push(record.recordId);
+        if (matchesRetentionRecordType(record, validated)) {
+          selected.push(record);
+        }
+      }
+      if (rows.length < pageSize) break;
+      const last = rows.at(-1);
+      if (!last) break;
+      cursor = { observedAt: last.observed_at, rawEventId: last.raw_event_id };
+    }
+
+    const protectedRecordIds = new Set([
+      ...latestRecordIds(selected, validated.keepLatest),
+      ...(validated.pinnedRecordIds ?? []),
+      ...unresolvedAttentionRecordIds(selected, validated),
+    ]);
+    const removedRecords = selected.filter((record) => shouldPruneRecord(record, validated, protectedRecordIds));
     if (removedRecords.length > 0) {
       const deleteRecord = db.prepare("DELETE FROM raw_events WHERE source_id = ? AND source_record_key = ?");
       db.exec("BEGIN IMMEDIATE;");
@@ -141,7 +173,7 @@ export function createRawEventRepository(db: MastheadDatabase, source: RawEventS
         throw error;
       }
     }
-    return retentionPruneResult(removedRecords, retainedRecords.length);
+    return retentionPruneResult(removedRecords, allRecordIds.length - removedRecords.length);
   };
 
   const clearStoreRecords = (): ClearLocalDataResult => {

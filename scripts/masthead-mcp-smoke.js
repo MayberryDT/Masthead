@@ -217,10 +217,15 @@ function sendLine(process, payload) {
     };
     const onStdout = (chunk) => {
       output += chunk.toString();
-      const lines = output.split("\n").filter(Boolean);
-      if (lines.length === 0) return;
+      const newline = output.indexOf("\n");
+      if (newline < 0) return;
+      const line = output.slice(0, newline).trim();
+      if (!line) {
+        output = output.slice(newline + 1);
+        return;
+      }
       try {
-        settle(resolve, JSON.parse(lines[0]));
+        settle(resolve, JSON.parse(line));
       } catch (error) {
         settle(reject, error);
       }
@@ -255,7 +260,10 @@ async function stopProcess(process) {
   if (process.exitCode !== null) return;
   process.kill("SIGTERM");
   await new Promise((resolve) => {
-    const timeout = setTimeout(resolve, 2_000);
+    const timeout = setTimeout(() => {
+      if (process.exitCode === null) process.kill("SIGKILL");
+      resolve();
+    }, 2_000);
     process.once("exit", () => {
       clearTimeout(timeout);
       resolve();

@@ -35,6 +35,7 @@ const PRODUCTION_HEALTH_TIMEOUT_MS = 300_000;
 const PRODUCTION_SHUTDOWN_TIMEOUT_MS = 30_000;
 const PRODUCTION_MAINTENANCE_TIMEOUT_MS = 43_200_000;
 const PRODUCTION_MAINTENANCE_EXIT_GRACE_MS = 30_000;
+const PRODUCTION_MAINTENANCE_MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 const VERSIONED_TARGET = /^Masthead-linux-x64-[A-Za-z0-9][A-Za-z0-9._+-]*$/u;
 const MV_PATH = "/usr/bin/mv";
 
@@ -4638,10 +4639,32 @@ export function waitForMaintenanceChild(
     let exitGraceTimer;
     let stdout = "";
     let stderr = "";
+    let collectedOutputBytes = 0;
+    let outputExceeded = false;
+    const appendBoundedOutput = (streamName, chunk) => {
+      if (outputExceeded) return;
+      const text = typeof chunk === "string" ? chunk : String(chunk);
+      const remaining = PRODUCTION_MAINTENANCE_MAX_OUTPUT_BYTES - collectedOutputBytes;
+      if (text.length <= remaining) {
+        if (streamName === "stdout") stdout += text;
+        else stderr += text;
+        collectedOutputBytes += text.length;
+        return;
+      }
+      if (remaining > 0) {
+        const clipped = text.slice(0, remaining);
+        if (streamName === "stdout") stdout += clipped;
+        else stderr += clipped;
+      }
+      collectedOutputBytes = PRODUCTION_MAINTENANCE_MAX_OUTPUT_BYTES;
+      outputExceeded = true;
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+    };
     child.stdout?.setEncoding("utf8");
     child.stderr?.setEncoding("utf8");
-    child.stdout?.on("data", (chunk) => { stdout += chunk; });
-    child.stderr?.on("data", (chunk) => { stderr += chunk; });
+    child.stdout?.on("data", (chunk) => { appendBoundedOutput("stdout", chunk); });
+    child.stderr?.on("data", (chunk) => { appendBoundedOutput("stderr", chunk); });
     const scheduleExitGrace = (message) => {
       if (exitGraceTimer) return;
       exitGraceTimer = setTimeout(() => {
@@ -4803,6 +4826,12 @@ export function waitForMaintenanceChild(
       }
       if (childError) {
         reject(childError);
+        return;
+      }
+      if (outputExceeded) {
+        reject(new Error(
+          `Production maintenance ${action} exceeded the combined stdout/stderr limit of ${PRODUCTION_MAINTENANCE_MAX_OUTPUT_BYTES} bytes.`
+        ));
         return;
       }
       if (code !== 0) {

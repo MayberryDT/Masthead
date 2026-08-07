@@ -4,6 +4,8 @@ export const MAX_LOGBOOK_PAGE_CACHE_ENTRIES = 50;
 
 export type LogbookPageCacheRequest = {
   baseUrl: string;
+  /** Canonical database identity; cache must not reuse pages after a DB replace at the same URL. */
+  databaseId?: string;
   filters: LogbookSearchFilters;
   logbookRevision: number;
   pageIndex: number;
@@ -26,6 +28,7 @@ export function logbookPageSearchFilters(request: LogbookPageCacheRequest): Logb
 export function logbookPageCacheKey(request: LogbookPageCacheRequest): string {
   return JSON.stringify({
     baseUrl: request.baseUrl,
+    databaseId: request.databaseId ?? "",
     filters: sortSearchFilters(logbookPageSearchFilters(request)),
     logbookRevision: request.logbookRevision,
     retryKey: request.retryKey ?? 0
@@ -38,8 +41,9 @@ export function readCachedLogbookPage(cache: Map<string, LogbookSearchResult>, r
 
 export function writeCachedLogbookPage(cache: Map<string, LogbookSearchResult>, request: LogbookPageCacheRequest, result: LogbookSearchResult): void {
   const cachedRequests = [...cache.keys()].map((key) => ({ key, request: parseLogbookPageCacheKey(key) }));
+  const requestDatabaseId = request.databaseId ?? "";
   const newestRevision = cachedRequests.reduce((revision, entry) => (
-    entry.request?.baseUrl === request.baseUrl
+    entry.request?.baseUrl === request.baseUrl && entry.request.databaseId === requestDatabaseId
       ? Math.max(revision, entry.request.logbookRevision)
       : revision
   ), -1);
@@ -47,7 +51,10 @@ export function writeCachedLogbookPage(cache: Map<string, LogbookSearchResult>, 
   for (const entry of cachedRequests) {
     if (
       entry.request?.baseUrl === request.baseUrl &&
-      entry.request.logbookRevision !== request.logbookRevision
+      (
+        entry.request.databaseId !== requestDatabaseId ||
+        entry.request.logbookRevision !== request.logbookRevision
+      )
     ) cache.delete(entry.key);
   }
   cache.set(logbookPageCacheKey(request), result);
@@ -58,11 +65,15 @@ export function writeCachedLogbookPage(cache: Map<string, LogbookSearchResult>, 
   }
 }
 
-function parseLogbookPageCacheKey(key: string): { baseUrl: string; logbookRevision: number } | undefined {
+function parseLogbookPageCacheKey(key: string): { baseUrl: string; databaseId: string; logbookRevision: number } | undefined {
   try {
-    const parsed = JSON.parse(key) as { baseUrl?: unknown; logbookRevision?: unknown };
+    const parsed = JSON.parse(key) as { baseUrl?: unknown; databaseId?: unknown; logbookRevision?: unknown };
     if (typeof parsed.baseUrl !== "string" || typeof parsed.logbookRevision !== "number") return undefined;
-    return { baseUrl: parsed.baseUrl, logbookRevision: parsed.logbookRevision };
+    return {
+      baseUrl: parsed.baseUrl,
+      databaseId: typeof parsed.databaseId === "string" ? parsed.databaseId : "",
+      logbookRevision: parsed.logbookRevision
+    };
   } catch {
     return undefined;
   }

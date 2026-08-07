@@ -1,7 +1,7 @@
 import { pathToFileURL } from "node:url";
 import type { ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { stat } from "node:fs/promises";
+import { lstat } from "node:fs/promises";
 import { join } from "node:path";
 import { app, BrowserWindow, ipcMain, Menu, net, Notification, protocol, shell } from "electron";
 import { collectGpuDiagnostics } from "./gpuDiagnostics";
@@ -19,7 +19,7 @@ import {
   stopOwnedDaemons,
   validateMcpLaunchConfig
 } from "./daemonLauncher";
-import { isMastheadOwnedDirectory } from "./pathPolicy";
+import { assertSafeMastheadDataDirectory } from "./pathPolicy";
 import { resolveProtocolPath } from "./protocol";
 import { configureElectronRuntime } from "./runtime";
 import { createMastheadTray, trayTooltipLabel } from "./tray";
@@ -481,12 +481,16 @@ function isElectronDevMode(): boolean {
 }
 
 async function openDataDirectory(path: string): Promise<void> {
-  if (!path) throw new Error("Data directory path is required.");
-  const info = await stat(path).catch(() => undefined);
+  const safePath = await assertSafeMastheadDataDirectory(path, {
+    additionalRoots: [electronDataDirectory()],
+    env: process.env
+  });
+  // Re-check leaf after resolution so a TOCTOU swap to a non-directory fails closed.
+  const info = await lstat(safePath).catch(() => undefined);
   if (!info) throw new Error(`Data directory does not exist: ${path}`);
+  if (info.isSymbolicLink()) throw new Error(`Refusing to open a symlinked data directory: ${path}`);
   if (!info.isDirectory()) throw new Error(`Data path is not a directory: ${path}`);
-  if (!isMastheadOwnedDirectory(path)) throw new Error(`Refusing to open a non-Masthead data directory: ${path}`);
-  const error = await shell.openPath(path);
+  const error = await shell.openPath(safePath);
   if (error) throw new Error(`failed to open data directory: ${error}`);
 }
 

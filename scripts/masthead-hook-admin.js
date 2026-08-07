@@ -281,8 +281,18 @@ function installMastheadHookConfig(config, options) {
   next.hooks ??= {};
 
   for (const eventName of REQUIRED_HOOK_EVENTS) {
-    const groups = [...(next.hooks[eventName] ?? [])].map(cloneGroup);
-    if (!groups.some((group) => group.hooks?.some(isMastheadHook))) {
+    let repairedExistingHook = false;
+    const groups = [...(next.hooks[eventName] ?? [])].map((group) => {
+      const nextGroup = cloneGroup(group);
+      if (!isOfficialGroup(nextGroup)) return nextGroup;
+      nextGroup.hooks = (nextGroup.hooks ?? []).map((entry) => {
+        if (!isMastheadHook(entry)) return entry;
+        repairedExistingHook = true;
+        return mastheadHook(options);
+      });
+      return nextGroup;
+    });
+    if (!repairedExistingHook) {
       groups.push({
         matcher: "*",
         hooks: [mastheadHook(options)]

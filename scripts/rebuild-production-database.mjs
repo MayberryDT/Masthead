@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, statSync } from "node:fs";
+import { existsSync, statSync, unlinkSync } from "node:fs";
 import { resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
@@ -14,6 +14,7 @@ const destinationPath = resolve(destinationArg);
 if (!existsSync(sourcePath)) throw new Error(`Source database does not exist: ${sourcePath}`);
 if (existsSync(destinationPath)) throw new Error(`Destination already exists: ${destinationPath}`);
 
+let rebuildSucceeded = false;
 const db = new DatabaseSync(destinationPath);
 try {
   db.exec("PRAGMA journal_mode = DELETE; PRAGMA synchronous = FULL; PRAGMA foreign_keys = OFF;");
@@ -150,8 +151,23 @@ try {
     tables: tableReports,
     normalizedInterruptedUnits
   }, null, 2));
+  rebuildSucceeded = true;
 } finally {
   db.close();
+  if (!rebuildSucceeded) {
+    try {
+      unlinkSync(destinationPath);
+    } catch {
+      // Best-effort cleanup so a failed rebuild does not leave a non-rerunnable destination.
+    }
+    for (const suffix of ["-wal", "-shm", "-journal"]) {
+      try {
+        unlinkSync(`${destinationPath}${suffix}`);
+      } catch {
+        // Best-effort sidecar cleanup.
+      }
+    }
+  }
 }
 
 function quoteIdentifier(value) {

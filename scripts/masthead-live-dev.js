@@ -6,6 +6,7 @@ import { removeDaemonOwnershipMetadata, writeDaemonOwnershipMetadata } from "../
 import { buildLiveDevDaemonEnv } from "../dist/daemon/src/core/liveDevDaemonEnv.js";
 import { buildLiveDevPlan, startReadOnlyConnectorBridge } from "../dist/daemon/src/core/worktreeConnector.js";
 import { classifyDaemonHealth } from "../dist/daemon/src/shared/protocol.js";
+import { assertLoopbackBindHost } from "../dist/daemon/src/shared/loopbackHost.js";
 import { prepareLiveDevInstanceLauncher, assertLiveDevInstanceManifest } from "../dist/daemon/src/core/liveDevLauncher.js";
 
 loadLocalEnv();
@@ -23,8 +24,8 @@ process.stdout.on("error", handleOutputError);
 process.stderr.on("error", handleOutputError);
 
 try {
+  assertLoopbackBindHost(process.env.MASTHEAD_HOST || "127.0.0.1");
   const plan = await buildLiveDevPlan(process.env);
-
   writeLine("Starting Masthead live app");
   writeLine(`App:       ${plan.uiUrl}`);
 
@@ -223,14 +224,29 @@ function isBrokenPipeError(error) {
 function stopAll(exitCodeOrSignal = 0) {
   shuttingDown = true;
   for (const child of children) {
-    child.kill("SIGTERM");
+    try {
+      child.kill("SIGTERM");
+    } catch {
+      // Process may already be gone.
+    }
   }
   for (const bridge of bridges) {
     void bridge.close();
   }
   void removeDaemonOwnershipMetadata(ownershipPath);
   const exitCode = signalExitCode(exitCodeOrSignal);
-  setTimeout(() => process.exit(exitCode), 250).unref();
+  setTimeout(() => {
+    for (const child of children) {
+      if (child.exitCode === null) {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // Best-effort hard stop.
+        }
+      }
+    }
+    process.exit(exitCode);
+  }, 1_500).unref();
 }
 
 function signalExitCode(value) {

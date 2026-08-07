@@ -12,7 +12,12 @@ export function resolveProtocolPath(rendererDist: string, rawUrl: string): strin
   if (url.protocol !== "masthead:" || url.hostname !== "app") return undefined;
 
   const root = resolve(rendererDist);
-  const rawPathname = decodeURIComponent(url.pathname);
+  let rawPathname: string;
+  try {
+    rawPathname = decodeURIComponent(url.pathname);
+  } catch {
+    return undefined;
+  }
   const normalizedPath = rawPathname === "/" || extname(rawPathname) === "" ? "/index.html" : rawPathname;
   const candidate = resolve(root, `.${normalizedPath}`);
   const rel = relative(root, candidate);

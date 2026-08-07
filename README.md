@@ -77,13 +77,16 @@ Website: [usemasthead.com](https://usemasthead.com) — product story and downlo
 ```bash
 git clone https://github.com/MayberryDT/Masthead.git
 cd Masthead
-npm install
+npm ci
+npm run audit:runtime    # production deps must stay clean (0 high/critical)
 npm run dev
 ```
 
 Requires **Node.js `>= 24.15.0`**.
 
 `npm run dev` starts the local daemon (default `http://127.0.0.1:17373`) and the UI on the first free Vite port starting at `5173`. Open the URL printed in the terminal.
+
+**npm audit notes:** prefer `npm run audit:runtime` (product gate) or `npm run audit:report` (runtime vs full-tree split). Full-tree `npm audit` includes Electron Forge/Vite **build** tooling and is not the same as “the shipped app runtime is vulnerable.” Details: [docs/reference/dependency-security.md](docs/reference/dependency-security.md) and [SECURITY.md](SECURITY.md).
 
 Desktop shell from a checkout:
 

@@ -35,11 +35,17 @@ Large features, new harness platforms, write-capable MCP tools, or redesigns sho
 ## Setup from source
 
 ```bash
-npm install
+npm ci
+npm run audit:runtime
 npm run dev
 ```
 
 Requires Node.js `>= 24.15.0` (`package.json` `engines`).
+
+If full-tree `npm audit` looks noisy, use `npm run audit:report` and read
+[docs/reference/dependency-security.md](docs/reference/dependency-security.md).
+The product gate is **runtime** dependencies (`audit:runtime`), not every
+Electron Forge build transitive.
 
 Desktop shell:
 
@@ -53,6 +59,7 @@ npm run dev:electron
 Before opening a PR, run the checks that match your change:
 
 ```bash
+npm run audit:runtime
 npm run verify
 ```
 

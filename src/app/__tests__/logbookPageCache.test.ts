@@ -122,6 +122,29 @@ describe("logbook page cache", () => {
     expect(readCachedLogbookPage(cache, { ...request, logbookRevision: 5 })).toBe(revisionFive);
   });
 
+  test("separates cached pages by database identity after a replace at the same URL", () => {
+    const cache = new Map();
+    const request = {
+      baseUrl: "http://127.0.0.1:17373/projection",
+      databaseId: "database:old",
+      filters: {},
+      logbookRevision: 1,
+      pageIndex: 0,
+      pageSize: 50,
+      query: "",
+      sort: "recent" as const
+    };
+    const oldResult = { sessions: [], total: 1 };
+    const newResult = { sessions: [], total: 2 };
+
+    writeCachedLogbookPage(cache, request, oldResult);
+    writeCachedLogbookPage(cache, { ...request, databaseId: "database:new" }, newResult);
+
+    expect(readCachedLogbookPage(cache, request)).toBeUndefined();
+    expect(readCachedLogbookPage(cache, { ...request, databaseId: "database:new" })).toBe(newResult);
+    expect(logbookPageCacheKey(request)).not.toBe(logbookPageCacheKey({ ...request, databaseId: "database:new" }));
+  });
+
   test("bounds cached pages across daemon URLs", () => {
     const cache = new Map();
     for (let index = 0; index < MAX_LOGBOOK_PAGE_CACHE_ENTRIES + 10; index += 1) {

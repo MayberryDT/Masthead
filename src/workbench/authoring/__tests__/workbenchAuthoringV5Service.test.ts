@@ -218,6 +218,52 @@ describe("workbench-authoring-v5 loop", () => {
     db.close();
   });
 
+  test("hard-rejects secret-bearing session enrichment at save and does not publish it", async () => {
+    const db = await testDatabase();
+    const sessionIds = Array.from({ length: 2 }, (_, index) => `session:v5:secret-gate:${index + 1}`);
+    for (const sessionId of sessionIds) seedCompileReadySession(db, sessionId);
+    const created = createWorkbenchAuthoringV5Request(db, {
+      actorId: "agent:test", command, currentIdentity: identity, expectedIdentity: identity, sessionIds
+    });
+    const started = startWorkbenchAuthoringV5Pack(db, {
+      command, currentIdentity: identity, expectedIdentity: identity, requestId: created.request.requestId
+    });
+    if (!("pack" in started)) throw new Error("expected_active_pack");
+    await inspectWholePack(db, started.pack.packId);
+    const authored = authorDraft(buildWorkbenchAuthoringV5Scaffold(db, { command, packId: started.pack.packId }).draft);
+    authored.sessions[0]!.fields.description =
+      "Attempted to use OPENAI_API_KEY=sk-secretsecretsecretsecret while validating the pack.";
+    const secretSessionId = authored.sessions[0]!.sessionId;
+    const cleanSessionId = authored.sessions[1]!.sessionId;
+
+    const saved = saveWorkbenchAuthoringV5Draft(db, {
+      command, currentIdentity: identity, draft: authored, expectedIdentity: identity, packId: started.pack.packId
+    });
+    expect(saved.outcomes.map(({ disposition }) => disposition)).toEqual(["hard_reject", "publishable"]);
+    expect(saved.outcomes[0]!.findings.map(({ code }) => code)).toContain("secret_detected");
+
+    const finished = finishWorkbenchAuthoringV5Pack(db, {
+      command, currentIdentity: identity, expectedIdentity: identity, packId: started.pack.packId
+    });
+    expect(finished.receipt.counts).toMatchObject({ attempted: 2, published: 1, rejected: 1 });
+    expect(finished.receipt.outcomes.find(({ sessionId }) => sessionId === secretSessionId)).toMatchObject({
+      disposition: "hard_reject",
+      findings: expect.arrayContaining([expect.objectContaining({ code: "secret_detected" })])
+    });
+    expect(readWorkbenchSessionState(db, secretSessionId)).toMatchObject({
+      publicationStatus: "not_added_to_logbook",
+      qualityStatus: "failed",
+      nonPublicationReason: "authoring_hard_reject"
+    });
+    expect(readWorkbenchSessionState(db, cleanSessionId)).toMatchObject({
+      publicationStatus: "published"
+    });
+    expect(finished.receipt.publishedArtifacts).toHaveLength(1);
+    expect(getLogbookArtifactDetail(db, finished.receipt.publishedArtifacts[0]!.artifactId)?.capsule.title)
+      .not.toMatch(/sk-secretsecretsecretsecret|OPENAI_API_KEY=/);
+    db.close();
+  });
+
   test.each([1, 2, 3, 4])("accepts a %i-session final pack", async (sessionCount) => {
     const db = await testDatabase();
     const sessionIds = Array.from({ length: sessionCount }, (_, index) => `session:v5:small:${index + 1}`);

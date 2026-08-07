@@ -137,6 +137,83 @@ describe("import coordinator", () => {
     db.close();
   });
 
+  test("finalizes cancelling imports on recovery instead of resurrecting them", async () => {
+    const db = await openTestDatabase();
+    seedSource(db);
+    db.prepare(
+      `INSERT INTO import_jobs (
+        import_job_id,
+        source_id,
+        import_kind,
+        status,
+        discovered_count,
+        processed_count,
+        imported_count,
+        queued_count,
+        failure_count,
+        current_path,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run("import_job:cancelling", "opencode-sessions", "metadata", "cancelling", 1, 0, 0, 1, 0, "/tmp/cancelling.jsonl", fixedNow());
+    db.prepare(
+      `INSERT INTO import_manifests (
+        manifest_id, import_job_id, source_id, runtime_kind, import_kind, scope_json,
+        generated_at, total_units, included_units, excluded_units, total_bytes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "manifest:cancelling",
+      "import_job:cancelling",
+      "opencode-sessions",
+      "opencode",
+      "metadata",
+      "{\"mode\":\"metadata_all\",\"includeChangedSinceCursor\":true}",
+      fixedNow(),
+      1,
+      1,
+      0,
+      10
+    );
+    db.prepare(
+      `INSERT INTO import_work_units (
+        work_unit_id, manifest_id, import_job_id, source_id, runtime_kind, source_kind,
+        confidence, unit_kind, source_path, status, processed_records, imported_records
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "unit:cancelling",
+      "manifest:cancelling",
+      "import_job:cancelling",
+      "opencode-sessions",
+      "opencode",
+      "jsonl",
+      "authoritative",
+      "metadata_source",
+      "/tmp/cancelling.jsonl",
+      "running",
+      0,
+      0
+    );
+
+    const recovered = recoverInterruptedImportJobs(db, fixedNow);
+    expect(recovered).toEqual([]);
+    expect(getImportJob(db, "import_job:cancelling")).toMatchObject({
+      finishedAt: fixedNow(),
+      status: "cancelled"
+    });
+    expect(db.prepare("SELECT status FROM import_work_units WHERE work_unit_id = ?").get("unit:cancelling")).toEqual({
+      status: "cancelled"
+    });
+    // Explicit retry may resume a terminal cancelled job; automatic recovery must not.
+    const resumed = resumeImportJob(db, "import_job:cancelling", async () => ({
+      discoveredCount: 0,
+      failureCount: 0,
+      importedCount: 0,
+      processedCount: 0,
+      queuedCount: 0
+    }), fixedNow);
+    expect(resumed.status).toBe("queued");
+    db.close();
+  });
+
   test("recovers and resumes an interrupted job without creating a replacement job", async () => {
     const db = await openTestDatabase();
     seedSource(db);

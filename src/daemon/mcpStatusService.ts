@@ -244,6 +244,15 @@ export function getMcpLaunchConfig(databasePath: string, dataDirectory?: string)
   };
 }
 
+function mcpSpawnEnv(launchEnv: Record<string, string>): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...launchEnv };
+  if (process.env.PATH) env.PATH = process.env.PATH;
+  if (process.env.PATHEXT) env.PATHEXT = process.env.PATHEXT;
+  if (process.env.SYSTEMROOT) env.SYSTEMROOT = process.env.SYSTEMROOT;
+  if (process.env.NODE_PATH) env.NODE_PATH = process.env.NODE_PATH;
+  return env;
+}
+
 export function coerceMcpLaunchConfig(value: unknown, fallback: McpLaunchConfigDto): McpLaunchConfigDto {
   const record = objectRecord(value) ?? {};
   const candidate = objectRecord(record.launchConfig) ?? record;
@@ -292,10 +301,11 @@ export async function validateMcpLaunchConfig(
 }
 
 export async function testMcpConnection(
-  launchConfig: McpLaunchConfigDto,
   activeDatabasePath: string,
+  dataDirectory?: string,
   timeoutMs = testConnectionTimeoutMs
 ): Promise<McpTestConnectionDto> {
+  const launchConfig = getMcpLaunchConfig(activeDatabasePath, dataDirectory);
   const attemptedAt = new Date().toISOString();
   const validation = await validateMcpLaunchConfig(launchConfig, activeDatabasePath);
   if (!validation.ready) {
@@ -311,7 +321,7 @@ export async function testMcpConnection(
   }
 
   const child = spawn(launchConfig.command, launchConfig.args, {
-    env: { ...process.env, ...launchConfig.env },
+    env: mcpSpawnEnv(launchConfig.env),
     stdio: ["pipe", "pipe", "pipe"]
   });
   let stdoutBuffer = "";

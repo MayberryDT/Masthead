@@ -71,6 +71,8 @@ describe("MCP status API", () => {
     });
     expect(mismatch.validation.problems.join(" ")).toContain("does not match active database");
 
+    const originalMcpEntry = process.env.MASTHEAD_MCP_ENTRY;
+    const originalMcpCommand = process.env.MASTHEAD_MCP_COMMAND;
     const testEntry = join(tempDir, "mcp-test-server.js");
     await writeFile(
       testEntry,
@@ -95,22 +97,37 @@ describe("MCP status API", () => {
         "});"
       ].join("\n")
     );
-    const connection = await postJson(baseUrl, "/mcp/test-connection", {
-      launchConfig: { ...launch.launchConfig, args: [testEntry] }
-    });
-    expect(connection.result).toMatchObject({
-      ok: true,
-      status: "passed",
-      serverInfo: { name: "masthead", version: "api-test" },
-      toolCount: 16,
-      toolNames: expect.arrayContaining(["search_knowledge", "search_sessions"]),
-      validation: {
-        commandExists: true,
-        databaseMatches: true,
-        entryExists: true,
-        ready: true
-      }
-    });
+    process.env.MASTHEAD_MCP_ENTRY = testEntry;
+    process.env.MASTHEAD_MCP_COMMAND = process.execPath;
+    try {
+      const connection = await postJson(baseUrl, "/mcp/test-connection", {
+        launchConfig: {
+          command: "/usr/bin/should-not-run",
+          args: ["/tmp/attacker-payload.js"],
+          env: { MASTHEAD_DB_PATH: "/tmp/attacker.sqlite", EVIL: "1" }
+        }
+      });
+      expect(connection.result).toMatchObject({
+        ok: true,
+        status: "passed",
+        serverInfo: { name: "masthead", version: "api-test" },
+        toolCount: 16,
+        toolNames: expect.arrayContaining(["search_knowledge", "search_sessions"]),
+        validation: {
+          commandExists: true,
+          databaseMatches: true,
+          entryExists: true,
+          ready: true
+        }
+      });
+      expect(connection.result.validation.commandPath).toBe(process.execPath);
+      expect(connection.result.validation.entryPath).toBe(testEntry);
+    } finally {
+      if (originalMcpEntry === undefined) delete process.env.MASTHEAD_MCP_ENTRY;
+      else process.env.MASTHEAD_MCP_ENTRY = originalMcpEntry;
+      if (originalMcpCommand === undefined) delete process.env.MASTHEAD_MCP_COMMAND;
+      else process.env.MASTHEAD_MCP_COMMAND = originalMcpCommand;
+    }
     const tools = await getJson(baseUrl, "/mcp/tools");
     expect(tools.tools).toEqual(
       expect.arrayContaining([

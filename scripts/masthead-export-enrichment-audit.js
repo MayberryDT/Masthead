@@ -70,13 +70,53 @@ function sanitizeValue(value, depth = 0) {
   if (Array.isArray(value)) return value.slice(0, 100).map((entry) => sanitizeValue(entry, depth + 1));
   const output = {};
   for (const [key, entry] of Object.entries(value).slice(0, 120)) {
-    if (/(password|token|secret|api[_-]?key|authorization)$/i.test(key)) {
+    if (isSensitiveAuditKey(key)) {
       output[key] = "[redacted-secret]";
       continue;
     }
     output[key] = sanitizeValue(entry, depth + 1);
   }
   return output;
+}
+
+function isSensitiveAuditKey(key) {
+  const tokens = String(key)
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z])([A-Z][a-z])/g, "$1 $2")
+    .toLowerCase()
+    .match(/[a-z0-9]+/g);
+  if (!tokens || tokens.length === 0) return false;
+  const sensitive = {
+    password: true,
+    passwd: true,
+    pwd: true,
+    secret: true,
+    token: true,
+    cookie: true,
+    cookies: true,
+    credential: true,
+    credentials: true,
+    authorization: true,
+    auth: true,
+    privatekey: true,
+    accesskey: true,
+    apikey: true,
+    sessioncookie: true,
+    setcookie: true
+  };
+  const keyModifiers = {
+    api: true,
+    private: true,
+    access: true,
+    secret: true,
+    auth: true,
+    session: true
+  };
+  const compact = tokens.join("");
+  if (sensitive[compact]) return true;
+  if (tokens.some((token) => sensitive[token])) return true;
+  if (tokens.includes("key") && tokens.some((token) => keyModifiers[token])) return true;
+  return false;
 }
 
 function sanitizeText(value) {

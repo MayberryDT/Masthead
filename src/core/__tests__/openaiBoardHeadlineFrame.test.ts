@@ -358,7 +358,13 @@ describe("OpenAI board headline frame", () => {
     });
 
     try {
-      const resultPromise = rewriteBoardHeadlineFrameWithOpenAI(input(), { enabled: true, apiKey: "key", fetchImpl, timeoutMs: 25 });
+      const resultPromise = rewriteBoardHeadlineFrameWithOpenAI(input(), {
+        enabled: true,
+        apiKey: "key",
+        baseUrl: "http://127.0.0.1:9/v1",
+        fetchImpl,
+        timeoutMs: 25
+      });
       await vi.advanceTimersByTimeAsync(25);
 
       await expect(resultPromise).resolves.toMatchObject({
@@ -368,5 +374,67 @@ describe("OpenAI board headline frame", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  test("refuses private-network provider base URLs before fetch", async () => {
+    const fetchImpl = vi.fn();
+
+    await expect(
+      rewriteBoardHeadlineFrameWithOpenAI(input(), {
+        enabled: true,
+        apiKey: "key",
+        baseUrl: "https://169.254.169.254/latest",
+        fetchImpl
+      })
+    ).resolves.toMatchObject({
+      status: "api_error",
+      failureMessage: expect.stringMatching(/private|link-local/i)
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  test("refuses HTTP redirects from the provider endpoint", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 302,
+      headers: { get: () => "http://127.0.0.1/secret" },
+      json: async () => ({})
+    });
+
+    const result = await rewriteBoardHeadlineFrameWithOpenAI(input(), {
+      enabled: true,
+      apiKey: "key",
+      fetchImpl
+    });
+
+    expect(result).toMatchObject({
+      status: "api_error",
+      failureMessage: expect.stringMatching(/redirect/i)
+    });
+    expect(fetchImpl).toHaveBeenCalledWith(
+      expect.stringContaining("https://api.openai.com/v1/responses"),
+      expect.objectContaining({ redirect: "manual" })
+    );
+  });
+
+  test("allows loopback OpenAI-compatible providers over HTTP", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(chatCompletionsResponseWithFrame(validFrame({ subject: "Local model" })));
+
+    await expect(
+      rewriteBoardHeadlineFrameWithOpenAI(input(), {
+        enabled: true,
+        apiKey: "local",
+        apiStyle: "chat_completions",
+        baseUrl: "http://127.0.0.1:11434/v1",
+        fetchImpl
+      })
+    ).resolves.toMatchObject({
+      status: "llm",
+      frame: { subject: "Local model" }
+    });
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "http://127.0.0.1:11434/v1/chat/completions",
+      expect.objectContaining({ redirect: "manual" })
+    );
   });
 });

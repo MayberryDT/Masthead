@@ -230,9 +230,16 @@ function searchArtifactsThroughMcp(databasePath, query, artifactId) {
       encoding: "utf8",
       env: { ...process.env, MASTHEAD_DB_PATH: databasePath },
       input: `${JSON.stringify(request)}\n`,
-      maxBuffer: 10 * 1024 * 1024
+      maxBuffer: 10 * 1024 * 1024,
+      timeout: 15_000
     });
-    if (child.status !== 0) throw new Error(child.stderr || `MCP exited ${child.status}`);
+    if (child.error || child.status !== 0) {
+      const reason = child.error?.message
+        ?? (child.signal === "SIGTERM" ? "MCP probe timed out" : undefined)
+        ?? child.stderr
+        ?? `MCP exited ${child.status}`;
+      throw new Error(reason);
+    }
     const reply = JSON.parse(child.stdout.trim());
     const result = JSON.parse(reply.result?.content?.[0]?.text ?? "{}");
     return { ok: result.artifacts?.some((artifact) => artifact.artifactId === artifactId) === true };

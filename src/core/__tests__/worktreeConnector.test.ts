@@ -179,12 +179,19 @@ describe("Masthead worktree connector planning", () => {
   });
 
   test.each([
-    "/mcp/launch-config/validate",
-    "/mcp/test-connection",
-    "/settings/llm-provider/models"
+    "/imports/repair/preview"
   ])("forwards read-only POST endpoint %s", async (pathname) => {
     expect(isAllowedReadOnlyBridgeRequest("POST", pathname)).toBe(true);
   });
+
+  test.each([
+    "/mcp/test-connection",
+    "/mcp/launch-config/validate",
+    "/settings/llm-provider/models"
+  ])("blocks dangerous POST endpoint %s from secondary bridge", async (pathname) => {
+    expect(isAllowedReadOnlyBridgeRequest("POST", pathname)).toBe(false);
+  });
+
 
   test("forwards read-only source scans but blocks source writes", () => {
     expect(isAllowedReadOnlyBridgeRequest("GET", "/sources/connectors")).toBe(true);
@@ -204,7 +211,8 @@ describe("Masthead worktree connector planning", () => {
     expect(isAllowedReadOnlyBridgeRequest("POST", "/imports")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/imports/job-1/report")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/data/delete")).toBe(false);
-    expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/capabilities")).toBe(false);
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/mcp/test-connection")).toBe(false);
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/settings/llm-provider/models")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("GET", "/workbench/authoring/assignments/assignment%3Aone/inspect")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("GET", "/workbench/authoring/v5/packs/authoring-v5-pack%3Aone/inspect")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/suggestions")).toBe(false);
@@ -385,6 +393,19 @@ describe("Masthead worktree connector planning", () => {
       ok: false,
       error: "read-only Masthead worktree bridge"
     });
+
+    for (const pathname of ["/mcp/test-connection", "/settings/llm-provider/models"]) {
+      const blockedDangerousPost = await fetch(`${bridge.baseUrl}${pathname}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "http://127.0.0.1:5180" },
+        body: JSON.stringify({ launchConfig: { command: "/bin/true", args: [], env: {} } })
+      });
+      expect(blockedDangerousPost.status).toBe(405);
+      await expect(blockedDangerousPost.json()).resolves.toMatchObject({
+        ok: false,
+        error: "read-only Masthead worktree bridge"
+      });
+    }
     expect(blockedSourceWrite.status).toBe(405);
   });
 });

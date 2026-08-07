@@ -3,10 +3,29 @@ name: Security
 on:
   pull_request:
   push:
-    branches: ["main"]
+    branches: ["main", "**"]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
+  runtime-audit:
+    name: Runtime dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.15.0
+          cache: npm
+      - run: npm ci
+      - name: Runtime high+ audit (product gate)
+        run: npm run audit:runtime
+      - name: Human-readable audit report
+        run: npm run audit:report
+
   codeql:
     name: CodeQL
     runs-on: ubuntu-latest
@@ -25,20 +44,10 @@ jobs:
   dependency-review:
     name: Dependency review
     runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && github.event.repository.private == false
     permissions:
       contents: read
       pull-requests: read
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - name: GitHub dependency review
-        if: github.event_name == 'pull_request' && github.event.repository.private == false
-        uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4
-      - name: Setup Node for private/runtime audit fallback
-        if: github.event_name != 'pull_request' || github.event.repository.private == true
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 24.15.0
-          cache: npm
-      - name: Runtime dependency audit fallback
-        if: github.event_name != 'pull_request' || github.event.repository.private == true
-        run: npm run audit:runtime
+      - uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4

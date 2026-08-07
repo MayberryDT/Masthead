@@ -148,6 +148,21 @@ describe("resolveHookRuntime", () => {
   test("ambient GROK_AGENT alone is not host detection", () => {
     expect(detectHostRuntime({ GROK_AGENT: "1", GROK_HOME: "/tmp/.grok" })).toBeUndefined();
   });
+
+  test("does not treat substring path or argv tokens as host markers", () => {
+    expect(
+      detectHostRuntime({}, {
+        processPath: "/home/user/.local/bin/my-codex-helper",
+        argv: ["node", "/tmp/encode-text.js"]
+      })
+    ).toBeUndefined();
+    expect(
+      detectHostRuntime({}, {
+        processPath: "/usr/bin/codex",
+        argv: ["codex"]
+      })
+    ).toBe("codex");
+  });
 });
 
 describe("runtimeFromAdapter live runtimes", () => {

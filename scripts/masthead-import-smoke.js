@@ -176,7 +176,10 @@ async function stopChild(child, signal) {
   if (child.exitCode !== null) return;
   child.kill(signal);
   await new Promise((resolve) => {
-    const timeout = setTimeout(resolve, 2_000);
+    const timeout = setTimeout(() => {
+      if (child.exitCode === null) child.kill("SIGKILL");
+      resolve();
+    }, 2_000);
     child.once("exit", () => {
       clearTimeout(timeout);
       resolve();

@@ -97,6 +97,7 @@ export function applySessionEnrichmentInTransaction(
 
 function capsuleFromOutput(output: SessionEnrichmentOutput, generatedAt: string): SessionCapsule {
   const evidenceRefs = output.evidenceRefs.map((ref) => ({ id: ref, kind: "event" as const, observedAt: generatedAt, source: "workbench" }));
+  const verification = verificationFromSummary(output.verificationSummary, evidenceRefs);
   return {
     candidateDecisions: [],
     commandsSummary: output.toolsSummary,
@@ -113,13 +114,7 @@ function capsuleFromOutput(output: SessionEnrichmentOutput, generatedAt: string)
         evidenceRefs,
         keyWork: [output.summary],
         outcome: output.outcome,
-        verification: {
-          commands: [],
-          evidenceRefs,
-          failures: [],
-          status: output.verificationSummary ? "passed" : "unknown",
-          summary: output.verificationSummary ?? ""
-        },
+        verification,
         warnings: []
       },
       sessionSummary: { confidence: output.confidence, evidenceRefs, state: "completed", text: output.summary },
@@ -140,13 +135,7 @@ function capsuleFromOutput(output: SessionEnrichmentOutput, generatedAt: string)
       evidenceRefs,
       keyWork: [output.summary],
       outcome: output.outcome,
-      verification: {
-        commands: [],
-        evidenceRefs,
-        failures: [],
-        status: output.verificationSummary ? "passed" : "unknown",
-        summary: output.verificationSummary ?? ""
-      },
+      verification,
       warnings: []
     },
     sessionSummary: { confidence: output.confidence, evidenceRefs, state: "completed", text: output.summary },
@@ -157,6 +146,32 @@ function capsuleFromOutput(output: SessionEnrichmentOutput, generatedAt: string)
     topics: output.topics,
     unresolved: [],
     validationWarnings: []
+  };
+}
+
+function verificationFromSummary(
+  summary: string | undefined,
+  evidenceRefs: Array<{ id: string; kind: "event"; observedAt: string; source: string }>
+): SessionCapsule["sessionDossier"]["verification"] {
+  const text = summary?.trim() ?? "";
+  if (!text) {
+    return { commands: [], evidenceRefs, failures: [], status: "unknown", summary: "" };
+  }
+  const lower = text.toLowerCase();
+  const mentionsPass = /\b(pass(?:ed|ing)?|succeed(?:ed|ing)?|successful|ok|verified|healthy)\b/u.test(lower);
+  const mentionsFail = /\b(fail(?:ed|ing|ure)?|error|broken|unhealthy|regress(?:ed|ion)?)\b/u.test(lower);
+  const mentionsMissing = /\b(not\s+(?:run|captured|available)|missing|unavailable|unknown|no verification|unverified)\b/u.test(lower);
+  let status: "passed" | "failed" | "mixed" | "missing" | "unknown" = "unknown";
+  if (mentionsPass && mentionsFail) status = "mixed";
+  else if (mentionsFail) status = "failed";
+  else if (mentionsPass) status = "passed";
+  else if (mentionsMissing) status = "missing";
+  return {
+    commands: [],
+    evidenceRefs,
+    failures: status === "failed" || status === "mixed" ? [text] : [],
+    status,
+    summary: text
   };
 }
 

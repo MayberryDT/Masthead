@@ -73,4 +73,15 @@ describe("endpoint matrix probe pass policy", () => {
     const reads = new Set(READ_ONLY_POST_ENDPOINTS.map((entry) => `${entry.method} ${entry.path}`));
     expect(reads).not.toContain("POST /workbench/authoring/suggestions");
   });
+
+  test("keeps MCP spawn/path-oracle and LLM model discovery off the bridge-safe POST allowlist", () => {
+    const reads = new Set(READ_ONLY_POST_ENDPOINTS.map((entry) => `${entry.method} ${entry.path}`));
+    const mutations = new Set(BLOCKED_MUTATION_ENDPOINTS.map((entry) => `${entry.method} ${entry.path}`));
+    expect(reads).not.toContain("POST /mcp/launch-config/validate");
+    expect(reads).not.toContain("POST /mcp/test-connection");
+    expect(reads).not.toContain("POST /settings/llm-provider/models");
+    expect(mutations).toContain("POST /mcp/launch-config/validate");
+    expect(mutations).toContain("POST /mcp/test-connection");
+    expect(mutations).toContain("POST /settings/llm-provider/models");
+  });
 });

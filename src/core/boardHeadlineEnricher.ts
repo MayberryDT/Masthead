@@ -103,6 +103,9 @@ type ResolvedBoardHeadlineProvider = {
   unsupportedReason?: string;
 };
 
+const MAX_HEADLINE_CACHE_ENTRIES = 256;
+const MAX_CONCURRENT_HEADLINE_REQUESTS = 4;
+
 export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig = {}): BoardHeadlineEnricher {
   const completed = new Map<CacheKey, ReadyLLMBoardHeadlineView>();
   const failures = new Map<CacheKey, OpenAIBoardHeadlineFrameResult>();
@@ -278,7 +281,7 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
       if (!canRequestNow) {
         continue;
       }
-      if (!inFlight.has(key)) {
+      if (!inFlight.has(key) && inFlight.size < MAX_CONCURRENT_HEADLINE_REQUESTS) {
         lastRequestedAtBySession.set(card.sessionId, nowMs);
         inFlight.set(key, requestHeadline(input, key, card.sessionId, provider));
         summary.requested += 1;
@@ -324,12 +327,14 @@ export function createBoardHeadlineEnricher(config: BoardHeadlineEnricherConfig 
       emitGenerationFinished(key, sessionId, input, result, view, requestedAt, completedAt, provider);
       if (view) {
         completed.set(key, view);
+        pruneOldestMapEntries(completed, MAX_HEADLINE_CACHE_ENTRIES);
         failures.delete(key);
         for (const pendingSessionId of pendingSessionIds.get(key) ?? [sessionId]) {
           emitFrameApplied(key, pendingSessionId, view);
         }
       } else {
         failures.set(key, result);
+        pruneOldestMapEntries(failures, MAX_HEADLINE_CACHE_ENTRIES);
       }
     } catch (error) {
       const result: OpenAIBoardHeadlineFrameResult = {
@@ -534,6 +539,14 @@ function nowIso(now: BoardHeadlineEnricherConfig["now"]): string {
 function requestAllowedForSession(lastRequestedAtBySession: Map<string, number>, sessionId: string, nowMs: number, cooldownMs: number): boolean {
   const lastRequestedAt = lastRequestedAtBySession.get(sessionId);
   return lastRequestedAt === undefined || nowMs - lastRequestedAt >= cooldownMs;
+}
+
+function pruneOldestMapEntries<K, V>(map: Map<K, V>, maxEntries: number): void {
+  while (map.size > maxEntries) {
+    const oldest = map.keys().next().value;
+    if (oldest === undefined) return;
+    map.delete(oldest);
+  }
 }
 
 function shouldRequestHeadlineForCard(card: SessionCardView): boolean {

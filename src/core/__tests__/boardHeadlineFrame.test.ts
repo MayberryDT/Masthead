@@ -174,6 +174,21 @@ describe("board headline frame contract", () => {
     }
   });
 
+  test("rejects lowercase flag-style credentials in remote headline text", () => {
+    expect(validateBoardHeadlineFrame(frame({ disposition: "mysql --password hunter2 during migrate" }))).toEqual({
+      ok: false,
+      reason: "unsafe_text"
+    });
+    expect(validateBoardHeadlineFrame(frame({ disposition: "stores password hunter2 in config" }))).toEqual({
+      ok: false,
+      reason: "unsafe_text"
+    });
+    expect(validateBoardHeadlineFrame(frame({ subject: "uses --api-key abcdef during setup", disposition: "continues safely" }))).toEqual({
+      ok: false,
+      reason: "unsafe_text"
+    });
+  });
+
   test("rejects unsafe secrets, API keys, Codex directives, and URL placeholders", () => {
     expect(validateBoardHeadlineFrame(frame({ disposition: "uses OPENAI_API_KEY during testing" }))).toEqual({
       ok: false,

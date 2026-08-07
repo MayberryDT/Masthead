@@ -125,6 +125,7 @@ export function createWorkbenchAuthoringV5Request(
     const requestFingerprint = createHash("sha256").update(JSON.stringify({
       actorId: input.actorId,
       identity: input.currentIdentity,
+      reEnrich: Boolean(input.reEnrich),
       sessionIds: input.sessionIds
     })).digest("hex");
     const readinessBySessionId = Object.fromEntries(input.sessionIds.map((sessionId) => [
@@ -585,10 +586,20 @@ export function finishWorkbenchAuthoringV5Pack(
     if (!saved) throw new Error("authoring_v5_saved_draft_missing");
     const draft = parseWorkbenchAuthoringV5Draft(db, saved.draft, pack);
     const request = requireWorkbenchAuthoringV5Request(db, pack.requestId);
+    // Re-classify at finish so secret-bearing fields cannot publish even if an older
+    // saved draft outcome missed the check (or outcomes were written before the gate).
+    const finishOutcomes = workbenchAuthoringV5Quality.applyWorkbenchAuthoringV5PackTitleDiversity(
+      draft.sessions.map((session) => classifySessionDraft(
+        session,
+        evidenceForPackSession(db, pack, session.sessionId)
+      )),
+      draft.sessions
+    );
+    const outcomesBySession = new Map(finishOutcomes.map((outcome) => [outcome.sessionId, outcome]));
     const publishable = draft.sessions.filter(({ sessionId }) => (
-      saved.outcomes.find((outcome) => outcome.sessionId === sessionId)?.disposition !== "hard_reject"
+      outcomesBySession.get(sessionId)?.disposition !== "hard_reject"
     ));
-    const hardRejected = saved.outcomes.filter(({ disposition }) => disposition === "hard_reject");
+    const hardRejected = finishOutcomes.filter(({ disposition }) => disposition === "hard_reject");
     // D1 / ISSUE-W1: hard-reject leaves the package path (Not Added), not enrich.
     for (const outcome of hardRejected) {
       markWorkbenchQuality(db, {
@@ -622,18 +633,18 @@ export function finishWorkbenchAuthoringV5Pack(
     const packReceipt: WorkbenchAuthoringV5PackReceipt = {
       completedAt,
       counts: {
-        attempted: saved.outcomes.length,
+        attempted: finishOutcomes.length,
         consideredNo: draft.optionalConsiderations.filter(({ decision }) => decision === "no").length,
         optionalPublished: optionalArtifacts.length,
         published: publishable.length,
-        rejected: saved.outcomes.filter(({ disposition }) => disposition === "hard_reject").length,
-        softFlagged: saved.outcomes.filter(({ disposition }) => disposition === "soft_flag").length
+        rejected: finishOutcomes.filter(({ disposition }) => disposition === "hard_reject").length,
+        softFlagged: finishOutcomes.filter(({ disposition }) => disposition === "soft_flag").length
       },
       draftRevision: pack.currentDraftRevision,
       evidenceRevision: pack.evidenceRevision,
       optionalArtifacts: published.publishedArtifacts.filter(({ kind }) => kind !== "session_dossier") as WorkbenchAuthoringV5PackReceipt["optionalArtifacts"],
       optionalConsiderations: draft.optionalConsiderations,
-      outcomes: saved.outcomes,
+      outcomes: finishOutcomes,
       packId: pack.packId,
       publishedArtifacts: published.publishedArtifacts.filter(({ kind }) => kind === "session_dossier") as WorkbenchAuthoringV5PackReceipt["publishedArtifacts"],
       receiptVersion: "workbench-authoring-v5-pack-receipt-v1",

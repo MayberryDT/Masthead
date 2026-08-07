@@ -109,13 +109,14 @@ export const READ_ONLY_ENDPOINTS = [
   { method: "GET", path: "/logbook/artifacts?q=Bridge", label: "logbook artifact search" }
 ];
 
-export const READ_ONLY_POST_ENDPOINTS = [
-  { method: "POST", path: "/mcp/launch-config/validate", label: "mcp launch validation", body: { launchConfig: { command: process.execPath, args: ["server.js"], env: {} } } },
-  { method: "POST", path: "/mcp/test-connection", label: "mcp connection test", body: { launchConfig: { command: process.execPath, args: ["server.js"], env: {} } } },
-  { method: "POST", path: "/settings/llm-provider/models", label: "llm provider model discovery", body: { activeProvider: "ollama", baseUrl: "http://127.0.0.1:11434/v1" } }
-];
+export const READ_ONLY_POST_ENDPOINTS = [];
+
+
 
 export const BLOCKED_MUTATION_ENDPOINTS = [
+  { method: "POST", path: "/mcp/test-connection", label: "mcp connection test" },
+  { method: "POST", path: "/mcp/launch-config/validate", label: "mcp launch validation" },
+  { method: "POST", path: "/settings/llm-provider/models", label: "llm provider model discovery" },
   { method: "POST", path: "/ingest", label: "hook ingest" },
   { method: "POST", path: "/imports", label: "start import" },
   { method: "POST", path: "/imports/import-1/cancel", label: "cancel import" },

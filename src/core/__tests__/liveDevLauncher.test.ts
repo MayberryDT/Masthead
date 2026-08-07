@@ -65,4 +65,13 @@ describe("non-Electron live development launcher", () => {
     expect(spawn).toBeGreaterThan(prepare);
     expect(bridge).toBeGreaterThan(spawn);
   });
+
+  test("rejects non-loopback MASTHEAD_HOST before planning the live stack", async () => {
+    const source = await readFile("scripts/masthead-live-dev.js", "utf8");
+    const assertHost = source.indexOf("assertLoopbackBindHost(process.env.MASTHEAD_HOST");
+    const plan = source.indexOf("buildLiveDevPlan(process.env)");
+    expect(assertHost).toBeGreaterThan(-1);
+    expect(plan).toBeGreaterThan(assertHost);
+    expect(source).toContain('from "../dist/daemon/src/shared/loopbackHost.js"');
+  });
 });

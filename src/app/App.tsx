@@ -198,6 +198,7 @@ export function App() {
     activeProjectionUrl,
     activeSurface,
     adapters,
+    databaseId: activeDatabaseId,
     externalRefreshKey: sourceLibraryRefreshKey,
     isLive: hasDaemonConnection
   });
