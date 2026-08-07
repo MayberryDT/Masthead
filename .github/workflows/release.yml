@@ -104,12 +104,12 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: linux-assets
           path: release-assets
 
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: macos-assets
           path: release-assets
@@ -130,22 +130,27 @@ jobs:
         run: |
           set -euo pipefail
           ls -lah release-assets
+          cat > release-notes.md <<'NOTES'
+          Desktop builds for **macOS** and **Linux**.
+
+          ## Install
+
+          1. Download the artifact for your platform.
+          2. macOS: open the `.dmg` (adhoc-signed — see README if Gatekeeper blocks).
+          3. Linux: install the `.deb` or unpack the zip.
+
+          ## Notes
+
+          - Pre-1.0 soft open source — APIs and schema may change.
+          - Source install: clone this repo and run `npm install && npm run dev`.
+          - Full notes: see CHANGELOG.md on main.
+          NOTES
+          # Strip the accidental common indent from the heredoc body
+          sed -i 's/^          //' release-notes.md
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" release-assets/* --clobber
           else
             gh release create "$TAG" release-assets/* \
               --title "Masthead ${TAG}" \
-              --notes "Desktop builds for **macOS** and **Linux**.
-
-## Install
-
-1. Download the artifact for your platform.
-2. macOS: open the \`.dmg\` (adhoc-signed — see README if Gatekeeper blocks).
-3. Linux: install the \`.deb\` or unpack the zip.
-
-## Notes
-
-- Pre-1.0 soft open source — APIs and schema may change.
-- Source install: clone this repo and run \`npm install && npm run dev\`.
-- Full notes: [CHANGELOG.md](https://github.com/MayberryDT/Masthead/blob/main/CHANGELOG.md)"
+              --notes-file release-notes.md
           fi
