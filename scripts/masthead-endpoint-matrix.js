@@ -67,7 +67,13 @@ export const READ_ONLY_ENDPOINTS = [
     label: "guided authoring immutable receipts",
     allowNotFound: true
   },
-  { method: "GET", path: "/workbench/authoring/canaries/pending", label: "pending guided authoring canaries" },
+  {
+    method: "GET",
+    path: "/workbench/authoring/canaries/pending",
+    label: "pending guided authoring canaries",
+    // V4 canary queue is audit-only; empty DB returns 404 rather than a live list.
+    allowNotFound: true
+  },
   {
     method: "GET",
     path: "/workbench/authoring/assignments/assignment%3Aone/review",
