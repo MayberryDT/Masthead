@@ -24,12 +24,12 @@ Post open-source face + marketing surface pass. Durable list of remaining work.
 
 ## Quality / hygiene
 
-1. **deepsec** local vuln scan (`npx deepsec`) on the repo before broader promotion.
-2. File a few good-first-issues for OSS contributors.
-3. CI speed / flaky test budget after tonight's shrink of the V5 multi-pack prep test.
-4. Import quality / harness coverage polish.
-5. Headline consistency across usemasthead.com, README, animas, portfolio.
-6. Optional V4 canary cleanup residue after V5 authoring path.
+1. File a few good-first-issues for OSS contributors.
+2. CI speed / flaky test budget after tonight's shrink of the V5 multi-pack prep test.
+3. Import quality / harness coverage polish.
+4. Headline consistency across usemasthead.com, README, animas, portfolio.
+5. Optional V4 canary cleanup residue after V5 authoring path.
+6. Security review: use standard tooling (npm audit, CodeQL, Semgrep, etc.) — not DeepSec.
 
 ## Deploy notes (sites)
 
