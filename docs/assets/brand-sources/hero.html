@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Masthead hero</title>
+<style>
+  @font-face {
+    font-family: "IBM Plex Sans";
+    src: url("file:///home/tyler/Documents/Masthead/node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-400-normal.woff2") format("woff2");
+    font-weight: 400;
+  }
+  @font-face {
+    font-family: "IBM Plex Sans";
+    src: url("file:///home/tyler/Documents/Masthead/node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-600-normal.woff2") format("woff2");
+    font-weight: 600;
+  }
+  @font-face {
+    font-family: "IBM Plex Mono";
+    src: url("file:///home/tyler/Documents/Masthead/node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-500-normal.woff2") format("woff2");
+    font-weight: 500;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    width: 1280px;
+    height: 720px;
+    background: #031019;
+    color: #f6fbff;
+    font-family: "IBM Plex Sans", system-ui, sans-serif;
+    overflow: hidden;
+  }
+  .frame {
+    width: 1280px;
+    height: 720px;
+    position: relative;
+    background:
+      radial-gradient(ellipse 70% 80% at 78% 45%, rgba(46,167,255,0.10), transparent 55%),
+      radial-gradient(ellipse 50% 60% at 15% 80%, rgba(54,216,105,0.05), transparent 50%),
+      linear-gradient(180deg, #041522 0%, #031019 55%, #020c12 100%);
+    padding: 56px 64px;
+    display: grid;
+    grid-template-columns: 1fr 1.15fr;
+    gap: 40px;
+    align-items: center;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 28px;
+  }
+  .brand img {
+    width: 44px;
+    height: 44px;
+    display: block;
+  }
+  .brand-name {
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: #f6fbff;
+  }
+  .eyebrow {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #2ea7ff;
+    margin-bottom: 16px;
+  }
+  h1 {
+    font-size: 40px;
+    font-weight: 600;
+    line-height: 1.15;
+    color: #f6fbff;
+    max-width: 480px;
+    margin-bottom: 18px;
+  }
+  .body {
+    font-size: 16px;
+    line-height: 1.5;
+    color: #d6e4ef;
+    max-width: 460px;
+    margin-bottom: 28px;
+  }
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .chip {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    font-weight: 500;
+    color: #91a8ba;
+    border: 1px solid rgba(92, 153, 187, 0.22);
+    background: #061925;
+    border-radius: 3px;
+    padding: 6px 10px;
+  }
+  .visual {
+    position: relative;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .stack {
+    position: relative;
+    width: 520px;
+    height: 420px;
+  }
+  .card {
+    position: absolute;
+    background: #071b28;
+    border: 1px solid rgba(92, 153, 187, 0.2);
+    border-radius: 5px;
+    box-shadow:
+      0 1px 0 rgba(190, 225, 245, 0.06) inset,
+      0 18px 40px rgba(0, 0, 0, 0.35);
+    padding: 14px 16px;
+  }
+  .card-session {
+    width: 210px;
+    left: 0;
+  }
+  .card-session.s1 { top: 36px; }
+  .card-session.s2 { top: 148px; left: 24px; }
+  .card-session.s3 { top: 260px; left: 8px; }
+  .card-artifact {
+    width: 280px;
+    right: 0;
+    top: 88px;
+    padding: 18px;
+    border-color: rgba(46, 167, 255, 0.28);
+    background: linear-gradient(180deg, #082130 0%, #071b28 100%);
+  }
+  .label {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #91a8ba;
+    margin-bottom: 8px;
+  }
+  .title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #f6fbff;
+    margin-bottom: 6px;
+  }
+  .sub {
+    font-size: 12px;
+    color: #91a8ba;
+    line-height: 1.4;
+  }
+  .state {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10px;
+    font-weight: 500;
+    margin-top: 10px;
+    padding: 3px 8px;
+    border-radius: 999px;
+  }
+  .state.live { color: #36d869; background: rgba(89, 212, 153, 0.14); }
+  .state.idle { color: #91a8ba; background: rgba(145, 168, 186, 0.12); }
+  .state.pub { color: #2ea7ff; background: rgba(45, 168, 255, 0.16); }
+  .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+  .lines {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+  .lines path {
+    fill: none;
+    stroke: rgba(46, 167, 255, 0.35);
+    stroke-width: 1.5;
+  }
+  .artifact-kind {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10px;
+    color: #2ea7ff;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+  .artifact-body {
+    font-size: 12px;
+    color: #d6e4ef;
+    line-height: 1.45;
+    border-top: 1px solid rgba(194, 221, 241, 0.13);
+    padding-top: 12px;
+    margin-top: 12px;
+  }
+  .artifact-meta {
+    display: flex;
+    gap: 12px;
+    margin-top: 14px;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10px;
+    color: #61798e;
+  }
+</style>
+</head>
+<body>
+  <div class="frame">
+    <div class="copy">
+      <div class="brand">
+        <img src="logo.png" alt="Masthead sail" />
+        <span class="brand-name">Masthead</span>
+      </div>
+      <div class="eyebrow">Your history is still local</div>
+      <h1>The work is still there. Masthead makes it findable.</h1>
+      <p class="body">
+        Local-first session data for AI coding agents—capture, publish, and reuse
+        durable knowledge without a cloud account.
+      </p>
+      <div class="meta">
+        <span class="chip">Local SQLite</span>
+        <span class="chip">Workbench → Logbook</span>
+        <span class="chip">Read-only MCP</span>
+        <span class="chip">MIT</span>
+      </div>
+    </div>
+    <div class="visual">
+      <div class="stack">
+        <svg class="lines" viewBox="0 0 520 420" aria-hidden="true">
+          <path d="M210 90 C 280 90, 300 160, 340 180" />
+          <path d="M234 200 C 290 200, 310 200, 340 200" />
+          <path d="M218 310 C 280 310, 300 240, 340 220" />
+        </svg>
+        <div class="card card-session s1">
+          <div class="label">Sources · Codex</div>
+          <div class="title">OAuth callback recovery</div>
+          <div class="sub">feature/auth-hardening</div>
+          <span class="state live"><span class="dot"></span>Live</span>
+        </div>
+        <div class="card card-session s2">
+          <div class="label">Sources · Claude Code</div>
+          <div class="title">Redirect boundary review</div>
+          <div class="sub">main · ended 12m ago</div>
+          <span class="state idle"><span class="dot"></span>Idle</span>
+        </div>
+        <div class="card card-session s3">
+          <div class="label">Sources · Cursor</div>
+          <div class="title">Bounded replay verification</div>
+          <div class="sub">release/desktop</div>
+          <span class="state idle"><span class="dot"></span>Idle</span>
+        </div>
+        <div class="card card-artifact">
+          <div class="artifact-kind">Runbook · published</div>
+          <div class="title">Recover an OAuth callback state mismatch</div>
+          <div class="sub">Keep the durable fix findable after the sidebar loses the thread.</div>
+          <div class="artifact-body">
+            Outcome: restore the callback path, re-seed state, verify the round-trip
+            before reopening the live connector.
+          </div>
+          <div class="artifact-meta">
+            <span>3 sessions</span>
+            <span>Logbook</span>
+            <span class="state pub" style="margin-top:0"><span class="dot"></span>Artifact</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

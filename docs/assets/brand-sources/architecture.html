@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Masthead architecture</title>
+<style>
+  @font-face {
+    font-family: "IBM Plex Sans";
+    src: url("file:///home/tyler/Documents/Masthead/node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-400-normal.woff2") format("woff2");
+    font-weight: 400;
+  }
+  @font-face {
+    font-family: "IBM Plex Sans";
+    src: url("file:///home/tyler/Documents/Masthead/node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-600-normal.woff2") format("woff2");
+    font-weight: 600;
+  }
+  @font-face {
+    font-family: "IBM Plex Mono";
+    src: url("file:///home/tyler/Documents/Masthead/node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-500-normal.woff2") format("woff2");
+    font-weight: 500;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    width: 1280px;
+    height: 720px;
+    background: #031019;
+    color: #f6fbff;
+    font-family: "IBM Plex Sans", system-ui, sans-serif;
+    overflow: hidden;
+  }
+  .frame {
+    width: 1280px;
+    height: 720px;
+    background:
+      radial-gradient(ellipse 80% 50% at 50% 0%, rgba(46,167,255,0.07), transparent 55%),
+      #031019;
+    padding: 48px 56px 56px;
+    display: flex;
+    flex-direction: column;
+  }
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 40px;
+  }
+  .left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .left img { width: 32px; height: 32px; }
+  .left h1 {
+    font-size: 20px;
+    font-weight: 600;
+  }
+  .eyebrow {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #2ea7ff;
+  }
+  .flow {
+    flex: 1;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 18px;
+    align-items: stretch;
+    position: relative;
+  }
+  .stage {
+    background: #071b28;
+    border: 1px solid rgba(92, 153, 187, 0.2);
+    border-radius: 5px;
+    box-shadow:
+      0 1px 0 rgba(190, 225, 245, 0.055) inset,
+      0 14px 32px rgba(0, 0, 0, 0.28);
+    padding: 22px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    position: relative;
+  }
+  .stage::after {
+    content: "";
+    position: absolute;
+    right: -14px;
+    top: 50%;
+    width: 10px;
+    height: 10px;
+    border-top: 2px solid rgba(46, 167, 255, 0.45);
+    border-right: 2px solid rgba(46, 167, 255, 0.45);
+    transform: translateY(-50%) rotate(45deg);
+    z-index: 2;
+  }
+  .stage:last-child::after { display: none; }
+  .num {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    font-weight: 500;
+    color: #2ea7ff;
+    letter-spacing: 0.08em;
+  }
+  .stage h2 {
+    font-size: 18px;
+    font-weight: 600;
+    color: #f6fbff;
+  }
+  .stage p {
+    font-size: 13px;
+    line-height: 1.45;
+    color: #d6e4ef;
+  }
+  .pills {
+    margin-top: auto;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .pill {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10px;
+    font-weight: 500;
+    color: #91a8ba;
+    background: #061925;
+    border: 1px solid rgba(92, 153, 187, 0.18);
+    border-radius: 3px;
+    padding: 5px 8px;
+  }
+  .pill.blue { color: #a9d7ff; border-color: rgba(46,167,255,0.28); background: rgba(45,168,255,0.10); }
+  .pill.green { color: #9df2b8; border-color: rgba(54,216,105,0.28); background: rgba(89,212,153,0.10); }
+  .footer {
+    margin-top: 28px;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    color: #61798e;
+    display: flex;
+    justify-content: space-between;
+  }
+</style>
+</head>
+<body>
+  <div class="frame">
+    <div class="header">
+      <div class="left">
+        <img src="logo.png" alt="" />
+        <h1>Masthead pipeline</h1>
+      </div>
+      <div class="eyebrow">Local-first · harness-neutral</div>
+    </div>
+    <div class="flow">
+      <div class="stage">
+        <div class="num">01 · SOURCES</div>
+        <h2>Sources</h2>
+        <p>Discover and enable live connectors for supported coding agents. Each harness keeps its own identity.</p>
+        <div class="pills">
+          <span class="pill">Codex</span>
+          <span class="pill">Claude Code</span>
+          <span class="pill">Cursor</span>
+          <span class="pill">+ more</span>
+        </div>
+      </div>
+      <div class="stage">
+        <div class="num">02 · STORE</div>
+        <h2>Local SQLite</h2>
+        <p>Canonical session database on your machine. No required cloud account or remote database.</p>
+        <div class="pills">
+          <span class="pill blue">Canonical DB</span>
+          <span class="pill">Sessions</span>
+          <span class="pill">Provenance</span>
+        </div>
+      </div>
+      <div class="stage">
+        <div class="num">03 · WORKBENCH</div>
+        <h2>Workbench</h2>
+        <p>Raw session → quality → agent authoring → publish. Turn recovered history into durable work.</p>
+        <div class="pills">
+          <span class="pill">V5 packs</span>
+          <span class="pill">Quality</span>
+          <span class="pill">Publish</span>
+        </div>
+      </div>
+      <div class="stage">
+        <div class="num">04 · REUSE</div>
+        <h2>Logbook + MCP</h2>
+        <p>Published artifacts only. Agents retrieve concise answers with source sessions attached—read-only.</p>
+        <div class="pills">
+          <span class="pill green">Runbook</span>
+          <span class="pill green">ADR</span>
+          <span class="pill green">Dossier</span>
+          <span class="pill blue">MCP</span>
+        </div>
+      </div>
+    </div>
+    <div class="footer">
+      <span>session data layer · not a monitoring tower</span>
+      <span>usemasthead.com</span>
+    </div>
+  </div>
+</body>
+</html>
