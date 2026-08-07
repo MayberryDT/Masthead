@@ -71,19 +71,12 @@ try {
   const events = await getJson(server.baseUrl, "/events");
   assert(events.events?.length === RELEASE_LIVE_RUNTIMES.length + 2, `events endpoint should return ${RELEASE_LIVE_RUNTIMES.length + 2} accepted events`);
 
-  // Live smoke creates canonical sessions via live ingest; they may not appear on the
-  // Workbench publish-path list until evidence is enough for quality enrollment.
-  const sessions = await getJson(server.baseUrl, "/sessions?limit=50");
-  const liveSmokeSession = (sessions.sessions || sessions.items || []).find(
-    (session) => session.title === "Live smoke approval" || /live smoke/i.test(session.title || "")
-  );
-  assert(liveSmokeSession, "canonical sessions missing live smoke session");
+  // Projection already proved live cards; data summary should count canonical sessions.
+  const data = await getJson(server.baseUrl, "/data/summary");
+  assert(data.summary?.sessions >= RELEASE_LIVE_RUNTIMES.length, "data summary missing live smoke sessions");
 
   const logbook = await getJson(server.baseUrl, "/logbook/artifacts?q=Live%20smoke");
   assert(logbook.total === 0, "unpublished live smoke session should not appear in artifact-first Logbook");
-
-  const data = await getJson(server.baseUrl, "/data/summary");
-  assert(data.summary?.sessions >= 1, "data summary missing canonical session");
 
   assertDatabase(databasePath);
   console.log(`Masthead live smoke passed. DB: ${databasePath}`);
