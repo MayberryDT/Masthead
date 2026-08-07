@@ -99,7 +99,7 @@ describe("Masthead hook admin CLI", () => {
           },
           { matcher: "*", hooks: [{ type: "command", command: hookCommand, timeout: 1 }] }
         ],
-        Stop: [{ hooks: [{ type: "command", command: hookCommand, timeout: 3 }] }],
+        Stop: [{ hooks: [{ type: "command", command: hookCommand, timeout: 1 }] }],
         UserPromptSubmit: [{ matcher: "*", hooks: [{ type: "command", command: hookCommand, timeout: 1 }] }],
         PermissionRequest: [{ matcher: "*", hooks: [{ type: "command", command: hookCommand, timeout: 1 }] }],
         PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command: hookCommand, timeout: 1 }] }],
