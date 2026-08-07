@@ -23,7 +23,7 @@ It is not a chat client, live monitoring tower, analytics dashboard, or task man
 - **Remembers** only what you publish in Logbook (artifacts, not a session library).
 - **Retrieves** published knowledge via read-only MCP so the next agent can reuse answers with sources.
 
-![Masthead architecture flow](docs/assets/masthead-architecture.jpg)
+![Masthead pipeline: Sources → Local SQLite → Workbench → Logbook + MCP](docs/assets/masthead-architecture.jpg)
 
 ## Trust model
 
