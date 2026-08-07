@@ -1,15 +1,39 @@
 # Support
 
-Use GitHub issues for reproducible bugs, documentation problems, and focused feature requests. Include the Masthead version, OS, Node version, install mode, expected behavior, actual behavior, and sanitized `npm run doctor` output.
+## Bugs and feature requests
 
-Use discussions or planning threads for broader product questions, adapter proposals, release-gate changes, or design tradeoffs.
+Use **[GitHub Issues](https://github.com/MayberryDT/Masthead/issues)** for reproducible bugs, documentation problems, and focused feature requests.
 
-Local diagnostics that help:
+Include when you can:
+
+- Masthead version (app about / `package.json` / release tag)
+- OS and install mode (desktop download vs source)
+- Expected behavior vs actual behavior
+- Sanitized diagnostics (see below)
+
+Do **not** attach raw session transcripts, local SQLite databases, secrets, shell history, screenshots with private data, or unredacted harness files.
+
+## Install and downloads
+
+- Desktop builds: [GitHub Releases](https://github.com/MayberryDT/Masthead/releases/latest)
+- Product site: [usemasthead.com](https://usemasthead.com)
+- macOS packaging notes: [docs/reference/macos-release-build.md](docs/reference/macos-release-build.md)
+
+## Local diagnostics
+
+From a source checkout:
 
 ```bash
 npm run doctor
 npm run check:product-contract
-npm run verify:no-citations
 ```
 
-Do not attach raw session transcripts, local SQLite databases, secrets, shell history, screenshots with private data, or unredacted source harness files to public issues.
+## Security
+
+Private vulnerability reports only — [SECURITY.md](SECURITY.md).
+
+## Product map
+
+- [README.md](README.md)
+- [openwiki/quickstart.md](openwiki/quickstart.md)
+- [ROADMAP.md](ROADMAP.md)

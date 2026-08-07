@@ -58,7 +58,7 @@ These are the main existing docs this wiki synthesizes:
 - `CONTEXT.md` — ubiquitous language (artifact-first).
 - `README.md` — repo-level overview and run/verify entrypoints.
 - `design.md` — master design source (Logbook section refined by ADR 0011).
-- `prd.md` — product scope; **read with ADR 0011 supersession note** for Logbook unit of search.
+- `docs/archive/prd.md` — historical product scope; **read with ADR 0011 supersession note** for Logbook unit of search.
 - `docs/adr/0011-artifact-first-logbook.md` — Logbook is an artifact book.
 - `docs/adr/0013-canonical-dossier-and-candidate-authoring.md` — preserved original-rendering and evidence findings; its V2 authoring flow is superseded.
 - `docs/adr/0014-agent-led-enriched-artifact-authoring.md` — superseded V3 decision and immutable audit history.
@@ -103,7 +103,7 @@ guided enrichment and publication; historical V1–V4 records are audit-only and
 ## Notes for future agents
 
 - Read `design.md` before visual work; read `CONTEXT.md` + ADR 0011 before Logbook/Workbench product work.
-- Treat `prd.md` as scope history with a supersession banner — do not reintroduce session-as-Logbook-row.
+- Treat `docs/archive/prd.md` as scope history with a supersession banner — do not reintroduce session-as-Logbook-row.
 - Do not read or document `.env` files or secrets.
 - Keep the `src/core`/`src/daemon` boundary clear: core is transformation logic; daemon owns runtime state and persistence.
 - Logbook has **no** bulk enrich UI; bulk/session-library chrome is deleted. Workbench owns compile and publish.

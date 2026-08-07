@@ -9,7 +9,7 @@ describe("artifact authoring product contract", () => {
       "CONTEXT.md",
       "README.md",
       "design.md",
-      "prd.md",
+      "docs/archive/prd.md",
       "openwiki/quickstart.md",
       "openwiki/logbook-and-workbench.md",
       "openwiki/data-and-integrations.md",

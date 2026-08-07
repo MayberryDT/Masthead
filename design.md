@@ -217,7 +217,7 @@ x-motion:
 
 This is the master design source for Masthead. The repo intentionally uses the lowercase filename `design.md`; tools or agents that expect Google's uppercase `DESIGN.md` format should be pointed at this file.
 
-Product requirements live in `prd.md`. Historical implementation plans under `docs/superpowers/plans/` are not current visual direction. Do not use deleted files, old screenshots, generic dashboard examples, or the previous Raycast-inspired document as design authority.
+Historical product requirements live in `docs/archive/prd.md`. Prefer README, OpenWiki, CONTEXT.md, and ADRs for current scope. Historical implementation plans under `docs/superpowers/plans/` are not current visual direction. Do not use deleted files, old screenshots, generic dashboard examples, or the previous Raycast-inspired document as design authority.
 
 ## Overview
 

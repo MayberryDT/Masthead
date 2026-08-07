@@ -1,0 +1,151 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to rebuild (e.g. v0.1.15). Leave empty when running on a tag push."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-linux:
+    name: Build Linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.15.0
+          cache: npm
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libnss3 libatk-bridge2.0-0 libgtk-3-0 libgbm1 fakeroot dpkg rpm
+
+      - run: npm ci
+      - run: npm run verify
+      - run: npm run build:desktop
+
+      - name: Collect Linux artifacts
+        run: |
+          mkdir -p release-assets
+          find out/make -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.zip' -o -name '*.AppImage' \) -print0 \
+            | xargs -0 -I{} cp -v {} release-assets/ || true
+          # Packaged directory zip fallback if makers only left zip under out/
+          if [ -z "$(ls -A release-assets 2>/dev/null)" ]; then
+            echo "No maker artifacts found under out/make; packaging zip of out tree heads" >&2
+            find out -maxdepth 2 -type d -name 'Masthead-*' -print
+            exit 1
+          fi
+          ls -lah release-assets
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: linux-assets
+          path: release-assets/
+          if-no-files-found: error
+
+  build-macos:
+    name: Build macOS
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.15.0
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build:desktop
+
+      - name: Collect macOS artifacts
+        run: |
+          mkdir -p release-assets
+          find out/make -type f \( -name '*.dmg' -o -name '*.zip' \) -print0 \
+            | xargs -0 -I{} cp -v {} release-assets/ || true
+          if [ -z "$(ls -A release-assets 2>/dev/null)" ]; then
+            echo "No macOS maker artifacts found under out/make" >&2
+            find out -type f | head -50
+            exit 1
+          fi
+          ls -lah release-assets
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: macos-assets
+          path: release-assets/
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: [build-linux, build-macos]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: linux-assets
+          path: release-assets
+
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: macos-assets
+          path: release-assets
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.tag }}" ]; then
+            echo "name=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.name }}
+        run: |
+          set -euo pipefail
+          ls -lah release-assets
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" release-assets/* --clobber
+          else
+            gh release create "$TAG" release-assets/* \
+              --title "Masthead ${TAG}" \
+              --notes "Desktop builds for **macOS** and **Linux**.
+
+## Install
+
+1. Download the artifact for your platform.
+2. macOS: open the \`.dmg\` (adhoc-signed — see README if Gatekeeper blocks).
+3. Linux: install the \`.deb\` or unpack the zip.
+
+## Notes
+
+- Pre-1.0 soft open source — APIs and schema may change.
+- Source install: clone this repo and run \`npm install && npm run dev\`.
+- Full notes: [CHANGELOG.md](https://github.com/MayberryDT/Masthead/blob/main/CHANGELOG.md)"
+          fi

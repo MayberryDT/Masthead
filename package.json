@@ -16,17 +16,20 @@
   "bugs": {
     "url": "https://github.com/MayberryDT/Masthead/issues"
   },
-  "homepage": "https://github.com/MayberryDT/Masthead#readme",
+  "homepage": "https://usemasthead.com",
   "keywords": [
     "masthead",
     "local-first",
     "session-data",
     "ai-agents",
     "codex",
+    "claude-code",
+    "cursor",
     "mcp",
     "workbench",
     "logbook",
-    "electron"
+    "electron",
+    "knowledge-management"
   ],
   "engines": {
     "node": ">=24.15.0"

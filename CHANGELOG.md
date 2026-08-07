@@ -11,10 +11,12 @@ Versions follow the `package.json` source of truth.
 - macOS Electron packaging path: DMG and zip makers, relocatable official Node bundling when the host Node is non-relocatable (e.g. Homebrew).
 - `releaseIdentity` resolution so packaged health/capabilities report real `buildVersion` and `buildSha` from `release.json` / env (not `development`).
 - Soft open-source entry docs: public-facing README structure, `docs/OPEN_SOURCE.md`, expanded ignore rules for local authoring dumps.
+- Public launch surface: Pip-style README, community docs rewrite, `ROADMAP.md`, release workflow that publishes macOS + Linux desktop artifacts on `v*` tags, and marketing assets under `docs/assets/`.
 
 ### Documented
 
 - MacinCloud / remote Mac dogfood closeout and release-build notes under `docs/acceptance/` and `docs/reference/macos-release-build.md`.
+- Historical root specs moved to `docs/archive/` (not current product SoT).
 
 ## [0.1.0] — 2026-06
 
