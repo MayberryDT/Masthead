@@ -305,11 +305,11 @@ build_electron_dev_bundles() {
   ) >>"$LOG_FILE" 2>&1; then
     log "Electron main and preload dev bundles are ready."
     return 0
+  else
+    local build_status=$?
+    log "Electron dev bundle build failed with exit status $build_status."
+    return "$build_status"
   fi
-
-  local build_status=$?
-  log "Electron dev bundle build failed with exit status $build_status."
-  return "$build_status"
 }
 
 cleanup_failed_dev_daemon() {

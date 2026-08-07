@@ -92,10 +92,7 @@ const staticReadOnlyBridgePaths = new Set([
 ]);
 
 const staticReadOnlyBridgePostPaths: Record<string, true> = {
-  "/imports/repair/preview": true,
-  "/mcp/launch-config/validate": true,
-  "/mcp/test-connection": true,
-  "/settings/llm-provider/models": true
+  "/imports/repair/preview": true
 };
 
 export function isAllowedReadOnlyBridgeRequest(method: string | undefined, pathname: string): boolean {
@@ -352,9 +349,17 @@ async function handleBridgeRequest(
   try {
     const target = new URL(`${requestUrl.pathname}${requestUrl.search}`, `${options.upstreamBaseUrl}/`);
     const method = request.method || "GET";
+    if (method === "POST") {
+      const origin = request.headers.origin;
+      if (typeof origin === "string" && !options.allowedOrigins.includes(origin)) {
+        sendJson(response, 403, headers, { ok: false, error: "origin not allowed" });
+        return;
+      }
+    }
     const requestBody = method === "GET" || method === "HEAD" ? undefined : await readRequestBody(request);
     const requestHeaders: Record<string, string> = { accept: request.headers.accept || "application/json" };
     if (typeof request.headers["content-type"] === "string") requestHeaders["content-type"] = request.headers["content-type"];
+    if (typeof request.headers.origin === "string") requestHeaders.origin = request.headers.origin;
     const upstreamResponse = await fetch(target, {
       body: requestBody,
       headers: requestHeaders,

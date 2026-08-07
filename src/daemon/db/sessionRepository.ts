@@ -6,7 +6,7 @@ import type { LiveBoardProjection, NormalizedEvent } from "../../core/types.ts";
 import { canonicalSessionId, runtimeIdFor } from "../../shared/sessionIdentity.ts";
 import { reconcileImportedTranscript } from "../../workbench/transcriptQualityReconciler.ts";
 import { upsertSessionSource } from "./sessionSourceRepository.ts";
-import type { MastheadDatabase } from "./sqlite.ts";
+import { withImmediateTransaction, type MastheadDatabase } from "./sqlite.ts";
 import { deriveTranscriptFileEffects } from "./transcriptEffects.ts";
 
 export { canonicalSessionId, runtimeIdFor } from "../../shared/sessionIdentity.ts";
@@ -70,21 +70,23 @@ export function createSessionRepository(db: MastheadDatabase, context: SessionRe
 
   const upsertLiveEvent = (event: NormalizedEvent): string | undefined => {
     if (!event.sessionId) return undefined;
-    ensureHostRuntime(event.occurredAt);
-    const sourceSessionId = event.sessionId;
-    const sessionId = canonicalSessionId(context.hostId, runtimeId, sourceSessionId);
-    upsertSession(event, sessionId, sourceSessionId);
-    upsertTurn(event, sessionId);
-    upsertMessage(event, sessionId);
-    upsertToolCall(event, sessionId);
-    upsertToolResult(event, sessionId);
-    upsertFileEffect(event, sessionId);
-    upsertRuntimeSignal(event, sessionId);
-    upsertModelUsage(event, sessionId);
-    if (context.reconcileLiveEvidenceOnEveryEvent !== false || event.type === "session.completed") {
-      afterSessionMaterialized(db, sessionId, "live_ingest");
-    }
-    return sessionId;
+    return withImmediateTransaction(db, () => {
+      ensureHostRuntime(event.occurredAt);
+      const sourceSessionId = event.sessionId!;
+      const sessionId = canonicalSessionId(context.hostId, runtimeId, sourceSessionId);
+      upsertSession(event, sessionId, sourceSessionId);
+      upsertTurn(event, sessionId);
+      upsertMessage(event, sessionId);
+      upsertToolCall(event, sessionId);
+      upsertToolResult(event, sessionId);
+      upsertFileEffect(event, sessionId);
+      upsertRuntimeSignal(event, sessionId);
+      upsertModelUsage(event, sessionId);
+      if (context.reconcileLiveEvidenceOnEveryEvent !== false || event.type === "session.completed") {
+        afterSessionMaterialized(db, sessionId, "live_ingest");
+      }
+      return sessionId;
+    });
   };
 
   const replaceBoardProjection = (projection: LiveBoardProjection, updatedAt: string): void => {

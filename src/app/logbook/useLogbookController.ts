@@ -21,11 +21,12 @@ type UseLogbookControllerInput = {
   activeProjectionUrl: string;
   activeSurface: AppSurface;
   adapters: AdapterStatus[];
+  databaseId?: string;
   externalRefreshKey: number;
   isLive: boolean;
 };
 
-export function useLogbookController({ activeProjectionUrl, activeSurface, adapters: _adapters, externalRefreshKey, isLive }: UseLogbookControllerInput) {
+export function useLogbookController({ activeProjectionUrl, activeSurface, adapters: _adapters, databaseId, externalRefreshKey, isLive }: UseLogbookControllerInput) {
   const [query, setQuery] = useState("");
   const [result, setResult] = useState<LogbookSearchResult>();
   const [loading, setLoading] = useState(false);
@@ -73,6 +74,7 @@ export function useLogbookController({ activeProjectionUrl, activeSurface, adapt
   const pageRequest = useMemo<LogbookPageCacheRequest>(
     () => ({
       baseUrl: activeProjectionUrl,
+      databaseId,
       filters,
       logbookRevision,
       pageIndex,
@@ -81,7 +83,7 @@ export function useLogbookController({ activeProjectionUrl, activeSurface, adapt
       retryKey: effectiveRetryKey,
       sort
     }),
-    [activeProjectionUrl, effectiveRetryKey, filters, logbookRevision, pageIndex, query, sort]
+    [activeProjectionUrl, databaseId, effectiveRetryKey, filters, logbookRevision, pageIndex, query, sort]
   );
 
   useEffect(() => {

@@ -90,6 +90,25 @@ describe("applySessionEnrichment", () => {
       count: 3
     });
   });
+
+  test("maps verification summary language to status instead of forcing passed", async () => {
+    const db = await testDb();
+    seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:abc", title: "Verify mapping" });
+    const failed = applySessionEnrichment(db, {
+      output: { ...validOutput(), verificationSummary: "Focused tests failed with exit code 1." },
+      sessionId: "session:abc"
+    });
+    expect(failed.ok).toBe(true);
+    const capsule = readCurrentSessionEnrichment(db, "session:abc", "session_capsule", SESSION_CAPSULE_PROMPT_VERSION);
+    expect(capsule?.content).toMatchObject({
+      sessionDossier: {
+        verification: {
+          status: "failed",
+          summary: "Focused tests failed with exit code 1."
+        }
+      }
+    });
+  });
 });
 
 function validOutput(): SessionEnrichmentOutput {

@@ -12,6 +12,14 @@ describe("daemon config", () => {
     expect(config.allowedOrigins).toContain("masthead://app");
   });
 
+  test("defaults to loopback and rejects non-loopback MASTHEAD_HOST binds", () => {
+    expect(daemonConfigFromEnv({}).host).toBe("127.0.0.1");
+    expect(daemonConfigFromEnv({ MASTHEAD_HOST: "localhost" }).host).toBe("localhost");
+    expect(daemonConfigFromEnv({ MASTHEAD_HOST: "::1" }).host).toBe("::1");
+    expect(() => daemonConfigFromEnv({ MASTHEAD_HOST: "0.0.0.0" })).toThrow(/loopback/i);
+    expect(() => daemonConfigFromEnv({ MASTHEAD_HOST: "192.168.1.10" })).toThrow(/loopback/i);
+  });
+
   test("maps migration quick-check skip from the environment", () => {
     expect(daemonConfigFromEnv({}).skipMigrationQuickCheck).toBe(false);
     expect(daemonConfigFromEnv({ MASTHEAD_SKIP_MIGRATION_QUICK_CHECK: "1" }).skipMigrationQuickCheck).toBe(true);

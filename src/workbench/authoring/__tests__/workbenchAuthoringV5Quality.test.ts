@@ -282,4 +282,16 @@ describe("workbenchAuthoringV5Quality — Q4 hard-reject code list sync", () => 
     const outcome = classifyWorkbenchAuthoringV5Session(groundedSession());
     expect(outcome).toMatchObject({ disposition: "publishable", findings: [] });
   });
+
+  test("hard-rejects session fields that contain unredacted secrets", () => {
+    const outcome = classifyWorkbenchAuthoringV5Session(
+      groundedSession({
+        description:
+          "Attempted to use OPENAI_API_KEY=sk-secretsecretsecretsecret while validating the pack."
+      })
+    );
+    expect(outcome.disposition).toBe("hard_reject");
+    expect(outcome.findings.map(({ code }) => code)).toContain("secret_detected");
+    expect(WORKBENCH_AUTHORING_V5_HARD_REJECT_CODES).toContain("secret_detected");
+  });
 });

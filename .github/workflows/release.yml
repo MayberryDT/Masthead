@@ -12,7 +12,7 @@ on:
         type: string
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
@@ -103,6 +103,8 @@ jobs:
     needs: [build-linux, build-macos]
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -118,11 +120,21 @@ jobs:
 
       - name: Resolve tag
         id: tag
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.tag }}" ]; then
-            echo "name=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -n "$INPUT_TAG" ]; then
+            case "$INPUT_TAG" in
+              *$'\n'*|*$'\r'*)
+                echo "inputs.tag must be a single-line tag name" >&2
+                exit 1
+                ;;
+            esac
+            # Pass via env (not expression interpolation) so untrusted input cannot rewrite the script.
+            printf 'name=%s\n' "$INPUT_TAG" >> "$GITHUB_OUTPUT"
           else
-            echo "name=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            printf 'name=%s\n' "$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Create or update release

@@ -2677,11 +2677,10 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
     if (request.method === "POST" && url.pathname === "/mcp/test-connection") {
       try {
-        const fallback = getMcpLaunchConfig(config.databasePath, config.dataDirectory);
-        const launchConfig = coerceMcpLaunchConfig(await optionalJsonBody(request), fallback);
+        await optionalJsonBody(request);
         sendJson(request, response, config.allowedOrigins, 200, {
           ok: true,
-          result: await testMcpConnection(launchConfig, config.databasePath)
+          result: await testMcpConnection(config.databasePath, config.dataDirectory)
         });
       } catch (error) {
         sendJson(request, response, config.allowedOrigins, 400, {

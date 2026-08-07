@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { lstat, readFile, readdir, rename, writeFile } from "node:fs/promises";
+import { lstat, readFile, readdir, realpath, rename, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 export const PACKAGED_BUNDLE_MANIFEST = "release-manifest.json";
@@ -127,39 +127,32 @@ function normalizeLayout(input) {
 }
 
 async function buildPayload(layout) {
-  const daemonPath = join(layout.resourcesPath, "daemon");
-  const distPath = join(daemonPath, "dist");
-  const distFiles = await listRegularFiles(distPath);
-  if (distFiles.length === 0) throw new Error("Packaged daemon dist tree is empty.");
+  const bundleRoot = await assertCanonicalTreeRoot(layout.bundleRoot, "bundle root");
+  const resourcesPath = await assertCanonicalDirectoryInside(layout.resourcesPath, bundleRoot, "resources directory");
+  await assertCanonicalRegularFileInside(layout.executablePath, bundleRoot, "executable");
+  await assertCanonicalRegularFileInside(layout.nodePath, bundleRoot, "bundled Node runtime");
+  await assertCanonicalRegularFileInside(join(resourcesPath, "app.asar"), bundleRoot, "app archive");
+  await assertCanonicalRegularFileInside(join(resourcesPath, "daemon", "release.json"), bundleRoot, "release identity");
+
   const release = await readReleaseIdentity(layout);
-  const privateDisplayPath = join(daemonPath, "scripts", "masthead-private-display.js");
-  let includesPrivateDisplay = true;
-  try {
-    await lstat(privateDisplayPath);
-  } catch (error) {
-    if (error?.code === "ENOENT" && release.version === "0.1.13") includesPrivateDisplay = false;
-    else throw error;
+  const manifestRelative = manifestRelativePath(bundleRoot, join(resourcesPath, PACKAGED_BUNDLE_MANIFEST));
+  const absoluteFiles = await listPackagedRegularFiles(bundleRoot, manifestRelative);
+  if (absoluteFiles.length === 0) throw new Error("Packaged bundle tree contains no regular files.");
+
+  const distRoot = join(resourcesPath, "daemon", "dist");
+  const distPrefix = `${manifestRelativePath(bundleRoot, distRoot)}/`;
+  if (!absoluteFiles.some((filePath) => manifestRelativePath(bundleRoot, filePath).startsWith(distPrefix))) {
+    throw new Error("Packaged daemon dist tree is empty.");
   }
 
-  const absoluteFiles = [
-    layout.executablePath,
-    join(layout.resourcesPath, "app.asar"),
-    ...distFiles,
-    layout.nodePath,
-    join(daemonPath, "release.json"),
-    join(daemonPath, "scripts", "packaged-bundle-manifest.js"),
-    join(daemonPath, "scripts", "masthead-production-cold-activation.js"),
-    join(daemonPath, "scripts", "masthead-production.js"),
-    ...(includesPrivateDisplay ? [privateDisplayPath] : []),
-    join(daemonPath, "scripts", "masthead-hook.js"),
-    join(daemonPath, "scripts", "resolve-hook-runtime.js")
-  ];
   const files = [];
   for (const filePath of absoluteFiles) {
     const metadata = await lstat(filePath);
-    if (!metadata.isFile()) throw new Error(`Packaged manifest payload is not a regular file: ${filePath}`);
+    if (metadata.isSymbolicLink() || !metadata.isFile()) {
+      throw new Error(`Packaged manifest payload is not a regular file: ${filePath}`);
+    }
     files.push({
-      path: manifestRelativePath(layout.bundleRoot, filePath),
+      path: manifestRelativePath(bundleRoot, filePath),
       sha256: await hashFile(filePath),
       size: metadata.size
     });
@@ -193,14 +186,36 @@ async function readReleaseIdentity(layout) {
   return { gitSha: release.gitSha, version: release.version };
 }
 
-async function listRegularFiles(root) {
+async function listPackagedRegularFiles(bundleRoot, excludeRelativePath) {
   const files = [];
-  for (const entry of (await readdir(root, { withFileTypes: true })).sort((left, right) => compareText(left.name, right.name))) {
-    const entryPath = join(root, entry.name);
-    if (entry.isDirectory()) files.push(...await listRegularFiles(entryPath));
-    else if (entry.isFile()) files.push(entryPath);
-    else throw new Error(`Packaged daemon dist tree contains a non-regular entry: ${entryPath}`);
+
+  async function walk(directoryPath) {
+    const entries = (await readdir(directoryPath, { withFileTypes: true }))
+      .sort((left, right) => compareText(left.name, right.name));
+    for (const entry of entries) {
+      const entryPath = join(directoryPath, entry.name);
+      const metadata = await lstat(entryPath);
+      if (metadata.isSymbolicLink()) {
+        throw new Error(`Packaged bundle contains a symbolic link: ${entryPath}`);
+      }
+      if (metadata.isDirectory()) {
+        const canonicalDirectory = await realpath(entryPath);
+        assertWithin(bundleRoot, canonicalDirectory, "bundle directory");
+        await walk(entryPath);
+        continue;
+      }
+      if (!metadata.isFile()) {
+        throw new Error(`Packaged bundle contains a non-regular entry: ${entryPath}`);
+      }
+      const canonicalFile = await realpath(entryPath);
+      assertWithin(bundleRoot, canonicalFile, "manifest payload");
+      const relativePath = manifestRelativePath(bundleRoot, entryPath);
+      if (relativePath === excludeRelativePath) continue;
+      files.push(entryPath);
+    }
   }
+
+  await walk(bundleRoot);
   return files;
 }
 
@@ -254,6 +269,52 @@ async function hashFile(filePath) {
 function manifestRelativePath(bundleRoot, filePath) {
   assertWithin(bundleRoot, filePath, "manifest payload");
   return relative(bundleRoot, filePath).split(sep).join("/");
+}
+
+async function assertCanonicalTreeRoot(path, label) {
+  const resolved = resolve(path);
+  const metadata = await lstat(resolved);
+  if (metadata.isSymbolicLink()) {
+    throw new Error(`Packaged ${label} must not be a symbolic link: ${resolved}`);
+  }
+  if (!metadata.isDirectory()) {
+    throw new Error(`Packaged ${label} must be a directory: ${resolved}`);
+  }
+  const canonical = await realpath(resolved);
+  if (canonical !== resolved) {
+    throw new Error(`Packaged ${label} must be a canonical real path: ${resolved}`);
+  }
+  return canonical;
+}
+
+async function assertCanonicalDirectoryInside(path, bundleRoot, label) {
+  const resolved = resolve(path);
+  assertWithin(bundleRoot, resolved, label);
+  const metadata = await lstat(resolved);
+  if (metadata.isSymbolicLink()) {
+    throw new Error(`Packaged ${label} must not be a symbolic link: ${resolved}`);
+  }
+  if (!metadata.isDirectory()) {
+    throw new Error(`Packaged ${label} must be a directory: ${resolved}`);
+  }
+  const canonical = await realpath(resolved);
+  assertWithin(bundleRoot, canonical, label);
+  return canonical;
+}
+
+async function assertCanonicalRegularFileInside(path, bundleRoot, label) {
+  const resolved = resolve(path);
+  assertWithin(bundleRoot, resolved, label);
+  const metadata = await lstat(resolved);
+  if (metadata.isSymbolicLink()) {
+    throw new Error(`Packaged ${label} must not be a symbolic link: ${resolved}`);
+  }
+  if (!metadata.isFile()) {
+    throw new Error(`Packaged ${label} must be a regular file: ${resolved}`);
+  }
+  const canonical = await realpath(resolved);
+  assertWithin(bundleRoot, canonical, label);
+  return canonical;
 }
 
 function assertWithin(root, candidate, label) {

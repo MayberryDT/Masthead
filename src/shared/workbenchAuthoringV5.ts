@@ -45,7 +45,8 @@ export const WORKBENCH_AUTHORING_V5_HARD_REJECT_CODES = [
   "duplicate_pack_title",
   "purpose_not_user_ask",
   "missing_core_field_grounding",
-  "unknown_canonical_evidence_ref"
+  "unknown_canonical_evidence_ref",
+  "secret_detected"
 ] as const;
 export const WORKBENCH_AUTHORING_V5_SOFT_FLAG_CODES = ["weak_verification", "thin_key_work"] as const;
 export type WorkbenchAuthoringV5FindingCode =

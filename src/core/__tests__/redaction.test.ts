@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { hasSemanticRedactedText, redactCommandOutput, redactPath, redactText } from "../redaction";
+import { hasSemanticRedactedText, isSensitiveKey, redactCommandOutput, redactJsonValue, redactPath, redactText } from "../redaction";
 
 describe("privacy redaction", () => {
   test("redacts common secret-bearing strings before persistence", () => {
@@ -69,6 +69,43 @@ describe("privacy redaction", () => {
     expect(output.text).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz1234567890");
     expect(output.text.length).toBeLessThanOrEqual(160);
     expect(output.truncated).toBe(true);
+  });
+
+
+  test("redacts structured JSON secrets by key even when values lack secret shapes", () => {
+    const redacted = redactJsonValue({
+      password: "ordinary-secret",
+      nested: {
+        sessionCookie: "sid=opaque-session-value",
+        credentials: { username: "alice", token: "plain-token-value" },
+        privateKey: "not-a-pem-block",
+        auth: "basic-user:basic-pass",
+        safe: "keep-me"
+      },
+      note: "password=still-redacted-by-text"
+    });
+
+    expect(redacted).toEqual({
+      password: "[SECRET:json_field]",
+      nested: {
+        sessionCookie: "[SECRET:json_field]",
+        credentials: "[SECRET:json_field]",
+        privateKey: "[SECRET:json_field]",
+        auth: "[SECRET:json_field]",
+        safe: "keep-me"
+      },
+      note: "[SECRET:env_secret]"
+    });
+    expect(isSensitiveKey("set-cookie")).toBe(true);
+    expect(isSensitiveKey("apiKey")).toBe(true);
+    expect(isSensitiveKey("title")).toBe(false);
+  });
+
+  test("redacts lowercase CLI secret flags in free text", () => {
+    const redacted = redactText("mysql --password hunter2 --token abc123 deploy");
+    expect(redacted).not.toContain("hunter2");
+    expect(redacted).not.toContain("abc123");
+    expect(redacted).toContain("[SECRET:cli_flag]");
   });
 
   test("distinguishes redaction-only placeholders from retained semantic text", () => {

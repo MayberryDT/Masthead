@@ -95,7 +95,7 @@ export function countRecordsByType(records: StoreRecord[]): Record<StoreRecord["
   return counts;
 }
 
-function shouldPruneRecord(record: StoreRecord, policy: RetentionPolicy, protectedRecordIds: Set<string>): boolean {
+export function shouldPruneRecord(record: StoreRecord, policy: RetentionPolicy, protectedRecordIds: Set<string>): boolean {
   if (protectedRecordIds.has(record.recordId)) return false;
   if (!matchesRetentionRecordType(record, policy)) return false;
   const olderThanCutoff = policy.cutoffAt ? record.observedAt < policy.cutoffAt : false;
@@ -103,11 +103,11 @@ function shouldPruneRecord(record: StoreRecord, policy: RetentionPolicy, protect
   return olderThanCutoff || beyondLatestCap;
 }
 
-function matchesRetentionRecordType(record: StoreRecord, policy: RetentionPolicy): boolean {
+export function matchesRetentionRecordType(record: StoreRecord, policy: RetentionPolicy): boolean {
   return !policy.recordTypes || policy.recordTypes.length === 0 || policy.recordTypes.includes(record.recordType);
 }
 
-function latestRecordIds(records: StoreRecord[], keepLatest: number | undefined): Set<string> {
+export function latestRecordIds(records: StoreRecord[], keepLatest: number | undefined): Set<string> {
   if (keepLatest === undefined) return new Set();
   return new Set(
     records
@@ -122,7 +122,7 @@ function latestRecordIds(records: StoreRecord[], keepLatest: number | undefined)
   );
 }
 
-function unresolvedAttentionRecordIds(records: StoreRecord[], policy: RetentionPolicy): string[] {
+export function unresolvedAttentionRecordIds(records: StoreRecord[], policy: RetentionPolicy): string[] {
   if (policy.keepUnresolvedAttention === false) return [];
   return records.flatMap((record) => {
     if (record.recordType !== "attention_item") return [];

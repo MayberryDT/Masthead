@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { access } from "node:fs/promises";
-import { resolve } from "node:path";
+import { access, lstat, stat } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
   createSingleConsistentBackupInsideExclusiveMaintenance,
@@ -181,8 +181,9 @@ export async function invalidateV5QualityCorpusRecovery(
     throw new Error("v5_quality_corpus_prepared_receipt_mismatch");
   }
   if (expectedAuditHash !== prepared.audit.auditHash) throw new Error("v5_quality_corpus_audit_hash_mismatch");
-  await access(prepared.backup.backupPath);
+  await verifyPreparedV5Backup(prepared);
   return withExclusiveDatabaseMaintenance(activePath, async () => {
+    await verifyPreparedV5Backup(prepared);
     const db = await openMastheadDatabase(activePath);
     try {
       const currentAudit = auditV5QualityCorpus(db, { retainCreatedBy: prepared.audit.retainCreatedBy });
@@ -196,6 +197,33 @@ export async function invalidateV5QualityCorpusRecovery(
       db.close();
     }
   });
+}
+
+
+async function verifyPreparedV5Backup(prepared: V5QualityCorpusPreparedRecovery): Promise<void> {
+  const expectedPath = join(dirname(prepared.databasePath), `${basename(prepared.databasePath)}.backup-current`);
+  const backupPath = resolve(prepared.backup.backupPath);
+  if (backupPath !== expectedPath) throw new Error("v5_quality_corpus_backup_path_mismatch");
+  const info = await lstat(backupPath);
+  if (info.isSymbolicLink() || !info.isFile()) throw new Error("v5_quality_corpus_backup_invalid");
+  const size = (await stat(backupPath)).size;
+  if (size !== prepared.backup.sizeBytes) throw new Error("v5_quality_corpus_backup_size_mismatch");
+  for (const suffix of ["-wal", "-shm", "-journal"] as const) {
+    try {
+      await access(`${backupPath}${suffix}`);
+      throw new Error(`v5_quality_corpus_backup_sidecar_present:${suffix.slice(1)}`);
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("v5_quality_corpus_backup_sidecar_present:")) throw error;
+    }
+  }
+  const backupDb = new DatabaseSync(backupPath, { readOnly: true }) as unknown as MastheadDatabase;
+  try {
+    const backupAudit = auditV5QualityCorpus(backupDb, { retainCreatedBy: prepared.audit.retainCreatedBy });
+    if (backupAudit.auditHash !== prepared.audit.auditHash) throw new Error("v5_quality_corpus_backup_audit_mismatch");
+    if (backupAudit.databaseId !== prepared.backup.databaseId) throw new Error("v5_quality_corpus_backup_identity_mismatch");
+  } finally {
+    backupDb.close();
+  }
 }
 
 function readDatabaseId(db: MastheadDatabase): string {

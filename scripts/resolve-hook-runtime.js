@@ -146,13 +146,27 @@ function pathLooksLike(value, token) {
   if (!value) return false;
   const normalized = value.replace(/\\/g, "/").toLowerCase();
   const needle = token.toLowerCase();
-  return normalized.includes(`/${needle}`) || normalized.includes(`${needle}/`) || normalized.endsWith(needle);
+  // Tokens that already encode path structure (e.g. "/.omp/") keep substring segment match.
+  if (needle.includes("/")) return normalized.includes(needle);
+  const base = normalized.slice(normalized.lastIndexOf("/") + 1);
+  if (base === needle || base.startsWith(`${needle}.`) || base.startsWith(`${needle}-`)) return true;
+  return (
+    normalized.includes(`/${needle}/`) ||
+    normalized.includes(`/${needle}.`) ||
+    normalized.endsWith(`/${needle}`)
+  );
 }
 
 function argvLooksLike(argv, token) {
   if (!argv?.length) return false;
   const needle = token.toLowerCase();
-  return argv.some((arg) => String(arg).toLowerCase().includes(needle));
+  return argv.some((arg) => {
+    const value = String(arg).toLowerCase().replace(/\\/g, "/");
+    if (value === needle) return true;
+    const base = value.slice(value.lastIndexOf("/") + 1);
+    if (base === needle || base.startsWith(`${needle}.`) || base.startsWith(`${needle}-`)) return true;
+    return value.endsWith(`=${needle}`);
+  });
 }
 
 function stringField(input, key) {

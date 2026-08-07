@@ -6,7 +6,8 @@ Masthead is **soft open source**: public under the MIT license so others can ins
 
 - **Public source, MIT license** — free to use, modify, and redistribute under [LICENSE](../LICENSE)
 - **Not a finished platform promise** — APIs, SQLite schema, CLI commands, and UI surfaces may change without a long deprecation cycle until 1.0
-- **Desktop-first install** — preferred path is a packaged app from [GitHub Releases](https://github.com/MayberryDT/Masthead/releases/latest); source install remains fully supported
+- **Desktop-first install** — preferred path is a packaged app from [GitHub Releases](https://github.com/MayberryDT/Masthead/releases/latest); source install remains fully supported for contributors
+- **Source install security gate** — after `npm ci`, `npm run audit:runtime` must report 0 high/critical production dependency issues; full-tree audit may include build tooling (see [dependency-security.md](reference/dependency-security.md))
 - **Not an npm library publish (yet)** — `package.json` stays `"private": true` until a deliberate one-line / package publish story lands (see [ROADMAP.md](../ROADMAP.md))
 - **Local-first privacy model** — core operation does not require a Masthead cloud account; session databases, hooks, and harness files stay on machines you control
 - **Selective PRs** — issues are the main intake; large or category-expanding PRs should be discussed first ([CONTRIBUTING.md](../CONTRIBUTING.md))

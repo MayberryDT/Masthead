@@ -129,7 +129,35 @@ function sanitizeText(value: string | undefined, options: SanitizeOptions): stri
 }
 
 function isSecretKey(key: string): boolean {
-  return /(password|token|secret|api[_-]?key|key)$/i.test(key);
+  const tokens =
+    key
+      .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+      .replace(/([A-Z])([A-Z][a-z])/g, "$1 $2")
+      .toLowerCase()
+      .match(/[a-z0-9]+/g) ?? [];
+  if (tokens.length === 0) return false;
+  const sensitive: Record<string, true> = {
+    password: true,
+    passwd: true,
+    pwd: true,
+    secret: true,
+    token: true,
+    cookie: true,
+    cookies: true,
+    credential: true,
+    credentials: true,
+    authorization: true,
+    auth: true,
+    privatekey: true,
+    accesskey: true,
+    apikey: true,
+    sessioncookie: true,
+    setcookie: true,
+    key: true
+  };
+  const compact = tokens.join("");
+  if (sensitive[compact]) return true;
+  return tokens.some((token) => sensitive[token]);
 }
 
 function parsePositiveInteger(value: string | undefined, fallback: number): number {

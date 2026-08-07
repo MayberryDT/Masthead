@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { access, lstat, realpath } from "node:fs/promises";
+import { access, chmod, lstat, mkdtemp, open as openFile, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { grokAdapter } from "../src/adapters/grok/adapter.ts";
@@ -19,6 +19,11 @@ import { reconcileImportedTranscript } from "../src/workbench/transcriptQualityR
 
 const GENERATED_AT = "2026-07-15T12:00:00.000Z";
 const RECENT_SCOPE = { days: 30, includeChangedSinceCursor: true, mode: "transcript_recent", unitLimit: 500 };
+const CORPUS_FIXTURE_RELATIVE_PATHS = [
+  join("grok", "019f42f6-8ada-7001-afff-c722e75faf45", "chat_history.jsonl"),
+  join("hermes", "session.jsonl"),
+  join("hermes", "old-session.jsonl")
+];
 
 export async function replayImportTrustCorpus(input) {
   const sourceRoot = await validatedCorpusRoot(input?.sourceRoot);
@@ -277,22 +282,80 @@ function scopeEvidence(db, importJobIds, importReports) {
   };
 }
 
+function isContainedPath(root, candidate) {
+  const rel = relative(root, candidate);
+  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+}
+
+async function assertCorpusFixturePath(corpusRoot, relativePath) {
+  const segments = relativePath.split(sep).filter(Boolean);
+  let cursor = corpusRoot;
+  for (const segment of segments) {
+    cursor = join(cursor, segment);
+    let info;
+    try {
+      info = await lstat(cursor);
+    } catch {
+      throw new Error("The sanitized corpus must contain the expected Grok and Hermes acceptance fixtures.");
+    }
+    if (info.isSymbolicLink()) {
+      throw new Error("The sanitized corpus must not contain symlinks.");
+    }
+  }
+
+  const canonicalPath = await realpath(cursor);
+  if (!isContainedPath(corpusRoot, canonicalPath)) {
+    throw new Error("A corpus fixture escapes the corpus root.");
+  }
+  const canonicalInfo = await lstat(canonicalPath);
+  if (canonicalInfo.isSymbolicLink() || !canonicalInfo.isFile()) {
+    throw new Error("The sanitized corpus must contain the expected Grok and Hermes acceptance fixtures.");
+  }
+  await access(canonicalPath);
+  return canonicalPath;
+}
+
 async function validatedCorpusRoot(value) {
   if (typeof value !== "string" || !value.trim()) throw new Error("A sanitized corpus is required via --source-root.");
   const requestedRoot = resolve(value);
+  if (productionLike(requestedRoot)) {
+    throw new Error("The sanitized corpus path must not reference production data.");
+  }
+
+  let rootInfo;
+  try {
+    rootInfo = await lstat(requestedRoot);
+  } catch {
+    throw new Error("The sanitized corpus must contain the expected Grok and Hermes acceptance fixtures.");
+  }
+  if (rootInfo.isSymbolicLink()) {
+    throw new Error("The sanitized corpus root must not be a symlink.");
+  }
+  if (!rootInfo.isDirectory()) {
+    throw new Error("The sanitized corpus must contain the expected Grok and Hermes acceptance fixtures.");
+  }
+
   let root;
   try {
     root = await realpath(requestedRoot);
-    if (productionLike(requestedRoot) || productionLike(root)) {
-      throw new Error("The sanitized corpus path must not reference production data.");
-    }
-    await Promise.all([
-      access(join(root, "grok", "019f42f6-8ada-7001-afff-c722e75faf45", "chat_history.jsonl")),
-      access(join(root, "hermes", "session.jsonl")),
-      access(join(root, "hermes", "old-session.jsonl"))
-    ]);
+  } catch {
+    throw new Error("The sanitized corpus must contain the expected Grok and Hermes acceptance fixtures.");
+  }
+  if (productionLike(root)) {
+    throw new Error("The sanitized corpus path must not reference production data.");
+  }
+
+  try {
+    await Promise.all(CORPUS_FIXTURE_RELATIVE_PATHS.map((relativePath) => assertCorpusFixturePath(root, relativePath)));
   } catch (error) {
-    if (error instanceof Error && error.message.includes("must not reference production")) throw error;
+    if (error instanceof Error && (
+      error.message.includes("must not reference production") ||
+      error.message.includes("must not be a symlink") ||
+      error.message.includes("must not contain symlinks") ||
+      error.message.includes("escapes the corpus root")
+    )) {
+      throw error;
+    }
     throw new Error("The sanitized corpus must contain the expected Grok and Hermes acceptance fixtures.");
   }
   return root;
@@ -302,19 +365,22 @@ export async function validateImportTrustDatabasePath(value) {
   if (typeof value !== "string" || !value.trim()) throw new Error("A safe isolated database path is required via --database.");
   const requestedPath = resolve(value);
   const temporaryRoot = await realpath("/tmp");
-  let databasePath;
+
+  // Gate the caller's requested path first so unsafe intent fails closed before allocation.
+  let databasePathHint;
   try {
-    databasePath = join(await realpath(dirname(requestedPath)), basename(requestedPath));
+    databasePathHint = join(await realpath(dirname(requestedPath)), basename(requestedPath));
   } catch {
     throw new Error("A safe isolated database path requires an existing parent directory under /tmp.");
   }
-  const rel = relative(temporaryRoot, databasePath);
+  const hintRelative = relative(temporaryRoot, databasePathHint);
   if (
-    !rel || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel) ||
-    productionLike(requestedPath) || productionLike(databasePath)
+    !hintRelative || hintRelative === ".." || hintRelative.startsWith(`..${sep}`) || isAbsolute(hintRelative) ||
+    productionLike(requestedPath) || productionLike(databasePathHint)
   ) {
     throw new Error("A safe isolated database path must be under /tmp and must not be production-like.");
   }
+
   let leaf;
   try {
     leaf = await lstat(requestedPath);
@@ -337,7 +403,50 @@ export async function validateImportTrustDatabasePath(value) {
     }
     throw new Error("A safe isolated database path must not already exist.");
   }
-  return databasePath;
+
+  // Close TOCTOU: allocate a private 0700 directory under the validated parent
+  // and exclusive-create the DB leaf there. Never open the caller-supplied leaf
+  // path after the checks above.
+  const parentDirectory = dirname(databasePathHint);
+  const safeDirectory = await mkdtemp(join(parentDirectory, "masthead-import-trust-db-"));
+  await chmod(safeDirectory, 0o700);
+  const safeDirectoryReal = await realpath(safeDirectory);
+  const safeRelative = relative(temporaryRoot, safeDirectoryReal);
+  if (
+    !safeRelative || safeRelative === ".." || safeRelative.startsWith(`..${sep}`) || isAbsolute(safeRelative) ||
+    productionLike(safeDirectoryReal) || !isContainedPath(parentDirectory, safeDirectoryReal)
+  ) {
+    throw new Error("A safe isolated database path must be under /tmp and must not be production-like.");
+  }
+
+  const leafName = basename(requestedPath) || "acceptance.sqlite";
+  if (
+    leafName === "." || leafName === ".." || leafName.includes("\0") ||
+    leafName.includes(sep) || leafName.includes("/") || leafName.includes("\\")
+  ) {
+    throw new Error("A safe isolated database path is required via --database.");
+  }
+  const databasePath = join(safeDirectoryReal, leafName);
+  let handle;
+  try {
+    handle = await openFile(databasePath, "wx", 0o600);
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "EEXIST") {
+      throw new Error("A safe isolated database path must not already exist.");
+    }
+    throw new Error("A safe isolated database path could not be created exclusively.");
+  }
+  await handle.close();
+
+  const createdInfo = await lstat(databasePath);
+  if (createdInfo.isSymbolicLink()) {
+    throw new Error("A safe isolated database path must not be a symlink.");
+  }
+  const createdReal = await realpath(databasePath);
+  if (!isContainedPath(safeDirectoryReal, createdReal) || productionLike(createdReal)) {
+    throw new Error("A safe isolated database path must be under /tmp and must not be production-like.");
+  }
+  return createdReal;
 }
 
 function productionLike(path) {

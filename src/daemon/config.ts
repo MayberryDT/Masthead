@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { homedir } from "node:os";
 import { resolveMastheadDataPaths } from "../shared/dataPaths.ts";
+import { assertLoopbackBindHost } from "../shared/loopbackHost.ts";
 
 export type DaemonConfig = {
   host: string;
@@ -51,7 +52,7 @@ export type DaemonConfig = {
 };
 
 export function daemonConfigFromEnv(env: NodeJS.ProcessEnv = process.env): DaemonConfig {
-  const host = env.MASTHEAD_HOST || "127.0.0.1";
+  const host = assertLoopbackBindHost(env.MASTHEAD_HOST || "127.0.0.1");
   const configuredPort = Number.parseInt(env.MASTHEAD_PORT || "", 10);
   const configuredGitRefreshMs = Number.parseInt(env.MASTHEAD_GIT_REFRESH_MS || "", 10);
   const productionRuntime = Boolean(env.MASTHEAD_PRODUCTION_ROOT?.trim());

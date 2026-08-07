@@ -1,4 +1,4 @@
-import { mkdtemp, rm, symlink } from "node:fs/promises";
+import { cp, lstat, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
@@ -135,4 +135,71 @@ describe("isolated import trust corpus replay", () => {
     await expect(validateImportTrustDatabasePath(databasePath))
       .rejects.toThrow(/safe isolated database path/i);
   });
+
+  test("exclusive-creates the database under a private 0700 directory", async () => {
+    const tempDir = await mkdtemp(join("/tmp", "masthead-import-trust-"));
+    tempDirs.push(tempDir);
+    const requested = join(tempDir, "acceptance.sqlite");
+
+    const created = await validateImportTrustDatabasePath(requested);
+    expect(created).not.toBe(requested);
+    expect(created.startsWith(`${tempDir}/`)).toBe(true);
+    expect(created).toMatch(/masthead-import-trust-db-[^/]+\/acceptance\.sqlite$/);
+    const parentMode = (await lstat(dirname(created))).mode & 0o777;
+    expect(parentMode).toBe(0o700);
+    expect((await lstat(created)).isSymbolicLink()).toBe(false);
+    // A second call with the same requested leaf still exclusive-creates a fresh path.
+    const createdAgain = await validateImportTrustDatabasePath(requested);
+    expect(createdAgain).not.toBe(created);
+    expect(createdAgain).toMatch(/acceptance\.sqlite$/);
+  });
+
+  test("rejects a corpus root that is a symlink", async () => {
+    const tempDir = await mkdtemp(join("/tmp", "masthead-import-trust-"));
+    tempDirs.push(tempDir);
+    const linkedRoot = join(tempDir, "linked-corpus");
+    await symlink(sourceRoot, linkedRoot, "dir");
+
+    await expect(replayImportTrustCorpus({
+      databasePath: join(tempDir, "acceptance.sqlite"),
+      sourceRoot: linkedRoot
+    })).rejects.toThrow(/symlink/i);
+  });
+
+  test("rejects a corpus fixture path that is a symlink escape", async () => {
+    const tempDir = await mkdtemp(join("/tmp", "masthead-import-trust-"));
+    tempDirs.push(tempDir);
+    const corpus = join(tempDir, "corpus");
+    await cp(sourceRoot, corpus, { recursive: true });
+    const fixturePath = join(corpus, "hermes", "session.jsonl");
+    const outside = join(tempDir, "outside-session.jsonl");
+    await writeFile(outside, "escaped\n");
+    await rm(fixturePath);
+    await symlink(outside, fixturePath, "file");
+
+    await expect(replayImportTrustCorpus({
+      databasePath: join(tempDir, "acceptance.sqlite"),
+      sourceRoot: corpus
+    })).rejects.toThrow(/symlink/i);
+  });
+
+  test("rejects a corpus fixture directory symlink escape", async () => {
+    const tempDir = await mkdtemp(join("/tmp", "masthead-import-trust-"));
+    tempDirs.push(tempDir);
+    const corpus = join(tempDir, "corpus");
+    await cp(sourceRoot, corpus, { recursive: true });
+    const hermesDir = join(corpus, "hermes");
+    const outsideDir = join(tempDir, "outside-hermes");
+    await mkdir(outsideDir);
+    await writeFile(join(outsideDir, "session.jsonl"), "escaped\n");
+    await writeFile(join(outsideDir, "old-session.jsonl"), "escaped\n");
+    await rm(hermesDir, { recursive: true, force: true });
+    await symlink(outsideDir, hermesDir, "dir");
+
+    await expect(replayImportTrustCorpus({
+      databasePath: join(tempDir, "acceptance.sqlite"),
+      sourceRoot: corpus
+    })).rejects.toThrow(/symlink|escapes the corpus root/i);
+  });
+
 });

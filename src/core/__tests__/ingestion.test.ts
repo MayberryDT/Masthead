@@ -176,6 +176,47 @@ describe("hook ingestion", () => {
     expect(received).not.toContain("secret-token-value");
   });
 
+  test("hook helper redacts structured JSON secret fields before posting", async () => {
+    let received = "";
+    const server = createServer((request, response) => {
+      request.setEncoding("utf8");
+      request.on("data", (chunk) => {
+        received += chunk;
+      });
+      request.on("end", () => {
+        response.writeHead(202, { "content-type": "application/json" });
+        response.end(JSON.stringify({ ok: true }));
+      });
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    servers.push(server);
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("expected tcp server");
+
+    const exitCode = await runHook(JSON.stringify({
+      ...hookPayload,
+      password: "ordinary-secret",
+      toolInput: {
+        cookie: "sid=opaque-session-value",
+        credentials: "user:pass-value",
+        privateKey: "not-a-pem-block",
+        command: "echo ok"
+      }
+    }), {
+      MASTHEAD_INGEST_URL: `http://127.0.0.1:${address.port}/ingest`,
+      MASTHEAD_HOOK_TIMEOUT_MS: "500"
+    });
+
+    expect(exitCode).toBe(0);
+    expect(received).toContain("[SECRET:json_field]");
+    expect(received).not.toContain("ordinary-secret");
+    expect(received).not.toContain("opaque-session-value");
+    expect(received).not.toContain("user:pass-value");
+    expect(received).not.toContain("not-a-pem-block");
+    expect(received).toContain("echo ok");
+  });
+
   test("hook helper executes when launched through the packaged current symlink", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "masthead-hook-symlink-"));
     const symlinkPath = join(tempDir, "masthead-hook.js");

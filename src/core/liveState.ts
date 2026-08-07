@@ -86,7 +86,9 @@ export function normalizeLiveStateReport(input: unknown, now: Date = new Date())
   const source = requiredString(input.source, "source");
   const state = normalizeLiveState(input.state);
   if (!state) throw new TypeError("live state report state is unsupported");
-  const observedAt = normalizeInstant(typeof input.observedAt === "string" ? input.observedAt : now.toISOString(), "observedAt");
+  const observedAtRaw = normalizeInstant(typeof input.observedAt === "string" ? input.observedAt : now.toISOString(), "observedAt");
+  const observedAtMs = Date.parse(observedAtRaw);
+  const observedAt = observedAtMs > now.getTime() ? now.toISOString() : observedAtRaw;
   const ttlMs = optionalFiniteNumber(input.ttlMs);
   const expiresAt = new Date(Date.parse(observedAt) + (ttlMs ?? DEFAULT_TTL_BY_STATE[state])).toISOString();
   const authority = normalizeAuthority(input.authority);

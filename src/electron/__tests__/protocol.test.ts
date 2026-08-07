@@ -12,8 +12,9 @@ describe("Electron protocol path policy", () => {
     expect(resolveProtocolPath("/home/app/dist", "masthead://app/favicon.ico")).toBe("/home/app/dist/favicon.ico");
   });
 
-  test("rejects path traversal and non-Masthead protocol URLs", () => {
+  test("rejects path traversal, malformed encoding, and non-Masthead protocol URLs", () => {
     expect(resolveProtocolPath("/home/app/dist", "masthead://app/assets/../../secret.txt")).toBeUndefined();
+    expect(resolveProtocolPath("/home/app/dist", "masthead://app/%E0%A4%A")).toBeUndefined();
     expect(resolveProtocolPath("/home/app/dist", "file:///home/app/dist/index.html")).toBeUndefined();
   });
 });

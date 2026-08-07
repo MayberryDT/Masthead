@@ -1,4 +1,4 @@
-import { redactText } from "./redaction.ts";
+import { isSensitiveKey, redactText } from "./redaction.ts";
 
 export type BoardHeadlineState =
   | "active"
@@ -163,19 +163,31 @@ function hasInternalStatusToken(value: string): boolean {
 }
 
 function hasUnsafeCredentialName(value: string): boolean {
-  return value
-    .split(/[^A-Za-z0-9_]+/)
-    .filter(Boolean)
-    .some((token) => {
-      if (token !== token.toUpperCase()) return false;
+  const tokens = value.split(/[^A-Za-z0-9_-]+/).filter(Boolean);
+  for (const token of tokens) {
+    // Field-style names (password, cookie, privateKey, ...). Bare "auth" is too common in product copy.
+    if (isSensitiveKey(token) && token.toLowerCase() !== "auth") return true;
 
+    if (token === token.toUpperCase()) {
       const parts = token.split("_").filter(Boolean);
       if (parts.some((part) => part === "SECRET" || part === "TOKEN" || part === "PASSWORD")) {
         return true;
       }
+      if (parts.includes("KEY") && parts.some((part) => part === "API" || part === "AUTH" || part === "ACCESS")) {
+        return true;
+      }
+    }
 
-      return parts.includes("KEY") && parts.some((part) => part === "API" || part === "AUTH" || part === "ACCESS");
-    });
+    const flagName = token.replace(/^--?/, "");
+    if (
+      /^(?:password|passwd|pass|token|secret|api[-_]?key|access[-_]?key|private[-_]?key|authorization|auth-token|cookie|credentials?)$/i.test(
+        flagName
+      )
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function cleanSlot(value: string): string {

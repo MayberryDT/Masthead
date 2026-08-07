@@ -3,6 +3,7 @@ import type {
   WorkbenchAuthoringV5SessionOutcome
 } from "../../shared/workbenchAuthoringV5.ts";
 import { WORKBENCH_AUTHORING_V5_HARD_REJECT_CODES } from "../../shared/workbenchAuthoringV5.ts";
+import { containsUnredactedSecret } from "./authoringValidation.ts";
 
 const HARD_FINDING_CODES = new Set<string>(WORKBENCH_AUTHORING_V5_HARD_REJECT_CODES);
 
@@ -160,6 +161,12 @@ export function classifyWorkbenchAuthoringV5Session(
     findings.push({
       code: "thin_key_work",
       message: "Key work is too thin to explain the concrete change or investigation."
+    });
+  }
+  if (containsUnredactedSecret(session.fields)) {
+    findings.push({
+      code: "secret_detected",
+      message: "Session enrichment fields contain secret-looking values."
     });
   }
   return {

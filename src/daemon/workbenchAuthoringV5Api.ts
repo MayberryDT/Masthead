@@ -198,6 +198,15 @@ export function routeWorkbenchAuthoringV5Request(
     const operation = packMatch[2];
     if (operation === "inspect") {
       if (request.method !== "GET") return methodNotAllowed();
+      const limitParam = request.url.searchParams.get("limit");
+      let limit: number | undefined;
+      if (limitParam !== null) {
+        const parsed = Number(limitParam);
+        if (!Number.isInteger(parsed) || parsed < 1 || parsed > 250) {
+          throw new Error("authoring_v5_inspect_limit_invalid");
+        }
+        limit = parsed;
+      }
       return {
         body: inspectWorkbenchAuthoringV5Pack(context.db, {
           command: context.authoringCommand,
@@ -205,7 +214,8 @@ export function routeWorkbenchAuthoringV5Request(
           expectedIdentity: expectedIdentityFromHeaders(request.headers),
           packId,
           ...(optionalQuery(request.url, "sessionId") ? { sessionId: optionalQuery(request.url, "sessionId") } : {}),
-          ...(optionalQuery(request.url, "cursor") ? { cursor: optionalQuery(request.url, "cursor") } : {})
+          ...(optionalQuery(request.url, "cursor") ? { cursor: optionalQuery(request.url, "cursor") } : {}),
+          ...(limit !== undefined ? { limit } : {})
         }),
         status: 200
       };

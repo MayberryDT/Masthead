@@ -27,6 +27,9 @@ const REDACTION_WRAPPER_TOKENS = new Set([
   "value"
 ]);
 
+const CLI_SECRET_FLAG_PATTERN =
+  /(?:^|[\s"'`])(?:--?(?:password|passwd|pass|token|secret|api[-_]?key|access[-_]?key|private[-_]?key|authorization|auth-token|cookie|credentials?))\b(?:\s*(?:=|\s)\s*[^\s"'`]+)?/gi;
+
 const REDACTION_PATTERNS: Array<[RegExp, string]> = [
   [/Authorization:\s*Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Authorization: Bearer [SECRET:bearer_token]"],
   [/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [SECRET:bearer_token]"],
@@ -40,7 +43,8 @@ const REDACTION_PATTERNS: Array<[RegExp, string]> = [
   [/\b[0-9a-f]{32,}\b/gi, "[SECRET:hex_token]"],
   [/\b(postgres(?:ql)?:\/\/)[^\s'"`]+/gi, "[SECRET:database_url]"],
   [/Cookie:\s*[^\n\r]+/gi, "Cookie: [SECRET:cookie]"],
-  [/\b(AWS|GOOGLE|OPENAI|ANTHROPIC|SUPABASE|GITHUB)?_?(SECRET|TOKEN|KEY|PASSWORD)[A-Z0-9_]*\s*=\s*[^\s\n\r]+/gi, "[SECRET:env_secret]"]
+  [/\b(AWS|GOOGLE|OPENAI|ANTHROPIC|SUPABASE|GITHUB)?_?(SECRET|TOKEN|KEY|PASSWORD)[A-Z0-9_]*\s*=\s*[^\s\n\r]+/gi, "[SECRET:env_secret]"],
+  [CLI_SECRET_FLAG_PATTERN, " [SECRET:cli_flag]"]
 ];
 
 const SENSITIVE_PATH_PATTERNS = [
@@ -53,6 +57,34 @@ const SENSITIVE_PATH_PATTERNS = [
   /\.sqlite(?:3|)$/i,
   /\.db$/i
 ];
+
+const SENSITIVE_KEY_TOKENS: Record<string, true> = {
+  password: true,
+  passwd: true,
+  pwd: true,
+  secret: true,
+  token: true,
+  cookie: true,
+  cookies: true,
+  credential: true,
+  credentials: true,
+  authorization: true,
+  auth: true,
+  privatekey: true,
+  accesskey: true,
+  apikey: true,
+  sessioncookie: true,
+  setcookie: true
+};
+
+const SENSITIVE_KEY_WITH_KEY_MODIFIERS: Record<string, true> = {
+  api: true,
+  private: true,
+  access: true,
+  secret: true,
+  auth: true,
+  session: true
+};
 
 export function redactText(input: string): string {
   let redacted = input.replace(PRIVATE_KEY_PATTERN, "[SECRET:private_key]");
@@ -94,11 +126,29 @@ function redactionIdentifierTokens(value: string): string[] {
     .match(REDACTION_WORD_PATTERN) ?? [];
 }
 
+export function isSensitiveKey(key: string): boolean {
+  const tokens = redactionIdentifierTokens(key).map((token) => token.toLowerCase());
+  if (tokens.length === 0) return false;
+
+  const compact = tokens.join("");
+  if (SENSITIVE_KEY_TOKENS[compact]) return true;
+  if (tokens.some((token) => SENSITIVE_KEY_TOKENS[token])) return true;
+  if (tokens.includes("key") && tokens.some((token) => SENSITIVE_KEY_WITH_KEY_MODIFIERS[token])) {
+    return true;
+  }
+  return false;
+}
+
 export function redactJsonValue(value: unknown): unknown {
   if (typeof value === "string") return redactText(value);
   if (Array.isArray(value)) return value.map(redactJsonValue);
   if (!value || typeof value !== "object") return value;
-  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, redactJsonValue(entry)]));
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
+      key,
+      isSensitiveKey(key) ? "[SECRET:json_field]" : redactJsonValue(entry)
+    ])
+  );
 }
 
 export function redactCommandOutput(input: string, maxLength = 2000): { text: string; truncated: boolean } {

@@ -1,6 +1,7 @@
 import { isUnsafeText, validateBoardHeadlineFrame, type BoardHeadlineFrame } from "./boardHeadlineFrame.ts";
 import type { BoardHeadlineInput, BoardHeadlineSignal } from "./boardHeadlineInput.ts";
 import { redactText } from "./redaction.ts";
+import { assertSafeProviderUrlShape } from "../shared/safeProviderUrl.ts";
 
 export type OpenAIBoardHeadlineFrameStatus =
   | "llm"
@@ -67,16 +68,26 @@ export async function rewriteBoardHeadlineFrameWithOpenAI(
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
+    assertSafeProviderUrlShape(endpoint);
     const headers: Record<string, string> = { "content-type": "application/json" };
     if (apiKey) headers.authorization = `Bearer ${apiKey}`;
     const response = await fetchImpl(endpoint, {
       method: "POST",
       headers,
       body: JSON.stringify(buildRequestPayload(apiStyle, model, input)),
+      redirect: "manual",
       signal: controller.signal
     });
 
     const latencyMs = Date.now() - startedAt;
+    if (response.status >= 300 && response.status < 400) {
+      return {
+        failureMessage: `${providerLabel} board headline frame request refused HTTP redirect (${response.status}).`,
+        latencyMs,
+        status: "api_error"
+      };
+    }
+
     if (!response.ok) {
       return {
         failureMessage: `${providerLabel} board headline frame request failed with HTTP ${response.status}.`,

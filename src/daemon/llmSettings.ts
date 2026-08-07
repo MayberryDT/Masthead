@@ -4,6 +4,7 @@ import { createAnthropicEnrichmentProvider } from "../enrichment/anthropicProvid
 import { createGeminiEnrichmentProvider } from "../enrichment/geminiProvider.ts";
 import { createOpenAIEnrichmentProvider } from "../enrichment/openAIProvider.ts";
 import type { SessionEnrichmentProvider } from "../enrichment/provider.ts";
+import { assertSafeProviderFetchUrl } from "../shared/safeProviderUrl.ts";
 import type { DaemonConfig } from "./config.ts";
 import { sourcePolicyEnabled } from "./db/sourcePolicyRepository.ts";
 import type { MastheadDatabase } from "./db/sqlite.ts";
@@ -284,13 +285,18 @@ export async function listLlmProviderModels(
   const provider = stored.providers[activeProvider];
   const baseUrl = normalizeBaseUrl(typeof input.baseUrl === "string" ? input.baseUrl : provider.baseUrl ?? definition.baseUrl, activeProvider);
   if (!baseUrl) throw new Error(providerRequirementMessage(activeProvider, definition, "an HTTP base URL"));
+  const safeBaseUrl = await assertSafeProviderFetchUrl(baseUrl);
   const inputApiKey = typeof input.apiKey === "string" && input.apiKey.trim() ? input.apiKey.trim() : undefined;
   const persistedBaseUrl = provider.baseUrl ?? definition.baseUrl;
   const apiKey = inputApiKey ?? (sameBaseUrl(baseUrl, persistedBaseUrl) ? provider.apiKey : undefined);
   const headers: Record<string, string> = { accept: "application/json" };
   if (apiKey) headers.authorization = `Bearer ${apiKey}`;
 
-  const response = await fetchImpl(`${baseUrl}/models`, { headers });
+  const modelsUrl = new URL("models", safeBaseUrl.pathname.endsWith("/") ? safeBaseUrl : new URL(`${safeBaseUrl.href}/`));
+  const response = await fetchImpl(modelsUrl, { headers, redirect: "manual" });
+  if (response.status >= 300 && response.status < 400) {
+    throw new Error(`${definition.label} model discovery refused a redirect response.`);
+  }
   if (!response.ok) throw new Error(`${definition.label} model discovery failed with HTTP ${response.status}.`);
   const body = (await response.json()) as unknown;
   const data = isRecord(body) && Array.isArray(body.data) ? body.data : [];

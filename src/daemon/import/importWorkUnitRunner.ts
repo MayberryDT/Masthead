@@ -39,8 +39,9 @@ export async function runImportWorkUnit(input: {
   const unit = getImportWorkUnit(input.db, input.workUnitId);
   if (!unit) throw new Error(`Import work unit not found: ${input.workUnitId}`);
   if (unit.status === "skipped" || unit.status === "cancelled") return { failed: 0, imported: 0, processed: 0, sessionIds: [] };
-  const sourceAllowed = sourcePolicyExplicitlyEnabled(input.db, "transcript_import", unit.sourceId) ||
-    Boolean(input.approvedSourceIds?.some((sourceId) => sourcePolicyExplicitlyEnabled(input.db, "transcript_import", sourceId)));
+  const sourceAllowed =
+    sourcePolicyExplicitlyEnabled(input.db, "transcript_import", unit.sourceId) ||
+    Boolean(input.approvedSourceIds?.includes(unit.sourceId));
   if (unit.unitKind === "transcript_file" && !sourceAllowed) {
     const observedAt = now();
     const failureGroup = recordImportFailureGroup(input.db, {

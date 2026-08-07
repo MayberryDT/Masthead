@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
@@ -87,8 +87,11 @@ describe("packaged bundle manifest", () => {
     });
   });
 
-  test("writes a deterministic, self-excluding digest over every required packaged payload", async () => {
+  test("writes a deterministic, self-excluding digest over the complete packaged tree", async () => {
     const fixture = await packagedFixture();
+    await mkdir(join(fixture.daemonPath, "dist", "libs"), { recursive: true });
+    await writeFile(join(fixture.daemonPath, "dist", "libs", "runtime-helper.js"), "helper");
+    await writeFile(join(fixture.resourcesPath, "extra-asset.txt"), "asset");
 
     const first = await writePackagedBundleManifest({
       bundleRoot: fixture.bundleRoot,
@@ -109,6 +112,7 @@ describe("packaged bundle manifest", () => {
     expect(first.files.map((entry: { path: string }) => entry.path)).toEqual([
       "masthead",
       "resources/app.asar",
+      "resources/daemon/dist/libs/runtime-helper.js",
       "resources/daemon/dist/src/cli/mastheadctl.js",
       "resources/daemon/dist/src/daemon/main.js",
       "resources/daemon/node",
@@ -118,7 +122,8 @@ describe("packaged bundle manifest", () => {
       "resources/daemon/scripts/masthead-production-cold-activation.js",
       "resources/daemon/scripts/masthead-production.js",
       "resources/daemon/scripts/packaged-bundle-manifest.js",
-      "resources/daemon/scripts/resolve-hook-runtime.js"
+      "resources/daemon/scripts/resolve-hook-runtime.js",
+      "resources/extra-asset.txt"
     ]);
     expect(first.files.map((entry: { path: string }) => entry.path)).not.toContain(
       "resources/release-manifest.json"
@@ -130,43 +135,33 @@ describe("packaged bundle manifest", () => {
     })).resolves.toEqual(first);
   });
 
-  test("verifies the pinned 0.1.13 payload before the private display guard existed", async () => {
+  test("includes every present regular file, including optional helpers when present", async () => {
     const fixture = await packagedFixture();
-    await writeFile(join(fixture.daemonPath, "release.json"), `${JSON.stringify({
-      gitSha: "b".repeat(40),
-      version: "0.1.13"
-    }, null, 2)}\n`);
     await rm(join(fixture.daemonPath, "scripts", "masthead-private-display.js"));
 
-    const manifest = await writePackagedBundleManifest({
+    const withoutOptional = await writePackagedBundleManifest({
       bundleRoot: fixture.bundleRoot,
       executablePath: join(fixture.bundleRoot, "masthead"),
       resourcesPath: fixture.resourcesPath
     });
-
-    expect(manifest.files.map((entry: { path: string }) => entry.path)).not.toContain(
+    expect(withoutOptional.files.map((entry: { path: string }) => entry.path)).not.toContain(
       "resources/daemon/scripts/masthead-private-display.js"
     );
     await expect(verifyPackagedBundleManifest({
       bundleRoot: fixture.bundleRoot,
       executablePath: join(fixture.bundleRoot, "masthead"),
       resourcesPath: fixture.resourcesPath
-    })).resolves.toEqual(manifest);
-  });
+    })).resolves.toEqual(withoutOptional);
 
-  test("rejects a 0.1.14 payload without the private display guard", async () => {
-    const fixture = await packagedFixture();
-    await writeFile(join(fixture.daemonPath, "release.json"), `${JSON.stringify({
-      gitSha: "c".repeat(40),
-      version: "0.1.14"
-    }, null, 2)}\n`);
-    await rm(join(fixture.daemonPath, "scripts", "masthead-private-display.js"));
-
-    await expect(writePackagedBundleManifest({
+    await writeFile(join(fixture.daemonPath, "scripts", "masthead-private-display.js"), "private display");
+    const withOptional = await writePackagedBundleManifest({
       bundleRoot: fixture.bundleRoot,
       executablePath: join(fixture.bundleRoot, "masthead"),
       resourcesPath: fixture.resourcesPath
-    })).rejects.toMatchObject({ code: "ENOENT" });
+    });
+    expect(withOptional.files.map((entry: { path: string }) => entry.path)).toContain(
+      "resources/daemon/scripts/masthead-private-display.js"
+    );
   });
 
   test.each(["masthead-hook.js", "resolve-hook-runtime.js"])("rejects tampered executable hook helper %s", async (script) => {
@@ -184,7 +179,7 @@ describe("packaged bundle manifest", () => {
     })).rejects.toThrow("does not match its content manifest");
   });
 
-  test("rejects a changed required file and an unlisted daemon dist file", async () => {
+  test("rejects a changed required file and an unexpected tree file after sealing", async () => {
     const fixture = await packagedFixture();
     await writePackagedBundleManifest({
       bundleRoot: fixture.bundleRoot,
@@ -206,6 +201,31 @@ describe("packaged bundle manifest", () => {
       executablePath: join(fixture.bundleRoot, "masthead"),
       resourcesPath: fixture.resourcesPath
     })).rejects.toThrow("does not match its content manifest");
+
+    await writeFile(join(fixture.resourcesPath, "unexpected-root-asset.bin"), "surprise");
+    await expect(verifyPackagedBundleManifest({
+      bundleRoot: fixture.bundleRoot,
+      executablePath: join(fixture.bundleRoot, "masthead"),
+      resourcesPath: fixture.resourcesPath
+    })).rejects.toThrow("does not match its content manifest");
+  });
+
+  test("rejects symbolic links in the packaged tree", async () => {
+    const fixture = await packagedFixture();
+    await symlink("/tmp", join(fixture.daemonPath, "dist", "escape-dir"));
+    await expect(writePackagedBundleManifest({
+      bundleRoot: fixture.bundleRoot,
+      executablePath: join(fixture.bundleRoot, "masthead"),
+      resourcesPath: fixture.resourcesPath
+    })).rejects.toThrow("symbolic link");
+
+    await rm(join(fixture.daemonPath, "dist", "escape-dir"), { force: true });
+    await symlink("/etc/passwd", join(fixture.daemonPath, "scripts", "escape-file.js"));
+    await expect(writePackagedBundleManifest({
+      bundleRoot: fixture.bundleRoot,
+      executablePath: join(fixture.bundleRoot, "masthead"),
+      resourcesPath: fixture.resourcesPath
+    })).rejects.toThrow("symbolic link");
   });
 
   test("rejects release metadata that no longer matches the manifest identity", async () => {

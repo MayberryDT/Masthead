@@ -1,9 +1,19 @@
+import { homedir } from "node:os";
 import { join } from "node:path";
 import type { DiscoveryContext } from "../types.ts";
 import type { AdapterPathCandidate } from "../pathTypes.ts";
 
 export function opencodeCandidatePaths(context: DiscoveryContext): AdapterPathCandidate[] {
-  const roots = [process.env.MASTHEAD_OPENCODE_HOME ?? process.env.OPENCODE_HOME, join(context.homeDir, ".opencode"), join(context.homeDir, ".local", "share", "opencode"), join(context.homeDir, ".config", "opencode")].filter(Boolean) as string[];
+  // Redirected/test homes must stay under context.homeDir and never escape via OPENCODE_HOME.
+  const envHome = context.homeDir === homedir()
+    ? process.env.MASTHEAD_OPENCODE_HOME ?? process.env.OPENCODE_HOME
+    : undefined;
+  const roots = [
+    envHome,
+    join(context.homeDir, ".opencode"),
+    join(context.homeDir, ".local", "share", "opencode"),
+    join(context.homeDir, ".config", "opencode")
+  ].filter(Boolean) as string[];
   return roots.flatMap((relativePath): AdapterPathCandidate[] => [
     {
       confidence: "heuristic",

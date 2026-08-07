@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { access, lstat, readFile, rename, rm, stat } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { backup, DatabaseSync } from "node:sqlite";
@@ -751,8 +752,11 @@ function readRevisions(db: MastheadDatabase): { logbook: number; workbench: numb
 
 async function fileEvidence(path: string): Promise<FileEvidence> {
   const info = await stat(path);
-  const bytes = await readFile(path);
-  return { sha256: sha256(bytes), sizeBytes: info.size };
+  const digest = createHash("sha256");
+  for await (const chunk of createReadStream(path)) {
+    digest.update(chunk as Buffer);
+  }
+  return { sha256: digest.digest("hex"), sizeBytes: info.size };
 }
 
 function bounds(values: string[]): { from: string; to: string } {
