@@ -178,7 +178,7 @@ describe("Workbench authoring HTTP API", () => {
     expect(daemon.database.prepare(
       "SELECT COUNT(*) AS count FROM workbench_activity WHERE related_run_id = ? AND event_type = 'authoring_request_created'"
     ).get(requestId)).toEqual({ count: 3_000 });
-  }, 60_000);
+  });
 
   test("fails preparation terminally without exposing a request when no frozen selection member is eligible", async () => {
     const { baseUrl, daemon } = await startTestDaemon();
