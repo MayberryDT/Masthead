@@ -14,7 +14,7 @@ Keep these true:
 - Local SQLite is canonical; harness files remain owned by their tools.
 - Core use does not require a Masthead cloud account.
 
-Read [README.md](README.md), [docs/OPEN_SOURCE.md](docs/OPEN_SOURCE.md), and [openwiki/quickstart.md](openwiki/quickstart.md) before large changes. UI work follows [design.md](design.md). Domain language lives in [CONTEXT.md](CONTEXT.md).
+Read [README.md](README.md), [docs/OPEN_SOURCE.md](docs/OPEN_SOURCE.md), and [docs/openwiki/quickstart.md](docs/openwiki/quickstart.md) before large changes. UI work follows [docs/internal/design.md](docs/internal/design.md). Domain language lives in [docs/internal/CONTEXT.md](docs/internal/CONTEXT.md).
 
 ## What we welcome
 

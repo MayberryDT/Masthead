@@ -39,6 +39,6 @@ The authoritative product contract is `docs/reference/sources-v2.md`.
 - Import-centric Sources UI and first-run copy are retired or moved to Workbench.
 - Daemon history adapters and import APIs may remain for Workbench; they are not Sources V2 UX.
 - Live connector install status must distinguish installed vs ready vs needs host action.
-- `design.md` Sources archetype becomes connector rows + enablement, not import jobs.
+- `docs/internal/design.md` Sources archetype becomes connector rows + enablement, not import jobs.
 - ADR 0008 remains valid for bounded local scan and harness catalog awareness; its import-onboarding framing is superseded for Sources UI by this ADR and Sources V2.
 - ADR 0009 remains valid for Workbench/Logbook; Sources no longer presents import progress as its primary job.

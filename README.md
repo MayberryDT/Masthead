@@ -110,7 +110,7 @@ Tutorials:
 
 - [First run / Codex import](docs/tutorials/first-run-codex-import.md)
 - [Import Codex history](docs/how-to/import-codex-history.md)
-- [OpenWiki quickstart](openwiki/quickstart.md)
+- [OpenWiki quickstart](docs/openwiki/quickstart.md)
 
 ## Status
 
@@ -124,6 +124,8 @@ See [docs/OPEN_SOURCE.md](docs/OPEN_SOURCE.md).
 
 ## Project docs
 
+**Public**
+
 - [Roadmap](ROADMAP.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security](SECURITY.md)
@@ -131,9 +133,16 @@ See [docs/OPEN_SOURCE.md](docs/OPEN_SOURCE.md).
 - [Code of Conduct](CODE_OF_CONDUCT.md)
 - [Changelog](CHANGELOG.md)
 - [Open source expectations](docs/OPEN_SOURCE.md)
-- [OpenWiki](openwiki/quickstart.md) — product map for humans and agents
-- [design.md](design.md) — UI design source of truth
-- [CONTEXT.md](CONTEXT.md) — domain vocabulary
+- [Architecture decisions](docs/adr/)
+- [How-tos & tutorials](docs/how-to/) · [Tutorials](docs/tutorials/)
+- [Reference](docs/reference/)
+
+**For contributors & agents**
+
+- [Product map (OpenWiki)](docs/openwiki/quickstart.md)
+- [Design system](docs/internal/design.md)
+- [Domain vocabulary](docs/internal/CONTEXT.md)
+- [Agent instructions](docs/internal/AGENTS.md)
 
 ## License
 

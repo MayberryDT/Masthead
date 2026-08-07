@@ -2,7 +2,7 @@
 
 **Status:** accepted product contract  
 **Decision record:** [ADR 0010](../adr/0010-sources-v2-live-connect-only.md)  
-**Design source:** `design.md` (Sources surface archetype)  
+**Design source:** `docs/internal/design.md` (Sources surface archetype)  
 **Supersedes for the normal Sources UI:** import-centric framing in older Sources docs. The app-level
 first-run coordinator is a deliberate exception: after live setup it may hand off a one-time history
 import to Workbench and show that durable job through reconciliation.
@@ -403,8 +403,8 @@ Honest sentence for detail panels:
 |---|---|
 | `docs/reference/sources-v2.md` | **This contract — Sources product source of truth** |
 | `docs/adr/0010-sources-v2-live-connect-only.md` | Decision record |
-| `design.md` | Visual/archetype source of truth |
-| `openwiki/sources.md` | Agent-facing summary of V2 |
+| `docs/internal/design.md` | Visual/archetype source of truth |
+| `docs/openwiki/sources.md` | Agent-facing summary of V2 |
 | `docs/reference/sources.md` | Legacy reference; import sections are historical / Workbench-bound |
 | `docs/adr/0008-…` | Bounded scan + catalog still apply; import onboarding UI superseded |
 | `docs/adr/0009-…` | Workbench/Logbook ownership unchanged |

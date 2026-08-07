@@ -3,7 +3,7 @@
 import { readFile } from "node:fs/promises";
 
 const requiredTerms = ["session data layer", "Logbook", "MCP", "harness-neutral"];
-const sourceFiles = ["docs/archive/prd.md", "design.md", "README.md", "AGENTS.md"];
+const sourceFiles = ["docs/archive/prd.md", "docs/internal/design.md", "README.md", "docs/internal/AGENTS.md"];
 const forbiddenOnlyPatterns = [
   /\bprimarily an observability console\b/i,
   /\bonly an observability console\b/i,

@@ -25,9 +25,9 @@ Historical specs and research sit under [docs/archive/](archive/) and are **not*
 
 Agent-oriented language for contributors who work in-tree:
 
-- [CONTEXT.md](../CONTEXT.md)
-- [AGENTS.md](../AGENTS.md)
-- [design.md](../design.md)
+- [CONTEXT.md](internal/CONTEXT.md)
+- [AGENTS.md](internal/AGENTS.md)
+- [design.md](internal/design.md)
 
 ## What maintainers still own
 
@@ -39,4 +39,4 @@ Agent-oriented language for contributors who work in-tree:
 
 - Bugs and feature requests: GitHub Issues
 - Security: GitHub Security Advisories ([SECURITY.md](../SECURITY.md))
-- Product map: [openwiki/quickstart.md](../openwiki/quickstart.md)
+- Product map: [openwiki/quickstart.md](openwiki/quickstart.md)

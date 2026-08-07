@@ -35,3 +35,11 @@ Thumbs.db
 npm-debug.log*
 coverage/
 .nyc_output/
+
+# Workshop / agent harness residue (not product surface)
+.agents/
+.superpowers/
+.deepsec/
+skills-lock.json
+prototype/
+mockups/

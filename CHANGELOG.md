@@ -6,6 +6,12 @@ Versions follow the `package.json` source of truth.
 
 ## [0.1.15] — 2026-08-06
 
+### Changed
+
+- Public repository tree prune: removed agent-skill harness (`.agents`, `skills-lock.json`), design mockups, throwaway prototypes, Superpowers plans, nested deepsec project, and other workshop residue from the default tree.
+- Moved agent operating docs to `docs/internal/` and product map to `docs/openwiki/`; dogfood acceptance notes to `docs/archive/acceptance/`.
+- Root keeps a short `AGENTS.md` pointer so coding agents still find instructions.
+
 ### Added
 
 - macOS Electron packaging path: DMG and zip makers, relocatable official Node bundling when the host Node is non-relocatable (e.g. Homebrew).

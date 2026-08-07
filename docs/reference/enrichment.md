@@ -21,7 +21,7 @@ Review-hold sessions never enter the handoff selection. Operators must accept th
 them to Not Added before they can join a later request. **Select-all for authoring / Copy Agent
 Prompt is compile-ready only** — review-only rows are left out of the V5 request (package-path size
 alone is not the authorable count). See
-[Logbook and Workbench](../../openwiki/logbook-and-workbench.md#workbench-quality-exits-three-way).
+[Logbook and Workbench](../../docs/openwiki/logbook-and-workbench.md#workbench-quality-exits-three-way).
 
 ## Packs and complete-selection obligation
 

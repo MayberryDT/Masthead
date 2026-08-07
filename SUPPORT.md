@@ -35,5 +35,5 @@ Private vulnerability reports only — [SECURITY.md](SECURITY.md).
 ## Product map
 
 - [README.md](README.md)
-- [openwiki/quickstart.md](openwiki/quickstart.md)
+- [docs/openwiki/quickstart.md](docs/openwiki/quickstart.md)
 - [ROADMAP.md](ROADMAP.md)

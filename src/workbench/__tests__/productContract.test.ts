@@ -6,13 +6,13 @@ import { describe, expect, test } from "vitest";
 describe("artifact authoring product contract", () => {
   test("documents V5 authoring as the sole live contract and retires V1-V4 writes", async () => {
     const active = await Promise.all([
-      "CONTEXT.md",
+      "docs/internal/CONTEXT.md",
       "README.md",
-      "design.md",
+      "docs/internal/design.md",
       "docs/archive/prd.md",
-      "openwiki/quickstart.md",
-      "openwiki/logbook-and-workbench.md",
-      "openwiki/data-and-integrations.md",
+      "docs/openwiki/quickstart.md",
+      "docs/openwiki/logbook-and-workbench.md",
+      "docs/openwiki/data-and-integrations.md",
       "docs/reference/enrichment.md",
       "docs/reference/session-dossier.md",
       "docs/reference/artifact-first-logbook-cutover.md",

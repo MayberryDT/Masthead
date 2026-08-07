@@ -35,5 +35,5 @@ This partially supersedes the Logbook definition in ADR 0009 (“Logbook shows o
 - Logbook UI, search APIs, and MCP default tools revolve around artifacts, not session tables.
 - Workbench CLI gains multi-session evidence packets, provenance declaration, join rationale, and per-kind publish/N/A/contribution states.
 - Session dossier remains the session-scoped spine; multi-session kinds carry the research-validated engineering knowledge wedge.
-- ADR 0009’s “published session” Logbook eligibility language should be read as historical; prefer compile-ready / automatic work resolved / published artifact from `CONTEXT.md`.
+- ADR 0009’s “published session” Logbook eligibility language should be read as historical; prefer compile-ready / automatic work resolved / published artifact from `docs/internal/CONTEXT.md`.
 - Signature-bounded expansion is V1 policy and may be revised after production dogfood.
