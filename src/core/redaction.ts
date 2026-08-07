@@ -122,7 +122,9 @@ function isRedactionWrapperLabel(label: string, wrapperTokens: Set<string>): boo
 function redactionIdentifierTokens(value: string): string[] {
   return value
     .replace(/([\p{Ll}\p{N}])(\p{Lu})/gu, "$1 $2")
-    .replace(/(\p{Lu})(\p{Lu}\p{Ll})/gu, "$1 $2")
+    // Only split acronym runs of 2+ capitals (HTTPSConnection → HTTPS Connection).
+    // A single leading capital before another capital+lower (OAuth) must stay one token.
+    .replace(/(\p{Lu}{2,})(\p{Lu}\p{Ll})/gu, "$1 $2")
     .match(REDACTION_WORD_PATTERN) ?? [];
 }
 
