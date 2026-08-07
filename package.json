@@ -106,7 +106,7 @@
     "@types/node": "24.10.2",
     "@types/react": "19.2.7",
     "@types/react-dom": "19.2.3",
-    "electron": "^42.8.1",
+    "electron": "^43.2.0",
     "happy-dom": "^20.10.6",
     "typescript": "5.9.3",
     "vite": "8.0.16",
