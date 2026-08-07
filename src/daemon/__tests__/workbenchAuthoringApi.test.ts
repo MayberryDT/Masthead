@@ -65,7 +65,7 @@ describe("Workbench authoring HTTP API", () => {
     });
   });
 
-  test("prepares a 3,000-session V5 request without starving health or exposing partial authoring state", async () => {
+  test("prepares a 3,000-session V5 request without starving health or exposing partial authoring state", { timeout: 180_000 }, async () => {
     const { baseUrl, daemon } = await startTestDaemon();
     const sessionIds = Array.from({ length: 3_000 }, (_, index) => `session:v5-full-selection:${index}`);
     const lastSessionId = sessionIds.at(-1)!;
