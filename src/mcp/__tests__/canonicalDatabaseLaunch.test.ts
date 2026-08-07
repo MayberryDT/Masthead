@@ -48,7 +48,7 @@ describe("canonical database MCP launch", () => {
       entry,
       [
         "if (!process.env.MASTHEAD_DB_PATH) { console.error('missing database'); process.exit(1); }",
-        "const tools = ['get_artifact','get_masthead_coverage','get_project_history','get_session','get_session_excerpt','get_session_transcript','list_project_sessions','search_artifacts','search_sessions'];",
+        "const tools = ['search_knowledge','list_knowledge','get_knowledge','get_provenance','get_evidence_excerpt','get_evidence_transcript','get_corpus_stats','search_artifacts','get_artifact','search_sessions','get_session','get_session_excerpt','get_session_transcript','list_project_sessions','get_project_history','get_masthead_coverage'];",
         "let buffer = '';",
         "process.stdin.setEncoding('utf8');",
         "process.stdin.on('data', (chunk) => {",
@@ -82,8 +82,8 @@ describe("canonical database MCP launch", () => {
     ).resolves.toMatchObject({
       ok: true,
       serverInfo: { name: "masthead", version: "test" },
-      toolCount: 9,
-      toolNames: expect.arrayContaining(["search_sessions"]),
+      toolCount: 16,
+      toolNames: expect.arrayContaining(["search_knowledge", "search_sessions"]),
       validation: {
         commandExists: true,
         databaseMatches: true,

@@ -580,7 +580,12 @@ export function storeGuidedDraftReviewInTransaction(
   if (inactiveMembership) throw new Error("guided_assignment_not_active");
   const revision = assignment.currentDraftRevision + 1;
   const accepted = !input.findings.some(({ severity }) => severity === "error");
-  const status: GuidedAuthoringAssignmentDto["status"] = accepted ? "ready_to_finish" : "needs_revision";
+  // V4 canary packs stage for operator approval; non-canary (and V5) go straight to finish-ready.
+  const status: GuidedAuthoringAssignmentDto["status"] = !accepted
+    ? "needs_revision"
+    : assignment.canary === 1
+      ? "staged_canary"
+      : "ready_to_finish";
   const now = new Date().toISOString();
   db.prepare(
     `INSERT INTO guided_authoring_draft_reviews
@@ -609,6 +614,13 @@ export function storeGuidedDraftReviewInTransaction(
     assignment.evidenceRevision,
     assignment.currentDraftRevision
   );
+  if (accepted && assignment.canary === 1) {
+    db.prepare(
+      `UPDATE guided_authoring_requests
+       SET status = 'awaiting_canary_approval', updated_at = ?
+       WHERE request_id = ? AND status IN ('open', 'awaiting_canary_approval')`
+    ).run(now, assignment.requestId);
+  }
   return requireGuidedAssignment(db, assignment.assignmentId);
 }
 
@@ -820,7 +832,11 @@ export function transitionGuidedAssignmentAfterReceiptInTransaction(
   const request = getGuidedAuthoringRequest(db, assignment.requestId);
   assertGuidedAssignmentReadyForCompletion(db, assignment, request);
   validateGuidedAssignmentReceipt(db, assignment, request, storedReceipt);
-  const expectedRequestStatus = "active";
+  // Canary packs complete from awaiting_canary_approval; later packs from active.
+  const expectedRequestStatus =
+    assignment.canary === 1 && request?.status === "awaiting_canary_approval"
+      ? "awaiting_canary_approval"
+      : "active";
   const now = storedReceipt.completedAt;
   const completed = db.prepare(
     `UPDATE guided_authoring_assignments
@@ -904,8 +920,30 @@ function assertGuidedAssignmentReadyForCompletion(
     } | undefined;
   const acceptedDraftIsCurrent = acceptedDraft?.accepted === 1 &&
     acceptedDraft.evidenceRevision === assignment.evidenceRevision;
-  const ready = assignment.status === "ready_to_finish" && acceptedDraftIsCurrent;
-  if (!ready) throw new Error("guided_assignment_not_ready");
+  if (!acceptedDraftIsCurrent || assignment.acceptedDraftRevision === null) {
+    throw new Error("guided_assignment_not_ready");
+  }
+
+  // V4 canary: finish from staged_canary after operator approval of the accepted draft.
+  if (assignment.canary === 1) {
+    const approvedReview = db.prepare(
+      `SELECT decision FROM guided_authoring_operator_reviews
+       WHERE assignment_id = ? AND draft_revision = ? AND decision = 'approved'`
+    ).get(assignment.assignmentId, assignment.acceptedDraftRevision) as { decision: string } | undefined;
+    if (
+      assignment.status !== "staged_canary" ||
+      !approvedReview ||
+      request?.status !== "awaiting_canary_approval"
+    ) {
+      throw new Error("guided_assignment_not_ready");
+    }
+    return;
+  }
+
+  // Non-canary / V5: finish from ready_to_finish with a current accepted draft.
+  if (assignment.status !== "ready_to_finish") {
+    throw new Error("guided_assignment_not_ready");
+  }
 }
 
 function validateGuidedAssignmentReceipt(
