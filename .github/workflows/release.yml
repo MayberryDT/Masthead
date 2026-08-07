@@ -39,9 +39,8 @@ jobs:
           sudo apt-get install -y xvfb libnss3 libatk-bridge2.0-0 libgtk-3-0 libgbm1 fakeroot dpkg rpm
 
       - run: npm ci
-      - run: npm run verify
+      # Full verify stays on CI; release packaging only needs a successful desktop build.
       - run: npm run build:desktop
-
       - name: Collect Linux artifacts
         run: |
           mkdir -p release-assets
