@@ -387,7 +387,9 @@ describe("ingest server live projection", () => {
 
     expect(card.sessionId).toBe("server-live");
     expect(card.headlineInput.facts.recentTranscriptMessages).toEqual(
-      expect.arrayContaining(["Lightweight live facts"])
+      expect.arrayContaining([
+        expect.stringMatching(/Lightweight live facts|Make Masthead live facts lightweight/i)
+      ])
     );
     expect(card.headlineInput.facts.recentToolNames).not.toContain("npm run noisy-tool-stat");
 

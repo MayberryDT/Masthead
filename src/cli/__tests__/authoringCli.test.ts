@@ -169,9 +169,10 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
   test("advertises only daemon authoring commands plus explicit wipe maintenance", async () => {
     const top = await runMastheadCli(["--help"], { env: {} });
     expect(top.stdout).toContain("mastheadctl workbench");
-    expect(top.stdout).toContain("workbench author start");
+    // Nested author commands are listed under `workbench --help`, not top-level help.
 
     const result = await runMastheadCli(["workbench", "--help"], { env: {} });
+    expect(result.stdout).toContain("workbench author start");
     for (const command of [
       "author bootstrap", "author start", "author inspect", "author scaffold", "author save", "author finish",
       "author status", "author receipt",

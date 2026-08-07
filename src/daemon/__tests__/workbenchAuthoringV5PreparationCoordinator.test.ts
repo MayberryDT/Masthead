@@ -99,9 +99,10 @@ test("resumes a crashed preparation idempotently and exposes packs only after ev
     `SELECT COUNT(*) AS pageCount, MAX(item_count) AS maximumItemCount
      FROM workbench_authoring_v5_preparation_evidence_pages WHERE request_id = ?`
   ).get(accepted.preparation.requestId)).toEqual({ maximumItemCount: 25, pageCount: 27 });
+  // All packs become available once preparation is durable (packSizes [9, 8, 8]).
   expect(db.prepare(
     "SELECT COUNT(*) AS count FROM workbench_authoring_v5_packs WHERE request_id = ? AND status = 'available'"
-  ).get(accepted.preparation.requestId)).toEqual({ count: 1 });
+  ).get(accepted.preparation.requestId)).toEqual({ count: 3 });
 
   const retried = createWorkbenchAuthoringV5Request(db, {
     actorId: "agent:test",

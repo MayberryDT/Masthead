@@ -1,0 +1,836 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Masthead — Sidebar Bottom Directions</title>
+  <style>
+    @font-face {
+      font-family: "IBM Plex Sans";
+      src: url("../node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-400-normal.woff2") format("woff2");
+      font-style: normal;
+      font-weight: 400;
+      font-display: swap;
+    }
+
+    @font-face {
+      font-family: "IBM Plex Sans";
+      src: url("../node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-600-normal.woff2") format("woff2");
+      font-style: normal;
+      font-weight: 600;
+      font-display: swap;
+    }
+
+    @font-face {
+      font-family: "IBM Plex Mono";
+      src: url("../node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-400-normal.woff2") format("woff2");
+      font-style: normal;
+      font-weight: 400;
+      font-display: swap;
+    }
+
+    :root {
+      --canvas: #020b12;
+      --sidebar: #041522;
+      --surface: #071b28;
+      --surface-raised: #092231;
+      --control: #061925;
+      --line: rgba(194, 221, 241, 0.13);
+      --line-strong: rgba(196, 226, 248, 0.22);
+      --blue: #2ea7ff;
+      --blue-soft: rgba(45, 168, 255, 0.15);
+      --green: #36d869;
+      --yellow: #ffcf36;
+      --red: #ff655d;
+      --ink: #f6fbff;
+      --body: #d6e4ef;
+      --mute: #91a8ba;
+      --ash: #61798e;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      color: var(--body);
+      background:
+        radial-gradient(circle at 78% -20%, rgba(46, 167, 255, 0.08), transparent 34rem),
+        linear-gradient(180deg, #020a10 0%, var(--canvas) 100%);
+      font-family: "IBM Plex Sans", system-ui, sans-serif;
+    }
+
+    body::before {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      content: "";
+      opacity: 0.16;
+      background-image: url("../public/textures/anodized-noise.svg");
+      background-size: 260px 260px;
+      mix-blend-mode: screen;
+    }
+
+    .page {
+      width: min(1360px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 44px 0 72px;
+    }
+
+    .page-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(280px, 420px);
+      gap: 36px;
+      align-items: end;
+      margin-bottom: 34px;
+      padding-bottom: 26px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .eyebrow,
+    .option-number,
+    .footer-kicker,
+    .mini-label,
+    .nav-count,
+    .artifact-kind {
+      font-family: "IBM Plex Mono", monospace;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+    }
+
+    .eyebrow {
+      margin: 0 0 10px;
+      color: var(--blue);
+      font-size: 11px;
+    }
+
+    h1 {
+      max-width: 760px;
+      margin: 0;
+      color: var(--ink);
+      font-size: clamp(30px, 4.2vw, 58px);
+      font-weight: 600;
+      letter-spacing: -0.035em;
+      line-height: 0.98;
+    }
+
+    .page-head > p {
+      margin: 0;
+      color: var(--mute);
+      font-size: 14px;
+      line-height: 1.65;
+    }
+
+    .directions {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 24px;
+    }
+
+    .direction {
+      position: relative;
+      min-width: 0;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: linear-gradient(180deg, rgba(7, 27, 40, 0.84), rgba(3, 16, 25, 0.94));
+      box-shadow: 0 18px 42px rgba(0, 0, 0, 0.22);
+    }
+
+    .direction:last-child {
+      grid-column: 1 / -1;
+    }
+
+    .direction-head {
+      display: grid;
+      grid-template-columns: 38px 1fr;
+      gap: 12px;
+      align-items: start;
+      padding: 17px 18px 16px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(5, 23, 36, 0.74);
+    }
+
+    .option-number {
+      display: grid;
+      width: 34px;
+      height: 34px;
+      place-items: center;
+      border: 1px solid rgba(46, 167, 255, 0.32);
+      border-radius: 4px;
+      color: var(--blue);
+      background: var(--blue-soft);
+      font-size: 11px;
+    }
+
+    .direction h2 {
+      margin: 0;
+      color: var(--ink);
+      font-size: 17px;
+      font-weight: 600;
+      line-height: 1.2;
+    }
+
+    .direction-head p {
+      margin: 5px 0 0;
+      color: var(--mute);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .preview-stage {
+      display: grid;
+      min-height: 660px;
+      place-items: center;
+      padding: 28px;
+      background:
+        linear-gradient(rgba(194, 221, 241, 0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(194, 221, 241, 0.025) 1px, transparent 1px),
+        #020d15;
+      background-size: 26px 26px;
+    }
+
+    .direction:last-child .preview-stage {
+      min-height: 640px;
+    }
+
+    .sidebar {
+      position: relative;
+      display: flex;
+      width: 248px;
+      height: 604px;
+      flex-direction: column;
+      overflow: hidden;
+      border: 1px solid rgba(144, 187, 215, 0.15);
+      border-radius: 7px;
+      color: var(--body);
+      background: var(--sidebar);
+      box-shadow:
+        0 24px 60px rgba(0, 0, 0, 0.42),
+        inset -1px 0 rgba(151, 198, 226, 0.05);
+    }
+
+    .sidebar::after {
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+      content: "";
+      opacity: 0.11;
+      background-image: url("../public/textures/anodized-noise.svg");
+      background-size: 220px 220px;
+      mix-blend-mode: screen;
+    }
+
+    .brand,
+    .nav,
+    .sidebar-bottom {
+      position: relative;
+      z-index: 1;
+    }
+
+    .brand {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      height: 74px;
+      padding: 15px 17px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .brand img {
+      width: 31px;
+      height: 31px;
+      object-fit: contain;
+    }
+
+    .brand strong {
+      display: block;
+      color: var(--ink);
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+
+    .brand small {
+      display: block;
+      margin-top: 2px;
+      color: var(--ash);
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 9px;
+    }
+
+    .nav {
+      display: grid;
+      gap: 3px;
+      padding: 15px 10px;
+    }
+
+    .nav-item {
+      position: relative;
+      display: grid;
+      grid-template-columns: 25px 1fr auto;
+      gap: 9px;
+      align-items: center;
+      min-height: 37px;
+      border-radius: 4px;
+      padding: 0 10px;
+      color: #9fb5c6;
+      font-size: 12px;
+    }
+
+    .nav-item.active {
+      color: #e5f3fc;
+      background: rgba(46, 167, 255, 0.11);
+    }
+
+    .nav-item.active::before {
+      position: absolute;
+      inset: 6px auto 6px -10px;
+      width: 2px;
+      border-radius: 0 2px 2px 0;
+      content: "";
+      background: var(--blue);
+    }
+
+    .nav-icon {
+      display: grid;
+      width: 22px;
+      height: 22px;
+      place-items: center;
+      color: #8ca7ba;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 13px;
+    }
+
+    .active .nav-icon { color: #d8efff; }
+
+    .nav-count {
+      min-width: 24px;
+      border-radius: 4px;
+      padding: 3px 5px;
+      color: #dff4ff;
+      background: #235f94;
+      font-size: 9px;
+      text-align: center;
+    }
+
+    .sidebar-bottom {
+      margin-top: auto;
+      padding: 0 14px 14px;
+    }
+
+    .footer-kicker {
+      margin: 0;
+      color: var(--ash);
+      font-size: 9px;
+      font-weight: 600;
+    }
+
+    .footer-card {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(104, 164, 198, 0.18);
+      border-radius: 6px;
+      background: rgba(8, 29, 43, 0.86);
+      box-shadow: 0 3px 12px rgba(0, 0, 0, 0.18);
+      padding: 13px;
+    }
+
+    .footer-card::before {
+      position: absolute;
+      inset: 0 0 auto;
+      height: 2px;
+      content: "";
+      background: var(--blue);
+      opacity: 0.75;
+    }
+
+    .footer-card h3 {
+      margin: 7px 0 0;
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 600;
+      line-height: 1.28;
+    }
+
+    .footer-card p {
+      margin: 5px 0 0;
+      color: var(--mute);
+      font-size: 10px;
+      line-height: 1.4;
+    }
+
+    .mini-action {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 11px;
+      border-top: 1px solid var(--line);
+      padding-top: 9px;
+      color: #bfe6ff;
+      font-size: 10px;
+      font-weight: 600;
+    }
+
+    .mini-action span:last-child {
+      color: var(--blue);
+      font-family: "IBM Plex Mono", monospace;
+    }
+
+    /* 01 — attention plate */
+    .attention-main {
+      display: grid;
+      grid-template-columns: 1fr 48px;
+      gap: 10px;
+      align-items: end;
+      margin-top: 9px;
+    }
+
+    .attention-main strong {
+      color: var(--ink);
+      font-size: 30px;
+      font-weight: 500;
+      letter-spacing: -0.05em;
+      line-height: 0.9;
+    }
+
+    .attention-main span {
+      color: var(--mute);
+      font-size: 10px;
+      line-height: 1.25;
+    }
+
+    .attention-bars {
+      display: grid;
+      gap: 4px;
+      align-content: end;
+    }
+
+    .attention-bars i {
+      display: block;
+      height: 3px;
+      border-radius: 999px;
+      background: rgba(46, 167, 255, 0.24);
+    }
+
+    .attention-bars i:nth-child(2) { width: 72%; }
+    .attention-bars i:nth-child(3) { width: 42%; background: rgba(255, 207, 54, 0.62); }
+
+    .attention-split {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin-top: 11px;
+    }
+
+    .attention-split div {
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      padding: 7px;
+      background: rgba(3, 16, 25, 0.48);
+    }
+
+    .attention-split strong {
+      display: block;
+      color: #e8f5fc;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 12px;
+    }
+
+    .attention-split span {
+      color: var(--ash);
+      font-size: 9px;
+    }
+
+    /* 02 — artifact ledger */
+    .ledger-total {
+      display: flex;
+      align-items: baseline;
+      gap: 7px;
+      margin-top: 9px;
+    }
+
+    .ledger-total strong {
+      color: var(--ink);
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 27px;
+      font-weight: 400;
+      line-height: 1;
+    }
+
+    .ledger-total span {
+      color: var(--mute);
+      font-size: 10px;
+    }
+
+    .ledger-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1px;
+      overflow: hidden;
+      margin-top: 11px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: var(--line);
+    }
+
+    .ledger-grid div {
+      display: flex;
+      justify-content: space-between;
+      gap: 5px;
+      padding: 7px;
+      color: var(--ash);
+      background: #061722;
+      font-size: 8px;
+    }
+
+    .ledger-grid strong {
+      color: var(--body);
+      font-family: "IBM Plex Mono", monospace;
+      font-weight: 400;
+    }
+
+    /* 03 — flow track */
+    .flow-track {
+      display: grid;
+      gap: 0;
+      margin-top: 12px;
+    }
+
+    .flow-step {
+      position: relative;
+      display: grid;
+      grid-template-columns: 18px 1fr auto;
+      gap: 8px;
+      align-items: center;
+      min-height: 34px;
+      color: var(--mute);
+      font-size: 9px;
+    }
+
+    .flow-step:not(:last-child)::after {
+      position: absolute;
+      top: 25px;
+      bottom: -9px;
+      left: 8px;
+      width: 1px;
+      content: "";
+      background: rgba(46, 167, 255, 0.28);
+    }
+
+    .flow-dot {
+      display: grid;
+      width: 17px;
+      height: 17px;
+      place-items: center;
+      border: 1px solid rgba(46, 167, 255, 0.42);
+      border-radius: 50%;
+      color: var(--blue);
+      background: #061d2b;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 7px;
+    }
+
+    .flow-step strong {
+      color: var(--body);
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 11px;
+      font-weight: 400;
+    }
+
+    .flow-step:last-child .flow-dot {
+      border-color: rgba(54, 216, 105, 0.5);
+      color: var(--green);
+      background: rgba(54, 216, 105, 0.09);
+    }
+
+    /* 04 — readiness relay */
+    .relay-list {
+      display: grid;
+      gap: 1px;
+      overflow: hidden;
+      margin-top: 11px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: var(--line);
+    }
+
+    .relay-row {
+      display: grid;
+      grid-template-columns: 8px 1fr auto;
+      gap: 8px;
+      align-items: center;
+      min-height: 33px;
+      padding: 0 8px;
+      background: #061722;
+      font-size: 9px;
+    }
+
+    .status-light {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 0 3px rgba(54, 216, 105, 0.08);
+    }
+
+    .relay-row.attention .status-light {
+      background: var(--yellow);
+      box-shadow: 0 0 0 3px rgba(255, 207, 54, 0.08);
+    }
+
+    .relay-row span:nth-child(2) { color: var(--body); }
+    .relay-row span:last-child {
+      color: var(--ash);
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 8px;
+    }
+
+    /* 05 — recent continuity */
+    .bookmark-card {
+      border-left: 2px solid var(--blue);
+      border-radius: 0 4px 4px 0;
+      margin-top: 11px;
+      padding: 10px 10px 9px;
+      background: linear-gradient(90deg, rgba(46, 167, 255, 0.11), rgba(3, 16, 25, 0.45));
+    }
+
+    .artifact-kind {
+      color: var(--blue);
+      font-size: 8px;
+    }
+
+    .bookmark-card h3 {
+      margin: 5px 0 0;
+      font-size: 12px;
+      line-height: 1.3;
+    }
+
+    .bookmark-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      margin-top: 8px;
+      color: var(--ash);
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 8px;
+    }
+
+    .reuse-line {
+      display: flex;
+      gap: 7px;
+      align-items: center;
+      margin-top: 9px;
+      color: var(--mute);
+      font-size: 9px;
+    }
+
+    .reuse-line i {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--green);
+    }
+
+    @media (max-width: 860px) {
+      .page-head,
+      .directions { grid-template-columns: 1fr; }
+      .direction:last-child { grid-column: auto; }
+      .page-head { gap: 18px; }
+    }
+
+    @media (max-width: 480px) {
+      .page { width: min(100% - 20px, 1360px); padding-top: 26px; }
+      .preview-stage { padding: 18px 8px; }
+      .direction-head { padding-inline: 14px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="page-head">
+      <div>
+        <p class="eyebrow">Masthead / Sidebar study</p>
+        <h1>What belongs below the menu?</h1>
+      </div>
+      <p>
+        Five static outcomes after removing Usage. The navigation stays constant; each direction gives the lower rail a different product job.
+      </p>
+    </header>
+
+    <section class="directions" aria-label="Five sidebar bottom directions">
+      <article class="direction">
+        <header class="direction-head">
+          <span class="option-number">01</span>
+          <div>
+            <h2>Blue Signal Plate</h2>
+            <p>The space answers: “What should I deal with next?”</p>
+          </div>
+        </header>
+        <div class="preview-stage">
+          <aside class="sidebar" aria-label="Option 1 sidebar">
+            <div class="brand"><img src="../public/assets/masthead-logo-sail.png" alt="" /><span><strong>Masthead</strong><small>v0.1.0</small></span></div>
+            <nav class="nav">
+              <div class="nav-item"><span class="nav-icon">◉</span><span>Now</span><span class="nav-count">2</span></div>
+              <div class="nav-item active"><span class="nav-icon">⌁</span><span>Workbench</span></div>
+              <div class="nav-item"><span class="nav-icon">▤</span><span>Logbook</span></div>
+              <div class="nav-item"><span class="nav-icon">⌘</span><span>Sources</span></div>
+              <div class="nav-item"><span class="nav-icon">⚙</span><span>Settings</span></div>
+            </nav>
+            <div class="sidebar-bottom">
+              <section class="footer-card">
+                <p class="footer-kicker">Next up</p>
+                <div class="attention-main">
+                  <div><strong>3</strong><span> sessions need review</span></div>
+                  <div class="attention-bars"><i></i><i></i><i></i></div>
+                </div>
+                <div class="attention-split">
+                  <div><strong>2</strong><span>Compile-ready</span></div>
+                  <div><strong>1</strong><span>Needs evidence</span></div>
+                </div>
+                <div class="mini-action"><span>Open Workbench</span><span>→</span></div>
+              </section>
+            </div>
+          </aside>
+        </div>
+      </article>
+
+      <article class="direction">
+        <header class="direction-head">
+          <span class="option-number">02</span>
+          <div>
+            <h2>Artifact Ledger Block</h2>
+            <p>The space answers: “What has Masthead produced?”</p>
+          </div>
+        </header>
+        <div class="preview-stage">
+          <aside class="sidebar" aria-label="Option 2 sidebar">
+            <div class="brand"><img src="../public/assets/masthead-logo-sail.png" alt="" /><span><strong>Masthead</strong><small>v0.1.0</small></span></div>
+            <nav class="nav">
+              <div class="nav-item"><span class="nav-icon">◉</span><span>Now</span><span class="nav-count">2</span></div>
+              <div class="nav-item"><span class="nav-icon">⌁</span><span>Workbench</span></div>
+              <div class="nav-item active"><span class="nav-icon">▤</span><span>Logbook</span></div>
+              <div class="nav-item"><span class="nav-icon">⌘</span><span>Sources</span></div>
+              <div class="nav-item"><span class="nav-icon">⚙</span><span>Settings</span></div>
+            </nav>
+            <div class="sidebar-bottom">
+              <section class="footer-card">
+                <p class="footer-kicker">Published knowledge</p>
+                <div class="ledger-total"><strong>42</strong><span>artifacts in Logbook</span></div>
+                <div class="ledger-grid">
+                  <div><span>Dossiers</span><strong>28</strong></div>
+                  <div><span>Runbooks</span><strong>9</strong></div>
+                  <div><span>Decisions</span><strong>3</strong></div>
+                  <div><span>Incidents</span><strong>2</strong></div>
+                </div>
+                <div class="mini-action"><span>Last published 8m ago</span><span>→</span></div>
+              </section>
+            </div>
+          </aside>
+        </div>
+      </article>
+
+      <article class="direction">
+        <header class="direction-head">
+          <span class="option-number">03</span>
+          <div>
+            <h2>Riveted Flow Track</h2>
+            <p>The space shows the product pipeline as one compact trace.</p>
+          </div>
+        </header>
+        <div class="preview-stage">
+          <aside class="sidebar" aria-label="Option 3 sidebar">
+            <div class="brand"><img src="../public/assets/masthead-logo-sail.png" alt="" /><span><strong>Masthead</strong><small>v0.1.0</small></span></div>
+            <nav class="nav">
+              <div class="nav-item"><span class="nav-icon">◉</span><span>Now</span><span class="nav-count">2</span></div>
+              <div class="nav-item active"><span class="nav-icon">⌁</span><span>Workbench</span></div>
+              <div class="nav-item"><span class="nav-icon">▤</span><span>Logbook</span></div>
+              <div class="nav-item"><span class="nav-icon">⌘</span><span>Sources</span></div>
+              <div class="nav-item"><span class="nav-icon">⚙</span><span>Settings</span></div>
+            </nav>
+            <div class="sidebar-bottom">
+              <section class="footer-card">
+                <p class="footer-kicker">Knowledge flow</p>
+                <div class="flow-track">
+                  <div class="flow-step"><span class="flow-dot">01</span><span>Captured sessions</span><strong>17</strong></div>
+                  <div class="flow-step"><span class="flow-dot">02</span><span>In Workbench</span><strong>6</strong></div>
+                  <div class="flow-step"><span class="flow-dot">03</span><span>Published artifacts</span><strong>11</strong></div>
+                </div>
+                <div class="mini-action"><span>4 automatically resolved</span><span>↗</span></div>
+              </section>
+            </div>
+          </aside>
+        </div>
+      </article>
+
+      <article class="direction">
+        <header class="direction-head">
+          <span class="option-number">04</span>
+          <div>
+            <h2>Stacked Status Relay</h2>
+            <p>The space summarizes whether Masthead’s core systems are ready.</p>
+          </div>
+        </header>
+        <div class="preview-stage">
+          <aside class="sidebar" aria-label="Option 4 sidebar">
+            <div class="brand"><img src="../public/assets/masthead-logo-sail.png" alt="" /><span><strong>Masthead</strong><small>v0.1.0</small></span></div>
+            <nav class="nav">
+              <div class="nav-item"><span class="nav-icon">◉</span><span>Now</span><span class="nav-count">2</span></div>
+              <div class="nav-item"><span class="nav-icon">⌁</span><span>Workbench</span></div>
+              <div class="nav-item"><span class="nav-icon">▤</span><span>Logbook</span></div>
+              <div class="nav-item active"><span class="nav-icon">⌘</span><span>Sources</span></div>
+              <div class="nav-item"><span class="nav-icon">⚙</span><span>Settings</span></div>
+            </nav>
+            <div class="sidebar-bottom">
+              <section class="footer-card">
+                <p class="footer-kicker">System readiness</p>
+                <div class="relay-list">
+                  <div class="relay-row attention"><i class="status-light"></i><span>Sources</span><span>2 need action</span></div>
+                  <div class="relay-row"><i class="status-light"></i><span>Workbench</span><span>Ready</span></div>
+                  <div class="relay-row"><i class="status-light"></i><span>Agent access</span><span>Read-only</span></div>
+                </div>
+                <div class="mini-action"><span>6 connectors ready</span><span>→</span></div>
+              </section>
+            </div>
+          </aside>
+        </div>
+      </article>
+
+      <article class="direction">
+        <header class="direction-head">
+          <span class="option-number">05</span>
+          <div>
+            <h2>Quiet Keel Bookmark</h2>
+            <p>The space favors continuity: the most recent durable thing, not another dashboard.</p>
+          </div>
+        </header>
+        <div class="preview-stage">
+          <aside class="sidebar" aria-label="Option 5 sidebar">
+            <div class="brand"><img src="../public/assets/masthead-logo-sail.png" alt="" /><span><strong>Masthead</strong><small>v0.1.0</small></span></div>
+            <nav class="nav">
+              <div class="nav-item"><span class="nav-icon">◉</span><span>Now</span><span class="nav-count">2</span></div>
+              <div class="nav-item"><span class="nav-icon">⌁</span><span>Workbench</span></div>
+              <div class="nav-item active"><span class="nav-icon">▤</span><span>Logbook</span></div>
+              <div class="nav-item"><span class="nav-icon">⌘</span><span>Sources</span></div>
+              <div class="nav-item"><span class="nav-icon">⚙</span><span>Settings</span></div>
+            </nav>
+            <div class="sidebar-bottom">
+              <section class="footer-card">
+                <p class="footer-kicker">Continue from Logbook</p>
+                <div class="bookmark-card">
+                  <span class="artifact-kind">Runbook</span>
+                  <h3>Artifact-first Logbook cutover</h3>
+                  <div class="bookmark-meta"><span>Masthead</span><span>8m ago</span></div>
+                </div>
+                <div class="reuse-line"><i></i><span>Last reused by an agent 2m ago</span></div>
+                <div class="mini-action"><span>Open recent artifact</span><span>→</span></div>
+              </section>
+            </div>
+          </aside>
+        </div>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

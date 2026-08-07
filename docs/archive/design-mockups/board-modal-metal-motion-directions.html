@@ -1,0 +1,991 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Masthead Board Modal Metal Motion Directions</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        color-scheme: dark;
+        --canvas: #031019;
+        --chrome: #041522;
+        --toolbar: #051724;
+        --surface: #071b28;
+        --surface-hover: #082130;
+        --control: #081d2a;
+        --line: rgba(92, 153, 187, 0.18);
+        --line-strong: rgba(196, 226, 248, 0.2);
+        --ink: #f6fbff;
+        --body: #d6e4ef;
+        --mute: #91a8ba;
+        --ash: #61798e;
+        --blue: #2ea7ff;
+        --green: #36d869;
+        --yellow: #ffcf36;
+        --red: #ff483e;
+        --font-ui: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        --ease-seat: cubic-bezier(0.22, 1, 0.36, 1);
+        --ease-weight: cubic-bezier(0.18, 0.82, 0.2, 1);
+        --origin-x: 50%;
+        --origin-y: 52%;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        min-height: 100%;
+        overflow-x: hidden;
+        background: var(--canvas);
+        color: var(--ink);
+        font-family: var(--font-ui);
+        font-feature-settings: "calt", "kern", "liga", "ss03";
+        font-variant-numeric: tabular-nums;
+        -webkit-font-smoothing: antialiased;
+        scroll-behavior: smooth;
+      }
+
+      body {
+        min-width: 0;
+        margin: 0;
+        overflow-x: hidden;
+        background:
+          linear-gradient(180deg, rgba(46, 167, 255, 0.045), transparent 270px),
+          linear-gradient(180deg, #031019 0%, #020b12 100%);
+        color: var(--body);
+      }
+
+      button {
+        font: inherit;
+      }
+
+      .page-shell {
+        width: min(1400px, calc(100vw - 28px));
+        margin: 0 auto;
+        padding: 16px 0 56px;
+      }
+
+      .prototype-head {
+        position: sticky;
+        top: 0;
+        z-index: 5;
+        display: grid;
+        gap: 10px;
+        border-bottom: 1px solid var(--line);
+        background: rgba(3, 16, 25, 0.92);
+        padding: 12px 0;
+        backdrop-filter: blur(12px);
+      }
+
+      .prototype-head h1 {
+        margin: 0;
+        color: var(--ink);
+        font-size: clamp(20px, 2.1vw, 28px);
+        line-height: 1.08;
+        letter-spacing: 0;
+      }
+
+      .index {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .index a,
+      .motion-button,
+      .close-button {
+        min-height: 40px;
+        border: 1px solid rgba(92, 153, 187, 0.2);
+        border-radius: 3px;
+        background:
+          linear-gradient(180deg, rgba(246, 251, 255, 0.045), transparent),
+          var(--control);
+        color: var(--body);
+        cursor: pointer;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        text-decoration: none;
+        transition:
+          transform 160ms var(--ease-seat),
+          border-color 160ms var(--ease-seat),
+          background-color 160ms var(--ease-seat),
+          color 160ms var(--ease-seat);
+      }
+
+      .index a {
+        min-height: 34px;
+        padding: 8px 9px;
+      }
+
+      .motion-button {
+        padding: 0 12px;
+      }
+
+      .close-button {
+        width: 40px;
+        padding: 0;
+        color: var(--ink);
+      }
+
+      .index a:hover,
+      .motion-button:hover,
+      .close-button:hover {
+        border-color: rgba(46, 167, 255, 0.42);
+        background-color: #092231;
+        color: var(--ink);
+      }
+
+      .motion-button:active,
+      .close-button:active {
+        transform: scale(0.97);
+      }
+
+      .directions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+        margin-top: 18px;
+      }
+
+      .direction {
+        min-width: 0;
+        scroll-margin-top: 108px;
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        background:
+          linear-gradient(180deg, rgba(246, 251, 255, 0.032), transparent 42%),
+          #04131f;
+        box-shadow:
+          inset 0 1px 0 rgba(246, 251, 255, 0.045),
+          0 18px 42px rgba(0, 0, 0, 0.22);
+      }
+
+      .direction-head {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: start;
+        min-width: 0;
+        border-bottom: 1px solid rgba(92, 153, 187, 0.13);
+        padding: 12px;
+      }
+
+      .direction-kicker {
+        color: var(--blue);
+        font-family: var(--font-mono);
+        font-size: 11px;
+      }
+
+      .direction h2 {
+        margin: 3px 0 0;
+        overflow-wrap: anywhere;
+        color: var(--ink);
+        font-size: 17px;
+        line-height: 1.22;
+        letter-spacing: 0;
+      }
+
+      .stage {
+        min-width: 0;
+        padding: 12px;
+      }
+
+      .board-bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: center;
+        justify-content: space-between;
+        min-width: 0;
+        margin-bottom: 10px;
+      }
+
+      .board-title {
+        overflow: hidden;
+        color: var(--mute);
+        font-family: var(--font-mono);
+        font-size: 11px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .board-pills {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .pill {
+        min-height: 28px;
+        border: 1px solid rgba(92, 153, 187, 0.18);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.025);
+        color: var(--mute);
+        font-family: var(--font-mono);
+        font-size: 10px;
+        line-height: 26px;
+        padding: 0 8px;
+        white-space: nowrap;
+      }
+
+      .card-button {
+        display: block;
+        width: 100%;
+        min-width: 0;
+        border: 1px solid rgba(46, 167, 255, 0.24);
+        border-left-color: var(--green);
+        border-radius: 5px;
+        background:
+          linear-gradient(180deg, rgba(246, 251, 255, 0.04), transparent 48%),
+          repeating-linear-gradient(180deg, rgba(13, 45, 64, 0.42) 0 1px, transparent 1px 22px),
+          var(--surface);
+        box-shadow:
+          inset 0 1px 0 rgba(190, 225, 245, 0.07),
+          inset 0 -1px 0 rgba(0, 0, 0, 0.54);
+        color: inherit;
+        cursor: pointer;
+        padding: 0;
+        text-align: left;
+        transition:
+          transform 160ms var(--ease-seat),
+          border-color 160ms var(--ease-seat),
+          background-color 160ms var(--ease-seat),
+          box-shadow 160ms var(--ease-seat);
+      }
+
+      .card-button:hover {
+        border-color: rgba(46, 167, 255, 0.38);
+        background-color: var(--surface-hover);
+        box-shadow:
+          inset 0 1px 0 rgba(190, 225, 245, 0.09),
+          inset 0 -1px 0 rgba(0, 0, 0, 0.56),
+          0 10px 26px rgba(0, 0, 0, 0.22);
+        transform: translateY(-1px);
+      }
+
+      .card-button:active {
+        transform: scale(0.985);
+      }
+
+      .session-card {
+        min-width: 0;
+        min-height: 206px;
+        padding: 12px;
+      }
+
+      .card-topline,
+      .card-footer,
+      .dossier-topline {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        justify-content: space-between;
+        min-width: 0;
+        color: var(--mute);
+        font-family: var(--font-mono);
+        font-size: 10px;
+      }
+
+      .truncate {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .status {
+        flex: 0 0 auto;
+        border: 1px solid rgba(54, 216, 105, 0.24);
+        border-radius: 999px;
+        background: rgba(89, 212, 153, 0.14);
+        color: var(--green);
+        padding: 3px 7px;
+      }
+
+      .session-card h3,
+      .modal-panel h3 {
+        margin: 12px 0 0;
+        color: var(--ink);
+        font-size: 15px;
+        line-height: 1.22;
+        letter-spacing: 0;
+      }
+
+      .session-card h3 {
+        display: -webkit-box;
+        min-height: 38px;
+        overflow: hidden;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+      }
+
+      .fact-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        margin-top: 14px;
+      }
+
+      .fact {
+        min-width: 0;
+        border: 1px solid rgba(92, 153, 187, 0.13);
+        background: rgba(255, 255, 255, 0.025);
+        padding: 7px;
+      }
+
+      .fact-value {
+        overflow: hidden;
+        color: var(--ink);
+        font-family: var(--font-mono);
+        font-size: 11px;
+        font-weight: 600;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .fact-label {
+        margin-top: 2px;
+        color: var(--ash);
+        font-size: 9px;
+        line-height: 1.2;
+      }
+
+      .card-footer {
+        margin-top: 13px;
+        font-size: 11px;
+      }
+
+      .modal-shell {
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        display: grid;
+        place-items: center;
+        min-width: 0;
+        padding: 24px;
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .modal-shell.is-open,
+      .modal-shell.is-closing {
+        pointer-events: auto;
+      }
+
+      .modal-shell.is-open,
+      .modal-shell.is-closing {
+        opacity: 1;
+      }
+
+      .modal-backdrop {
+        position: absolute;
+        inset: 0;
+        background: rgba(0, 8, 14, 0.72);
+        opacity: 0;
+      }
+
+      .modal-assembly {
+        position: relative;
+        z-index: 1;
+        width: min(860px, calc(100vw - 48px));
+        min-width: 0;
+        transform-style: preserve-3d;
+        perspective: 1200px;
+      }
+
+      .modal-assembly::before,
+      .modal-assembly::after {
+        content: "";
+        position: absolute;
+        z-index: -1;
+        pointer-events: none;
+      }
+
+      .modal-panel {
+        position: relative;
+        min-width: 0;
+        overflow: hidden;
+        border: 1px solid rgba(92, 153, 187, 0.28);
+        border-radius: 8px;
+        background:
+          linear-gradient(180deg, rgba(246, 251, 255, 0.05), transparent 44%),
+          repeating-linear-gradient(180deg, rgba(13, 45, 64, 0.28) 0 1px, transparent 1px 24px),
+          var(--surface);
+        box-shadow:
+          inset 0 1px 0 rgba(246, 251, 255, 0.08),
+          inset 0 -1px 0 rgba(0, 0, 0, 0.58),
+          0 34px 86px rgba(0, 0, 0, 0.58);
+        opacity: 0;
+        transform-origin: var(--origin-x) var(--origin-y);
+      }
+
+      .modal-header {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 16px;
+        align-items: start;
+        border-bottom: 1px solid rgba(92, 153, 187, 0.15);
+        padding: 16px;
+      }
+
+      .modal-title {
+        min-width: 0;
+      }
+
+      .modal-title h2 {
+        margin: 4px 0 0;
+        overflow-wrap: anywhere;
+        color: var(--ink);
+        font-size: 22px;
+        line-height: 1.1;
+        letter-spacing: 0;
+      }
+
+      .modal-body {
+        display: grid;
+        grid-template-columns: 1fr 0.78fr;
+        gap: 14px;
+        padding: 16px;
+      }
+
+      .dossier-section {
+        min-width: 0;
+        border: 1px solid rgba(92, 153, 187, 0.14);
+        background: rgba(3, 16, 25, 0.32);
+        padding: 12px;
+      }
+
+      .dossier-section h3 {
+        margin: 0 0 10px;
+      }
+
+      .evidence-block {
+        min-width: 0;
+        border-left: 2px solid rgba(46, 167, 255, 0.42);
+        background: rgba(3, 16, 25, 0.46);
+        color: var(--body);
+        font-family: var(--font-mono);
+        font-size: 11px;
+        line-height: 1.5;
+        overflow-wrap: anywhere;
+        padding: 10px;
+      }
+
+      .audit-list {
+        display: grid;
+        gap: 8px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .audit-list li {
+        display: grid;
+        gap: 2px;
+        min-width: 0;
+        border-bottom: 1px solid rgba(92, 153, 187, 0.11);
+        padding-bottom: 8px;
+      }
+
+      .audit-list li:last-child {
+        border-bottom: 0;
+        padding-bottom: 0;
+      }
+
+      .audit-time {
+        color: var(--mute);
+        font-family: var(--font-mono);
+        font-size: 10px;
+      }
+
+      .audit-text {
+        color: var(--body);
+        font-size: 12px;
+        line-height: 1.42;
+      }
+
+      .is-open .modal-backdrop {
+        animation: backdrop-in 300ms linear both;
+      }
+
+      .is-closing .modal-backdrop {
+        animation: backdrop-out 300ms linear both;
+      }
+
+      .is-open.motion-1 .modal-panel { animation: forged-plate-in 300ms var(--ease-weight) both; }
+      .is-closing.motion-1 .modal-panel { animation: forged-plate-out 300ms cubic-bezier(0.48, 0, 0.82, 0.28) both; }
+      .motion-1 .modal-assembly::before {
+        inset: -8px 12px auto;
+        height: 8px;
+        border: 1px solid rgba(92, 153, 187, 0.2);
+        background: #020b12;
+      }
+
+      .is-open.motion-2 .modal-panel { animation: rail-gauge-in 300ms var(--ease-weight) both; }
+      .is-closing.motion-2 .modal-panel { animation: rail-gauge-out 300ms cubic-bezier(0.52, 0, 0.82, 0.28) both; }
+      .motion-2 .modal-assembly::before,
+      .motion-2 .modal-assembly::after {
+        top: 18px;
+        bottom: 18px;
+        width: 6px;
+        background: rgba(46, 167, 255, 0.22);
+      }
+      .motion-2 .modal-assembly::before { left: -12px; }
+      .motion-2 .modal-assembly::after { right: -12px; }
+
+      .is-open.motion-3 .modal-panel { animation: counterweight-hinge-in 300ms var(--ease-weight) both; }
+      .is-closing.motion-3 .modal-panel { animation: counterweight-hinge-out 300ms cubic-bezier(0.48, 0, 0.82, 0.28) both; }
+      .motion-3 .modal-panel { transform-origin: 50% 0%; }
+
+      .is-open.motion-4 .modal-panel { animation: magnetic-seat-in 300ms var(--ease-weight) both; }
+      .is-closing.motion-4 .modal-panel { animation: magnetic-seat-out 300ms cubic-bezier(0.54, 0, 0.88, 0.34) both; }
+      .motion-4 .modal-assembly::before {
+        inset: -10px;
+        border: 1px solid rgba(46, 167, 255, 0.12);
+        border-radius: 10px;
+        transform: scale(0.985);
+      }
+
+      .is-open.motion-5 .modal-panel { animation: telescoping-drawer-in 300ms var(--ease-weight) both; }
+      .is-closing.motion-5 .modal-panel { animation: telescoping-drawer-out 300ms cubic-bezier(0.5, 0, 0.88, 0.32) both; }
+      .is-open.motion-5 .modal-body .dossier-section { animation: drawer-content-in 300ms var(--ease-seat) both; }
+
+      .is-open.motion-6 .modal-panel { animation: vault-door-in 300ms var(--ease-weight) both; }
+      .is-closing.motion-6 .modal-panel { animation: vault-door-out 300ms cubic-bezier(0.5, 0, 0.86, 0.28) both; }
+      .motion-6 .modal-panel { transform-origin: 0% 50%; }
+
+      .is-open.motion-7 .modal-panel { animation: hydraulic-press-in 300ms var(--ease-weight) both; }
+      .is-closing.motion-7 .modal-panel { animation: hydraulic-press-out 300ms cubic-bezier(0.48, 0, 0.86, 0.3) both; }
+      .motion-7 .modal-assembly::before {
+        left: 50%;
+        top: -46px;
+        width: 72px;
+        height: 46px;
+        border: 1px solid rgba(92, 153, 187, 0.2);
+        background: #031019;
+        transform: translateX(-50%);
+      }
+
+      .is-open.motion-8 .modal-panel { animation: dovetail-lock-in 300ms var(--ease-weight) both; }
+      .is-closing.motion-8 .modal-panel { animation: dovetail-lock-out 300ms cubic-bezier(0.5, 0, 0.82, 0.3) both; }
+      .motion-8 .modal-assembly::after {
+        right: 24px;
+        bottom: -9px;
+        left: 24px;
+        height: 9px;
+        background: linear-gradient(90deg, transparent, rgba(92, 153, 187, 0.2), transparent);
+      }
+
+      .is-open.motion-9 .modal-panel { animation: bearing-gantry-in 300ms var(--ease-weight) both; }
+      .is-closing.motion-9 .modal-panel { animation: bearing-gantry-out 300ms cubic-bezier(0.48, 0, 0.86, 0.3) both; }
+      .motion-9 .modal-assembly::before,
+      .motion-9 .modal-assembly::after {
+        right: 26px;
+        left: 26px;
+        height: 3px;
+        background: rgba(46, 167, 255, 0.22);
+      }
+      .motion-9 .modal-assembly::before { top: -14px; }
+      .motion-9 .modal-assembly::after { bottom: -14px; }
+
+      .is-open.motion-10 .modal-panel { animation: shim-compression-in 300ms var(--ease-weight) both; }
+      .is-closing.motion-10 .modal-panel { animation: shim-compression-out 300ms cubic-bezier(0.52, 0, 0.86, 0.3) both; }
+      .motion-10 .modal-assembly::before,
+      .motion-10 .modal-assembly::after {
+        inset: 8px;
+        border: 1px solid rgba(92, 153, 187, 0.14);
+        border-radius: 8px;
+      }
+      .motion-10 .modal-assembly::after {
+        inset: 16px;
+      }
+
+      @keyframes backdrop-in {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+
+      @keyframes backdrop-out {
+        from { opacity: 1; }
+        to { opacity: 0; }
+      }
+
+      @keyframes forged-plate-in {
+        0% { opacity: 0; transform: translate3d(0, -58px, 0) scale3d(0.86, 0.72, 1); }
+        58% { opacity: 1; transform: translate3d(0, 10px, 0) scale3d(1.015, 1.025, 1); }
+        76% { transform: translate3d(0, -3px, 0) scale3d(0.996, 0.992, 1); }
+        100% { opacity: 1; transform: translate3d(0, 0, 0) scale3d(1, 1, 1); }
+      }
+
+      @keyframes forged-plate-out {
+        0% { opacity: 1; transform: translate3d(0, 0, 0) scale3d(1, 1, 1); }
+        88% { opacity: 1; transform: translate3d(0, -28px, 0) scale3d(0.95, 0.84, 1); }
+        100% { opacity: 0; transform: translate3d(0, -34px, 0) scale3d(0.94, 0.82, 1); }
+      }
+
+      @keyframes rail-gauge-in {
+        0% { opacity: 0; transform: scale3d(0.28, 0.08, 1); }
+        38% { opacity: 1; transform: scale3d(1, 0.1, 1); }
+        72% { transform: scale3d(1.012, 1.03, 1); }
+        100% { opacity: 1; transform: scale3d(1, 1, 1); }
+      }
+
+      @keyframes rail-gauge-out {
+        0% { opacity: 1; transform: scale3d(1, 1, 1); }
+        88% { opacity: 1; transform: scale3d(1, 0.1, 1); }
+        100% { opacity: 0; transform: scale3d(0.28, 0.08, 1); }
+      }
+
+      @keyframes counterweight-hinge-in {
+        0% { opacity: 0; transform: rotateX(-68deg) translate3d(0, -36px, 0) scale3d(0.92, 0.92, 1); }
+        62% { opacity: 1; transform: rotateX(5deg) translate3d(0, 3px, 0) scale3d(1, 1, 1); }
+        82% { transform: rotateX(-1.6deg) translate3d(0, 0, 0); }
+        100% { opacity: 1; transform: rotateX(0deg) translate3d(0, 0, 0) scale3d(1, 1, 1); }
+      }
+
+      @keyframes counterweight-hinge-out {
+        0% { opacity: 1; transform: rotateX(0deg) translate3d(0, 0, 0) scale3d(1, 1, 1); }
+        88% { opacity: 1; transform: rotateX(-44deg) translate3d(0, -22px, 0) scale3d(0.95, 0.95, 1); }
+        100% { opacity: 0; transform: rotateX(-54deg) translate3d(0, -28px, 0) scale3d(0.94, 0.94, 1); }
+      }
+
+      @keyframes magnetic-seat-in {
+        0% { opacity: 0; transform: translate3d(0, 54px, 0) scale3d(0.74, 0.74, 1); }
+        46% { opacity: 1; transform: translate3d(0, -8px, 0) scale3d(1.035, 1.035, 1); }
+        62% { transform: translate3d(0, 4px, 0) scale3d(0.988, 0.988, 1); }
+        78% { transform: translate3d(0, -2px, 0) scale3d(1.006, 1.006, 1); }
+        100% { opacity: 1; transform: translate3d(0, 0, 0) scale3d(1, 1, 1); }
+      }
+
+      @keyframes magnetic-seat-out {
+        0% { opacity: 1; transform: translate3d(0, 0, 0) scale3d(1, 1, 1); }
+        88% { opacity: 1; transform: translate3d(0, 34px, 0) scale3d(0.82, 0.82, 1); }
+        100% { opacity: 0; transform: translate3d(0, 42px, 0) scale3d(0.78, 0.78, 1); }
+      }
+
+      @keyframes telescoping-drawer-in {
+        0% { opacity: 0; transform: translate3d(0, 72px, 0) scale3d(0.72, 0.18, 1); }
+        34% { opacity: 1; transform: translate3d(0, 32px, 0) scale3d(1, 0.28, 1); }
+        72% { transform: translate3d(0, -5px, 0) scale3d(1, 1.025, 1); }
+        100% { opacity: 1; transform: translate3d(0, 0, 0) scale3d(1, 1, 1); }
+      }
+
+      @keyframes telescoping-drawer-out {
+        0% { opacity: 1; transform: translate3d(0, 0, 0) scale3d(1, 1, 1); }
+        88% { opacity: 1; transform: translate3d(0, 44px, 0) scale3d(0.78, 0.22, 1); }
+        100% { opacity: 0; transform: translate3d(0, 54px, 0) scale3d(0.72, 0.18, 1); }
+      }
+
+      @keyframes drawer-content-in {
+        from { opacity: 0; transform: translate3d(0, 18px, 0); }
+        to { opacity: 1; transform: translate3d(0, 0, 0); }
+      }
+
+      @keyframes vault-door-in {
+        0% { opacity: 0; transform: rotateY(-38deg) translate3d(-92px, 0, 0) scale3d(0.9, 0.96, 1); }
+        58% { opacity: 1; transform: rotateY(4deg) translate3d(8px, 0, 0) scale3d(1.01, 1, 1); }
+        82% { transform: rotateY(-1deg) translate3d(-2px, 0, 0) scale3d(1, 1, 1); }
+        100% { opacity: 1; transform: rotateY(0deg) translate3d(0, 0, 0) scale3d(1, 1, 1); }
+      }
+
+      @keyframes vault-door-out {
+        0% { opacity: 1; transform: rotateY(0deg) translate3d(0, 0, 0) scale3d(1, 1, 1); }
+        88% { opacity: 1; transform: rotateY(-26deg) translate3d(-58px, 0, 0) scale3d(0.93, 0.97, 1); }
+        100% { opacity: 0; transform: rotateY(-32deg) translate3d(-72px, 0, 0) scale3d(0.92, 0.96, 1); }
+      }
+
+      @keyframes hydraulic-press-in {
+        0% { opacity: 0; transform: translate3d(0, -64px, 0) scale3d(1.08, 0.08, 1); }
+        42% { opacity: 1; transform: translate3d(0, 12px, 0) scale3d(1.02, 1.08, 1); }
+        68% { transform: translate3d(0, -3px, 0) scale3d(0.995, 0.982, 1); }
+        100% { opacity: 1; transform: translate3d(0, 0, 0) scale3d(1, 1, 1); }
+      }
+
+      @keyframes hydraulic-press-out {
+        0% { opacity: 1; transform: translate3d(0, 0, 0) scale3d(1, 1, 1); }
+        88% { opacity: 1; transform: translate3d(0, -40px, 0) scale3d(1.025, 0.16, 1); }
+        100% { opacity: 0; transform: translate3d(0, -48px, 0) scale3d(1.03, 0.12, 1); }
+      }
+
+      @keyframes dovetail-lock-in {
+        0% { opacity: 0; transform: translate3d(-76px, 24px, 0) rotateZ(-2.4deg) scale3d(0.9, 0.92, 1); }
+        60% { opacity: 1; transform: translate3d(12px, -3px, 0) rotateZ(0.55deg) scale3d(1.01, 1.01, 1); }
+        78% { transform: translate3d(-4px, 0, 0) rotateZ(-0.18deg) scale3d(0.997, 0.997, 1); }
+        100% { opacity: 1; transform: translate3d(0, 0, 0) rotateZ(0deg) scale3d(1, 1, 1); }
+      }
+
+      @keyframes dovetail-lock-out {
+        0% { opacity: 1; transform: translate3d(0, 0, 0) rotateZ(0deg) scale3d(1, 1, 1); }
+        88% { opacity: 1; transform: translate3d(52px, 14px, 0) rotateZ(1.45deg) scale3d(0.92, 0.94, 1); }
+        100% { opacity: 0; transform: translate3d(64px, 18px, 0) rotateZ(1.8deg) scale3d(0.91, 0.93, 1); }
+      }
+
+      @keyframes bearing-gantry-in {
+        0% { opacity: 0; transform: translate3d(-120px, -36px, 0) scale3d(0.84, 0.84, 1); }
+        40% { opacity: 1; transform: translate3d(34px, -12px, 0) scale3d(1, 1, 1); }
+        66% { transform: translate3d(-10px, 4px, 0) scale3d(1.008, 1.008, 1); }
+        84% { transform: translate3d(3px, -1px, 0) scale3d(0.998, 0.998, 1); }
+        100% { opacity: 1; transform: translate3d(0, 0, 0) scale3d(1, 1, 1); }
+      }
+
+      @keyframes bearing-gantry-out {
+        0% { opacity: 1; transform: translate3d(0, 0, 0) scale3d(1, 1, 1); }
+        88% { opacity: 1; transform: translate3d(84px, 24px, 0) scale3d(0.88, 0.88, 1); }
+        100% { opacity: 0; transform: translate3d(104px, 30px, 0) scale3d(0.86, 0.86, 1); }
+      }
+
+      @keyframes shim-compression-in {
+        0% { opacity: 0; transform: scale3d(1.18, 0.52, 1) translate3d(0, 30px, 0); }
+        40% { opacity: 1; transform: scale3d(0.96, 1.06, 1) translate3d(0, -6px, 0); }
+        64% { transform: scale3d(1.018, 0.99, 1) translate3d(0, 3px, 0); }
+        100% { opacity: 1; transform: scale3d(1, 1, 1) translate3d(0, 0, 0); }
+      }
+
+      @keyframes shim-compression-out {
+        0% { opacity: 1; transform: scale3d(1, 1, 1) translate3d(0, 0, 0); }
+        88% { opacity: 1; transform: scale3d(1.12, 0.54, 1) translate3d(0, 22px, 0); }
+        100% { opacity: 0; transform: scale3d(1.14, 0.48, 1) translate3d(0, 28px, 0); }
+      }
+
+      @media (max-width: 980px) {
+        .directions {
+          grid-template-columns: 1fr;
+        }
+
+        .modal-body {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 560px) {
+        .page-shell {
+          width: min(100% - 20px, 1400px);
+          padding-top: 10px;
+        }
+
+        .prototype-head {
+          position: static;
+        }
+
+        .direction-head,
+        .modal-header {
+          grid-template-columns: 1fr;
+        }
+
+        .motion-button {
+          width: 100%;
+        }
+
+        .modal-shell {
+          padding: 10px;
+        }
+
+        .modal-assembly {
+          width: min(100%, calc(100vw - 20px));
+        }
+
+        .modal-title h2 {
+          font-size: 19px;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        html {
+          scroll-behavior: auto;
+        }
+
+        *,
+        *::before,
+        *::after {
+          animation-duration: 1ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 1ms !important;
+        }
+
+        .modal-panel {
+          transform: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page-shell">
+      <header class="prototype-head">
+        <h1>Board Modal Metal Motion Directions</h1>
+        <nav class="index" aria-label="Prototype options"></nav>
+      </header>
+      <div class="directions" id="directions"></div>
+    </main>
+
+    <div class="modal-shell" id="modalShell" aria-hidden="true">
+      <div class="modal-backdrop" data-close></div>
+      <div class="modal-assembly">
+        <article class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="modalTitle" tabindex="-1">
+          <header class="modal-header">
+            <div class="modal-title">
+              <div class="dossier-topline">
+                <span class="truncate">Masthead / main / current worktree</span>
+                <span class="status">ACTIVE</span>
+              </div>
+              <h2 id="modalTitle">Session Dossier</h2>
+            </div>
+            <button class="close-button" type="button" aria-label="Close session dossier" data-close>×</button>
+          </header>
+          <div class="modal-body">
+            <section class="dossier-section">
+              <h3>Current Evidence</h3>
+              <div class="fact-grid">
+                <div class="fact"><div class="fact-value">gpt-5.5</div><div class="fact-label">Model</div></div>
+                <div class="fact"><div class="fact-value">1.8M</div><div class="fact-label">Tokens</div></div>
+                <div class="fact"><div class="fact-value">1h 43m</div><div class="fact-label">Runtime</div></div>
+                <div class="fact"><div class="fact-value">0s ago</div><div class="fact-label">Last activity</div></div>
+              </div>
+              <h3>Recent Output</h3>
+              <div class="evidence-block">Created Cloudflare zone usemasthead.com with registrar prep. Waiting on DNS propagation check before marking source as connected.</div>
+            </section>
+            <section class="dossier-section">
+              <h3>Audit Trail</h3>
+              <ul class="audit-list">
+                <li><span class="audit-time">14:06:18</span><span class="audit-text">Verified local session import path and source health.</span></li>
+                <li><span class="audit-time">14:03:42</span><span class="audit-text">Opened Cloudflare adapter details from Board card.</span></li>
+                <li><span class="audit-time">13:58:07</span><span class="audit-text">Recorded branch, project, and command provenance.</span></li>
+              </ul>
+            </section>
+          </div>
+        </article>
+      </div>
+    </div>
+
+    <template id="directionTemplate">
+      <section class="direction" data-option>
+        <header class="direction-head">
+          <div>
+            <div class="direction-kicker"></div>
+            <h2></h2>
+          </div>
+          <button class="motion-button" type="button">Open / replay</button>
+        </header>
+        <div class="stage">
+          <div class="board-bar">
+            <div class="board-title">Board / live sessions</div>
+            <div class="board-pills">
+              <span class="pill">Recent</span>
+              <span class="pill">Codex</span>
+              <span class="pill">10s</span>
+            </div>
+          </div>
+          <button class="card-button" type="button">
+            <article class="session-card">
+              <div class="card-topline">
+                <span class="truncate">Masthead · Cloudflare API</span>
+                <span class="status">ACTIVE</span>
+              </div>
+              <h3>Created Cloudflare zone usemasthead.com with registrar prep.</h3>
+              <div class="fact-grid">
+                <div class="fact"><div class="fact-value">1h 43m</div><div class="fact-label">Runtime</div></div>
+                <div class="fact"><div class="fact-value">1.8M</div><div class="fact-label">Tokens</div></div>
+                <div class="fact"><div class="fact-value">gpt-5.5</div><div class="fact-label">Model</div></div>
+                <div class="fact"><div class="fact-value">current</div><div class="fact-label">Worktree</div></div>
+              </div>
+              <footer class="card-footer">
+                <span>0s ago</span>
+                <span>main</span>
+              </footer>
+            </article>
+          </button>
+        </div>
+      </section>
+    </template>
+
+    <script>
+      const directions = [
+        "Forged Plate Drop",
+        "Rail-Gauge Extension",
+        "Counterweighted Hinge",
+        "Magnetic Seating Clamp",
+        "Telescoping Drawer Stack",
+        "Vault Door Swing",
+        "Hydraulic Press Lift",
+        "Dovetail Slide-Lock",
+        "Ball-Bearing Gantry",
+        "Stacked Shim Compression"
+      ];
+
+      const directionsRoot = document.querySelector("#directions");
+      const indexRoot = document.querySelector(".index");
+      const template = document.querySelector("#directionTemplate");
+      const modalShell = document.querySelector("#modalShell");
+      const modalPanel = modalShell.querySelector(".modal-panel");
+      let activeMotion = "";
+      let closeTimer = 0;
+
+      directions.forEach((name, index) => {
+        const number = index + 1;
+        const section = template.content.firstElementChild.cloneNode(true);
+        section.id = `option-${number}`;
+        section.dataset.option = String(number);
+        section.querySelector(".direction-kicker").textContent = `Option ${number}`;
+        section.querySelector("h2").textContent = name;
+        section.querySelector(".motion-button").dataset.motion = String(number);
+        section.querySelector(".card-button").dataset.motion = String(number);
+        section.querySelector(".card-button").setAttribute("aria-label", `Open option ${number}: ${name}`);
+        directionsRoot.appendChild(section);
+
+        const link = document.createElement("a");
+        link.href = `#option-${number}`;
+        link.textContent = String(number).padStart(2, "0");
+        indexRoot.appendChild(link);
+      });
+
+      function openModal(motion, sourceElement) {
+        clearTimeout(closeTimer);
+        const rect = sourceElement.getBoundingClientRect();
+        const originX = ((rect.left + rect.width / 2) / window.innerWidth) * 100;
+        const originY = ((rect.top + rect.height / 2) / window.innerHeight) * 100;
+        modalShell.style.setProperty("--origin-x", `${originX}%`);
+        modalShell.style.setProperty("--origin-y", `${originY}%`);
+
+        modalShell.classList.remove("is-open", "is-closing");
+        if (activeMotion) modalShell.classList.remove(activeMotion);
+        activeMotion = `motion-${motion}`;
+        modalShell.classList.add(activeMotion);
+        modalShell.setAttribute("aria-hidden", "false");
+        void modalShell.offsetWidth;
+        modalShell.classList.add("is-open");
+        modalPanel.focus({ preventScroll: true });
+      }
+
+      function closeModal() {
+        if (!modalShell.classList.contains("is-open")) return;
+        modalShell.classList.remove("is-open");
+        modalShell.classList.add("is-closing");
+        clearTimeout(closeTimer);
+        closeTimer = window.setTimeout(() => {
+          modalShell.classList.remove("is-closing", activeMotion);
+          modalShell.setAttribute("aria-hidden", "true");
+          activeMotion = "";
+        }, 360);
+      }
+
+      document.addEventListener("click", (event) => {
+        const openControl = event.target.closest("[data-motion]");
+        if (openControl) {
+          openModal(openControl.dataset.motion, openControl);
+          return;
+        }
+        if (event.target.closest("[data-close]")) {
+          closeModal();
+        }
+      });
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") closeModal();
+      });
+    </script>
+  </body>
+</html>

@@ -129,6 +129,7 @@ export function isGuidedAuthoringCapabilitiesDto(
     capabilities.bundleVersion === "workbench-authoring-v4" &&
     capabilities.policyVersion === GUIDED_AUTHORING_POLICY_VERSION &&
     capabilities.maxSessionsPerAssignment === 12 &&
+    capabilities.canarySessions === 3 &&
     isRequiredTrimmedString(capabilities.databaseId) &&
     isRequiredTrimmedString(capabilities.buildSha) &&
     isRequiredTrimmedString(capabilities.instanceId) &&

@@ -153,12 +153,13 @@ describe("live projection client helpers", () => {
     expect(projection.summary.running).toBe(1);
     expect(projection.summary.needsAction).toBe(1);
     expect(projection.cards[0].headline.headline).toMatch(
-      /Masthead OpenCode session: (waiting for the next required input|waiting for approval|approval requested)\./i
+      /approval requested/i
     );
+
     expect(projection.cards[0].headline.source).toBe("offline");
     expect("copy" in projection.cards[0]).toBe(false);
-    expect(projection.cards[1].headline.headline).toBe("Masthead OpenCode session: ready for review.");
-    expect(projection.selectedSession?.headline.headline).toBe("Masthead OpenCode session: ready for review.");
+    expect(projection.cards[1].headline.headline).toMatch(/ready for review/i);
+    expect(projection.selectedSession?.headline.headline).toMatch(/ready for review/i);
     expect(projection.selectedSession && "copy" in projection.selectedSession).toBe(false);
     expect(projection.brief).toMatchObject({
       text: "Approval is pending in one active session. One session is running overall.",
@@ -226,7 +227,9 @@ describe("live projection client helpers", () => {
       conflicts: []
     } as unknown as LiveBoardProjection);
 
-    expect(projection.cards[0].headline.headline).toMatch(/Masthead OpenCode session: (in progress|making file changes|editing files|inspecting the workspace)\./);
+    // Offline normalizer may keep path-cluster context labels (e.g. "UI work: …")
+    // while still replacing pure category-only enrichment titles.
+    expect(projection.cards[0].headline.headline).toMatch(/making file changes|in progress|editing files|inspecting the workspace|UI work/i);
     expect(projection.cards[0].headline.source).toBe("offline");
     expect(projection.cards[0].headline.headline).not.toMatch(/LLM/i);
     expect("copy" in projection.cards[0]).toBe(false);

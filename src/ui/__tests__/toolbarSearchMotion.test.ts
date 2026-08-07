@@ -4,7 +4,7 @@ import { describe, expect, test } from "vitest";
 describe("toolbar search motion", () => {
   test("ports the selected telescoping steel rail search motion from the prototype", () => {
     const mastheadCss = readFileSync("src/styles/masthead.css", "utf8");
-    const prototypeHtml = readFileSync("mockups/toolbar-filter-metal-motion-directions.html", "utf8");
+    const prototypeHtml = readFileSync("docs/archive/design-mockups/toolbar-filter-metal-motion-directions.html", "utf8");
 
     expect(prototypeHtml).toContain('"Telescoping Steel Rail"');
     expect(prototypeHtml).toContain("animation: telescoping-rail-in 300ms var(--ease-lock) both;");

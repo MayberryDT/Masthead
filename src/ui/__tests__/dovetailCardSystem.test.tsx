@@ -204,7 +204,7 @@ describe("dovetail card system", () => {
 
   test("Board session CSS contains the exact selected mockup selectors", () => {
     const mastheadCss = readFileSync("src/styles/masthead.css", "utf8");
-    const prototypeHtml = readFileSync("mockups/session-card-directions.html", "utf8");
+    const prototypeHtml = readFileSync("docs/archive/design-mockups/session-card-directions.html", "utf8");
     expect(sha256(prototypeHtml)).toBe("f6d1a7873fb681fabf1cb1ed7da2ecb30127502a245e107c38899d9d030a1d10");
     const boardVariantRule = cssRuleBody(mastheadCss, ".masthead-shell .session-card.bottom-variant-card");
     const compactVariantRule = cssRuleBody(
@@ -311,7 +311,7 @@ describe("dovetail card system", () => {
 
   test("Secondary app card CSS follows the selected welded sheet metal prototype", () => {
     const mastheadCss = readFileSync("src/styles/masthead.css", "utf8");
-    const prototypeHtml = readFileSync("mockups/secondary-card-directions.html", "utf8");
+    const prototypeHtml = readFileSync("docs/archive/design-mockups/secondary-card-directions.html", "utf8");
     expect(sha256(prototypeHtml)).toBe("cb46462beee01df57da4ebb079fa37d6742901e2b163b761ede36bac674be38e");
 
     const prototypeCardRule = withoutCssDeclarations(cssRuleBody(prototypeHtml, ".weld-sheet .metal-card"), [
@@ -364,7 +364,9 @@ describe("dovetail card system", () => {
     expect(logbookCss).toContain(".logbook-col-kind");
     expect(logbookCss).toContain(".logbook-col-confidence");
     expect(logbookCss).toContain(".logbook-col-provenance");
-    expect(cssRuleBody(logbookCss, ".logbook-panel > .logbook-toolbar")).toContain("margin-block-end: var(--space-sm);");
+    // Toolbar is a row inside the panel (not a direct `.logbook-panel > .logbook-toolbar` child).
+    expect(logbookCss).toContain(".logbook-toolbar-row");
+    expect(logbookCss).toContain(".logbook-toolbar");
   });
 });
 

@@ -4,7 +4,7 @@ import { describe, expect, test } from "vitest";
 describe("toolbar dropdown motion", () => {
   test("ports the prototype forged plate dropdown motion into the shared toolbar menu", () => {
     const mastheadCss = readFileSync("src/styles/masthead.css", "utf8");
-    const prototypeHtml = readFileSync("mockups/toolbar-filter-metal-motion-directions.html", "utf8");
+    const prototypeHtml = readFileSync("docs/archive/design-mockups/toolbar-filter-metal-motion-directions.html", "utf8");
 
     expect(prototypeHtml).toContain("animation: forged-plate-in var(--open-dur) var(--ease-weight) both;");
     expect(prototypeHtml).toContain("animation: forged-plate-out var(--close-dur) cubic-bezier(0.42, 0, 0.7, 0.22) both;");

@@ -4,7 +4,7 @@ import { describe, expect, test } from "vitest";
 describe("folded sheet-metal control system", () => {
   test("ports option 4 control treatment from the prototype", () => {
     const mastheadCss = readFileSync("src/styles/masthead.css", "utf8");
-    const prototypeHtml = readFileSync("mockups/control-system-directions.html", "utf8");
+    const prototypeHtml = readFileSync("docs/archive/design-mockups/control-system-directions.html", "utf8");
 
     const option4Rule = cssRuleBody(prototypeHtml, ".d4");
     const foldedTokenRule = cssRuleBodyContaining(mastheadCss, ".masthead-shell", "--folded-control-texture");
