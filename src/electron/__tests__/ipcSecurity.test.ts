@@ -15,6 +15,9 @@ describe("Electron IPC security policy", () => {
     expect(isAllowedIpcChannel(ELECTRON_CHANNELS.mastheadPagesDisconnect)).toBe(true);
     expect(isAllowedIpcChannel(ELECTRON_CHANNELS.mastheadPagesListLogbooks)).toBe(true);
     expect(isAllowedIpcChannel(ELECTRON_CHANNELS.mastheadPagesCreateLogbook)).toBe(true);
+    expect(isAllowedIpcChannel(ELECTRON_CHANNELS.mastheadPagesChooseCover)).toBe(true);
+    expect(isAllowedIpcChannel(ELECTRON_CHANNELS.mastheadPagesClearCover)).toBe(true);
+    expect(isAllowedIpcChannel(ELECTRON_CHANNELS.mastheadPagesUploadCover)).toBe(true);
     expect(isAllowedIpcChannel(ELECTRON_CHANNELS.mastheadPagesPublishStaged)).toBe(true);
     expect(isAllowedIpcChannel(ELECTRON_CHANNELS.mastheadPagesRemoveStaged)).toBe(true);
     expect(isAllowedIpcChannel("shell:openExternal")).toBe(false);

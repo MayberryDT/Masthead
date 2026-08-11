@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { createMastheadPagesCredentialStore, type SafeStorageLike } from "../mastheadPagesCredentials";
+import { createCoverSelectionStore } from "../mastheadPagesCover";
 import { createMastheadPagesRemoteClient } from "../mastheadPagesRemoteClient";
 import { computePageObjectId } from "../../mastheadPages/objectIdentity";
 import type { PageRevisionV1, PublisherAccountV1, PublishPageRequestV1 } from "../../mastheadPages/types";
@@ -275,5 +276,79 @@ describe("mastheadPagesRemoteClient", () => {
     const result = await client.publishStaged({ refs: [{ artifactId: "a1", requestDigest }] });
     expect(result.results[0]).toMatchObject({ status: "published", idempotencyKey: "idem-key-0001" });
     await expect(store.loadRefreshToken(safeStorage)).resolves.toBe("refresh-2");
+  });
+
+  test("uploadCover posts multipart without local paths and rejects path smuggling", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "masthead-pages-cover-upload-"));
+    tempDirs.push(dir);
+    const store = createMastheadPagesCredentialStore({ userDataPath: dir, platform: "linux" });
+    const safeStorage = fakeSafeStorage();
+    await store.save("refresh-1", account, safeStorage);
+    const coverStore = createCoverSelectionStore();
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01, 0x02]);
+    const preview = coverStore.put({ contentType: "image/png", bytes: png });
+
+    const fetchImpl = vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/v1/device-token")) {
+        return jsonResponse(200, {
+          protocolVersion: "masthead-pages-device-token-v1",
+          status: "authorized",
+          accessToken: "access-cover",
+          accessTokenExpiresIn: 600,
+          refreshToken: "refresh-cover",
+          scopes: ["logbooks:read", "logbooks:write"],
+          account
+        });
+      }
+      if (url.includes("/cover")) {
+        expect(init?.method).toBe("PUT");
+        expect(init?.body).toBeInstanceOf(FormData);
+        const form = init?.body as FormData;
+        const file = form.get("cover");
+        expect(file).toBeTruthy();
+        if (file && typeof file === "object" && "name" in file) {
+          expect((file as File).name).toBe("cover.png");
+          expect((file as File).name).not.toContain("/");
+        }
+        const serialized = JSON.stringify({
+          url,
+          headers: init?.headers,
+          // ensure no absolute path leaked into request metadata
+        });
+        expect(serialized).not.toMatch(/\/home\/|C:\\\\|file:\/\//i);
+        return jsonResponse(200, {
+          protocolVersion: "masthead-pages-cover-result-v1",
+          coverVersion: "deadbeef".repeat(8)
+        });
+      }
+      throw new Error(`unexpected ${url}`);
+    });
+
+    const client = createMastheadPagesRemoteClient({
+      apiOrigin: "https://masthead.page",
+      credentialStore: store,
+      safeStorage,
+      fetchImpl: fetchImpl as never,
+      daemonBaseUrl: () => "http://127.0.0.1:17373",
+      platform: "linux",
+      coverSelectionStore: coverStore
+    });
+
+    await expect(
+      client.uploadCover({
+        publicLogbookId: "11111111-1111-4111-8111-111111111111",
+        selectionId: preview.selectionId,
+        // @ts-expect-error path must be rejected
+        path: "/home/secret/cover.png"
+      })
+    ).rejects.toThrow(/forbidden_field/);
+
+    const uploaded = await client.uploadCover({
+      publicLogbookId: "11111111-1111-4111-8111-111111111111",
+      selectionId: preview.selectionId
+    });
+    expect(uploaded.coverVersion).toHaveLength(64);
+    expect(coverStore.get(preview.selectionId)).toBeUndefined();
   });
 });

@@ -61,6 +61,17 @@ describe("mastheadPages desktopClient", () => {
             defaultLicense: "all-rights-reserved"
           };
         },
+        chooseMastheadPagesCover: async () => {
+          calls.push("chooseMastheadPagesCover");
+          return { canceled: true as const };
+        },
+        clearMastheadPagesCover: async () => {
+          calls.push("clearMastheadPagesCover");
+        },
+        uploadMastheadPagesCover: async () => {
+          calls.push("uploadMastheadPagesCover");
+          return { protocolVersion: "masthead-pages-cover-result-v1" as const, coverVersion: "abc" };
+        },
         publishStagedToMastheadPages: async (args: { refs: Array<{ artifactId: string; requestDigest: string }> }) => {
           calls.push(`publish:${args.refs[0]?.artifactId}`);
           return { protocolVersion: "masthead-pages-publish-batch-result-v1", results: [] };
@@ -91,6 +102,12 @@ describe("mastheadPages desktopClient", () => {
       description: "",
       defaultLicense: "all-rights-reserved"
     });
+    await expect(client.chooseCover()).resolves.toEqual({ canceled: true });
+    await client.clearCover();
+    await client.uploadCover({
+      publicLogbookId: "11111111-1111-4111-8111-111111111112",
+      selectionId: "33333333-3333-4333-8333-333333333333"
+    });
     await client.publishStaged([{ artifactId: "a1", requestDigest: "sha256-abc" }]);
     await client.withdrawStaged({ artifactId: "a1", requestDigest: "sha256-abc" });
 
@@ -100,6 +117,9 @@ describe("mastheadPages desktopClient", () => {
       "disconnectMastheadPages",
       "listMastheadPagesLogbooks",
       "createMastheadPagesLogbook",
+      "chooseMastheadPagesCover",
+      "clearMastheadPagesCover",
+      "uploadMastheadPagesCover",
       "publish:a1",
       "remove:a1"
     ]);

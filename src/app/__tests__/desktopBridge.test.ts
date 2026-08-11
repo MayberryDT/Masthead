@@ -100,17 +100,26 @@ describe("desktop bridge", () => {
   test("exposes typed Masthead Pages methods without shell:openExternal", () => {
     const getMastheadPagesConnection = vi.fn(async () => ({ status: "disconnected" as const }));
     const connectMastheadPages = vi.fn(async () => ({ status: "disconnected" as const }));
+    const chooseMastheadPagesCover = vi.fn(async () => ({ canceled: true as const }));
+    const uploadMastheadPagesCover = vi.fn(async () => ({
+      protocolVersion: "masthead-pages-cover-result-v1" as const,
+      coverVersion: "abc"
+    }));
     vi.stubGlobal("window", {
       mastheadDesktop: {
         invoke: async <T>() => ({ ok: true }) as T,
         getMastheadPagesConnection,
-        connectMastheadPages
+        connectMastheadPages,
+        chooseMastheadPagesCover,
+        uploadMastheadPagesCover
       }
     });
 
     const bridge = getDesktopBridge();
     expect(bridge?.getMastheadPagesConnection).toBe(getMastheadPagesConnection);
     expect(bridge?.connectMastheadPages).toBe(connectMastheadPages);
+    expect(bridge?.chooseMastheadPagesCover).toBe(chooseMastheadPagesCover);
+    expect(bridge?.uploadMastheadPagesCover).toBe(uploadMastheadPagesCover);
     expect(bridge).not.toHaveProperty("openExternal");
   });
 });

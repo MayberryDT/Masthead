@@ -22,6 +22,7 @@ import {
   assertSecureStorageAvailable,
   SECURE_STORAGE_UNAVAILABLE
 } from "./mastheadPagesCredentials.ts";
+import type { CoverImageType, CoverSelectionStore, CoverSourceBytes } from "./mastheadPagesCover.ts";
 import {
   assertStagedRefsOnly,
   chunkPublishBatch,
@@ -39,6 +40,16 @@ import {
 export type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
 export type OpenExternalLike = (url: string) => Promise<string | void> | string | void;
 
+export type CoverUploadInput = {
+  publicLogbookId: string;
+  selectionId: string;
+};
+
+export type CoverUploadResult = {
+  protocolVersion: "masthead-pages-cover-result-v1";
+  coverVersion: string;
+};
+
 export type MastheadPagesRemoteClientOptions = {
   apiOrigin?: string;
   credentialStore: MastheadPagesCredentialStore;
@@ -52,6 +63,7 @@ export type MastheadPagesRemoteClientOptions = {
   platform?: NodeJS.Platform;
   requestTimeoutMs?: number;
   maxPollAttempts?: number;
+  coverSelectionStore?: CoverSelectionStore;
 };
 
 function redactError(error: unknown): Error {
@@ -259,6 +271,76 @@ export function createMastheadPagesRemoteClient(options: MastheadPagesRemoteClie
       return validated.value.publicLogbook;
     },
 
+    async uploadCover(input: CoverUploadInput): Promise<CoverUploadResult> {
+      if (!input || typeof input !== "object" || Array.isArray(input)) {
+        throw new Error("cover_upload_invalid_request");
+      }
+      if (typeof input.publicLogbookId !== "string" || !input.publicLogbookId) {
+        throw new Error("cover_upload_invalid_logbook");
+      }
+      if (typeof input.selectionId !== "string" || !input.selectionId) {
+        throw new Error("cover_upload_invalid_selection");
+      }
+      // Reject any attempt to smuggle paths or raw file objects through IPC.
+      for (const key of Object.keys(input as Record<string, unknown>)) {
+        if (key !== "publicLogbookId" && key !== "selectionId") {
+          throw new Error(`cover_upload_forbidden_field:${key}`);
+        }
+      }
+      if (!options.coverSelectionStore) throw new Error("cover_selection_store_unavailable");
+      const source = options.coverSelectionStore.take(input.selectionId);
+      if (!source) throw new Error("cover_selection_missing");
+
+      const { accessToken } = await ensureAccessToken();
+      const form = buildCoverMultipart(source);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 60_000);
+      try {
+        const response = await fetchImpl(
+          `${apiOrigin()}/api/v1/public-logbooks/${encodeURIComponent(input.publicLogbookId)}/cover`,
+          {
+            method: "PUT",
+            headers: {
+              accept: "application/json",
+              authorization: `Bearer ${accessToken}`
+            },
+            body: form,
+            signal: controller.signal
+          }
+        );
+        const text = await response.text();
+        let body: unknown = null;
+        if (text) {
+          try {
+            body = JSON.parse(text) as unknown;
+          } catch {
+            body = { error: "invalid-json-body" };
+          }
+        }
+        if (response.status !== 200 && response.status !== 201) {
+          throw new Error(`cover_upload_failed:${response.status}`);
+        }
+        if (!body || typeof body !== "object" || Array.isArray(body)) {
+          throw new Error("cover_upload_invalid_response");
+        }
+        const record = body as Record<string, unknown>;
+        if (record.protocolVersion !== "masthead-pages-cover-result-v1") {
+          throw new Error("cover_upload_invalid_response");
+        }
+        if (typeof record.coverVersion !== "string" || !record.coverVersion) {
+          throw new Error("cover_upload_invalid_response");
+        }
+        return {
+          protocolVersion: "masthead-pages-cover-result-v1",
+          coverVersion: record.coverVersion
+        };
+      } catch (error) {
+        throw redactError(error);
+      } finally {
+        clearTimeout(timeout);
+      }
+    },
+
     async publishStaged(args: unknown): Promise<PublishPageBatchResultV1> {
       const refs = assertStagedRefsOnly(args, "publish");
       const batch = await loadStagedPublishBatch(refs, pendingFetcher);
@@ -306,3 +388,18 @@ export function createMastheadPagesRemoteClient(options: MastheadPagesRemoteClie
 }
 
 export type MastheadPagesRemoteClient = ReturnType<typeof createMastheadPagesRemoteClient>;
+
+function coverFilename(contentType: CoverImageType): string {
+  if (contentType === "image/jpeg") return "cover.jpg";
+  if (contentType === "image/webp") return "cover.webp";
+  return "cover.png";
+}
+
+function buildCoverMultipart(source: CoverSourceBytes): FormData {
+  const form = new FormData();
+  const bytes = Uint8Array.from(source.bytes);
+  const blob = new Blob([bytes], { type: source.contentType });
+  // Generic filename only — never the original local path.
+  form.append("cover", blob, coverFilename(source.contentType));
+  return form;
+}

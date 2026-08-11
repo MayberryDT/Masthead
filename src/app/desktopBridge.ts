@@ -40,6 +40,9 @@ export type DesktopBridge = {
   disconnectMastheadPages?: () => Promise<void>;
   listMastheadPagesLogbooks?: () => Promise<unknown[]>;
   createMastheadPagesLogbook?: (input: unknown) => Promise<unknown>;
+  chooseMastheadPagesCover?: () => Promise<unknown>;
+  clearMastheadPagesCover?: (args?: { selectionId?: string }) => Promise<void>;
+  uploadMastheadPagesCover?: (input: { publicLogbookId: string; selectionId: string }) => Promise<unknown>;
   publishStagedToMastheadPages?: (args: { refs: MastheadPagesStagedRef[] }) => Promise<unknown>;
   removeStagedFromMastheadPages?: (args: { ref: MastheadPagesStagedRef }) => Promise<unknown>;
 };
@@ -62,6 +65,12 @@ export function getDesktopBridge(): DesktopBridge | undefined {
       typeof candidate.listMastheadPagesLogbooks === "function" ? candidate.listMastheadPagesLogbooks : undefined,
     createMastheadPagesLogbook:
       typeof candidate.createMastheadPagesLogbook === "function" ? candidate.createMastheadPagesLogbook : undefined,
+    chooseMastheadPagesCover:
+      typeof candidate.chooseMastheadPagesCover === "function" ? candidate.chooseMastheadPagesCover : undefined,
+    clearMastheadPagesCover:
+      typeof candidate.clearMastheadPagesCover === "function" ? candidate.clearMastheadPagesCover : undefined,
+    uploadMastheadPagesCover:
+      typeof candidate.uploadMastheadPagesCover === "function" ? candidate.uploadMastheadPagesCover : undefined,
     publishStagedToMastheadPages:
       typeof candidate.publishStagedToMastheadPages === "function" ? candidate.publishStagedToMastheadPages : undefined,
     removeStagedFromMastheadPages:

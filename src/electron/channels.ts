@@ -19,6 +19,9 @@ export const ELECTRON_CHANNELS = {
   mastheadPagesDisconnect: "masthead:pages:disconnect",
   mastheadPagesListLogbooks: "masthead:pages:list-logbooks",
   mastheadPagesCreateLogbook: "masthead:pages:create-logbook",
+  mastheadPagesChooseCover: "masthead:pages:choose-cover",
+  mastheadPagesClearCover: "masthead:pages:clear-cover",
+  mastheadPagesUploadCover: "masthead:pages:upload-cover",
   mastheadPagesPublishStaged: "masthead:pages:publish-staged",
   mastheadPagesRemoveStaged: "masthead:pages:remove-staged"
 } as const;
@@ -43,6 +46,9 @@ export const LEGACY_COMMAND_TO_CHANNEL: Record<string, ElectronChannel> = {
   masthead_pages_disconnect_command: ELECTRON_CHANNELS.mastheadPagesDisconnect,
   masthead_pages_list_logbooks_command: ELECTRON_CHANNELS.mastheadPagesListLogbooks,
   masthead_pages_create_logbook_command: ELECTRON_CHANNELS.mastheadPagesCreateLogbook,
+  masthead_pages_choose_cover_command: ELECTRON_CHANNELS.mastheadPagesChooseCover,
+  masthead_pages_clear_cover_command: ELECTRON_CHANNELS.mastheadPagesClearCover,
+  masthead_pages_upload_cover_command: ELECTRON_CHANNELS.mastheadPagesUploadCover,
   masthead_pages_publish_staged_command: ELECTRON_CHANNELS.mastheadPagesPublishStaged,
   masthead_pages_remove_staged_command: ELECTRON_CHANNELS.mastheadPagesRemoveStaged
 };

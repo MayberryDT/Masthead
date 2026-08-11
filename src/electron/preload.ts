@@ -6,6 +6,8 @@ import type {
   PublicLogbookSummaryV1,
   RemovePageResultV1
 } from "../mastheadPages/types";
+import type { CoverPreview } from "./mastheadPagesCover";
+import type { CoverUploadInput, CoverUploadResult } from "./mastheadPagesRemoteClient";
 import type { PagesConnectionState } from "./mastheadPagesCredentials";
 import { ELECTRON_CHANNELS, LEGACY_COMMAND_TO_CHANNEL } from "./channels";
 
@@ -34,6 +36,14 @@ contextBridge.exposeInMainWorld("mastheadDesktop", {
     ipcRenderer.invoke(ELECTRON_CHANNELS.mastheadPagesListLogbooks) as Promise<PublicLogbookSummaryV1[]>,
   createMastheadPagesLogbook: (input: CreatePublicLogbookRequestV1): Promise<PublicLogbookSummaryV1> =>
     ipcRenderer.invoke(ELECTRON_CHANNELS.mastheadPagesCreateLogbook, input) as Promise<PublicLogbookSummaryV1>,
+  chooseMastheadPagesCover: (): Promise<CoverPreview | { canceled: true } | { error: string }> =>
+    ipcRenderer.invoke(ELECTRON_CHANNELS.mastheadPagesChooseCover) as Promise<
+      CoverPreview | { canceled: true } | { error: string }
+    >,
+  clearMastheadPagesCover: (args?: { selectionId?: string }): Promise<void> =>
+    ipcRenderer.invoke(ELECTRON_CHANNELS.mastheadPagesClearCover, args) as Promise<void>,
+  uploadMastheadPagesCover: (input: CoverUploadInput): Promise<CoverUploadResult> =>
+    ipcRenderer.invoke(ELECTRON_CHANNELS.mastheadPagesUploadCover, input) as Promise<CoverUploadResult>,
   publishStagedToMastheadPages: (args: {
     refs: Array<{ artifactId: string; requestDigest: string }>;
   }): Promise<PublishPageBatchResultV1> =>

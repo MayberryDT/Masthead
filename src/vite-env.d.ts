@@ -44,6 +44,9 @@ type MastheadDesktopBridge = {
   disconnectMastheadPages?: () => Promise<void>;
   listMastheadPagesLogbooks?: () => Promise<unknown[]>;
   createMastheadPagesLogbook?: (input: unknown) => Promise<unknown>;
+  chooseMastheadPagesCover?: () => Promise<unknown>;
+  clearMastheadPagesCover?: (args?: { selectionId?: string }) => Promise<void>;
+  uploadMastheadPagesCover?: (input: { publicLogbookId: string; selectionId: string }) => Promise<unknown>;
   publishStagedToMastheadPages?: (args: { refs: MastheadPagesStagedRef[] }) => Promise<unknown>;
   removeStagedFromMastheadPages?: (args: { ref: MastheadPagesStagedRef }) => Promise<unknown>;
   projectionUrl?: string;

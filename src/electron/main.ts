@@ -3,13 +3,14 @@ import type { ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { lstat } from "node:fs/promises";
 import { join } from "node:path";
-import { app, BrowserWindow, ipcMain, Menu, net, Notification, protocol, safeStorage, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, net, Notification, protocol, safeStorage, shell } from "electron";
 import { collectGpuDiagnostics } from "./gpuDiagnostics";
 import { headlessDesktopPlan } from "./headless";
 import { installMastheadCliLauncher, resolveMastheadCliLaunchTarget } from "./cliLauncher";
 import { resolveMastheadAppIconPath } from "./icon";
 import { ELECTRON_CHANNELS, isAllowedIpcSender, registerMastheadIpc } from "./ipc";
 import { createMastheadPagesCredentialStore } from "./mastheadPagesCredentials";
+import { chooseCoverFile, createCoverSelectionStore } from "./mastheadPagesCover";
 import { createMastheadPagesRemoteClient } from "./mastheadPagesRemoteClient";
 import { showSessionTransitionNotification } from "./notifications";
 import {
@@ -383,6 +384,7 @@ function registerRendererProtocol(): void {
 
 function registerDesktopIpc(): void {
   const targetInput = connectorTargetInput;
+  const coverSelectionStore = createCoverSelectionStore();
   const pagesClient = createMastheadPagesRemoteClient({
     credentialStore: createMastheadPagesCredentialStore({
       userDataPath: app.getPath("userData"),
@@ -396,7 +398,8 @@ function registerDesktopIpc(): void {
     daemonBaseUrl: () => connectorBaseUrl(resolveDaemonLaunchTarget(targetInput()).port),
     daemonFetch: (input, init) => net.fetch(String(input), init),
     platform: process.platform,
-    env: process.env
+    env: process.env,
+    coverSelectionStore
   });
 
   ipcMain.on(ELECTRON_CHANNELS.rendererConfig, (event) => {
@@ -482,6 +485,27 @@ function registerDesktopIpc(): void {
       [ELECTRON_CHANNELS.mastheadPagesListLogbooks]: () => pagesClient.listPublicLogbooks(),
       [ELECTRON_CHANNELS.mastheadPagesCreateLogbook]: (args) =>
         pagesClient.createPublicLogbook(args as CreatePublicLogbookRequestV1),
+      [ELECTRON_CHANNELS.mastheadPagesChooseCover]: () =>
+        chooseCoverFile({
+          dialog: {
+            showOpenDialog: (options) =>
+              dialog.showOpenDialog({
+                properties: ["openFile"],
+                filters: options.filters
+              })
+          },
+          store: coverSelectionStore
+        }),
+      [ELECTRON_CHANNELS.mastheadPagesClearCover]: (args) => {
+        const selectionId =
+          args && typeof args === "object" && !Array.isArray(args) && typeof (args as { selectionId?: unknown }).selectionId === "string"
+            ? (args as { selectionId: string }).selectionId
+            : undefined;
+        coverSelectionStore.clear(selectionId);
+        return { ok: true };
+      },
+      [ELECTRON_CHANNELS.mastheadPagesUploadCover]: (args) =>
+        pagesClient.uploadCover(args as { publicLogbookId: string; selectionId: string }),
       [ELECTRON_CHANNELS.mastheadPagesPublishStaged]: (args) => pagesClient.publishStaged(args),
       [ELECTRON_CHANNELS.mastheadPagesRemoveStaged]: (args) => pagesClient.withdrawStaged(args)
     },
