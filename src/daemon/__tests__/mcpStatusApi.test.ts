@@ -97,8 +97,8 @@ describe("MCP status API", () => {
         "    if (!line) continue;",
         "    const request = JSON.parse(line);",
         "    const result = request.method === 'tools/list'",
-        "      ? { tools: tools.map((name) => ({ name })) }",
-        "      : { protocolVersion: '2024-11-05', serverInfo: { name: 'masthead', version: 'api-test' } };",
+        "      ? { tools: tools.map((name) => ({ inputSchema: { type: 'object' }, name })) }",
+        "      : { capabilities: { tools: {} }, protocolVersion: '2024-11-05', serverInfo: { name: 'masthead', version: 'api-test' } };",
         "    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, result }) + '\\n');",
         "  }",
         "});"

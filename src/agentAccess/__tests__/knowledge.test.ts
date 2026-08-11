@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { migrateDatabase } from "../../daemon/db/schema.ts";
 import { applySessionArtifact, publishSessionArtifact } from "../../daemon/db/sessionArtifactRepository.ts";
-import { seedSession } from "../../daemon/db/__tests__/sessionTestHelpers.ts";
+import { publishSessionToLogbook, seedSession } from "../../daemon/db/__tests__/sessionTestHelpers.ts";
 import { openMastheadDatabase } from "../../daemon/db/sqlite.ts";
 import { getEvidenceTranscript } from "../evidence.ts";
 import { getKnowledge, searchKnowledge } from "../knowledge.ts";
@@ -117,6 +117,31 @@ describe("agentAccess knowledge API", () => {
     });
     expect(allowed.ok).toBe(true);
     expect(allowed.sessionId).toBe("session:prov-a");
+    db.close();
+  });
+
+  test("evidence transcript applies maxBytes across all returned rows", async () => {
+    const db = await openDb();
+    const sessionId = "session:bounded-transcript";
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId,
+      title: "Bounded evidence transcript"
+    });
+    publishSessionToLogbook(db, sessionId);
+
+    const result = getEvidenceTranscript(db, { limit: 10, maxBytes: 24, sessionId });
+    const contentBytes = result.items.reduce(
+      (total, item) =>
+        total + Buffer.byteLength(item.text, "utf8") + Buffer.byteLength(item.narrativeText ?? "", "utf8"),
+      0
+    );
+
+    expect(contentBytes).toBeGreaterThan(0);
+    expect(contentBytes).toBeLessThanOrEqual(24);
+    expect(result.sourceRefs).toEqual(result.items.map((item) => item.sourceRef));
     db.close();
   });
 });

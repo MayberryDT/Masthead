@@ -1,7 +1,6 @@
-import { spawn } from "node:child_process";
-import { once } from "node:events";
+import { Client } from "@modelcontextprotocol/client";
+import { DEFAULT_INHERITED_ENV_VARS, StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { constants } from "node:fs";
-import { setTimeout as delay } from "node:timers/promises";
 import { access } from "node:fs/promises";
 import { delimiter, isAbsolute, resolve } from "node:path";
 import {
@@ -245,7 +244,10 @@ export function getMcpLaunchConfig(databasePath: string, dataDirectory?: string)
 }
 
 function mcpSpawnEnv(launchEnv: Record<string, string>): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...launchEnv };
+  // SDK v2 merges its defaults first. Undefined own values override those keys,
+  // and Node omits undefined values from the spawned process environment.
+  const env: NodeJS.ProcessEnv = Object.fromEntries(DEFAULT_INHERITED_ENV_VARS.map((key) => [key, undefined]));
+  Object.assign(env, launchEnv);
   if (process.env.PATH) env.PATH = process.env.PATH;
   if (process.env.PATHEXT) env.PATHEXT = process.env.PATHEXT;
   if (process.env.SYSTEMROOT) env.SYSTEMROOT = process.env.SYSTEMROOT;
@@ -303,9 +305,10 @@ export async function validateMcpLaunchConfig(
 export async function testMcpConnection(
   activeDatabasePath: string,
   dataDirectory?: string,
-  timeoutMs = testConnectionTimeoutMs
+  timeoutMs = testConnectionTimeoutMs,
+  options: { launchConfig?: McpLaunchConfigDto } = {}
 ): Promise<McpTestConnectionDto> {
-  const launchConfig = getMcpLaunchConfig(activeDatabasePath, dataDirectory);
+  const launchConfig = options.launchConfig ?? getMcpLaunchConfig(activeDatabasePath, dataDirectory);
   const attemptedAt = new Date().toISOString();
   const validation = await validateMcpLaunchConfig(launchConfig, activeDatabasePath);
   if (!validation.ready) {
@@ -320,126 +323,86 @@ export async function testMcpConnection(
     };
   }
 
-  const child = spawn(launchConfig.command, launchConfig.args, {
-    env: mcpSpawnEnv(launchConfig.env),
-    stdio: ["pipe", "pipe", "pipe"]
+  const client = new Client({ name: "masthead-agent-access", version: "0.1.0" }, {
+    versionNegotiation: {
+      mode: "auto",
+      probe: { timeoutMs }
+    }
   });
-  let stdoutBuffer = "";
+  const transport = new StdioClientTransport({
+    args: launchConfig.args,
+    command: launchConfig.command,
+    env: mcpSpawnEnv(launchConfig.env) as Record<string, string>,
+    stderr: "pipe"
+  });
   let stderr = "";
-  const onStderr = (chunk: Buffer) => {
-    stderr += chunk.toString("utf8");
+  const onStderr = (chunk: unknown) => {
+    stderr += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
   };
-  child.stderr.on("data", onStderr);
-  child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }) + "\n");
-
-  type ProbeResult = Omit<McpTestConnectionDto, "attemptedAt" | "testedAt" | "validation" | "status">;
-  const readResponse = async (): Promise<ProbeResult> => {
-    let initialized:
-      | {
-          protocolVersion?: string;
-          serverInfo?: { name?: string; version?: string };
-        }
-      | undefined;
-
-    for await (const chunk of child.stdout) {
-      stdoutBuffer += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
-      let newlineIndex = stdoutBuffer.indexOf("\n");
-      while (newlineIndex !== -1) {
-        const line = stdoutBuffer.slice(0, newlineIndex).trim();
-        stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
-        newlineIndex = stdoutBuffer.indexOf("\n");
-        if (!line) continue;
-        try {
-          const response = JSON.parse(line) as {
-            result?: {
-              protocolVersion?: string;
-              serverInfo?: { name?: string; version?: string };
-              tools?: Array<{ name?: unknown }>;
-            };
-            error?: { message?: string };
-          };
-
-          if (!initialized) {
-            if (response.result?.serverInfo?.name !== "masthead") {
-              return {
-                ok: false,
-                message: response.error?.message || "MCP server returned an unexpected initialize response.",
-                stderr: stderr.trim() || undefined
-              };
-            }
-            initialized = {
-              protocolVersion: response.result.protocolVersion,
-              serverInfo: response.result.serverInfo
-            };
-            child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }) + "\n");
-            child.stdin.end();
-            continue;
-          }
-
-          const toolNames = Array.isArray(response.result?.tools)
-            ? response.result.tools.map((tool) => tool.name).filter((name): name is string => typeof name === "string").sort()
-            : [];
-          const missingTools = expectedMcpToolNames.filter((name) => !toolNames.includes(name));
-          if (missingTools.length > 0) {
-            return {
-              ok: false,
-              message: `MCP server tools/list missing tools: ${missingTools.join(", ")}`,
-              protocolVersion: initialized.protocolVersion,
-              serverInfo: initialized.serverInfo,
-              stderr: stderr.trim() || undefined,
-              toolCount: toolNames.length,
-              toolNames
-            };
-          }
-          return {
-            ok: true,
-            message: `MCP server initialized and returned ${toolNames.length} tools.`,
-            protocolVersion: initialized.protocolVersion,
-            serverInfo: initialized.serverInfo,
-            stderr: stderr.trim() || undefined,
-            toolCount: toolNames.length,
-            toolNames
-          };
-        } catch (error) {
-          return {
-            ok: false,
-            message: `MCP server returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`,
-            protocolVersion: initialized?.protocolVersion,
-            serverInfo: initialized?.serverInfo,
-            stderr: stderr.trim() || undefined
-          };
-        }
-      }
+  const signal = AbortSignal.timeout(timeoutMs);
+  transport.stderr?.on("data", onStderr);
+  try {
+    await client.connect(transport, { signal, timeout: timeoutMs });
+    const listed = await client.listTools(undefined, { cacheMode: "bypass", signal, timeout: timeoutMs });
+    const toolNames = listed.tools.map((tool) => tool.name).sort();
+    const missingTools = expectedMcpToolNames.filter((name) => !toolNames.includes(name));
+    const protocolVersion = client.getNegotiatedProtocolVersion();
+    const serverInfo = client.getServerVersion();
+    if (serverInfo?.name !== "masthead") {
+      return {
+        attemptedAt,
+        testedAt: attemptedAt,
+        ok: false,
+        status: "failed",
+        validation,
+        message: "MCP server returned an unexpected server identity.",
+        protocolVersion,
+        serverInfo,
+        stderr: stderr.trim() || undefined
+      };
+    }
+    if (missingTools.length > 0) {
+      return {
+        attemptedAt,
+        testedAt: attemptedAt,
+        ok: false,
+        status: "failed",
+        validation,
+        message: `MCP server tools/list missing tools: ${missingTools.join(", ")}`,
+        protocolVersion,
+        serverInfo,
+        stderr: stderr.trim() || undefined,
+        toolCount: toolNames.length,
+        toolNames
+      };
     }
     return {
+      attemptedAt,
+      testedAt: attemptedAt,
+      ok: true,
+      status: "passed",
+      validation,
+      message: `MCP server negotiated ${client.getProtocolEra()} protocol and returned ${toolNames.length} tools.`,
+      protocolVersion,
+      serverInfo,
+      stderr: stderr.trim() || undefined,
+      toolCount: toolNames.length,
+      toolNames
+    };
+  } catch (error) {
+    return {
+      attemptedAt,
+      testedAt: attemptedAt,
       ok: false,
-      message: initialized ? "MCP server stdout closed before tools/list response." : "MCP server stdout closed before initialize response.",
-      protocolVersion: initialized?.protocolVersion,
-      serverInfo: initialized?.serverInfo,
+      status: "failed",
+      validation,
+      message: `MCP server connection failed: ${error instanceof Error ? error.message : String(error)}`,
       stderr: stderr.trim() || undefined
     };
-  };
-
-  const exitResult = once(child, "exit").then(([code, signal]) => ({
-    ok: false,
-    message: `MCP server exited before initialize response (${code ?? signal ?? "unknown"}).`,
-    stderr: stderr.trim() || undefined
-  }));
-  const errorResult = once(child, "error").then(([error]) => ({
-    ok: false,
-    message: `MCP server failed to start: ${error instanceof Error ? error.message : String(error)}`,
-    stderr: stderr.trim() || undefined
-  }));
-  const timeoutResult = delay(timeoutMs).then(() => ({
-    ok: false,
-    message: `MCP server did not respond within ${timeoutMs}ms.`,
-    stderr: stderr.trim() || undefined
-  }));
-
-  const result = await Promise.race([readResponse(), exitResult, errorResult, timeoutResult]);
-  child.stderr.off("data", onStderr);
-  if (!child.killed) child.kill();
-  return { attemptedAt, testedAt: attemptedAt, validation, status: result.ok ? "passed" : "failed", ...result };
+  } finally {
+    transport.stderr?.off("data", onStderr);
+    await client.close().catch(() => undefined);
+  }
 }
 
 async function executableExists(command: string): Promise<boolean> {

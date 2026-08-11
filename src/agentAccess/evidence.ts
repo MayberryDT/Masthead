@@ -49,7 +49,22 @@ export function getEvidenceTranscript(db: MastheadDatabase, args: EvidenceArgs) 
     limit: args.limit,
     sessionId: args.sessionId
   });
-  const items = transcript.items.map((item) => boundTranscriptItem(item, maxBytes));
+  let remainingBytes = maxBytes;
+  const items = transcript.items.flatMap((item) => {
+    if (remainingBytes <= 0) return [];
+    const text = boundText(item.text, remainingBytes);
+    remainingBytes -= Buffer.byteLength(text, "utf8");
+    const narrativeText =
+      item.narrativeText === undefined ? undefined : boundText(item.narrativeText, remainingBytes);
+    remainingBytes -= Buffer.byteLength(narrativeText ?? "", "utf8");
+    return [
+      {
+        ...item,
+        ...(item.narrativeText === undefined ? {} : { narrativeText }),
+        text
+      }
+    ];
+  });
   return {
     artifactId: args.artifactId,
     coverage: transcript.coverage,
@@ -92,14 +107,6 @@ function transcriptKind(role: EvidenceRole | undefined) {
   if (role === "user" || role === "assistant") return role;
   if (role === "tool") return "tools" as const;
   return "all" as const;
-}
-
-function boundTranscriptItem(item: SessionTranscriptItem, maxBytes: number): SessionTranscriptItem {
-  return {
-    ...item,
-    ...(item.narrativeText === undefined ? {} : { narrativeText: boundText(item.narrativeText, maxBytes) }),
-    text: boundText(item.text, maxBytes)
-  };
 }
 
 function boundText(text: string, maxBytes: number): string {

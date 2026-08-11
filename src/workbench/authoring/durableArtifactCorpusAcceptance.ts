@@ -9,7 +9,7 @@ import { getSessionDossier } from "../../daemon/db/sessionDossierRepository.ts";
 import { getOrCreateDatabaseIdentity, migrateDatabase } from "../../daemon/db/schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../../daemon/db/sqlite.ts";
 import { iterateSessionTranscriptItems } from "../../daemon/db/sessionTranscriptRepository.ts";
-import { handleMcpLine } from "../../mcp/protocol.ts";
+import { callTool as invokeMcpTool } from "../../mcp/protocol.ts";
 import type {
   WorkbenchAuthoringReceiptV3,
   WorkbenchAutomaticArtifactKind,
@@ -965,21 +965,7 @@ function artifactOnlyReuseTask(
 }
 
 function callMcpTool(db: MastheadDatabase, name: string, args: Record<string, unknown>): unknown {
-  const line = handleMcpLine(db, JSON.stringify({
-    id: `durable-gate:${name}`,
-    jsonrpc: "2.0",
-    method: "tools/call",
-    params: { arguments: args, name }
-  }));
-  if (!line) throw new Error(`mcp_no_response:${name}`);
-  const response = JSON.parse(line) as {
-    error?: unknown;
-    result?: { content?: Array<{ text?: string }> };
-  };
-  if (response.error) throw new Error(`mcp_error:${name}:${JSON.stringify(response.error)}`);
-  const text = response.result?.content?.[0]?.text;
-  if (!text) throw new Error(`mcp_empty_result:${name}`);
-  return JSON.parse(text);
+  return invokeMcpTool(db, name, args);
 }
 
 async function openFixtureDatabase(path: string): Promise<MastheadDatabase> {

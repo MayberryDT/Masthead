@@ -18,14 +18,11 @@ try {
     ownedTempDir = seeded.tempDir;
   }
 
-  mcp = spawn(process.execPath, ["dist/daemon/src/mcp/server.js"], {
-    cwd: process.cwd(),
-    env: { ...process.env, MASTHEAD_DB_PATH: databasePath },
-    stdio: ["pipe", "pipe", "pipe"]
-  });
+  mcp = startMcp(databasePath);
 
-  const initialized = await rpc(mcp, "initialize", {});
-  assert(initialized.result?.serverInfo?.name === "masthead", "initialize failed");
+  const discovered = await rpc(mcp, "server/discover", {});
+  assert(discovered.result?.supportedVersions?.includes("2026-07-28"), "modern discovery failed");
+  assert(discovered.result?._meta?.["io.modelcontextprotocol/serverInfo"]?.name === "masthead", "modern discovery missing server metadata");
   const tools = await rpc(mcp, "tools/list", {});
   const toolNames = tools.result.tools.map((tool) => tool.name).sort();
   assert(JSON.stringify(toolNames) === JSON.stringify([
@@ -92,7 +89,20 @@ try {
 
   assert(dbCount(databasePath, "mcp_query_log") >= 11, "MCP query audit log was not written");
 
-  const output = { ok: true, databasePath, tools: toolNames, auditRows: dbCount(databasePath, "mcp_query_log") };
+  await stopProcess(mcp);
+  mcp = startMcp(databasePath);
+  const initialized = await rpc(mcp, "initialize", {
+    capabilities: {},
+    clientInfo: { name: "masthead-mcp-smoke-legacy", version: "1.0.0" },
+    protocolVersion: "2024-11-05"
+  }, null);
+  assert(initialized.result?.serverInfo?.name === "masthead", "legacy initialize failed");
+  const legacyTools = await rpc(mcp, "tools/list", {}, null);
+  assert(legacyTools.result?.tools?.length === toolNames.length, "legacy tools/list failed");
+  const legacyCoverage = await callTool(mcp, "get_masthead_coverage", {}, null);
+  assert(legacyCoverage.sessions >= search.sessions.length, "legacy tool call failed");
+
+  const output = { ok: true, databasePath, protocolVersions: ["2026-07-28", initialized.result.protocolVersion], tools: toolNames, auditRows: dbCount(databasePath, "mcp_query_log") };
   if (process.argv.includes("--json")) console.log(JSON.stringify(output, null, 2));
   else console.log(`Masthead MCP smoke passed. DB: ${databasePath}`);
 } finally {
@@ -180,15 +190,32 @@ async function createSmokeDatabase() {
   }
 }
 
-function rpc(process, method, params) {
-  return sendLine(process, { jsonrpc: "2.0", id: nextId(), method, params });
+function rpc(process, method, params, meta = modernMeta()) {
+  return sendLine(process, { jsonrpc: "2.0", id: nextId(), method, params: meta ? { ...params, _meta: meta } : params });
 }
 
-async function callTool(process, name, args) {
-  const response = await rpc(process, "tools/call", { name, arguments: args });
+async function callTool(process, name, args, meta = modernMeta()) {
+  const response = await rpc(process, "tools/call", { name, arguments: args }, meta);
+  if (response.result?.structuredContent !== undefined) return response.result.structuredContent;
   const text = response.result?.content?.[0]?.text;
   assert(typeof text === "string", `${name} returned no text content`);
   return JSON.parse(text);
+}
+
+function modernMeta() {
+  return {
+    "io.modelcontextprotocol/clientCapabilities": {},
+    "io.modelcontextprotocol/clientInfo": { name: "masthead-mcp-smoke", version: "1.0.0" },
+    "io.modelcontextprotocol/protocolVersion": "2026-07-28"
+  };
+}
+
+function startMcp(databasePath) {
+  return spawn(process.execPath, ["dist/daemon/src/mcp/server.js"], {
+    cwd: process.cwd(),
+    env: { ...process.env, MASTHEAD_DB_PATH: databasePath },
+    stdio: ["pipe", "pipe", "pipe"]
+  });
 }
 
 function nextId() {
