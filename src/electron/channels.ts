@@ -13,7 +13,14 @@ export const ELECTRON_CHANNELS = {
   windowClose: "masthead:window:close",
   windowMaximize: "masthead:window:maximize",
   windowMinimize: "masthead:window:minimize",
-  notifySessionTransition: "masthead:notify:session-transition"
+  notifySessionTransition: "masthead:notify:session-transition",
+  mastheadPagesGetConnection: "masthead:pages:get-connection",
+  mastheadPagesConnect: "masthead:pages:connect",
+  mastheadPagesDisconnect: "masthead:pages:disconnect",
+  mastheadPagesListLogbooks: "masthead:pages:list-logbooks",
+  mastheadPagesCreateLogbook: "masthead:pages:create-logbook",
+  mastheadPagesPublishStaged: "masthead:pages:publish-staged",
+  mastheadPagesRemoveStaged: "masthead:pages:remove-staged"
 } as const;
 
 export const LEGACY_COMMAND_TO_CHANNEL: Record<string, ElectronChannel> = {
@@ -30,7 +37,14 @@ export const LEGACY_COMMAND_TO_CHANNEL: Record<string, ElectronChannel> = {
   window_close_command: ELECTRON_CHANNELS.windowClose,
   window_maximize_command: ELECTRON_CHANNELS.windowMaximize,
   window_minimize_command: ELECTRON_CHANNELS.windowMinimize,
-  notify_session_transition_command: ELECTRON_CHANNELS.notifySessionTransition
+  notify_session_transition_command: ELECTRON_CHANNELS.notifySessionTransition,
+  masthead_pages_get_connection_command: ELECTRON_CHANNELS.mastheadPagesGetConnection,
+  masthead_pages_connect_command: ELECTRON_CHANNELS.mastheadPagesConnect,
+  masthead_pages_disconnect_command: ELECTRON_CHANNELS.mastheadPagesDisconnect,
+  masthead_pages_list_logbooks_command: ELECTRON_CHANNELS.mastheadPagesListLogbooks,
+  masthead_pages_create_logbook_command: ELECTRON_CHANNELS.mastheadPagesCreateLogbook,
+  masthead_pages_publish_staged_command: ELECTRON_CHANNELS.mastheadPagesPublishStaged,
+  masthead_pages_remove_staged_command: ELECTRON_CHANNELS.mastheadPagesRemoveStaged
 };
 
 export type ElectronChannel = (typeof ELECTRON_CHANNELS)[keyof typeof ELECTRON_CHANNELS];

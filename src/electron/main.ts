@@ -3,12 +3,14 @@ import type { ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { lstat } from "node:fs/promises";
 import { join } from "node:path";
-import { app, BrowserWindow, ipcMain, Menu, net, Notification, protocol, shell } from "electron";
+import { app, BrowserWindow, ipcMain, Menu, net, Notification, protocol, safeStorage, shell } from "electron";
 import { collectGpuDiagnostics } from "./gpuDiagnostics";
 import { headlessDesktopPlan } from "./headless";
 import { installMastheadCliLauncher, resolveMastheadCliLaunchTarget } from "./cliLauncher";
 import { resolveMastheadAppIconPath } from "./icon";
 import { ELECTRON_CHANNELS, isAllowedIpcSender, registerMastheadIpc } from "./ipc";
+import { createMastheadPagesCredentialStore } from "./mastheadPagesCredentials";
+import { createMastheadPagesRemoteClient } from "./mastheadPagesRemoteClient";
 import { showSessionTransitionNotification } from "./notifications";
 import {
   type StartLiveConnectorResult,
@@ -32,6 +34,7 @@ import {
   rendererTrustedOrigins
 } from "./window";
 import { shouldHideWindowOnClose } from "./windowCloseBehavior";
+import type { CreatePublicLogbookRequestV1 } from "../mastheadPages/types";
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -71,6 +74,12 @@ if (!app.requestSingleInstanceLock()) {
     Menu.setApplicationMenu(null);
     registerRendererProtocol();
     await configureCliLauncher();
+    // Probe async OS encryption early so Linux backend selection is known before credential use.
+    try {
+      await safeStorage.isAsyncEncryptionAvailable();
+    } catch {
+      // Credential operations fail closed later if storage is unavailable.
+    }
     if (desktopPlan.registerDesktopIpc) registerDesktopIpc();
     const appIconPath = mastheadAppIconPath();
     if (desktopPlan.startConnectorInMain) await startHeadlessConnector();
@@ -374,6 +383,21 @@ function registerRendererProtocol(): void {
 
 function registerDesktopIpc(): void {
   const targetInput = connectorTargetInput;
+  const pagesClient = createMastheadPagesRemoteClient({
+    credentialStore: createMastheadPagesCredentialStore({
+      userDataPath: app.getPath("userData"),
+      platform: process.platform
+    }),
+    safeStorage,
+    fetchImpl: (input, init) => net.fetch(String(input), init),
+    openExternal: async (url) => {
+      await shell.openExternal(url);
+    },
+    daemonBaseUrl: () => connectorBaseUrl(resolveDaemonLaunchTarget(targetInput()).port),
+    daemonFetch: (input, init) => net.fetch(String(input), init),
+    platform: process.platform,
+    env: process.env
+  });
 
   ipcMain.on(ELECTRON_CHANNELS.rendererConfig, (event) => {
     if (!isAllowedIpcSender(event.senderFrame?.url, { allowDevRenderer: isElectronDevMode() })) {
@@ -451,7 +475,15 @@ function registerDesktopIpc(): void {
       }),
       [ELECTRON_CHANNELS.readStoreRecords]: () => [],
       [ELECTRON_CHANNELS.notifySessionTransition]: (args) => showSessionTransitionNotification(Notification, args),
-      [ELECTRON_CHANNELS.appendStoreRecords]: () => undefined
+      [ELECTRON_CHANNELS.appendStoreRecords]: () => undefined,
+      [ELECTRON_CHANNELS.mastheadPagesGetConnection]: () => pagesClient.getConnection(),
+      [ELECTRON_CHANNELS.mastheadPagesConnect]: () => pagesClient.connect(),
+      [ELECTRON_CHANNELS.mastheadPagesDisconnect]: () => pagesClient.disconnect(),
+      [ELECTRON_CHANNELS.mastheadPagesListLogbooks]: () => pagesClient.listPublicLogbooks(),
+      [ELECTRON_CHANNELS.mastheadPagesCreateLogbook]: (args) =>
+        pagesClient.createPublicLogbook(args as CreatePublicLogbookRequestV1),
+      [ELECTRON_CHANNELS.mastheadPagesPublishStaged]: (args) => pagesClient.publishStaged(args),
+      [ELECTRON_CHANNELS.mastheadPagesRemoveStaged]: (args) => pagesClient.withdrawStaged(args)
     },
     { allowDevRenderer: isElectronDevMode() }
   );

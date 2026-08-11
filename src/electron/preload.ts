@@ -1,5 +1,12 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { DesktopNotificationResult, DesktopSessionTransitionNotificationInput } from "../app/desktopBridge";
+import type {
+  CreatePublicLogbookRequestV1,
+  PublishPageBatchResultV1,
+  PublicLogbookSummaryV1,
+  RemovePageResultV1
+} from "../mastheadPages/types";
+import type { PagesConnectionState } from "./mastheadPagesCredentials";
 import { ELECTRON_CHANNELS, LEGACY_COMMAND_TO_CHANNEL } from "./channels";
 
 const runtimeProcess = globalThis.process as { env?: Record<string, string | undefined>; platform?: string } | undefined;
@@ -17,5 +24,23 @@ contextBridge.exposeInMainWorld("mastheadDesktop", {
   },
   notifySessionTransition: (input: DesktopSessionTransitionNotificationInput): Promise<DesktopNotificationResult> =>
     ipcRenderer.invoke(ELECTRON_CHANNELS.notifySessionTransition, input) as Promise<DesktopNotificationResult>,
+  getMastheadPagesConnection: (): Promise<PagesConnectionState> =>
+    ipcRenderer.invoke(ELECTRON_CHANNELS.mastheadPagesGetConnection) as Promise<PagesConnectionState>,
+  connectMastheadPages: (): Promise<PagesConnectionState> =>
+    ipcRenderer.invoke(ELECTRON_CHANNELS.mastheadPagesConnect) as Promise<PagesConnectionState>,
+  disconnectMastheadPages: (): Promise<void> =>
+    ipcRenderer.invoke(ELECTRON_CHANNELS.mastheadPagesDisconnect) as Promise<void>,
+  listMastheadPagesLogbooks: (): Promise<PublicLogbookSummaryV1[]> =>
+    ipcRenderer.invoke(ELECTRON_CHANNELS.mastheadPagesListLogbooks) as Promise<PublicLogbookSummaryV1[]>,
+  createMastheadPagesLogbook: (input: CreatePublicLogbookRequestV1): Promise<PublicLogbookSummaryV1> =>
+    ipcRenderer.invoke(ELECTRON_CHANNELS.mastheadPagesCreateLogbook, input) as Promise<PublicLogbookSummaryV1>,
+  publishStagedToMastheadPages: (args: {
+    refs: Array<{ artifactId: string; requestDigest: string }>;
+  }): Promise<PublishPageBatchResultV1> =>
+    ipcRenderer.invoke(ELECTRON_CHANNELS.mastheadPagesPublishStaged, args) as Promise<PublishPageBatchResultV1>,
+  removeStagedFromMastheadPages: (args: {
+    ref: { artifactId: string; requestDigest: string };
+  }): Promise<RemovePageResultV1> =>
+    ipcRenderer.invoke(ELECTRON_CHANNELS.mastheadPagesRemoveStaged, args) as Promise<RemovePageResultV1>,
   projectionUrl: rendererConfig?.projectionUrl || `http://127.0.0.1:${projectionPort}/projection`
 });
