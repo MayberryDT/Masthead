@@ -221,6 +221,7 @@ describe("Settings surface", () => {
     expect(panel?.textContent).toContain("MCP server");
     expect(panel?.textContent).toContain("Test connection");
     expect(panel?.textContent).toContain("Access");
+    expect(panel?.textContent).toContain("Read-only access to published Pages in your Local Logbook.");
     expect(panel?.textContent).toContain("Client setup");
     expect(panel?.textContent).toContain("Copy configuration");
     expect(panel?.textContent).not.toContain("Checking the local MCP launch configuration");

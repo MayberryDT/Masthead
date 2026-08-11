@@ -8,7 +8,7 @@ Masthead is a **local-first, harness-neutral session data layer** for AI coding 
 
 Keep these true:
 
-- Sessions are capture / Workbench units; **Logbook is published artifacts only**.
+- Sessions are capture / Workbench units; **Logbook is published Pages only**. The implementation retains `artifact` identifiers for compatibility.
 - Live **Now** is a shallow view over collected data, not the product category.
 - **MCP is read-only** for the launch surface.
 - Local SQLite is canonical; harness files remain owned by their tools.

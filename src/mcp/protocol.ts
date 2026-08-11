@@ -189,7 +189,7 @@ export function toolDefinitions() {
     {
       name: "search_knowledge",
       description:
-        "PRIMARY: Search published Logbook knowledge (session dossiers, runbooks, ADRs, incident timelines). Prefer this for reuse questions.",
+        "PRIMARY: Search published Logbook Pages (session dossiers, runbooks, ADRs, incident timelines). Prefer this for reuse questions.",
       inputSchema: objectSchema(
         {
           kind: { type: "string", enum: ["session_dossier", "runbook", "adr", "incident_timeline"] },
@@ -205,7 +205,7 @@ export function toolDefinitions() {
     },
     {
       name: "list_knowledge",
-      description: "PRIMARY: Browse published knowledge without a text query (kind/project/date filters + pagination).",
+      description: "PRIMARY: Browse published Logbook Pages without a text query (kind/project/date filters + pagination).",
       inputSchema: objectSchema(
         {
           kind: { type: "string", enum: ["session_dossier", "runbook", "adr", "incident_timeline"] },
@@ -221,12 +221,12 @@ export function toolDefinitions() {
     {
       name: "get_knowledge",
       description:
-        "PRIMARY: Get one published artifact with stable artifactId, body, provenance sessions, and evidence refs.",
+        "PRIMARY: Get one published Logbook Page with internal stable artifactId, body, provenance sessions, and evidence refs.",
       inputSchema: objectSchema({ artifactId: { type: "string", minLength: 1 } }, ["artifactId"])
     },
     {
       name: "get_provenance",
-      description: "PRIMARY: List provenance sessions for a published artifact (and join rationale when multi-session).",
+      description: "PRIMARY: List provenance sessions for a published Logbook Page by internal artifactId (and join rationale when multi-session).",
       inputSchema: objectSchema({ artifactId: { type: "string", minLength: 1 } }, ["artifactId"])
     },
     {
@@ -261,7 +261,7 @@ export function toolDefinitions() {
     },
     {
       name: "get_corpus_stats",
-      description: "PRIMARY: Published artifact counts by kind/project plus optional session coverage stats.",
+      description: "PRIMARY: Published Logbook Page counts by kind/project plus optional session coverage stats.",
       inputSchema: objectSchema({})
     },
     // v1 aliases

@@ -129,7 +129,7 @@ export function workbenchHelp(): string {
   return [
     "Usage: mastheadctl workbench <command> [options]",
     "",
-    "Guided artifact authoring:",
+    "Guided Page authoring:",
     "  mastheadctl workbench author bootstrap --request <request-id> --json",
     "  mastheadctl workbench author start --request <request-id> --json",
     "  mastheadctl workbench author inspect --pack <pack-id> --json",

@@ -369,12 +369,12 @@ Tier controls visual intensity. Lifecycle controls state meaning. Do not conflat
 
 ### Logbook
 
-> **Product unit (ADR 0011):** Logbook is an **artifact book**. Rows are published artifacts
-> (session dossier, runbook, ADR, incident timeline), not sessions. See `CONTEXT.md` and
-> `../openwiki/logbook-and-workbench.md`.
+> **Product unit (ADR 0011):** Logbook is a collection of published **Pages** (session dossier,
+> runbook, ADR, incident timeline), not sessions. The implementation and ADR retain `artifact` for
+> persisted contracts. See `CONTEXT.md` and `../openwiki/logbook-and-workbench.md`.
 
 The Logbook is not an old utility list or session library. It should optimize scanning, filtering,
-pagination, and opening **published artifact** capsules while retaining the shared surface language.
+pagination, and opening published **Page** capsules while retaining the shared surface language.
 
 Locked composition: dense capsule table (Kind · Title/Highlight · Project · Conf · Provenance ·
 Published) plus a selection-driven inspector with **kind-specific body** and **always-visible

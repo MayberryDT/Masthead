@@ -456,14 +456,14 @@ function WorkbenchArtifactsSection({ dossier }: { dossier?: ReadableSessionDossi
   if (artifacts.length === 0) return null;
   return (
     <div className="summary-section workbench-artifacts" data-dossier-section="workbench-artifacts">
-      <h4>Workbench artifacts</h4>
+      <h4>Workbench Pages</h4>
       <ul className="workbench-artifact-list">
         {artifacts.map((artifact) => (
           <li key={artifact.artifactId}>
             <details>
               <summary>
                 <span>{artifactKindLabel(artifact.artifactKind)}</span>
-                <strong>{artifact.title ?? "Untitled artifact"}</strong>
+                <strong>{artifact.title ?? "Untitled Page"}</strong>
                 <em>{[artifact.confidence, `${artifact.evidenceRefs.length} refs`, formatDateTime(artifact.createdAt)].filter(Boolean).join(" / ")}</em>
               </summary>
               <pre>{artifactContentPreview(artifact.content)}</pre>
@@ -483,7 +483,7 @@ function artifactContentPreview(content: unknown): string {
   try {
     return sanitizeWorkbenchArtifactPreview(JSON.stringify(content, null, 2));
   } catch {
-    return "Artifact content could not be rendered.";
+    return "Page content could not be rendered.";
   }
 }
 

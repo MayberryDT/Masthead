@@ -1,8 +1,9 @@
 # OpenWiki Quickstart
 
 Masthead is a local-first, harness-neutral session data layer that turns AI-agent session history into
-**evidence-backed engineering knowledge artifacts** people and agents can search and reuse. Sessions are
-the capture and Workbench pipeline unit; **Logbook rows are published artifacts**, not session table rows.
+evidence-backed engineering knowledge **Pages** people and agents can search and reuse. Sessions are
+the capture and Workbench pipeline unit; **Logbook rows are published Pages**, not session table rows.
+Persisted types, IDs, routes, schemas, and MCP arguments retain `artifact` as the internal term.
 
 This wiki is the fastest map for both humans and coding agents. Start here, then follow the links that match the area you want to change.
 
@@ -19,18 +20,18 @@ abandoned or retained as read-only history; see
 Masthead is not primarily a chat client, live monitoring console, or task manager. The product hierarchy is:
 
 1. canonical session database,
-2. Workbench (raw → publish pipeline for sessions and multi-kind artifacts),
-3. Logbook (**published artifacts only** — session dossiers, runbooks, ADRs, incident timelines),
-4. read-only MCP (artifact-primary reuse; session/transcript tools for evidence),
+2. Workbench (raw → publish pipeline for sessions and multi-kind Pages),
+3. Logbook (**published Pages only** — session dossiers, runbooks, ADRs, incident timelines),
+4. read-only MCP (Page-primary reuse; artifact compatibility contracts and session/transcript evidence tools),
 5. live Now (shallow cards),
 6. Sources V2 (harness live-connect only).
 
 Ownership in one line each:
 
 - **Workbench** owns transcript import, cleanup, agent enrichment, daemon-rebuilt dossier publication,
-  and optional-artifact authoring. **Copy Agent Prompt** creates a durable
+  and optional Page authoring. **Copy Agent Prompt** creates a durable
   guided authoring request, then copies only its request ID and instance-bound start command.
-- **Logbook** is an **artifact book**: capsule list + body inspector + provenance. No bulk enrich, checkboxes, or session-library chrome.
+- **Logbook** is a collection of **Pages**: capsule list + body inspector + provenance. Capsules remain artifacts internally. No bulk enrich, checkboxes, or session-library chrome.
 - **Sources** owns discovering local harnesses and enabling live connectors — not import jobs or per-session Workbench work. Contract: [sources.md](sources.md) → `docs/reference/sources-v2.md`.
 - **Now** is shallow live presence only.
 
@@ -59,7 +60,7 @@ These are the main existing docs this wiki synthesizes:
 - `README.md` — repo-level overview and run/verify entrypoints.
 - `docs/internal/design.md` — master design source (Logbook section refined by ADR 0011).
 - `docs/archive/prd.md` — historical product scope; **read with ADR 0011 supersession note** for Logbook unit of search.
-- `docs/adr/0011-artifact-first-logbook.md` — Logbook is an artifact book.
+- `docs/adr/0011-artifact-first-logbook.md` — establishes the internal artifact model behind Logbook Pages.
 - `docs/adr/0013-canonical-dossier-and-candidate-authoring.md` — preserved original-rendering and evidence findings; its V2 authoring flow is superseded.
 - `docs/adr/0014-agent-led-enriched-artifact-authoring.md` — superseded V3 decision and immutable audit history.
 - `docs/adr/0015-guided-authoring-campaigns.md` — superseded V4 audit contract.

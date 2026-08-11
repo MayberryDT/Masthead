@@ -9,17 +9,28 @@ manager.
 The product hierarchy is:
 
 1. canonical session database,
-2. Workbench (raw → publish pipeline for sessions + multi-kind artifacts),
-3. Logbook (**published artifacts only** — not session rows; ADR 0011),
-4. read-only MCP (artifact-primary; session tools for evidence),
+2. Workbench (raw → publish pipeline for sessions + multi-kind Pages),
+3. Logbook (**published Pages only** — not session rows; ADR 0011),
+4. read-only MCP (Page-primary product language; artifact compatibility contracts),
 5. live Now (shallow),
 6. Sources V2 (harness live-connect only; see `../reference/sources-v2.md`).
 
 Observability is a view over continuously collected session data.
 
-**Logbook = published artifacts** (`session_dossier`, `runbook`, `adr`, `incident_timeline`).
+**Logbook = published Pages** (`session_dossier`, `runbook`, `adr`, `incident_timeline`).
 Sessions are capture/Workbench/provenance units only. Vocabulary: `CONTEXT.md` (this directory). Decision:
 `../adr/0011-artifact-first-logbook.md`. Surface map: `../openwiki/logbook-and-workbench.md`.
+
+## Product And Implementation Vocabulary
+
+Use **Page** in user-facing copy for one reusable unit of Logbook knowledge. A **Logbook** is a
+collection of Pages, and the **Local Logbook** is private and canonical. Keep `artifact` in technical
+identifiers, persisted types, IDs, routes, schemas, MCP arguments, diagnostics that expose those
+contracts, and historical documentation. Do not rename artifact implementation identifiers opportunistically.
+
+Publication actions must name their destination: **Publish to Logbook** or **Publish to Masthead
+Pages**. Never introduce a bare **Publish** action, and do not imply that hosted Masthead Pages is
+required for the local product.
 
 ## OpenWiki
 
@@ -57,7 +68,7 @@ Surface archetypes:
 
 - Now: live cards.
 - Workbench: dense ops table plus terminal-like Activity rail and selection-driven pipeline actions.
-- Logbook: dense **artifact** capsule table plus body/provenance inspector (no bulk/checkboxes/summary strip).
+- Logbook: dense **Page** table backed by artifact capsules plus body/provenance inspector (no bulk/checkboxes/summary strip).
 - Sources: harness connector rows plus live enablement (Discover → Enable → Activate → Test); see `../reference/sources-v2.md`.
 - Settings: one centered compact steel card with direct preferences and one inline detail section
   at a time for Data, Agent access, Advanced, or Danger zone.

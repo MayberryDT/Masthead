@@ -312,7 +312,7 @@ describe("useLogbookController artifact detail", () => {
     expect(latestController?.selectedArtifact).toBeUndefined();
     expect(latestController?.detailLoading).toBe(true);
     expect(container?.textContent).not.toContain("First body");
-    expect(container?.textContent).toContain("Loading artifact");
+    expect(container?.textContent).toContain("Loading Page");
 
     await act(async () => {
       resolveB?.(artifactDetail("session-b", "Second body"));
@@ -325,7 +325,7 @@ describe("useLogbookController artifact detail", () => {
     expect(container?.textContent).not.toContain("First body");
   });
 
-  test("surfaces a user-visible error when artifact detail fails to load", async () => {
+  test("surfaces a user-visible error when Page detail fails to load", async () => {
     mockLogbookSearch([session("session-err", "Broken artifact")], 1);
     vi.mocked(getLogbookArtifact).mockRejectedValueOnce(new Error("network down"));
     await renderHarness();
@@ -338,8 +338,8 @@ describe("useLogbookController artifact detail", () => {
 
     expect(latestController?.detailLoading).toBe(false);
     expect(latestController?.selectedArtifact).toBeUndefined();
-    expect(latestController?.detailError).toBe("Could not load artifact");
-    expect(container?.textContent).toContain("Could not load artifact");
+    expect(latestController?.detailError).toBe("Could not load Page");
+    expect(container?.textContent).toContain("Could not load Page");
   });
 
   test("does not load dossier or transcript side effects for selection", async () => {

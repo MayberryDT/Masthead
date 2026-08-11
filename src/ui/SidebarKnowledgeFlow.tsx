@@ -17,7 +17,7 @@ export function SidebarKnowledgeFlow({ summary, error }: Props) {
       <div className="sidebar-knowledge-spine">
         <FlowRow index="01" label="Capture sessions" value={value(summary?.capturedSessions)} />
         <FlowRow index="02" label="Workbench" value={value(summary?.workbenchSessions)} />
-        <FlowRow index="03" label="Publish artifacts" value={value(summary?.publishedArtifacts)} />
+        <FlowRow index="03" label="Publish to Logbook" value={value(summary?.publishedArtifacts)} />
       </div>
       <p className="sidebar-knowledge-resolved">
         {unavailable

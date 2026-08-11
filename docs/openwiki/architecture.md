@@ -8,7 +8,7 @@ Masthead is built as a thin desktop shell around a local daemon and a canonical 
 - `src/core` holds pure domain logic and reducers used by the daemon and UI.
 - `src/enrichment` turns canonical sessions into durable summaries and search projections.
 - `src/workbench` owns the raw→ready session pipeline (state, quality, claims, activity).
-- `src/mcp` exposes read-only access to the same database over stdio MCP (artifact-primary reuse).
+- `src/mcp` exposes read-only access to the same database over stdio MCP (Page-primary reuse with artifact-compatible payloads).
 
 ## Runtime shape
 
@@ -27,8 +27,8 @@ source files / hooks / local scans
   -> canonical SQLite session graph
   -> Now projection (shallow live cards)
   -> Workbench pipeline (session readiness + multi-kind compile/publish)
-  -> published artifacts (session_dossier, runbook, adr, incident_timeline)
-  -> Logbook UI + artifact-primary MCP retrieval
+  -> published Pages (persisted as session_dossier, runbook, adr, incident_timeline artifacts)
+  -> Logbook UI + Page-primary MCP retrieval
 ```
 
 ## Renderer and shell

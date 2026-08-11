@@ -111,8 +111,8 @@ export function LogbookToolbar({ filterOptions, filters = {}, onFilterChange, on
     <div className="logbook-toolbar observability-toolbar metal-toolbar" aria-label="Logbook controls">
       <CollapsibleSearch
         containerClassName="logbook-search"
-        label="Search published artifacts"
-        placeholder="Search published artifacts…"
+        label="Search published Pages"
+        placeholder="Search published Pages…"
         value={query}
         onChange={(event) => onQueryChange(event.currentTarget.value)}
         onClear={() => onQueryChange("")}
@@ -193,7 +193,7 @@ export function LogbookToolbar({ filterOptions, filters = {}, onFilterChange, on
           onChange={(value) => onFilterChange?.({ ...filters, project: filterChangeValues(value) })}
         />
 
-        <AppSelect label="Sort artifacts" icon="recentActivity" value={sort} options={sortOptions} className="logbook-sort" onChange={(value) => onSortChange(value as LogbookSort)} />
+        <AppSelect label="Sort Pages" icon="recentActivity" value={sort} options={sortOptions} className="logbook-sort" onChange={(value) => onSortChange(value as LogbookSort)} />
       </div>
     </div>
   );

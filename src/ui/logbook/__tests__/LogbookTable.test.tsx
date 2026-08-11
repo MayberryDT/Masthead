@@ -62,6 +62,7 @@ describe("LogbookTable", () => {
     expect(html).toContain("Runbook");
     expect(html).toContain("high");
     expect(html).toContain("2 sessions");
+    expect(html).toContain('aria-label="Open Page: Repair OAuth callback"');
     expect(html).toContain('aria-pressed="true"');
     expect(html).not.toContain("surface-card-grid");
     expect(html).not.toContain("surface-data-card");

@@ -1,6 +1,6 @@
 # Import Codex history
 
-Masthead can materialize existing Codex history into its canonical local session database. Imported sessions enter Workbench; they do not become Logbook rows. Logbook contains only artifacts published from Workbench.
+Masthead can materialize existing Codex history into its canonical local session database. Imported sessions enter Workbench; they do not become Logbook rows. Logbook contains only Pages published from Workbench.
 
 ## Start Masthead
 
@@ -56,6 +56,6 @@ curl -X POST \
 
 URL-encode the session id in the path. Preview checks that the requested source is linked and permitted; import queues the transcript job only when that check passes. These writes are intentionally unavailable through a read-only worktree bridge.
 
-For artifact authoring, copy the plain-language handoff from Workbench or direct your agent to the selected Workbench sessions. The installed CLI is a daemon HTTP adapter; normal authoring never opens SQLite directly.
+For Page authoring, copy the plain-language handoff from Workbench or direct your agent to the selected Workbench sessions. The installed CLI is a daemon HTTP adapter; normal authoring never opens SQLite directly.
 
-After automatic authoring finishes, search the published artifacts in Logbook. Use `/sessions` only for session evidence and Workbench inspection, not as a Logbook listing.
+After automatic authoring finishes, search the published Pages in Logbook. Use `/sessions` only for session evidence and Workbench inspection, not as a Logbook listing.

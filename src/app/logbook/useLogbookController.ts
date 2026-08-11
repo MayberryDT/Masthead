@@ -179,7 +179,7 @@ export function useLogbookController({ activeProjectionUrl, activeSurface, adapt
           console.error("[masthead] Logbook artifact detail failed", loadError);
           setSelectedArtifact(undefined);
           setProvenanceTranscriptTarget(undefined);
-          setDetailError("Could not load artifact");
+          setDetailError("Could not load Page");
         }
       })
       .finally(() => {

@@ -159,7 +159,7 @@ describe("SessionDossier", () => {
     expect(html).toContain("Run the full Dossier verification suite.");
   });
 
-  test("renders current Workbench artifacts in the enrichment summary", () => {
+  test("presents current Workbench artifacts as Pages in the enrichment summary", () => {
     const currentDossier = dossier();
     currentDossier.artifacts = [
       {
@@ -180,7 +180,7 @@ describe("SessionDossier", () => {
 
     const html = renderToStaticMarkup(<SessionDossier dossier={currentDossier} />);
 
-    expect(html).toContain("Workbench artifacts");
+    expect(html).toContain("Workbench Pages");
     expect(html).toContain("Persist Workbench dossier");
     expect(html).toContain("Session Dossier");
     expect(html).toContain("1 refs");
@@ -380,7 +380,7 @@ describe("SessionDossier", () => {
 
     const html = renderToStaticMarkup(<SessionDossier dossier={currentDossier} />);
 
-    expect(html).toContain("Workbench artifacts");
+    expect(html).toContain("Workbench Pages");
     expect(html).toContain("Forbidden preview strings");
     expect(html).not.toContain("mastheadctl");
     expect(html).not.toContain("npm run");

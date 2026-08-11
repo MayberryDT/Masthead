@@ -14,7 +14,7 @@ const AUTHORING_ACTIVITY_PRESENTATION: Record<string, WorkbenchActivityPresentat
   authoring_session_published: { label: "Session published", tone: "ok" },
   authoring_session_soft_flagged: { label: "Session soft-flagged", tone: "warn" },
   authoring_session_rejected: { label: "Session rejected", tone: "bad" },
-  authoring_optional_artifact_published: { label: "Optional artifact published", tone: "ok" },
+  authoring_optional_artifact_published: { label: "Optional Page published", tone: "ok" },
   authoring_optional_considered_no: { label: "Optional considered — no", tone: "info" },
   authoring_request_completed: { label: "Request completed", tone: "ok" },
   authoring_daemon_error: { label: "Daemon error", tone: "bad" }

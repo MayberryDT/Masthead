@@ -830,7 +830,7 @@ describe("WorkbenchPanel", () => {
     expect(failMessage).toContain("operator rejected");
     expect(failMessage).toContain("leave the package path");
     expect(failMessage).toContain("Ready/passed sessions in the selection are not affected");
-    expect(failMessage).toContain("will not author artifacts");
+    expect(failMessage).toContain("will not author Pages");
     expect(failMessage).toContain("enrichment prose");
 
     const acceptMessage = buildBulkQualityAcceptConfirmMessage(2);
