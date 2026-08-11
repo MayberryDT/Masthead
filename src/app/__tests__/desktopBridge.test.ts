@@ -96,4 +96,21 @@ describe("desktop bridge", () => {
       notifySessionTransitionDesktop({ sessionId: "s1", transition: "ended", title: "Session ended" })
     ).resolves.toEqual({ ok: true, shown: false, reason: "bridge_unavailable" });
   });
+
+  test("exposes typed Masthead Pages methods without shell:openExternal", () => {
+    const getMastheadPagesConnection = vi.fn(async () => ({ status: "disconnected" as const }));
+    const connectMastheadPages = vi.fn(async () => ({ status: "disconnected" as const }));
+    vi.stubGlobal("window", {
+      mastheadDesktop: {
+        invoke: async <T>() => ({ ok: true }) as T,
+        getMastheadPagesConnection,
+        connectMastheadPages
+      }
+    });
+
+    const bridge = getDesktopBridge();
+    expect(bridge?.getMastheadPagesConnection).toBe(getMastheadPagesConnection);
+    expect(bridge?.connectMastheadPages).toBe(connectMastheadPages);
+    expect(bridge).not.toHaveProperty("openExternal");
+  });
 });

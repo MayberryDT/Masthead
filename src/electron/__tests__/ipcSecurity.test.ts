@@ -10,6 +10,13 @@ describe("Electron IPC security policy", () => {
     expect(isAllowedIpcChannel(ELECTRON_CHANNELS.windowMaximize)).toBe(true);
     expect(isAllowedIpcChannel(ELECTRON_CHANNELS.windowMinimize)).toBe(true);
     expect(isAllowedIpcChannel(ELECTRON_CHANNELS.notifySessionTransition)).toBe(true);
+    expect(isAllowedIpcChannel(ELECTRON_CHANNELS.mastheadPagesGetConnection)).toBe(true);
+    expect(isAllowedIpcChannel(ELECTRON_CHANNELS.mastheadPagesConnect)).toBe(true);
+    expect(isAllowedIpcChannel(ELECTRON_CHANNELS.mastheadPagesDisconnect)).toBe(true);
+    expect(isAllowedIpcChannel(ELECTRON_CHANNELS.mastheadPagesListLogbooks)).toBe(true);
+    expect(isAllowedIpcChannel(ELECTRON_CHANNELS.mastheadPagesCreateLogbook)).toBe(true);
+    expect(isAllowedIpcChannel(ELECTRON_CHANNELS.mastheadPagesPublishStaged)).toBe(true);
+    expect(isAllowedIpcChannel(ELECTRON_CHANNELS.mastheadPagesRemoveStaged)).toBe(true);
     expect(isAllowedIpcChannel("shell:openExternal")).toBe(false);
     expect(isAllowedIpcChannel("__proto__")).toBe(false);
   });
