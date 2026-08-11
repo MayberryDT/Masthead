@@ -1,3 +1,4 @@
+import { fromJsonSchema, McpServer } from "@modelcontextprotocol/server";
 import type { MastheadDatabase } from "../daemon/db/sqlite.ts";
 import {
   getArtifactTool,
@@ -18,69 +19,30 @@ import {
   searchSessionsTool
 } from "./tools.ts";
 
-type JsonRpcRequest = {
-  jsonrpc?: "2.0";
-  id?: string | number | null;
-  method?: string;
-  params?: Record<string, unknown>;
-  tool?: string;
-  arguments?: Record<string, unknown>;
-};
-
-export function handleMcpLine(db: MastheadDatabase, line: string): string | undefined {
-  let request: JsonRpcRequest;
-  try {
-    request = JSON.parse(line) as JsonRpcRequest;
-  } catch {
-    return JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } });
+export function createMcpServer(db: MastheadDatabase): McpServer {
+  const server = new McpServer({ name: "masthead", version: "0.1.0" });
+  for (const definition of toolDefinitions()) {
+    server.registerTool(
+      definition.name,
+      {
+        description: definition.description,
+        inputSchema: fromJsonSchema<Record<string, unknown>>(definition.inputSchema)
+      },
+      async (args) => {
+        const result = callTool(db, definition.name, args);
+        const text = JSON.stringify(result, null, 2);
+        return {
+          content: [{ type: "text", text }],
+          isError: false,
+          structuredContent: JSON.parse(text) as Record<string, unknown>
+        };
+      }
+    );
   }
-
-  try {
-    if (request.method) {
-      const response = handleJsonRpc(db, request);
-      return response ? JSON.stringify(response) : undefined;
-    }
-    const result = callTool(db, request.tool ?? "", request.arguments ?? {});
-    return JSON.stringify({ id: request.id, result });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (request.method) return JSON.stringify({ jsonrpc: "2.0", id: request.id ?? null, error: { code: -32602, message } });
-    return JSON.stringify({ id: request.id, error: message });
-  }
+  return server;
 }
 
-function handleJsonRpc(db: MastheadDatabase, request: JsonRpcRequest) {
-  if (request.method === "notifications/initialized") return undefined;
-  if (request.method === "initialize") {
-    return {
-      jsonrpc: "2.0",
-      id: request.id,
-      result: {
-        protocolVersion: "2024-11-05",
-        capabilities: { tools: {} },
-        serverInfo: { name: "masthead", version: "0.1.0" }
-      }
-    };
-  }
-  if (request.method === "tools/list") {
-    return { jsonrpc: "2.0", id: request.id, result: { tools: toolDefinitions() } };
-  }
-  if (request.method === "tools/call") {
-    const params = request.params ?? {};
-    const result = callTool(db, requiredString(params.name, "name"), objectArg(params.arguments));
-    return {
-      jsonrpc: "2.0",
-      id: request.id,
-      result: {
-        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-        isError: false
-      }
-    };
-  }
-  throw new Error(`Unknown MCP method: ${request.method}`);
-}
-
-function callTool(db: MastheadDatabase, tool: string, args: Record<string, unknown>): unknown {
+export function callTool(db: MastheadDatabase, tool: string, args: Record<string, unknown>): unknown {
   // --- Artifact-first v2 (primary) ---
   if (tool === "search_knowledge") {
     return searchKnowledgeTool(db, {

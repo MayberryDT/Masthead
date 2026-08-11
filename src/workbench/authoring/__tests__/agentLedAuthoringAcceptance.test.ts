@@ -17,7 +17,7 @@ import {
   readWorkbenchSessionState,
   resetGuidedAssignmentWorkbenchInTransaction
 } from "../../../daemon/db/workbenchPipelineRepository.ts";
-import { handleMcpLine } from "../../../mcp/protocol.ts";
+import { callTool as invokeMcpTool } from "../../../mcp/protocol.ts";
 import type { GuidedAuthoringBundleV4 } from "../../../shared/guidedAuthoring.ts";
 import type { PublishedSessionDossierV1 } from "../../../shared/sessionDossier.ts";
 import type { WorkbenchAuthoringReceiptV3 } from "../../../shared/workbenchAuthoring.ts";
@@ -614,8 +614,5 @@ function allOptionalClaimsHaveVerbatimSupport(db: MastheadDatabase, artifactIds:
 }
 
 function callMcp(db: MastheadDatabase, tool: string, args: Record<string, unknown>): Record<string, any> {
-  const output = handleMcpLine(db, JSON.stringify({ arguments: args, id: 1, tool }));
-  const response = JSON.parse(output ?? "{}") as { result?: Record<string, any> };
-  if (!response.result) throw new Error(`mcp_call_failed:${tool}`);
-  return response.result;
+  return invokeMcpTool(db, tool, args) as Record<string, any>;
 }

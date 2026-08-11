@@ -4,7 +4,7 @@ import { createWriteStream } from "node:fs";
 import { constants } from "node:fs";
 import { access, chmod, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 
 const resourceRoot = resolve(".electron-resources/daemon");
@@ -19,6 +19,7 @@ const coldActivationScriptTarget = resolve(resourceRoot, "scripts", "masthead-pr
 const manifestScriptTarget = resolve(resourceRoot, "scripts", "packaged-bundle-manifest.js");
 const devIconTarget = resolve(resourceRoot, "masthead-logo-sail-dev.png");
 const releaseTarget = resolve(resourceRoot, "release.json");
+const runtimeNodeModulesTarget = resolve(resourceRoot, "node_modules");
 
 const packageJson = JSON.parse(await readFile(resolve("package.json"), "utf8"));
 const gitSha = (process.env.MASTHEAD_BUILD_SHA || execFileSync("git", ["rev-parse", "HEAD"], {
@@ -35,6 +36,7 @@ await mkdir(resolve(resourceRoot, "scripts"), { recursive: true });
 await writeFile(resolve(resourceRoot, "README.txt"), "Generated daemon resources are copied here by `npm run prepare:electron-resources`.\n");
 await bundleRelocatableNode(nodeTarget);
 await cp(resolve("dist/daemon"), distTarget, { recursive: true });
+await copyRuntimeDependencyClosure(["@modelcontextprotocol/client", "@modelcontextprotocol/server"]);
 await cp(resolve("scripts/masthead-hook.js"), hookScriptTarget);
 await cp(resolve("scripts/masthead-production.js"), productionScriptTarget);
 await cp(resolve("scripts/masthead-private-display.js"), privateDisplayScriptTarget);
@@ -46,6 +48,8 @@ await writeFile(releaseTarget, `${JSON.stringify({ gitSha, version: packageJson.
 await access(nodeTarget, constants.X_OK);
 await access(cliTarget, constants.R_OK);
 await access(maintenanceTarget, constants.R_OK);
+await access(resolve(runtimeNodeModulesTarget, "@modelcontextprotocol", "client", "package.json"), constants.R_OK);
+await access(resolve(runtimeNodeModulesTarget, "@modelcontextprotocol", "server", "package.json"), constants.R_OK);
 await access(productionScriptTarget, constants.R_OK);
 await access(privateDisplayScriptTarget, constants.R_OK);
 await access(coldActivationScriptTarget, constants.R_OK);
@@ -55,6 +59,7 @@ assertNodeRunsStandalone(nodeTarget);
 
 console.log(`Prepared Electron daemon resources in ${resourceRoot}`);
 console.log(`Bundled Node runtime as ${basename(nodeTarget)}`);
+console.log("Bundled MCP runtime dependency closure");
 console.log(`Bundled hook helper as ${basename(hookScriptTarget)}`);
 console.log(`Bundled production lifecycle as ${basename(productionScriptTarget)}`);
 console.log(`Bundled private display guard as ${basename(privateDisplayScriptTarget)}`);
@@ -83,6 +88,25 @@ async function bundleRelocatableNode(targetPath) {
     throw new Error(`Bundled Node runtime does not execute standalone: ${targetPath}`);
   }
   console.log(`Bundled official Node binary at ${targetPath}`);
+}
+
+async function copyRuntimeDependencyClosure(packageNames) {
+  const copied = new Set();
+  for (const packageName of packageNames) await copyRuntimePackage(packageName, copied);
+}
+
+async function copyRuntimePackage(packageName, copied) {
+  if (copied.has(packageName)) return;
+  copied.add(packageName);
+  const packageSegments = packageName.split("/");
+  const source = resolve("node_modules", ...packageSegments);
+  const manifest = JSON.parse(await readFile(resolve(source, "package.json"), "utf8"));
+  const target = resolve(runtimeNodeModulesTarget, ...packageSegments);
+  await mkdir(dirname(target), { recursive: true });
+  await cp(source, target, { recursive: true });
+  for (const dependency of Object.keys(manifest.dependencies || {})) {
+    await copyRuntimePackage(dependency, copied);
+  }
 }
 
 function nodeRunsStandalone(nodePath) {
