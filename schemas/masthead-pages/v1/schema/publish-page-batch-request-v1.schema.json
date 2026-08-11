@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://masthead.page/schema/publish-page-batch-request-v1.schema.json",
+  "title": "PublishPageBatchRequestV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocolVersion", "requests"],
+  "properties": {
+    "protocolVersion": { "const": "masthead-pages-publish-batch-v1" },
+    "requests": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 500,
+      "items": { "$ref": "publish-page-request-v1.schema.json" }
+    }
+  }
+}

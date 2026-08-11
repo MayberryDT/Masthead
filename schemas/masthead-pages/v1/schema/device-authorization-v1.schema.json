@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://masthead.page/schema/device-authorization-v1.schema.json",
+  "title": "Device authorization contracts",
+  "$defs": {
+    "authorizationRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion"],
+      "properties": {
+        "protocolVersion": {
+          "const": "masthead-pages-device-authorization-v1"
+        }
+      }
+    },
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocolVersion",
+        "deviceCode",
+        "userCode",
+        "verificationUri",
+        "expiresIn",
+        "pollingInterval"
+      ],
+      "properties": {
+        "protocolVersion": {
+          "const": "masthead-pages-device-authorization-v1"
+        },
+        "deviceCode": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "userCode": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "verificationUri": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "expiresIn": { "type": "integer", "exclusiveMinimum": 0 },
+        "pollingInterval": { "type": "integer", "exclusiveMinimum": 0 }
+      }
+    },
+    "tokenRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "grantType", "deviceCode"],
+      "properties": {
+        "protocolVersion": { "const": "masthead-pages-device-token-v1" },
+        "grantType": { "const": "device_code" },
+        "deviceCode": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "refreshRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "grantType", "refreshToken"],
+      "properties": {
+        "protocolVersion": { "const": "masthead-pages-device-token-v1" },
+        "grantType": { "const": "refresh_token" },
+        "refreshToken": { "type": "string", "minLength": 1, "maxLength": 4096 }
+      }
+    },
+    "tokenResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["protocolVersion", "status"],
+          "properties": {
+            "protocolVersion": { "const": "masthead-pages-device-token-v1" },
+            "status": { "enum": ["pending", "denied", "expired"] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "protocolVersion",
+            "status",
+            "accessToken",
+            "accessTokenExpiresIn",
+            "refreshToken",
+            "scopes",
+            "account"
+          ],
+          "properties": {
+            "protocolVersion": { "const": "masthead-pages-device-token-v1" },
+            "status": { "const": "authorized" },
+            "accessToken": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "accessTokenExpiresIn": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            },
+            "refreshToken": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "scopes": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "logbooks:read",
+                  "logbooks:write",
+                  "pages:create",
+                  "pages:revise",
+                  "pages:remove"
+                ]
+              }
+            },
+            "account": {
+              "$ref": "publisher-account-v1.schema.json#/$defs/account"
+            }
+          }
+        }
+      ]
+    },
+    "revokeRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "refreshToken"],
+      "properties": {
+        "protocolVersion": { "const": "masthead-pages-device-revoke-v1" },
+        "refreshToken": { "type": "string", "minLength": 1, "maxLength": 4096 }
+      }
+    },
+    "revokeResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "status"],
+      "properties": {
+        "protocolVersion": {
+          "const": "masthead-pages-device-revoke-result-v1"
+        },
+        "status": { "enum": ["revoked", "already-revoked"] }
+      }
+    }
+  }
+}

@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://masthead.page/schema/public-logbook-api-v1.schema.json",
+  "title": "Public Logbook API contracts",
+  "$defs": {
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "ownerAccountId",
+        "title",
+        "slug",
+        "description",
+        "visibility",
+        "defaultLicense"
+      ],
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "ownerAccountId": { "type": "string", "format": "uuid" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "slug": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+        },
+        "description": { "type": "string", "maxLength": 2000 },
+        "visibility": { "enum": ["discoverable", "unlisted"] },
+        "defaultLicense": {
+          "enum": ["all-rights-reserved", "cc-by-4.0"]
+        },
+        "companionUrl": { "type": "string", "pattern": "^https://" },
+        "coverVersion": { "type": "string", "minLength": 1 }
+      }
+    },
+    "createRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocolVersion",
+        "title",
+        "slug",
+        "description",
+        "defaultLicense"
+      ],
+      "properties": {
+        "protocolVersion": { "const": "masthead-pages-logbook-v1" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "slug": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+        },
+        "description": { "type": "string", "maxLength": 2000 },
+        "visibility": { "enum": ["discoverable", "unlisted"] },
+        "defaultLicense": {
+          "enum": ["all-rights-reserved", "cc-by-4.0"]
+        },
+        "companionUrl": { "type": "string", "pattern": "^https://" }
+      }
+    },
+    "updateRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion"],
+      "properties": {
+        "protocolVersion": { "const": "masthead-pages-logbook-v1" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "visibility": { "enum": ["discoverable", "unlisted"] },
+        "defaultLicense": {
+          "enum": ["all-rights-reserved", "cc-by-4.0"]
+        },
+        "companionUrl": { "type": "string", "pattern": "^https://" }
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "publicLogbook"],
+      "properties": {
+        "protocolVersion": { "const": "masthead-pages-logbook-result-v1" },
+        "publicLogbook": { "$ref": "#/$defs/summary" }
+      }
+    },
+    "listResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "items"],
+      "properties": {
+        "protocolVersion": { "const": "masthead-pages-logbook-list-v1" },
+        "items": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/summary" }
+        }
+      }
+    }
+  }
+}

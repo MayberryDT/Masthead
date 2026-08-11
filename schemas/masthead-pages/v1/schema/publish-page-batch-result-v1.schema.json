@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://masthead.page/schema/publish-page-batch-result-v1.schema.json",
+  "title": "PublishPageBatchResultV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocolVersion", "results"],
+  "properties": {
+    "protocolVersion": { "const": "masthead-pages-publish-batch-result-v1" },
+    "results": {
+      "type": "array",
+      "items": { "$ref": "publish-page-result-v1.schema.json" }
+    }
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://masthead.page/schema/remove-page-api-v1.schema.json",
+  "title": "Remove Page API contracts",
+  "$defs": {
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "pageId", "idempotencyKey"],
+      "properties": {
+        "protocolVersion": { "const": "masthead-pages-remove-v1" },
+        "pageId": { "type": "string", "format": "uuid" },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 128
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocolVersion",
+        "pageId",
+        "idempotencyKey",
+        "status",
+        "retryable"
+      ],
+      "properties": {
+        "protocolVersion": { "const": "masthead-pages-remove-result-v1" },
+        "pageId": { "type": "string", "format": "uuid" },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 128
+        },
+        "status": {
+          "enum": [
+            "removed",
+            "idempotent-replay",
+            "rejected",
+            "retryable-failure"
+          ]
+        },
+        "removedAt": { "type": "string", "format": "date-time" },
+        "retryable": { "type": "boolean" },
+        "code": { "type": "string" },
+        "message": { "type": "string" }
+      }
+    }
+  }
+}

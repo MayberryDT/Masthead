@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://masthead.page/schema/publisher-account-v1.schema.json",
+  "title": "PublisherAccount contracts",
+  "$defs": {
+    "account": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocolVersion",
+        "accountId",
+        "publisherAccess",
+        "defaultLogbookVisibility"
+      ],
+      "properties": {
+        "protocolVersion": { "const": "masthead-pages-account-v1" },
+        "accountId": { "type": "string", "format": "uuid" },
+        "handle": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$"
+        },
+        "publisherAccess": {
+          "enum": ["publisher", "request_required", "requested", "suspended"]
+        },
+        "defaultLogbookVisibility": {
+          "enum": ["discoverable", "unlisted"]
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "account"],
+      "properties": {
+        "protocolVersion": { "const": "masthead-pages-account-result-v1" },
+        "account": { "$ref": "#/$defs/account" }
+      }
+    }
+  }
+}

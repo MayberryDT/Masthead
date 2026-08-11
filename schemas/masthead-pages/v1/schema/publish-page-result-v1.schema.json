@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://masthead.page/schema/publish-page-result-v1.schema.json",
+  "title": "PublishPageResultV1",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "idempotencyKey",
+        "pageId",
+        "objectId",
+        "currentUrl",
+        "exactRevisionUrl",
+        "publishedAt"
+      ],
+      "properties": {
+        "status": { "enum": ["published", "idempotent-replay"] },
+        "idempotencyKey": { "type": "string", "minLength": 8, "maxLength": 128 },
+        "pageId": { "type": "string", "format": "uuid" },
+        "objectId": { "type": "string", "pattern": "^sha256-[0-9a-f]{64}$" },
+        "parentObjectId": {
+          "type": "string",
+          "pattern": "^sha256-[0-9a-f]{64}$"
+        },
+        "currentUrl": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "exactRevisionUrl": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "publishedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "idempotencyKey", "code", "retryable", "message"],
+      "properties": {
+        "status": { "enum": ["rejected", "conflict", "retryable-failure"] },
+        "idempotencyKey": { "type": "string", "minLength": 8, "maxLength": 128 },
+        "code": {
+          "enum": [
+            "invalid-request",
+            "unsupported-version",
+            "object-id-mismatch",
+            "content-blocked",
+            "not-authorized",
+            "not-owner",
+            "limit-reached",
+            "parent-conflict",
+            "idempotency-conflict",
+            "temporarily-unavailable"
+          ]
+        },
+        "retryable": { "type": "boolean" },
+        "message": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "currentObjectId": {
+          "type": "string",
+          "pattern": "^sha256-[0-9a-f]{64}$"
+        }
+      }
+    }
+  ]
+}

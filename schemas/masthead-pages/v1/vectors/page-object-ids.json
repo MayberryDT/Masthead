@@ -1,0 +1,220 @@
+[
+  {
+    "name": "minimal.valid.json",
+    "objectId": "sha256-4ed38abcf264f892e580f667fd58c9281f4d07ecd136fe29e7e476f64f285bc6",
+    "object": {
+      "schemaVersion": "masthead-page-revision-v1",
+      "kind": "session_dossier",
+      "title": "Minimal public Page",
+      "summary": "A minimal valid session dossier projection for contract tests.",
+      "body": {
+        "keyWork": [],
+        "decisions": [],
+        "blockers": [],
+        "continuation": {
+          "openQuestions": [],
+          "constraints": []
+        },
+        "warnings": []
+      },
+      "labels": {
+        "topics": [],
+        "technologies": []
+      },
+      "verification": {
+        "status": "unknown",
+        "summary": "No verification claims were published.",
+        "checks": [],
+        "failures": []
+      },
+      "evidence": [],
+      "provenance": {
+        "sourceKind": "session_dossier",
+        "sourceSchema": "canonical-session-dossier-v1",
+        "sourceLinks": []
+      },
+      "license": "all-rights-reserved",
+      "generator": {
+        "name": "Masthead",
+        "version": "0.1.15",
+        "projection": "session-dossier-public-v1"
+      }
+    }
+  },
+  {
+    "name": "complete.valid.json",
+    "objectId": "sha256-b0c5248db2e92593546d682c3020e563e5aa66a6b0f4bc8800fc130fc11ac341",
+    "object": {
+      "schemaVersion": "masthead-page-revision-v1",
+      "kind": "session_dossier",
+      "title": "Ship portable Page contract",
+      "summary": "Locked the portable Page revision contract, object identity, and publish envelopes for local and hosted runtimes.",
+      "body": {
+        "purpose": "Share one compatibility bundle across Masthead and Masthead Pages.",
+        "outcome": "Strict PageRevisionV1 decoding and RFC 8785 object IDs are available as a package.",
+        "keyWork": [
+          "Defined PageRevisionV1 and publish DTOs",
+          "Rejected unknown fields and duplicate JSON keys",
+          "Computed sha256 object IDs from canonical bytes"
+        ],
+        "decisions": [
+          "JSON Schema is the portable contract source",
+          "idempotencyKey is the only safe cross-repo correlation key"
+        ],
+        "blockers": [
+          "Hosted persistence is still pending"
+        ],
+        "continuation": {
+          "nextStep": "Render one immutable fixture for humans and agents",
+          "openQuestions": [
+            "Which social image layout ships first?"
+          ],
+          "constraints": [
+            "No raw transcripts in public Pages"
+          ]
+        },
+        "warnings": [
+          "Evidence is publisher-selected and bounded"
+        ]
+      },
+      "labels": {
+        "topics": [
+          "public-alpha",
+          "contracts"
+        ],
+        "technologies": [
+          "typescript",
+          "cloudflare-workers"
+        ]
+      },
+      "verification": {
+        "status": "passed",
+        "summary": "Contract tests cover decode, identity, and management DTOs.",
+        "checks": [
+          "npm test -- tests/contract --run",
+          "npm run typecheck"
+        ],
+        "failures": []
+      },
+      "evidence": [
+        {
+          "id": "evidence-1",
+          "kind": "excerpt",
+          "label": "Acceptance note",
+          "text": "Unknown fields are rejected before object identity is computed.",
+          "supports": [
+            "decisions",
+            "key-work"
+          ]
+        },
+        {
+          "id": "evidence-2",
+          "kind": "verification",
+          "label": "Test command",
+          "text": "npm test -- tests/contract --run",
+          "supports": [
+            "verification"
+          ]
+        }
+      ],
+      "provenance": {
+        "sourceKind": "session_dossier",
+        "sourceSchema": "canonical-session-dossier-v1",
+        "sourceDate": "2026-08-11",
+        "sourceLinks": [
+          {
+            "rel": "repository",
+            "label": "masthead-pages",
+            "url": "https://github.com/MayberryDT/masthead-pages"
+          },
+          {
+            "rel": "commit",
+            "label": "contract baseline",
+            "url": "https://github.com/MayberryDT/masthead-pages/commit/0000000000000000000000000000000000000001"
+          }
+        ]
+      },
+      "license": "cc-by-4.0",
+      "generator": {
+        "name": "Masthead",
+        "version": "0.1.15",
+        "projection": "session-dossier-public-v1"
+      }
+    }
+  },
+  {
+    "name": "markdown-adversarial.valid.json",
+    "objectId": "sha256-e76a5c89f278687c9ecf0540016bd7f1fa39fe638ff07b38a23544dd5e02af29",
+    "object": {
+      "schemaVersion": "masthead-page-revision-v1",
+      "kind": "session_dossier",
+      "title": "Markdown edge cases <script>alert(1)</script>",
+      "summary": "Contains markdown that must remain inert text: [click](javascript:alert(1)), <img src=x onerror=alert(1)>, and **bold**.",
+      "body": {
+        "purpose": "Ensure renderers treat content as data.\n\n- item one\n- item two",
+        "outcome": "No HTML execution authority crosses the boundary.",
+        "keyWork": [
+          "Embedded `code` and ```fence``` markers stay plain strings",
+          "Link-like text: https://example.com/path?q=1#frag"
+        ],
+        "decisions": [
+          "Raw HTML is disabled at render time"
+        ],
+        "blockers": [],
+        "continuation": {
+          "openQuestions": [
+            "How should footnotes look in agent text?"
+          ],
+          "constraints": [
+            "Do not execute markdown HTML"
+          ]
+        },
+        "warnings": [
+          "<svg/onload=alert(1)>"
+        ]
+      },
+      "labels": {
+        "topics": [
+          "security",
+          "markdown"
+        ],
+        "technologies": [
+          "commonmark"
+        ]
+      },
+      "verification": {
+        "status": "mixed",
+        "summary": "Content is valid JSON; HTML must not execute when rendered.",
+        "checks": [
+          "decodePageRevisionV1 accepts the fixture"
+        ],
+        "failures": [
+          "Browser HTML without sanitization would be unsafe"
+        ]
+      },
+      "evidence": [
+        {
+          "id": "evidence-1",
+          "kind": "excerpt",
+          "label": "Adversarial snippet",
+          "text": "Payload: [x](javascript:alert(1)) and <iframe src=\"https://evil.example\"></iframe>",
+          "supports": [
+            "purpose",
+            "outcome"
+          ]
+        }
+      ],
+      "provenance": {
+        "sourceKind": "session_dossier",
+        "sourceSchema": "canonical-session-dossier-v1",
+        "sourceLinks": []
+      },
+      "license": "all-rights-reserved",
+      "generator": {
+        "name": "Masthead",
+        "version": "0.1.15",
+        "projection": "session-dossier-public-v1"
+      }
+    }
+  }
+]

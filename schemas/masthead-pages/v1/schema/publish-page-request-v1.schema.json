@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://masthead.page/schema/publish-page-request-v1.schema.json",
+  "title": "PublishPageRequestV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocolVersion",
+    "publicLogbookId",
+    "slug",
+    "idempotencyKey",
+    "objectId",
+    "object"
+  ],
+  "properties": {
+    "protocolVersion": { "const": "masthead-pages-publish-v1" },
+    "publicLogbookId": { "type": "string", "format": "uuid" },
+    "pageId": { "type": "string", "format": "uuid" },
+    "slug": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "expectedParentObjectId": {
+      "type": "string",
+      "pattern": "^sha256-[0-9a-f]{64}$"
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:~-]*$"
+    },
+    "objectId": { "type": "string", "pattern": "^sha256-[0-9a-f]{64}$" },
+    "object": { "$ref": "page-revision-v1.schema.json" }
+  }
+}

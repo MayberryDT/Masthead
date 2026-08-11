@@ -1,0 +1,63 @@
+{
+  "schemaVersion": "masthead-page-revision-v1",
+  "kind": "session_dossier",
+  "title": "Markdown edge cases <script>alert(1)</script>",
+  "summary": "Contains markdown that must remain inert text: [click](javascript:alert(1)), <img src=x onerror=alert(1)>, and **bold**.",
+  "body": {
+    "purpose": "Ensure renderers treat content as data.\n\n- item one\n- item two",
+    "outcome": "No HTML execution authority crosses the boundary.",
+    "keyWork": [
+      "Embedded `code` and ```fence``` markers stay plain strings",
+      "Link-like text: https://example.com/path?q=1#frag"
+    ],
+    "decisions": [
+      "Raw HTML is disabled at render time"
+    ],
+    "blockers": [],
+    "continuation": {
+      "openQuestions": [
+        "How should footnotes look in agent text?"
+      ],
+      "constraints": [
+        "Do not execute markdown HTML"
+      ]
+    },
+    "warnings": [
+      "<svg/onload=alert(1)>"
+    ]
+  },
+  "labels": {
+    "topics": ["security", "markdown"],
+    "technologies": ["commonmark"]
+  },
+  "verification": {
+    "status": "mixed",
+    "summary": "Content is valid JSON; HTML must not execute when rendered.",
+    "checks": [
+      "decodePageRevisionV1 accepts the fixture"
+    ],
+    "failures": [
+      "Browser HTML without sanitization would be unsafe"
+    ]
+  },
+  "evidence": [
+    {
+      "id": "evidence-1",
+      "kind": "excerpt",
+      "label": "Adversarial snippet",
+      "text": "Payload: [x](javascript:alert(1)) and <iframe src=\"https://evil.example\"></iframe>",
+      "supports": ["purpose", "outcome"]
+    }
+  ],
+  "provenance": {
+    "sourceKind": "session_dossier",
+    "sourceSchema": "canonical-session-dossier-v1",
+    "sourceLinks": []
+  },
+  "license": "all-rights-reserved",
+  "generator": {
+    "name": "Masthead",
+    "version": "0.1.15",
+    "projection": "session-dossier-public-v1"
+  }
+}
