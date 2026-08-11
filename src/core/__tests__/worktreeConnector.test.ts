@@ -230,6 +230,16 @@ describe("Masthead worktree connector planning", () => {
     expect(isAllowedReadOnlyBridgeRequest("POST", "/workbench/authoring/runs/authoring%3Arun/finish")).toBe(false);
   });
 
+  test("keeps Masthead Pages preparation and result routes off the read-only bridge", () => {
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/masthead-pages/reviews/prepare")).toBe(false);
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/masthead-pages/reviews/finalize")).toBe(false);
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/masthead-pages/selection/resolve")).toBe(false);
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/masthead-pages/operations/removal/stage")).toBe(false);
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/masthead-pages/publications/record")).toBe(false);
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/masthead-pages/failures/record")).toBe(false);
+    expect(isAllowedReadOnlyBridgeRequest("GET", "/masthead-pages/operations/pending/artifact%3Aone")).toBe(false);
+  });
+
   test("proxies read endpoints through a read-only worktree bridge", async () => {
     const upstream = createServer((request, response) => {
       if (request.url === "/health") {

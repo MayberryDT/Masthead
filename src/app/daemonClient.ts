@@ -1967,3 +1967,98 @@ export async function saveReviewDisposition(disposition: ReviewDisposition, base
   });
   if (!response.ok) throw new Error(`review disposition save failed: ${response.status}`);
 }
+
+export async function prepareMastheadPagesReviews(
+  input: { artifactIds: string[] },
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { signal?: AbortSignal } = {}
+): Promise<unknown> {
+  return postJson(baseUrl, "/masthead-pages/reviews/prepare", {
+    body: input,
+    label: "masthead pages prepare reviews",
+    signal: options.signal
+  });
+}
+
+export async function finalizeAndStageMastheadPagesReviews(
+  input: { items: unknown[] },
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { signal?: AbortSignal } = {}
+): Promise<unknown> {
+  return postJson(baseUrl, "/masthead-pages/reviews/finalize", {
+    body: input,
+    label: "masthead pages finalize reviews",
+    signal: options.signal
+  });
+}
+
+export async function resolveMastheadPagesSelection(
+  input: {
+    q?: string;
+    query?: string;
+    project?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    limit?: number;
+  } = {},
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { signal?: AbortSignal } = {}
+): Promise<{ ok: true; artifactIds: string[] }> {
+  return postJson(baseUrl, "/masthead-pages/selection/resolve", {
+    body: input,
+    label: "masthead pages resolve selection",
+    signal: options.signal
+  });
+}
+
+export async function stageMastheadPagesRemoval(
+  input: { artifactId: string },
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { signal?: AbortSignal } = {}
+): Promise<unknown> {
+  return postJson(baseUrl, "/masthead-pages/operations/removal/stage", {
+    body: input,
+    label: "masthead pages stage removal",
+    signal: options.signal
+  });
+}
+
+export async function getPendingMastheadPagesOperation(
+  artifactId: string,
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { signal?: AbortSignal } = {}
+): Promise<unknown> {
+  return getJson(baseUrl, `/masthead-pages/operations/pending/${encodeURIComponent(artifactId)}`, {
+    label: "masthead pages pending operation",
+    signal: options.signal
+  });
+}
+
+export async function recordMastheadPagesResults(
+  input:
+    | { kind: "publication"; receipt: Record<string, unknown> }
+    | { kind: "failure"; failure: Record<string, unknown> }
+    | { kind: "removed"; artifactId: string; removedAt?: string },
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { signal?: AbortSignal } = {}
+): Promise<unknown> {
+  if (input.kind === "publication") {
+    return postJson(baseUrl, "/masthead-pages/publications/record", {
+      body: input.receipt,
+      label: "masthead pages record publication",
+      signal: options.signal
+    });
+  }
+  if (input.kind === "removed") {
+    return postJson(baseUrl, "/masthead-pages/failures/record", {
+      body: { artifactId: input.artifactId, kind: "removed", removedAt: input.removedAt },
+      label: "masthead pages record removal",
+      signal: options.signal
+    });
+  }
+  return postJson(baseUrl, "/masthead-pages/failures/record", {
+    body: input.failure,
+    label: "masthead pages record failure",
+    signal: options.signal
+  });
+}

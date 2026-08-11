@@ -39,11 +39,75 @@ import {
   searchLogbook,
   scanSourcesSetup,
   testRuntimeHooks,
-  syncSources
+  syncSources,
+  prepareMastheadPagesReviews,
+  finalizeAndStageMastheadPagesReviews,
+  resolveMastheadPagesSelection,
+  stageMastheadPagesRemoval,
+  getPendingMastheadPagesOperation,
+  recordMastheadPagesResults
 } from "../daemonClient";
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+describe("daemon client masthead pages", () => {
+  test("calls preparation, finalize, selection, pending, removal, and result routes", async () => {
+    const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const requestUrl = new URL(String(url));
+      if (requestUrl.pathname === "/masthead-pages/reviews/prepare") {
+        expect(init?.method).toBe("POST");
+        return response({ ok: true, items: [{ eligibility: "eligible" }] });
+      }
+      if (requestUrl.pathname === "/masthead-pages/reviews/finalize") {
+        return response({ ok: true, items: [{ decision: "ready", staged: true }] });
+      }
+      if (requestUrl.pathname === "/masthead-pages/selection/resolve") {
+        return response({ ok: true, artifactIds: ["artifact:1"] });
+      }
+      if (requestUrl.pathname === "/masthead-pages/operations/removal/stage") {
+        return response({ ok: true, staged: true });
+      }
+      if (requestUrl.pathname.startsWith("/masthead-pages/operations/pending/")) {
+        expect(init?.method ?? "GET").toBe("GET");
+        return response({ ok: true, operation: { operationKind: "publish" } });
+      }
+      if (requestUrl.pathname === "/masthead-pages/publications/record") {
+        return response({ ok: true, mapping: { status: "live" } });
+      }
+      if (requestUrl.pathname === "/masthead-pages/failures/record") {
+        return response({ ok: true, mapping: { status: "failed" } });
+      }
+      throw new Error(`unexpected ${requestUrl.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const base = "http://127.0.0.1:17373/projection";
+    await expect(prepareMastheadPagesReviews({ artifactIds: ["a"] }, base)).resolves.toMatchObject({
+      items: [{ eligibility: "eligible" }]
+    });
+    await expect(finalizeAndStageMastheadPagesReviews({ items: [] }, base)).resolves.toMatchObject({
+      items: [{ staged: true }]
+    });
+    await expect(resolveMastheadPagesSelection({ q: "alpha" }, base)).resolves.toEqual({
+      ok: true,
+      artifactIds: ["artifact:1"]
+    });
+    await expect(stageMastheadPagesRemoval({ artifactId: "a" }, base)).resolves.toMatchObject({ ok: true });
+    await expect(getPendingMastheadPagesOperation("a", base)).resolves.toMatchObject({
+      operation: { operationKind: "publish" }
+    });
+    await expect(
+      recordMastheadPagesResults({ kind: "publication", receipt: { artifactId: "a" } }, base)
+    ).resolves.toMatchObject({ mapping: { status: "live" } });
+    await expect(
+      recordMastheadPagesResults({
+        kind: "failure",
+        failure: { artifactId: "a", errorClass: "x", message: "y", retryable: true }
+      }, base)
+    ).resolves.toMatchObject({ mapping: { status: "failed" } });
+  });
 });
 
 describe("daemon client review dispositions", () => {

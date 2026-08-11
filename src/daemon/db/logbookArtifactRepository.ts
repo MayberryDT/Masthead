@@ -1,3 +1,5 @@
+import { checkSessionDossierEligibility } from "../../mastheadPages/eligibility.ts";
+import type { PublishedSessionDossierV1 } from "../../shared/sessionDossier.ts";
 import type { MastheadDatabase } from "./sqlite.ts";
 import {
   getSessionArtifact,
@@ -53,6 +55,100 @@ export function getLogbookArtifactDetail(db: MastheadDatabase, artifactId: strin
   const record = getSessionArtifact(db, artifactId);
   if (!record || record.publicationStatus !== "published" || record.status !== "current") return undefined;
   return toDetail(record);
+}
+
+/**
+ * Resolve at most `limit` current eligible session_dossier artifact IDs for Masthead Pages
+ * selection, in deterministic published_at/updated_at/id order, without paging 100-row searches.
+ */
+export function listEligibleMastheadPagesArtifactIds(
+  db: MastheadDatabase,
+  query: LogbookArtifactSearchQuery = {},
+  limit = 500
+): string[] {
+  const capped = Math.max(1, Math.min(Math.trunc(limit || 500), 500));
+  const clauses = [
+    `session_artifacts.publication_status = 'published'`,
+    `session_artifacts.status = 'current'`,
+    `session_artifacts.artifact_kind = 'session_dossier'`,
+    `session_artifacts.schema_version = 'canonical-session-dossier-v1'`
+  ];
+  const params: Array<string | number> = [];
+  let searchJoin = "";
+  let ordering = `session_artifacts.published_at DESC,
+                session_artifacts.updated_at DESC,
+                session_artifacts.artifact_id DESC`;
+
+  if (query.project) {
+    clauses.push("session_artifacts.project_label = ?");
+    params.push(query.project);
+  }
+  const searchQuery = typeof query.q === "string" ? query.q.trim() : "";
+  if (searchQuery) {
+    searchJoin =
+      "JOIN session_artifact_search ON session_artifact_search.artifact_id = session_artifacts.artifact_id";
+    clauses.push("session_artifact_search MATCH ?");
+    params.push(sanitizeSimpleFtsQuery(searchQuery));
+    ordering = `bm25(session_artifact_search, 0.0, 12.0, 10.0, 12.0, 1.0, 1.0, 1.0) ASC,
+                session_artifacts.published_at DESC,
+                session_artifacts.updated_at DESC,
+                session_artifacts.artifact_id DESC`;
+  }
+  if (query.dateFrom) {
+    clauses.push("session_artifacts.published_at >= ?");
+    params.push(query.dateFrom);
+  }
+  if (query.dateTo) {
+    clauses.push("session_artifacts.published_at <= ?");
+    params.push(query.dateTo);
+  }
+
+  // Single oversampled read, then filter eligibility in-process (enrichment / provenance).
+  const oversample = Math.min(Math.max(capped * 4, capped), 2000);
+  const rows = db
+    .prepare(
+      `SELECT session_artifacts.artifact_id AS artifactId
+       FROM session_artifacts
+       ${searchJoin}
+       WHERE ${clauses.join(" AND ")}
+       ORDER BY ${ordering}
+       LIMIT ?`
+    )
+    .all(...params, oversample) as Array<{ artifactId: string }>;
+
+  const ids: string[] = [];
+  for (const row of rows) {
+    if (ids.length >= capped) break;
+    if (isEligibleMastheadPagesArtifact(db, row.artifactId)) {
+      ids.push(row.artifactId);
+    }
+  }
+  return ids;
+}
+
+function sanitizeSimpleFtsQuery(value: string): string {
+  const tokens = value
+    .replace(/["']/g, " ")
+    .split(/\s+/u)
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0 && !/^(AND|OR|NOT)$/i.test(token))
+    .map((token) => `"${token.replace(/"/g, "")}"`);
+  return tokens.length > 0 ? tokens.join(" ") : '""';
+}
+
+function isEligibleMastheadPagesArtifact(db: MastheadDatabase, artifactId: string): boolean {
+  const detail = getLogbookArtifactDetail(db, artifactId);
+  if (!detail) return false;
+  if (typeof detail.body !== "object" || detail.body === null) return false;
+  const result = checkSessionDossierEligibility({
+    artifactKind: detail.capsule.kind,
+    status: detail.status,
+    publicationStatus: detail.publicationStatus,
+    schemaVersion: detail.schemaVersion,
+    content: detail.body as PublishedSessionDossierV1,
+    provenanceSessionIds: detail.provenanceSessionIds
+  });
+  return result.eligible;
 }
 
 export function getLogbookArtifactSummary(db: MastheadDatabase): LogbookArtifactSummaryDto {

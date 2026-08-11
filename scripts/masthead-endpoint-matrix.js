@@ -144,7 +144,14 @@ export const BLOCKED_MUTATION_ENDPOINTS = [
   { method: "POST", path: "/retention", label: "retention prune" },
   { method: "POST", path: "/data/delete", label: "delete data" },
   { method: "POST", path: "/data/retention/default", label: "default retention" },
-  { method: "POST", path: "/clear", label: "clear store" }
+  { method: "POST", path: "/clear", label: "clear store" },
+  { method: "POST", path: "/masthead-pages/reviews/prepare", label: "prepare masthead pages reviews" },
+  { method: "POST", path: "/masthead-pages/reviews/finalize", label: "finalize masthead pages reviews" },
+  { method: "POST", path: "/masthead-pages/selection/resolve", label: "resolve masthead pages selection" },
+  { method: "POST", path: "/masthead-pages/operations/removal/stage", label: "stage masthead pages removal" },
+  { method: "POST", path: "/masthead-pages/publications/record", label: "record masthead pages publication" },
+  { method: "POST", path: "/masthead-pages/failures/record", label: "record masthead pages failure" },
+  { method: "GET", path: "/masthead-pages/operations/pending/artifact%3Aone", label: "get pending masthead pages operation" }
 ];
 
 export const ENDPOINT_MATRIX = {

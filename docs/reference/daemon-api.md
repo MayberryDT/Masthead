@@ -97,6 +97,18 @@ Clients should reject a daemon that does not identify `product: "masthead"` with
 - `GET /settings/hooks` returns live connector settings for the release target runtimes.
 - `GET /settings/hooks/:runtime` returns one runtime live connector setting for `codex`, `claude_code`, `cursor`, `grok`, `opencode`, `omp`, `pi`, or `hermes`.
 
+## Masthead Pages (primary-only)
+
+Local review preparation and release-mapping writes for **Publish to Masthead Pages**. These routes never call the hosted service and never read Electron credentials. They are **not** bridge-safe: secondary worktree bridges must not forward them. Electron main loads staged bytes only via `GET /masthead-pages/operations/pending/:artifactId` on the primary daemon.
+
+- `POST /masthead-pages/reviews/prepare` accepts `{ "artifactIds": ["..."] }` (1–500). Returns `{ ok, items[] }` where each item has `eligibility` (`eligible` \| `ineligible`), optional `baseObject` (`PageRevisionV1` without selected evidence), `evidenceCandidates` (canonical local evidence text for the single provenance session), egress `findings`, and optional private `existingRelease` mapping metadata. No network.
+- `POST /masthead-pages/reviews/finalize` accepts `{ "items": [{ artifactId, publicLogbookId, pagesAccountId, slug, license, evidenceSelections, ... }] }`. Validates review choices, builds the exact `PublishPageRequestV1`, runs egress preflight, and **stages** ready (or acknowledged warning) requests into the private mapping before returning `{ ok, items[] }` with `decision`, `request`, `requestDigest`, and `staged`. Rejects renderer-supplied prebuilt Page/request envelopes.
+- `POST /masthead-pages/selection/resolve` accepts optional Logbook filters and returns up to 500 current eligible `session_dossier` artifact IDs in deterministic order without repeated 100-row search loops.
+- `POST /masthead-pages/operations/removal/stage` accepts **only** `{ "artifactId" }` and builds/stages `RemovePageRequestV1` from the private mapping.
+- `GET /masthead-pages/operations/pending/:artifactId` returns the staged operation (`operationKind`, exact `requestJson`, `requestDigest`, `idempotencyKey`) or `404`.
+- `POST /masthead-pages/publications/record` records a successful hosted publication receipt into the private mapping and clears pending publish data.
+- `POST /masthead-pages/failures/record` records a hosted failure (`retryable` retains pending data) or `{ kind: "removed" }` after confirmed removal.
+
 ## Write Endpoints
 
 Write endpoints are local daemon operations. They are not exposed through MCP.

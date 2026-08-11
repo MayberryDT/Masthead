@@ -193,6 +193,12 @@ import {
   routeWorkbenchAuthoringRequest
 } from "./workbenchAuthoringApi.ts";
 import { createWorkbenchAuthoringV5PreparationCoordinator } from "./workbenchAuthoringV5PreparationCoordinator.ts";
+import {
+  getMastheadPagesBodyLimit,
+  isMastheadPagesPath,
+  mastheadPagesInvalidJsonResult,
+  routeMastheadPagesRequest
+} from "./mastheadPagesApi.ts";
 
 export type MastheadDaemon = {
   server: Server;
@@ -2786,6 +2792,33 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           schedulePreparation: authoringV5PreparationCoordinator.schedule
         },
         { body, headers: request.headers, method: request.method ?? "GET", url }
+      );
+      if (result) {
+        sendJson(request, response, config.allowedOrigins, result.status, result.body);
+        return;
+      }
+    }
+
+    if (isMastheadPagesPath(url.pathname)) {
+      let body: unknown;
+      if (request.method === "POST") {
+        try {
+          body = await optionalJsonBody(
+            request,
+            getMastheadPagesBodyLimit(url.pathname, DEFAULT_BODY_LIMIT_BYTES)
+          );
+        } catch (error) {
+          const result = mastheadPagesInvalidJsonResult(error);
+          sendJson(request, response, config.allowedOrigins, result.status, result.body);
+          return;
+        }
+      }
+      const result = routeMastheadPagesRequest(
+        {
+          db: database,
+          generatorVersion: resolveReleaseIdentity().version
+        },
+        { body, method: request.method ?? "GET", url }
       );
       if (result) {
         sendJson(request, response, config.allowedOrigins, result.status, result.body);
