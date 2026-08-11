@@ -71,7 +71,7 @@
     "smoke:import": "npm run build:daemon && node scripts/masthead-import-smoke.js",
     "smoke:mcp": "npm run build:daemon && node scripts/masthead-mcp-smoke.js",
     "package:electron": "npm run version:sync && npm run build && npm run prepare:electron-resources && electron-forge package",
-    "test:electron": "vitest --run src/electron/**/*.test.ts src/app/__tests__/connectorClient.test.ts src/app/__tests__/nativeStoreClient.test.ts src/app/__tests__/desktopBridge.test.ts src/mcp/__tests__/canonicalDatabaseLaunch.test.ts src/daemon/__tests__/mcpStatusApi.test.ts",
+    "test:electron": "npm run build:daemon && vitest --run src/electron/**/*.test.ts src/app/__tests__/connectorClient.test.ts src/app/__tests__/nativeStoreClient.test.ts src/app/__tests__/desktopBridge.test.ts src/mcp/__tests__/canonicalDatabaseLaunch.test.ts src/daemon/__tests__/mcpStatusApi.test.ts",
     "test:electron-security": "vitest --run src/electron/__tests__/ipcSecurity.test.ts src/electron/__tests__/windowSecurity.test.ts src/electron/__tests__/protocol.test.ts && node scripts/masthead-electron-security-check.js",
     "smoke:electron": "npm run build:daemon && node scripts/masthead-electron-smoke.js",
     "smoke:electron:packaged": "npm run build:desktop && node scripts/masthead-electron-packaged-smoke.js",
