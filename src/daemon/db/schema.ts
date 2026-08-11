@@ -200,6 +200,11 @@ const migrations = [
     version: 39,
     name: "039_workbench_authoring_v5_preparation",
     path: resolve(currentDir, "migrations/039_workbench_authoring_v5_preparation.sql")
+  },
+  {
+    version: 40,
+    name: "040_masthead_pages_release_mappings",
+    path: resolve(currentDir, "migrations/040_masthead_pages_release_mappings.sql")
   }
 ];
 
@@ -282,7 +287,8 @@ const criticalTables = [
   "guided_authoring_draft_reviews",
   "guided_authoring_operator_reviews",
   "guided_authoring_enrichment_provenance",
-  "masthead_data_revisions"
+  "masthead_data_revisions",
+  "masthead_pages_release_mappings"
 ];
 
 export function migrateDatabase(db: MastheadDatabase): void {
