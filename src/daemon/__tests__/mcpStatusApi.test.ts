@@ -39,6 +39,13 @@ describe("MCP status API", () => {
       }
     });
     expect(status.status.launchConfig).toBeUndefined();
+    expect.soft(status.status.permissions.allowed).toEqual([
+      "Search published Pages",
+      "Read published Page bodies with provenance",
+      "Read provenance-gated historical evidence",
+      "Search session summaries for evidence",
+      "Read project history"
+    ]);
 
     const launch = await getJson(baseUrl, "/mcp/launch-config");
     expect(launch.launchConfig.env.MASTHEAD_DB_PATH).toBe(databasePath);
@@ -166,6 +173,63 @@ describe("MCP status API", () => {
         })
       ])
     );
+    expect.soft(
+      tools.tools
+        .filter((tool: { purpose?: unknown }) => typeof tool.purpose === "string" && tool.purpose.startsWith("PRIMARY:"))
+        .map(({ arguments: toolArguments, dataReturned, name, purpose }: Record<string, string>) => ({
+          arguments: toolArguments,
+          dataReturned,
+          name,
+          purpose
+        }))
+    ).toEqual([
+      {
+        arguments: "optional query, kind, project, dateFrom, dateTo, limit, offset",
+        dataReturned: "Published Page capsules (internal artifactId, kind, title, summary, provenance)",
+        name: "search_knowledge",
+        purpose: "PRIMARY: Search published Logbook Pages for reuse"
+      },
+      {
+        arguments: "optional kind, project, dateFrom, dateTo, limit, offset",
+        dataReturned: "Published Page capsules without text query",
+        name: "list_knowledge",
+        purpose: "PRIMARY: Browse published Pages"
+      },
+      {
+        arguments: "artifactId",
+        dataReturned: "Full Page with internal artifactId, body, provenance, evidence refs",
+        name: "get_knowledge",
+        purpose: "PRIMARY: Read one published Page"
+      },
+      {
+        arguments: "artifactId",
+        dataReturned: "Provenance session ids and join rationale for one Page",
+        name: "get_provenance",
+        purpose: "PRIMARY: List provenance for a published Page"
+      },
+      {
+        arguments: "none",
+        dataReturned: "Published Page counts by kind plus session coverage",
+        name: "get_corpus_stats",
+        purpose: "PRIMARY: Page-first corpus statistics"
+      }
+    ]);
+    expect(tools.tools.filter((tool: { name?: unknown }) => tool.name === "search_artifacts" || tool.name === "get_artifact")).toEqual([
+      {
+        arguments: "optional query, kind, project, limit, offset",
+        dataReturned: "Published artifact capsules (v1 alias of search_knowledge)",
+        name: "search_artifacts",
+        permission: "Read only",
+        purpose: "Alias of search_knowledge"
+      },
+      {
+        arguments: "artifactId",
+        dataReturned: "Artifact body with stable artifactId (v1 alias of get_knowledge)",
+        name: "get_artifact",
+        permission: "Read only",
+        purpose: "Alias of get_knowledge"
+      }
+    ]);
 
     const audit = await getJson(baseUrl, "/mcp/audit?limit=1");
     expect(audit.audit).toEqual([

@@ -153,6 +153,7 @@ export function McpSettings({ baseUrl, privacy }: McpSettingsProps) {
 
       <SettingsRow
         label="Access"
+        description="Read-only access to published Pages in your Local Logbook."
         value={
           <StatusBadge tone={accessEnabled ? "active" : "neutral"}>
             {accessEnabled ? "Enabled" : "Disabled"}

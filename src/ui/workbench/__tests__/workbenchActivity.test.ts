@@ -27,7 +27,7 @@ describe("workbenchActivityTone", () => {
     ["authoring_session_published", "Session published", "ok"],
     ["authoring_session_soft_flagged", "Session soft-flagged", "warn"],
     ["authoring_session_rejected", "Session rejected", "bad"],
-    ["authoring_optional_artifact_published", "Optional artifact published", "ok"],
+    ["authoring_optional_artifact_published", "Optional Page published", "ok"],
     ["authoring_optional_considered_no", "Optional considered — no", "info"],
     ["authoring_request_completed", "Request completed", "ok"],
     ["authoring_daemon_error", "Daemon error", "bad"],

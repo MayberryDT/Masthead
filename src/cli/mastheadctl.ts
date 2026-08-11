@@ -22,7 +22,7 @@ function topLevelHelp(): string {
     "Usage: mastheadctl <command>",
     "",
     "Commands:",
-    "  mastheadctl workbench    Guided local enrichment and artifact authoring",
+    "  mastheadctl workbench    Guided local enrichment and Page authoring",
     "  mastheadctl import repair Preview or apply provenance-scoped import repair",
     "",
     "Try:",

@@ -67,7 +67,7 @@ const defaultCanRun: UseWorkbenchControllerResult["canRun"] = () => false;
 
 const TOOLTIPS = {
   copyAgentPrompt:
-    "Copy a plain-language request for your coding agent to enrich the selected sessions and publish only justified artifacts.",
+    "Copy a plain-language request for your coding agent to enrich the selected sessions, create only justified Pages, and Publish to Logbook.",
   selectAll: "Select every package-path session across all pages (not just this page).",
   clear: "Clear the current selection.",
   pipeline:
@@ -119,7 +119,7 @@ export function buildBulkQualityFailConfirmMessage(reviewCount: number): string 
     "",
     "This moves them to Not Added (reason: operator rejected). They leave the package path.",
     "Ready/passed sessions in the selection are not affected.",
-    "Masthead will not author artifacts or write enrichment prose."
+    "Masthead will not author Pages or write enrichment prose."
   ].join("\n");
 }
 

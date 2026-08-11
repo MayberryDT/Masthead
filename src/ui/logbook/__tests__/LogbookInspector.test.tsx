@@ -129,8 +129,8 @@ describe("LogbookInspector", () => {
     expect(html).toContain("serialize lock");
     expect(html).toContain("session:a");
     expect(html).toContain("shared EBUSY signature");
-    expect(html).toContain("Artifact detail");
-    expect(html).toContain('aria-label="Close artifact detail"');
+    expect(html).toContain("Page detail");
+    expect(html).toContain('aria-label="Close Page detail"');
     expect(html).toContain("Runbook");
     expect(html).toContain("EBUSY");
     expect(html).toContain("npm test");
@@ -407,21 +407,21 @@ describe("LogbookInspector", () => {
     expect(html).not.toContain("logbook-inspector-json");
   });
 
-  test("renders loading state while artifact detail request is in flight", () => {
+  test("renders loading state while Page detail request is in flight", () => {
     const html = renderToStaticMarkup(<LogbookInspector loading onClose={() => undefined} />);
 
-    expect(html).toContain("Artifact detail");
-    expect(html).toContain("Loading artifact");
-    expect(html).toContain("Loading artifact detail");
+    expect(html).toContain("Page detail");
+    expect(html).toContain("Loading Page");
+    expect(html).toContain("Loading Page detail");
   });
 
-  test("renders error state when artifact detail fails to load", () => {
-    const html = renderToStaticMarkup(<LogbookInspector error="Could not load artifact" onClose={() => undefined} />);
+  test("renders error state when Page detail fails to load", () => {
+    const html = renderToStaticMarkup(<LogbookInspector error="Could not load Page" onClose={() => undefined} />);
 
-    expect(html).toContain("Artifact detail");
-    expect(html).toContain("Could not load artifact");
+    expect(html).toContain("Page detail");
+    expect(html).toContain("Could not load Page");
     expect(html).toContain('role="alert"');
-    expect(html).not.toContain("Loading artifact detail");
+    expect(html).not.toContain("Loading Page detail");
   });
 
   test("pretty-prints unknown body shapes", () => {

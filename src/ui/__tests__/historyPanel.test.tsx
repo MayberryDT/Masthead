@@ -27,7 +27,7 @@ describe("HistoryPanel", () => {
     const html = renderToStaticMarkup(<HistoryPanel records={records()} query="project:App" onQueryChange={() => {}} />);
 
     expect(html).toContain("Logbook");
-    expect(html).toContain("Search published artifacts");
+    expect(html).toContain("Search published Pages");
     expect(html).not.toContain("Session library");
     expect(html).not.toContain("Search and inspect durable agent-session history.");
     expect(html).toContain("TITLE / HIGHLIGHT");
@@ -132,8 +132,8 @@ describe("HistoryPanel", () => {
     expect(html).not.toContain(">Tool calls</dt>");
     expect(html).not.toContain("<dt>Date range</dt>");
     expect(html).not.toContain("May 2026 - Jun 2026");
-    expect(html).toContain("No published artifacts yet.");
-    expect(html).toContain("Compile and publish from Workbench.");
+    expect(html).toContain("No published Pages yet.");
+    expect(html).toContain("Publish to Logbook from Workbench.");
   });
 
   test("renders more than six database-backed sessions and exposes detail actions", () => {
@@ -246,8 +246,8 @@ describe("HistoryPanel", () => {
       />
     );
 
-    expect(html).toContain('aria-label="Loading published artifacts"');
-    expect(html).toContain("Loading published artifacts");
+    expect(html).toContain('aria-label="Loading published Pages"');
+    expect(html).toContain("Loading published Pages");
     expect(html).toContain("<table");
     expect(html).toContain("TITLE / HIGHLIGHT");
     expect(html).toContain("KIND");
@@ -281,12 +281,12 @@ describe("HistoryPanel", () => {
     expect(html).not.toContain("History case");
   });
 
-  test("renders artifact-first empty and filter-miss copy", () => {
+  test("renders Page-first empty and filter-miss copy", () => {
     const empty = renderToStaticMarkup(
       <HistoryPanel loadState={{ state: "ready", sessions: [], total: 0 }} loading={false} query="" onQueryChange={() => {}} onOpenWorkbench={() => {}} />
     );
-    expect(empty).toContain("No published artifacts yet.");
-    expect(empty).toContain("Compile and publish from Workbench.");
+    expect(empty).toContain("No published Pages yet.");
+    expect(empty).toContain("Publish to Logbook from Workbench.");
     expect(empty).toContain("Open Workbench");
     expect(empty).not.toContain("Open Sources");
     expect(empty).not.toContain("No sessions imported yet.");
@@ -301,7 +301,7 @@ describe("HistoryPanel", () => {
         onQueryChange={() => {}}
       />
     );
-    expect(filtered).toContain("No artifacts match these filters.");
+    expect(filtered).toContain("No Pages match these filters.");
     expect(filtered).not.toContain("No sessions match these filters.");
   });
 

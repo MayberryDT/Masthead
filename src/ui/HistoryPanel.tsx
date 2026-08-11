@@ -397,13 +397,13 @@ function LogbookSkeleton({ mode = "initial" }: { mode?: "initial" | "page" }) {
       role="status"
       aria-live="polite"
       aria-busy="true"
-      aria-label={isPageLoading ? "Loading next Logbook page" : "Loading published artifacts"}
+      aria-label={isPageLoading ? "Loading next Logbook page" : "Loading published Pages"}
     >
       {isPageLoading ? null : (
         <div className="logbook-loading-copy" aria-hidden="true">
           <p className="mono-label">Logbook</p>
-          <strong>Loading published artifacts</strong>
-          <span>Hydrating the published artifact index.</span>
+          <strong>Loading published Pages</strong>
+          <span>Hydrating the published Page index.</span>
         </div>
       )}
       <table className="logbook-table compact logbook-skeleton-table" aria-hidden="true">
@@ -496,7 +496,7 @@ function emptyStateFor(
     return {
       reason,
       title: "Logbook is offline.",
-      message: "Masthead needs the local daemon before it can read published artifacts.",
+      message: "Masthead needs the local daemon before it can read published Pages.",
       actions: [
         { label: "Retry connection", onClick: options.onRetry, variant: "primary" },
         { label: "Open Workbench", onClick: options.onOpenWorkbench }
@@ -516,8 +516,8 @@ function emptyStateFor(
   if (reason === "query_no_results") {
     return {
       reason,
-      title: "No artifacts match these filters.",
-      message: "The Logbook has published artifacts, but none match the active search, facet, date, or sort criteria.",
+      title: "No Pages match these filters.",
+      message: "The Logbook has published Pages, but none match the active search, facet, date, or sort criteria.",
       support: options.activeFilters.length > 0 ? `Active filters: ${options.activeFilters.map((facet) => `${facet.label} ${facet.value}`).join(", ")}` : undefined,
       actions: [{ label: "Clear filters", onClick: options.onClearFilters, variant: "primary" }]
     };
@@ -528,7 +528,7 @@ function emptyStateFor(
     return {
       reason,
       title: "Sources are detected but not imported.",
-      message: "Masthead found local agent history stores. Import metadata, then compile and publish from Workbench to populate the Logbook.",
+      message: "Masthead found local agent history stores. Import metadata, then create Pages in Workbench and Publish to Logbook.",
       support: `${formatCount(options.sourceSummary.detectedSources)} sources detected; ${formatCount(options.sourceSummary.discoveredSessions)} sessions available to import.`,
       actions: [
         { label: "Import metadata", onClick: runtime && options.onImportMetadata ? () => options.onImportMetadata?.(runtime) : undefined, disabled: options.importBusy, variant: "primary" },
@@ -539,8 +539,8 @@ function emptyStateFor(
 
   return {
     reason,
-    title: "No published artifacts yet.",
-    message: "Compile and publish from Workbench.",
+    title: "No published Pages yet.",
+    message: "Publish to Logbook from Workbench.",
     actions: [{ label: "Open Workbench", onClick: options.onOpenWorkbench, variant: "primary" }]
   };
 }

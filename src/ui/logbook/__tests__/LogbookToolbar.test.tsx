@@ -36,8 +36,8 @@ describe("LogbookToolbar", () => {
       />
     );
 
-    expect(html).toContain("Search published artifacts");
-    expect(html).toContain("Search published artifacts…");
+    expect(html).toContain("Search published Pages");
+    expect(html).toContain("Search published Pages…");
     expect(html.indexOf("Date 2")).toBeLessThan(html.indexOf("Kind filter"));
     expect(html).toContain("Date 2");
     expect(html).toContain("Kind filter");
@@ -47,9 +47,9 @@ describe("LogbookToolbar", () => {
     expect(html).toContain("2026-06-01");
     expect(html).toContain("2026-06-25");
     expect(html).toContain("Project");
-    expect(html.indexOf("Search published artifacts")).toBeLessThan(html.indexOf("Date 2"));
+    expect(html.indexOf("Search published Pages")).toBeLessThan(html.indexOf("Date 2"));
     expect(html.indexOf("Kind filter")).toBeLessThan(html.indexOf("Project filter"));
-    expect(html.indexOf("Kind filter")).toBeLessThan(html.indexOf("Sort artifacts"));
+    expect(html.indexOf("Kind filter")).toBeLessThan(html.indexOf("Sort Pages"));
     expect(html).not.toContain("Runtime filter");
     expect(html).not.toContain("Model filter");
     expect(html).not.toContain("Enrich summaries");

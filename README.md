@@ -9,7 +9,7 @@
 
 **The work is still there. Masthead makes it findable.**
 
-Masthead is a **local-first session data layer** for AI coding agents. It captures work from supported harnesses (Codex, Claude Code, Cursor, and others), keeps it in a canonical SQLite database on your machine, and turns selected sessions into **published knowledge artifacts**—dossiers, runbooks, ADRs, and incident timelines—that people and agents can search and reuse.
+Masthead is a **local-first session data layer** for AI coding agents. It captures work from supported harnesses (Codex, Claude Code, Cursor, and others), keeps it in a canonical SQLite database on your machine, and turns selected sessions into published knowledge **Pages**—dossiers, runbooks, ADRs, and incident timelines—that people and agents can search and reuse.
 
 When a sidebar, index, or provider filter stops surfacing local history, Masthead gives supported sessions an independent place to live—and a path from raw transcript to reusable answer.
 
@@ -20,7 +20,7 @@ It is not a chat client, live monitoring tower, analytics dashboard, or task man
 - **Captures** supported agent sessions into one local record that outlives any single tool.
 - **Connects** harnesses through Sources: discover, enable, activate, and test live connectors.
 - **Publishes** durable work through Workbench: raw session → quality → agent authoring → publish.
-- **Remembers** only what you publish in Logbook (artifacts, not a session library).
+- **Remembers** only the Pages you publish to your private, canonical **Local Logbook**.
 - **Retrieves** published knowledge via read-only MCP so the next agent can reuse answers with sources.
 
 ![Masthead pipeline: Sources → Local SQLite → Workbench → Logbook + MCP](docs/assets/masthead-architecture.jpg)
@@ -43,8 +43,8 @@ More detail: [docs/OPEN_SOURCE.md](docs/OPEN_SOURCE.md) and [SECURITY.md](SECURI
 | --- | --- |
 | **Sources** | Discover and enable live harness connectors |
 | **Workbench** | Raw session → quality → agent authoring → publish |
-| **Logbook** | Published artifacts only (not a session library) |
-| **MCP** | Read-only, artifact-primary tools for other agents |
+| **Logbook** | Published Pages only (not a session library) |
+| **MCP** | Read-only access to published Pages for other agents |
 | **Now** | Shallow live presence across supported harnesses |
 
 ## Install
@@ -107,7 +107,7 @@ npm run build:electron
 2. Open **Sources**, discover local harnesses, enable and test the ones you use.
 3. Import history where offered (transcript import may require explicit approval—it can contain private work).
 4. Use **Workbench** to select sessions and drive enrichment / V5 pack authoring with your coding agent.
-5. Read published results in **Logbook**; attach **MCP** so another agent can retrieve artifacts with provenance.
+5. Read published Pages in **Logbook**; attach **MCP** so another agent can retrieve them with provenance.
 
 Tutorials:
 

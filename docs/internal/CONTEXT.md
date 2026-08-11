@@ -1,9 +1,27 @@
 # Masthead
 
-Masthead is a local-first session data product that turns AI-agent session history into durable,
-evidence-backed engineering knowledge artifacts people and agents can search and reuse.
+Masthead is a local-first session data product that turns AI-agent session history into durable
+Pages of evidence-backed engineering knowledge that people and agents can search and reuse.
 
 ## Language
+
+**Page**:
+Masthead's canonical user-facing term for one reusable unit of engineering knowledge. A Page may be
+a session dossier, runbook, ADR, or incident timeline. `artifact` is the legacy/internal implementation term
+for a Page; it remains correct in persisted types, IDs, routes, schemas, MCP arguments, and code.
+_Avoid_: Artifact in product copy, note, blob, output file, session row
+
+**Local Logbook**:
+The private, canonical Logbook stored on the user's machine. It is a collection of Pages and remains
+fully useful without a hosted Masthead service.
+_Avoid_: Cloud account, hosted prerequisite, secondary cache
+
+**Publication language**:
+Use **Publish to Logbook** for the local publication destination and **Publish to Masthead Pages**
+for the distinct hosted destination if that product surface is introduced. Never use a bare
+**Publish** action when the destination could be ambiguous. This vocabulary does not add hosted
+Masthead Pages behavior.
+_Avoid_: Publish, upload, sync
 
 **Authoring runtime boundary**:
 ADR 0016 defines the implemented `workbench-authoring-v5` contract. New work uses fixed packs,
@@ -64,11 +82,12 @@ and re-compile. Dogfood databases may be reset multiple times.
 _Avoid_: Long dual-read compatibility shim, preserve legacy Logbook rows as a product requirement
 
 **Logbook**:
-The searchable library of published artifacts. It is an artifact book, not a session table: every
-search hit is an artifact (including session capsules listing session dossiers, plus runbooks, ADRs,
-and incident timelines). It supports search, browse, filtering, sorting, and artifact inspection
-with provenance back to source sessions. It does not own raw-session cleanup, transcript import,
-bulk enrichment, source setup, or Workbench process tracking.
+The searchable collection of published Pages. It is a Page library, not a session table: every
+search hit is a Page (including session capsules listing session dossiers, plus runbooks, ADRs, and
+incident timelines). It supports search, browse, filtering, sorting, and Page inspection with
+provenance back to source sessions. Its persisted records and compatibility contracts continue to
+use `artifact`. It does not own raw-session cleanup, transcript import, bulk enrichment, source
+setup, or Workbench process tracking.
 _Avoid_: Session library, session table, Workbench, import queue, enrichment surface, dual session/artifact browser
 
 **Artifact-primary MCP**:
@@ -407,11 +426,12 @@ The bounded evidence packet for the fully declared provenance set P used at vali
 for a multi-session artifact. Evidence refs must resolve inside this packet.
 _Avoid_: Merging ad hoc single-session packets without a declared set, unbounded export
 
-**Artifact**:
-A durable, versioned unit of engineering knowledge. Every Logbook entry is an artifact. An
-artifact has a kind, a listing capsule, a full body, current/superseded history, evidence refs,
-and provenance to one or more source sessions.
-_Avoid_: Note, blob, output file, session row, memory layer entry, listing alone
+**Artifact (internal implementation term)**:
+The legacy/internal persisted representation of a Page. Every Logbook Page is backed by an artifact
+with a kind, listing capsule, full body, current/superseded history, evidence refs, and provenance to
+one or more source sessions. Keep this term in technical identifiers and compatibility contracts;
+present the unit to users as a Page.
+_Avoid_: Opportunistic identifier rename, user-facing product term, note, blob, output file
 
 **Artifact body**:
 The full inspectable content of an artifact opened from a Logbook listing. For the session kind,

@@ -19,11 +19,11 @@ describe("SidebarKnowledgeFlow", () => {
     expect(html).toContain('aria-label="Knowledge flow"');
     expect(html).toContain("Capture sessions");
     expect(html).toContain("Workbench");
-    expect(html).toContain("Publish artifacts");
+    expect(html).toContain("Publish to Logbook");
     expect(html).not.toContain("sidebar-knowledge-flow-title");
     expect(text).toContain("Capture sessions17");
     expect(text).toContain("Workbench6");
-    expect(text).toContain("Publish artifacts11");
+    expect(text).toContain("Publish to Logbook11");
     expect(text).toContain("4 automatically resolved");
   });
 
@@ -42,7 +42,7 @@ describe("SidebarKnowledgeFlow", () => {
 
     expect(text).toContain("Capture sessions0");
     expect(text).toContain("Workbench0");
-    expect(text).toContain("Publish artifacts0");
+    expect(text).toContain("Publish to Logbook0");
     expect(text).toContain("0 automatically resolved");
     expect(html).not.toContain("Summary unavailable");
   });
@@ -61,7 +61,7 @@ describe("SidebarKnowledgeFlow", () => {
 
     expect(text).toContain("Capture sessions17");
     expect(text).toContain("Workbench6");
-    expect(text).toContain("Publish artifacts11");
+    expect(text).toContain("Publish to Logbook11");
     expect(text).toContain("4 automatically resolved");
     expect(html).not.toContain(">—<");
   });

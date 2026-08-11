@@ -14,7 +14,7 @@
 |---------|------|-----|
 | **Now** | Live session card | Shallow running/idle/attention |
 | **Workbench** | Captured **session** on package path | Transcript, quality, compile handoff, multi-kind resolution |
-| **Logbook** | Published **artifact** | Search/browse/open knowledge capsules |
+| **Logbook** | Published **Page** (`artifact` internally) | Search/browse/open knowledge capsules |
 
 Sessions never become Logbook rows. Provenance points back to sessions.
 
@@ -124,7 +124,7 @@ selection, and any new imports can still fill Workbench.
 
 ## Logbook (locked UI)
 
-- **Row** = published artifact only (`session_dossier`, `runbook`, `adr`, `incident_timeline`).
+- **Row** = published Page only (`session_dossier`, `runbook`, `adr`, `incident_timeline`; persisted as an artifact).
 - **Columns:** Kind · Title/Highlight · Project · Conf · Provenance · Published.
 - **Layout:** left capsule table, right inspector = **body + always-visible provenance** (join rationale when multi-session).
 - **Filters:** kind · project · date · search (no runtime/model primary, no bulk enrich, no checkboxes, no summary strip).
@@ -146,7 +146,7 @@ New work uses the V5 runtime. V1–V4 records remain readable for audit, but the
 retired and cannot run or resume an enrichment campaign. See the
 [V5 migration note](../reference/workbench-authoring-v5-migration.md).
 
-One durable `workbench-authoring-v5` request produces enriched dossiers and any useful optional artifacts:
+One durable `workbench-authoring-v5` request produces enriched dossiers and any useful optional Pages:
 
 1. **Enriched dossier** — the agent writes current durable enrichment for every selected session;
    the daemon then renders the original canonical dossier structure.

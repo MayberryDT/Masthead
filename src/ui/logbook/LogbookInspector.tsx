@@ -32,18 +32,18 @@ export function LogbookInspector({
 }: Props) {
   if (!artifact && !loading && !error) return null;
 
-  const title = artifact?.title ?? (loading ? "Loading artifact" : error ? "Could not load artifact" : "Artifact detail");
-  const label = artifact ? kindLabel(artifact.kind) : "Artifact detail";
+  const title = artifact?.title ?? (loading ? "Loading Page" : error ? "Could not load Page" : "Page detail");
+  const label = artifact ? kindLabel(artifact.kind) : "Page detail";
 
   return (
-    <aside className="logbook-inspector metal-surface" aria-label="Artifact detail">
+    <aside className="logbook-inspector metal-surface" aria-label="Page detail">
       <header>
         <div>
           <p className="mono-label">{label}</p>
           <h2>{title}</h2>
           {artifact ? <ArtifactMeta artifact={artifact} /> : null}
         </div>
-        <button type="button" className="surface-inline-action logbook-inspector-close" aria-label="Close artifact detail" onClick={onClose}>
+        <button type="button" className="surface-inline-action logbook-inspector-close" aria-label="Close Page detail" onClick={onClose}>
           <Icon name="close" size="toolbar" weight={iconWeights.toolbar} />
         </button>
       </header>
@@ -56,7 +56,7 @@ export function LogbookInspector({
           <ProvenanceSection joinRationale={artifact.joinRationale} provenanceLabel={artifact.provenanceLabel} provenanceSessionIds={artifact.provenanceSessionIds} />
         </>
       ) : loading ? (
-        <p className="surface-status">Loading artifact detail...</p>
+        <p className="surface-status">Loading Page detail...</p>
       ) : error ? (
         <p className="surface-status" role="alert">
           {error}
@@ -152,7 +152,7 @@ function renderArtifactBody(
   const record = asRecord(body);
   if (!record) {
     if (body === undefined || body === null || body === "") {
-      return <p className="surface-status">No body captured for this artifact.</p>;
+      return <p className="surface-status">No body captured for this Page.</p>;
     }
     if (isKnownArtifactKind(kind)) {
       if (typeof body === "string") return <TextSection label="Body" value={body.trim()} />;
@@ -160,7 +160,7 @@ function renderArtifactBody(
         const values = body.filter((entry): entry is string => typeof entry === "string" && Boolean(entry.trim()));
         if (values.length > 0) return <ListSection label="Body" values={values} />;
       }
-      return <p className="surface-status">No structured body captured for this artifact.</p>;
+      return <p className="surface-status">No structured body captured for this Page.</p>;
     }
     return <pre className="logbook-inspector-json">{prettyUnknown(body)}</pre>;
   }

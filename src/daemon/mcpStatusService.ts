@@ -82,31 +82,31 @@ export type McpToolDto = {
 export const MCP_TOOL_CATALOG: McpToolDto[] = [
   {
     arguments: "optional query, kind, project, dateFrom, dateTo, limit, offset",
-    dataReturned: "Published knowledge capsules (artifactId, kind, title, summary, provenance)",
+    dataReturned: "Published Page capsules (internal artifactId, kind, title, summary, provenance)",
     name: "search_knowledge",
     permission: "Read only",
-    purpose: "PRIMARY: Search published Logbook knowledge for reuse"
+    purpose: "PRIMARY: Search published Logbook Pages for reuse"
   },
   {
     arguments: "optional kind, project, dateFrom, dateTo, limit, offset",
-    dataReturned: "Published knowledge capsules without text query",
+    dataReturned: "Published Page capsules without text query",
     name: "list_knowledge",
     permission: "Read only",
-    purpose: "PRIMARY: Browse published knowledge"
+    purpose: "PRIMARY: Browse published Pages"
   },
   {
     arguments: "artifactId",
-    dataReturned: "Full artifact with artifactId, body, provenance, evidence refs",
+    dataReturned: "Full Page with internal artifactId, body, provenance, evidence refs",
     name: "get_knowledge",
     permission: "Read only",
-    purpose: "PRIMARY: Read one published knowledge artifact"
+    purpose: "PRIMARY: Read one published Page"
   },
   {
     arguments: "artifactId",
-    dataReturned: "Provenance session ids and join rationale",
+    dataReturned: "Provenance session ids and join rationale for one Page",
     name: "get_provenance",
     permission: "Read only",
-    purpose: "PRIMARY: List provenance for a published artifact"
+    purpose: "PRIMARY: List provenance for a published Page"
   },
   {
     arguments: "sessionId, optional artifactId, query, limit, maxBytes",
@@ -124,10 +124,10 @@ export const MCP_TOOL_CATALOG: McpToolDto[] = [
   },
   {
     arguments: "none",
-    dataReturned: "Published artifact counts by kind plus session coverage",
+    dataReturned: "Published Page counts by kind plus session coverage",
     name: "get_corpus_stats",
     permission: "Read only",
-    purpose: "PRIMARY: Corpus statistics (artifacts first)"
+    purpose: "PRIMARY: Page-first corpus statistics"
   },
   {
     arguments: "optional query, kind, project, limit, offset",
@@ -195,8 +195,8 @@ export const MCP_TOOL_CATALOG: McpToolDto[] = [
 ];
 
 const allowedPermissions = [
-  "Search published knowledge artifacts",
-  "Read published artifact bodies with provenance",
+  "Search published Pages",
+  "Read published Page bodies with provenance",
   "Read provenance-gated historical evidence",
   "Search session summaries for evidence",
   "Read project history"

@@ -1,5 +1,9 @@
 # ADR 0011: Logbook Is an Artifact Book
 
+> **Current product language:** Users see each reusable knowledge unit as a **Page** and Logbook as
+> a collection of Pages. This ADR retains `artifact` for the persisted implementation model and
+> compatibility contracts it established.
+
 ## Status
 
 Accepted.

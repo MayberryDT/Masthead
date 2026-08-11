@@ -11,8 +11,8 @@ not the session import/publish pipeline (Workbench) and not the published archiv
 ```text
 Sources wires harnesses
   → live events → canonical DB + Now
-    → Workbench deepens sessions and publishes artifacts
-      → Logbook shows published artifacts (not session rows)
+    → Workbench deepens sessions and publishes Pages
+      → Logbook shows published Pages (artifacts internally, not session rows)
 ```
 
 ## Job
@@ -40,7 +40,7 @@ Do not rebuild Sources as:
 - Workbench activity surface.
 
 History adapters and import APIs may still exist in the daemon for Workbench. They are not Sources V2 UX.
-Workbench publishes **artifacts** into Logbook (ADR 0011); Sources never owns Logbook visibility.
+Workbench publishes **Pages** into Logbook (persisted internally as artifacts; ADR 0011); Sources never owns Logbook visibility.
 
 ## UI shape
 

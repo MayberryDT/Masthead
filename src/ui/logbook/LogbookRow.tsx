@@ -10,7 +10,7 @@ type Props = {
 };
 
 export function LogbookRow({ density, onSelect, rowIndex = 0, selected = false, session }: Props) {
-  const title = session.title || "Untitled artifact";
+  const title = session.title || "Untitled Page";
   const highlight = session.snippet || session.objective;
   const kind = session.runtime ?? session.lifecycle ?? "artifact";
   const publishedAt = session.lastActivityAt;
@@ -33,7 +33,7 @@ export function LogbookRow({ density, onSelect, rowIndex = 0, selected = false, 
     <tr
       className={`logbook-row ${density === "compact" ? "compact" : ""} ${selected ? "selected" : ""}`.trim()}
       tabIndex={0}
-      aria-label={`Open artifact: ${title}`}
+      aria-label={`Open Page: ${title}`}
       aria-selected={selected}
       style={style}
       onClick={handleRowClick}
@@ -84,7 +84,8 @@ function kindLabel(kind: string): string {
   if (kind === "runbook") return "Runbook";
   if (kind === "adr") return "ADR";
   if (kind === "incident_timeline") return "Timeline";
-  return kind || "Artifact";
+  if (kind === "artifact" || kind === "page") return "Page";
+  return kind || "Page";
 }
 
 function HighlightedSnippet({ snippet }: { snippet: string }) {

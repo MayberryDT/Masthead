@@ -1,6 +1,6 @@
 # Data and integrations
 
-This page covers the canonical local store, the daemon HTTP surface, the MCP boundary, published artifacts, and derived enrichment data.
+This page covers the canonical local store, the daemon HTTP surface, the MCP boundary, published Pages, and derived enrichment data.
 
 ## Canonical data path
 
@@ -26,7 +26,7 @@ ambiguous identity are repair-required import outcomes and never become Workbenc
 reasons. Quality reconciliation starts only after complete import evidence. Automatic suppression
 can reopen when the evidence revision changes; user exclusion remains sticky.
 
-**Published knowledge** lives in artifact tables (`session_artifacts` + provenance), not as “Logbook session rows.” Schema migration `018_artifact_first_logbook` introduces that model. Dogfood may wipe published artifact state and rebuild via Workbench; see `docs/reference/artifact-first-logbook-cutover.md`.
+**Published Pages** live in artifact tables (`session_artifacts` + provenance), not as “Logbook session rows.” Schema migration `018_artifact_first_logbook` introduces that internal model. Dogfood may wipe published artifact state and rebuild via Workbench; see `docs/reference/artifact-first-logbook-cutover.md`.
 
 ## Daemon API
 
