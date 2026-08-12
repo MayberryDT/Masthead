@@ -1,11 +1,16 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
+import { availableParallelism } from "node:os";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { defineConfig } from "vitest/config";
 import type { Plugin } from "vite";
 import pkg from "./package.json" with { type: "json" };
 import { REQUIRED_CLIENT_CAPABILITIES } from "./src/shared/protocol";
+
+// Cap fork workers so the full release gate stays off swap when heavy failed-V1 recovery
+// cases and daemon/Electron suites run together. Assertions and per-test budgets stay fixed.
+const releaseGateMaxWorkers = Math.max(1, Math.min(2, availableParallelism()));
 
 export default defineConfig({
   define: {
@@ -21,7 +26,8 @@ export default defineConfig({
     environment: "node",
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
     hookTimeout: 30_000,
-    testTimeout: 30_000
+    testTimeout: 30_000,
+    maxWorkers: releaseGateMaxWorkers
   }
 });
 
