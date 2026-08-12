@@ -33,6 +33,38 @@ for (const check of forbiddenPairs) {
   }
 }
 
+// Permanent Logbook checkboxes are forbidden; temporary Masthead Pages selection mode may use them.
+try {
+  const row = await readFile("src/ui/logbook/LogbookRow.tsx", "utf8");
+  const table = await readFile("src/ui/logbook/LogbookTable.tsx", "utf8");
+  const combined = `${row}\n${table}`;
+
+  if (/type=["']checkbox["']/.test(combined) && !/pagesSelectionMode/.test(combined)) {
+    failures.push("Logbook checkbox present without pagesSelectionMode gate");
+  }
+
+  // Checkbox markup must be gated on temporary Masthead Pages selection mode.
+  if (/type=["']checkbox["']/.test(combined)) {
+    const checkboxBlocks = combined.split(/type=["']checkbox["']/);
+    // Every checkbox occurrence should sit near a pagesSelectionMode condition in the same file.
+    if (!/pagesSelectionMode\s*(?:\?|&&|\|\||===|!==)/.test(combined) && !/pagesSelectionMode\s*\)/.test(combined)) {
+      failures.push("Logbook checkbox is not gated by pagesSelectionMode");
+    }
+    void checkboxBlocks;
+  }
+
+  // Masthead Pages review surfaces may use checkboxes for acknowledgments.
+  const review = await readFile("src/ui/masthead-pages/MastheadPagesReviewDialog.tsx", "utf8");
+  if (!/type=["']checkbox["']/.test(review)) {
+    failures.push("MastheadPagesReviewDialog missing acknowledgment checkbox");
+  }
+  if (!/Publish to Masthead Pages/.test(review)) {
+    failures.push("MastheadPagesReviewDialog missing qualified Publish to Masthead Pages label");
+  }
+} catch (error) {
+  failures.push(`Logbook/Masthead Pages surface check failed: ${error instanceof Error ? error.message : String(error)}`);
+}
+
 if (failures.length > 0) {
   console.error("Masthead surface contract failed:");
   for (const failure of failures) console.error(`- ${failure}`);

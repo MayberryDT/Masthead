@@ -127,8 +127,9 @@ selection, and any new imports can still fill Workbench.
 - **Row** = published Page only (`session_dossier`, `runbook`, `adr`, `incident_timeline`; persisted as an artifact).
 - **Columns:** Kind · Title/Highlight · Project · Conf · Provenance · Published.
 - **Layout:** left capsule table, right inspector = **body + always-visible provenance** (join rationale when multi-session).
-- **Filters:** kind · project · date · search (no runtime/model primary, no bulk enrich, no checkboxes, no summary strip).
-- **Empty after wipe:** normal until Workbench republishes.
+- **Filters:** kind · project · date · search (no runtime/model primary, no bulk enrich, no permanent checkboxes, no summary strip).
+- **Publish to Masthead Pages:** optional hosted publication of a current enriched `session_dossier`. Temporary selection-mode checkboxes appear only while that flow is active and fully clean up when it ends. See [Masthead Pages integration](../reference/masthead-pages-integration.md).
+- **Empty after wipe:** normal until Workbench republishes. Hosted outages never remove or block local Logbook Pages.
 
 ### Code map
 
@@ -250,7 +251,8 @@ status, reviews, and receipts remain audit history; their mutations return
 
 ## Anti-patterns for agents
 
-- Do not reintroduce Logbook bulk enrich, row checkboxes, or summary metrics strip.
+- Do not reintroduce Logbook bulk enrich, permanent row checkboxes, or summary metrics strip.
+- Do not use a bare **Publish** action; keep **Publish to Logbook** and **Publish to Masthead Pages** qualified.
 - Do not treat “published session” as a Logbook search hit.
 - Do not document Logbook as a session library or dual session/artifact browser.
 - Do not put Workbench process tracking into Logbook.

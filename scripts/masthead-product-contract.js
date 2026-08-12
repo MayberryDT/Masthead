@@ -7,7 +7,9 @@ const productLanguageFiles = [
   "README.md",
   "docs/how-to/import-codex-history.md",
   "docs/openwiki/quickstart.md",
-  "docs/tutorials/first-run-codex-import.md"
+  "docs/tutorials/first-run-codex-import.md",
+  "docs/reference/masthead-pages-integration.md",
+  "docs/acceptance/masthead-pages-publication-gate.md"
 ];
 const pageLanguageSurfaceContracts = [
   {
@@ -147,8 +149,26 @@ try {
       failures.push(`package.json still exposes retired V4 mutation harness: ${retiredScript}`);
     }
   }
+  for (const requiredScript of ["smoke:masthead-pages", "smoke:masthead-pages:offline", "check:masthead-pages-contract"]) {
+    if (!packageJson?.scripts?.[requiredScript]) {
+      failures.push(`package.json missing required Masthead Pages script: ${requiredScript}`);
+    }
+  }
 } catch (error) {
   failures.push(`package.json could not be checked: ${error instanceof Error ? error.message : String(error)}`);
+}
+
+const pagesIntegration = normalizeWhitespace(fileContents("docs/reference/masthead-pages-integration.md"));
+for (const requirement of [
+  { label: "qualified Publish to Masthead Pages", pattern: /\bPublish to Masthead Pages\b/ },
+  { label: "local-first offline behavior", pattern: /fully useful without a Masthead Pages account/i },
+  { label: "temporary selection mode", pattern: /temporary Masthead Pages selection mode/i },
+  { label: "OS-backed credentials", pattern: /safeStorage|OS-backed credentials/i },
+  { label: "no bare Publish", pattern: /Never a bare \*\*Publish\*\*/i }
+]) {
+  if (!requirement.pattern.test(pagesIntegration)) {
+    failures.push(`docs/reference/masthead-pages-integration.md missing ${requirement.label}`);
+  }
 }
 
 const readme = contents.find(({ file }) => file === "README.md")?.text ?? "";

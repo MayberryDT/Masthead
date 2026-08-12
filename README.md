@@ -34,8 +34,9 @@ Masthead is built around a narrow, local-first boundary:
 - **You choose what crosses** — only context you deliberately hand off goes to a coding-agent provider.
 - **MCP is read-only** on the launch surface — other agents can query published knowledge; they do not write your store.
 - **Harness files stay owned by their tools** — Masthead observes and records; it does not replace Codex, Claude Code, or Cursor.
+- **Optional Publish to Masthead Pages** — desktop can project a reviewed Logbook Page to the hosted public service; hosted outages never block local Logbook, Workbench, or MCP.
 
-More detail: [docs/OPEN_SOURCE.md](docs/OPEN_SOURCE.md) and [SECURITY.md](SECURITY.md).
+More detail: [docs/OPEN_SOURCE.md](docs/OPEN_SOURCE.md), [SECURITY.md](SECURITY.md), and [docs/reference/masthead-pages-integration.md](docs/reference/masthead-pages-integration.md).
 
 ## Product map
 

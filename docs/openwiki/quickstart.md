@@ -31,7 +31,7 @@ Ownership in one line each:
 - **Workbench** owns transcript import, cleanup, agent enrichment, daemon-rebuilt dossier publication,
   and optional Page authoring. **Copy Agent Prompt** creates a durable
   guided authoring request, then copies only its request ID and instance-bound start command.
-- **Logbook** is a collection of **Pages**: capsule list + body inspector + provenance. Capsules remain artifacts internally. No bulk enrich, checkboxes, or session-library chrome.
+- **Logbook** is a collection of **Pages**: capsule list + body inspector + provenance. Capsules remain artifacts internally. No bulk enrich, permanent checkboxes, or session-library chrome. Optional **Publish to Masthead Pages** uses a temporary selection mode only.
 - **Sources** owns discovering local harnesses and enabling live connectors — not import jobs or per-session Workbench work. Contract: [sources.md](sources.md) → `docs/reference/sources-v2.md`.
 - **Now** is shallow live presence only.
 
