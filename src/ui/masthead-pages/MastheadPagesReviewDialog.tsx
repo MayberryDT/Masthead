@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { EgressFinding } from "../../mastheadPages/egressPreflight";
 import type { PageLicense, PublicLogbookSummaryV1, SourceLinkV1 } from "../../mastheadPages/types";
 import type { MastheadPagesEvidenceCandidate, MastheadPagesPublicationOutcome, MastheadPagesReviewPhase } from "../../app/mastheadPages/types";
@@ -26,6 +27,8 @@ export type MastheadPagesReviewDialogProps = {
   previewRequest?: unknown;
   decision?: "ready" | "needs_review" | "blocked";
   canConfirmPublish: boolean;
+  confirmPublishLabel?: string;
+  releaseActions?: ReactNode;
   outcome: MastheadPagesPublicationOutcome;
   error?: string;
   gate?: string;
@@ -47,6 +50,7 @@ export function MastheadPagesReviewDialog({
   artifactId,
   busy = false,
   canConfirmPublish,
+  confirmPublishLabel = "Publish to Masthead Pages",
   connection,
   decision,
   error,
@@ -72,15 +76,19 @@ export function MastheadPagesReviewDialog({
   previewObject,
   previewRequest,
   publicLogbookId,
+  releaseActions,
   selectedEvidenceRefs,
   slug,
   title
 }: MastheadPagesReviewDialogProps) {
   if (!open) return null;
 
-  const fieldsLocked = phase === "finalizing" || phase === "publishing" || phase === "complete";
+  const fieldsLocked =
+    phase === "finalizing" || phase === "publishing" || phase === "removing" || phase === "complete";
   const showWarningAck = decision === "needs_review" || findings.some((finding) => finding.severity === "warn");
   const blocked = decision === "blocked" || gate === "blocked";
+  const publishBusyLabel =
+    phase === "publishing" ? "Publishing…" : phase === "removing" ? "Removing…" : confirmPublishLabel;
 
   return (
     <div className="masthead-pages-review-backdrop" role="presentation" onClick={onClose}>
@@ -93,7 +101,7 @@ export function MastheadPagesReviewDialog({
       >
         <header className="masthead-pages-review-header">
           <div>
-            <p className="mono-label">Publish to Masthead Pages</p>
+            <p className="mono-label">{confirmPublishLabel}</p>
             <h2 id="masthead-pages-review-title">{title ?? "Review outbound Page"}</h2>
             {artifactId ? <p className="masthead-pages-review-artifact mono-label">{artifactId}</p> : null}
           </div>
@@ -106,6 +114,7 @@ export function MastheadPagesReviewDialog({
           <section aria-label="Destination" className="masthead-pages-review-step">
             <p className="mono-label">1. Destination</p>
             <MastheadPagesStatus connection={connection} error={undefined} outcome={outcome} />
+            {releaseActions}
             {connection?.status !== "connected" ? (
               <AppButton disabled={busy} onClick={onConnect} variant="primary">
                 Connect Masthead Pages
@@ -214,18 +223,31 @@ export function MastheadPagesReviewDialog({
             {decision ? <p className="surface-status">Review decision: {decision}</p> : null}
             <div className="masthead-pages-review-actions">
               <AppButton
-                disabled={busy || phase === "finalizing" || phase === "publishing" || phase === "complete"}
+                disabled={
+                  busy ||
+                  phase === "finalizing" ||
+                  phase === "publishing" ||
+                  phase === "removing" ||
+                  phase === "complete"
+                }
                 onClick={onFinalize}
                 variant="default"
               >
                 {phase === "finalizing" ? "Running review…" : "Run outbound review"}
               </AppButton>
               <AppButton
-                disabled={busy || !canConfirmPublish || blocked || phase === "publishing" || phase === "complete"}
+                disabled={
+                  busy ||
+                  !canConfirmPublish ||
+                  blocked ||
+                  phase === "publishing" ||
+                  phase === "removing" ||
+                  phase === "complete"
+                }
                 onClick={onConfirmPublish}
                 variant="primary"
               >
-                {phase === "publishing" ? "Publishing…" : "Publish to Masthead Pages"}
+                {publishBusyLabel}
               </AppButton>
             </div>
           </section>

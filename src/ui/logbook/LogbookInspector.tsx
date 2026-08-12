@@ -6,10 +6,12 @@ import {
   isPublishedSessionDossierV1,
   type LogbookInspectorArtifact
 } from "../../app/logbook/logbookInspectorModel";
+import type { MastheadPagesReleaseUiState } from "../../mastheadPages/releaseState";
 import { Icon } from "../icons/Icon";
 import { iconWeights } from "../icons/icon-tokens";
 import { StatusBadge } from "../primitives/StatusBadge";
 import { SessionDossierContent } from "../session-dossier/SessionDossierContent";
+import { MastheadPagesReleaseActions } from "../masthead-pages/MastheadPagesReleaseActions";
 
 export type { LogbookInspectorArtifact };
 
@@ -20,6 +22,11 @@ type Props = {
   transcriptFilter?: SessionTranscriptKindFilter;
   onTranscriptFilterChange?: (filter: SessionTranscriptKindFilter) => void;
   onPublishToMastheadPages?: (artifactId: string) => void;
+  mastheadPagesReleaseState?: MastheadPagesReleaseUiState;
+  mastheadPagesFriendlyUrl?: string;
+  mastheadPagesExactUrl?: string;
+  onRetryMastheadPagesPublication?: (artifactId: string) => void;
+  onRemoveFromMastheadPages?: (artifactId: string) => void;
   onClose: () => void;
 };
 
@@ -27,8 +34,13 @@ export function LogbookInspector({
   artifact,
   error,
   loading = false,
+  mastheadPagesExactUrl,
+  mastheadPagesFriendlyUrl,
+  mastheadPagesReleaseState,
   onClose,
   onPublishToMastheadPages,
+  onRemoveFromMastheadPages,
+  onRetryMastheadPagesPublication,
   onTranscriptFilterChange,
   transcriptFilter = "all"
 }: Props) {
@@ -40,6 +52,17 @@ export function LogbookInspector({
     Boolean(onPublishToMastheadPages) &&
     Boolean(artifact?.artifactId) &&
     artifact?.mastheadPagesEligible === true;
+  const releaseState = mastheadPagesReleaseState ?? "not_on_pages";
+  const publishLabel =
+    releaseState === "changed_locally" || releaseState === "live"
+      ? "Publish new revision"
+      : "Publish to Masthead Pages";
+  const showReleaseActions =
+    Boolean(artifact?.artifactId) &&
+    (releaseState === "live" ||
+      releaseState === "changed_locally" ||
+      releaseState === "failed" ||
+      releaseState === "removed");
 
   return (
     <aside className="logbook-inspector metal-surface" aria-label="Page detail">
@@ -65,9 +88,31 @@ export function LogbookInspector({
                   if (artifact.artifactId) onPublishToMastheadPages?.(artifact.artifactId);
                 }}
               >
-                Publish to Masthead Pages
+                {publishLabel}
               </button>
             </div>
+          ) : null}
+          {showReleaseActions ? (
+            <MastheadPagesReleaseActions
+              releaseState={releaseState}
+              friendlyUrl={mastheadPagesFriendlyUrl}
+              exactUrl={mastheadPagesExactUrl}
+              canRetryPublish={releaseState === "failed" && Boolean(onRetryMastheadPagesPublication)}
+              canRemove={
+                (releaseState === "live" || releaseState === "changed_locally" || releaseState === "failed") &&
+                Boolean(onRemoveFromMastheadPages)
+              }
+              onRetryPublish={
+                artifact.artifactId && onRetryMastheadPagesPublication
+                  ? () => onRetryMastheadPagesPublication(artifact.artifactId!)
+                  : undefined
+              }
+              onRemove={
+                artifact.artifactId && onRemoveFromMastheadPages
+                  ? () => onRemoveFromMastheadPages(artifact.artifactId!)
+                  : undefined
+              }
+            />
           ) : null}
           <div className="logbook-inspector-body">
             {renderArtifactBody(artifact, { onTranscriptFilterChange, transcriptFilter })}

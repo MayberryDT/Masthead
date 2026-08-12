@@ -1,4 +1,5 @@
 import type { EgressFinding } from "../../mastheadPages/egressPreflight";
+import type { MastheadPagesReleaseUiState, ReleaseMappingSnapshot } from "../../mastheadPages/releaseState";
 import type {
   ObjectId,
   PageLicense,
@@ -6,6 +7,7 @@ import type {
   PublishPageRequestV1,
   PublishPageResultV1,
   PublicLogbookSummaryV1,
+  RemovePageResultV1,
   SourceLinkV1
 } from "../../mastheadPages/types";
 import type { MastheadPagesConnectionState } from "../desktopBridge";
@@ -28,6 +30,10 @@ export type MastheadPagesEvidenceSelection = {
   supports: string[];
 };
 
+export type ExistingReleaseSnapshot = ReleaseMappingSnapshot & {
+  publicLogbookId?: string;
+};
+
 export type PreparedPageReviewItem = {
   artifactId: string;
   eligibility: "eligible" | "ineligible";
@@ -38,14 +44,7 @@ export type PreparedPageReviewItem = {
   contentFingerprint?: string;
   lineageId?: string;
   baseObject?: unknown;
-  existingRelease?: {
-    pageId?: string;
-    objectId?: string;
-    publicLogbookId?: string;
-    status?: string;
-    friendlyUrl?: string;
-    exactUrl?: string;
-  };
+  existingRelease?: ExistingReleaseSnapshot;
 };
 
 export type FinalizedPageReviewItem = {
@@ -55,24 +54,32 @@ export type FinalizedPageReviewItem = {
   request?: PublishPageRequestV1;
   requestDigest?: ObjectId;
   staged: boolean;
-  existingRelease?: PreparedPageReviewItem["existingRelease"];
+  existingRelease?: ExistingReleaseSnapshot;
 };
 
 export type MastheadPagesPublicationOutcome =
   | { kind: "idle" }
   | { kind: "publishing" }
+  | { kind: "removing" }
   | {
       kind: "published";
       result: PublishPageResultV1;
       friendlyUrl?: string;
       exactUrl?: string;
+      previousExactUrl?: string;
+    }
+  | {
+      kind: "removed";
+      result?: RemovePageResultV1;
+      message?: string;
     }
   | {
       kind: "failed";
       message: string;
       retryable: boolean;
       code?: string;
-      result?: PublishPageResultV1;
+      result?: PublishPageResultV1 | RemovePageResultV1;
+      parentConflictObjectId?: string;
     };
 
 export type MastheadPagesReviewPhase =
@@ -82,6 +89,7 @@ export type MastheadPagesReviewPhase =
   | "finalizing"
   | "finalized"
   | "publishing"
+  | "removing"
   | "complete"
   | "error";
 
@@ -102,8 +110,13 @@ export type MastheadPagesReviewState = {
   prepareFindings: EgressFinding[];
   prepared?: PreparedPageReviewItem;
   finalized?: FinalizedPageReviewItem;
+  releaseMapping?: ExistingReleaseSnapshot;
+  releaseState: MastheadPagesReleaseUiState;
+  confirmPublishLabel: string;
+  removalConfirmOpen: boolean;
   outcome: MastheadPagesPublicationOutcome;
   error?: string;
+  parentConflictObjectId?: string;
   gate?:
     | "desktop_unavailable"
     | "disconnected"
@@ -111,7 +124,8 @@ export type MastheadPagesReviewState = {
     | "non_publisher"
     | "ineligible"
     | "blocked"
-    | "needs_warning_ack";
+    | "needs_warning_ack"
+    | "parent_conflict";
 };
 
 export type { PublishPageBatchResultV1, PublishPageRequestV1, PageLicense, SourceLinkV1, ObjectId };

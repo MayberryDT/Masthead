@@ -184,6 +184,28 @@
   gap: 8px;
 }
 
+.masthead-pages-release-actions {
+  display: grid;
+  gap: 8px;
+  border: 1px solid rgba(92, 153, 187, 0.14);
+  border-radius: 6px;
+  background: rgba(6, 25, 37, 0.45);
+  padding: 12px;
+  margin-top: 8px;
+}
+
+.masthead-pages-removal-warning {
+  display: grid;
+  gap: 10px;
+}
+
+.masthead-pages-removal-warning p {
+  margin: 0;
+  color: var(--body);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .masthead-pages-connection-section .masthead-pages-status {
   margin-bottom: 10px;
 }

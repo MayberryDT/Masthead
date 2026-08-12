@@ -84,6 +84,39 @@ describe("MastheadPagesReviewDialog", () => {
     expect(html).toContain('disabled=""');
   });
 
+  test("uses Publish new revision confirmation label for changed local Pages", () => {
+    const html = renderToStaticMarkup(
+      <MastheadPagesReviewDialog
+        open
+        phase="finalized"
+        logbooks={[]}
+        publicLogbookId="logbook-1"
+        license="all-rights-reserved"
+        slug="page"
+        evidenceCandidates={[]}
+        selectedEvidenceRefs={[]}
+        sourceLinks={[]}
+        includeSourceDate={false}
+        acknowledgeWarnings={false}
+        findings={[]}
+        decision="ready"
+        canConfirmPublish
+        confirmPublishLabel="Publish new revision"
+        outcome={{ kind: "idle" }}
+        onClose={() => undefined}
+        onPublicLogbookIdChange={() => undefined}
+        onLicenseChange={() => undefined}
+        onSlugChange={() => undefined}
+        onEvidenceChange={() => undefined}
+        onIncludeSourceDateChange={() => undefined}
+        onAcknowledgeWarningsChange={() => undefined}
+        onFinalize={() => undefined}
+        onConfirmPublish={() => undefined}
+      />
+    );
+    expect(html).toContain("Publish new revision");
+  });
+
   test("disables confirm for blocked decisions", () => {
     const onConfirm = vi.fn();
     const html = renderToStaticMarkup(

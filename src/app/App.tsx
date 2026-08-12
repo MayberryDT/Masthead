@@ -77,6 +77,7 @@ import { useSourcesConnectorsController } from "./sources/useSourcesConnectorsCo
 import { useKnowledgeFlowSummary } from "./sidebar/useKnowledgeFlowSummary";
 import { useWorkbenchController } from "./workbench/useWorkbenchController";
 import { clearUnsupportedLocationHash } from "./locationHash";
+import { MastheadPagesReleaseActions } from "../ui/masthead-pages/MastheadPagesReleaseActions";
 import { MastheadPagesReviewDialog } from "../ui/masthead-pages/MastheadPagesReviewDialog";
 
 type ConnectorActionState = ConnectorActionView;
@@ -774,13 +775,54 @@ export function App() {
             previewRequest={mastheadPages.previewRequest}
             decision={mastheadPages.state.finalized?.decision}
             canConfirmPublish={mastheadPages.canConfirmPublish}
+            confirmPublishLabel={mastheadPages.state.confirmPublishLabel}
+            releaseActions={
+              <MastheadPagesReleaseActions
+                releaseState={mastheadPages.state.releaseState}
+                friendlyUrl={mastheadPages.state.releaseMapping?.friendlyUrl}
+                exactUrl={
+                  mastheadPages.state.outcome.kind === "published"
+                    ? mastheadPages.state.outcome.previousExactUrl ??
+                      mastheadPages.state.outcome.exactUrl ??
+                      mastheadPages.state.releaseMapping?.exactUrl
+                    : mastheadPages.state.releaseMapping?.exactUrl
+                }
+                lastError={
+                  mastheadPages.state.outcome.kind === "failed" ? mastheadPages.state.outcome.message : undefined
+                }
+                parentConflictObjectId={mastheadPages.state.parentConflictObjectId}
+                canRetryPublish={mastheadPages.canRetryPublish}
+                canRetryRemove={mastheadPages.canRetryRemove}
+                canRemove={mastheadPages.canRemove}
+                showRemovalWarning={mastheadPages.state.removalConfirmOpen}
+                busy={
+                  mastheadPages.state.phase === "publishing" || mastheadPages.state.phase === "removing"
+                }
+                onRetryPublish={() => {
+                  void mastheadPages.retryPendingPublication();
+                }}
+                onRetryRemove={() => {
+                  void mastheadPages.retryPendingRemoval();
+                }}
+                onRemove={() => {
+                  mastheadPages.beginRemoval();
+                }}
+                onConfirmRemove={() => {
+                  void mastheadPages.confirmRemoval();
+                }}
+                onCancelRemove={() => {
+                  mastheadPages.cancelRemoval();
+                }}
+              />
+            }
             outcome={mastheadPages.state.outcome}
             error={mastheadPages.state.error}
             gate={mastheadPages.state.gate}
             busy={
               mastheadPages.state.phase === "loading" ||
               mastheadPages.state.phase === "finalizing" ||
-              mastheadPages.state.phase === "publishing"
+              mastheadPages.state.phase === "publishing" ||
+              mastheadPages.state.phase === "removing"
             }
             onClose={mastheadPages.closeReview}
             onConnect={() => {

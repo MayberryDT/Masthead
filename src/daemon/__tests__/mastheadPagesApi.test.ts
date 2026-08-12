@@ -228,6 +228,35 @@ describe("masthead pages daemon API", () => {
     expect(getPendingMastheadPagesOperation(db, readyId)?.operationKind).toBe("publish");
   });
 
+  test("finalizes a revision with pageId and expectedParentObjectId from the private mapping", async () => {
+    const db = await testDb();
+    const artifactId = seedEligibleArtifact(db, "session:revision");
+    recordMastheadPagesPublication(db, publicationReceipt(artifactId));
+
+    const result = routeMastheadPagesRequest(
+      { db },
+      {
+        method: "POST",
+        url: new URL("http://127.0.0.1/masthead-pages/reviews/finalize"),
+        body: {
+          items: [finalizeItem(artifactId, "revision-page")]
+        }
+      }
+    );
+
+    expect(result?.status).toBe(200);
+    const body = result?.body as {
+      items: Array<{ decision: string; staged: boolean; request: Record<string, unknown> }>;
+    };
+    expect(body.items[0]?.decision).toBe("ready");
+    expect(body.items[0]?.staged).toBe(true);
+    expect(body.items[0]?.request).toMatchObject({
+      pageId: "11111111-1111-4111-8111-111111111111",
+      expectedParentObjectId: expect.stringMatching(/^sha256-/)
+    });
+    expect(getPendingMastheadPagesOperation(db, artifactId)?.operationKind).toBe("publish");
+  });
+
   test("stages removal from local mapping only", async () => {
     const db = await testDb();
     const artifactId = seedEligibleArtifact(db, "session:remove");

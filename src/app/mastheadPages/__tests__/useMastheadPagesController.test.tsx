@@ -248,6 +248,326 @@ describe("useMastheadPagesController", () => {
     expect(latest?.state.outcome.kind).toBe("published");
   });
 
+  test("labels and stages a revision when an existing live mapping is present", async () => {
+    const desktopClient = mockDesktopClient();
+    const request = await sampleRequest();
+    request.pageId = "page-live";
+    request.expectedParentObjectId = "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const digest = await sha256CanonicalRequest(request);
+    const prepareReviews = vi.fn().mockResolvedValue({
+      ok: true,
+      items: [
+        {
+          ...eligiblePrepared(),
+          contentFingerprint: "fp-new",
+          existingRelease: {
+            status: "live",
+            pageId: "page-live",
+            objectId: "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            publicLogbookId: "logbook-1",
+            localContentFingerprint: "fp-old",
+            friendlyUrl: "https://masthead.page/u/demo/notes/page",
+            exactUrl: "https://masthead.page/r/old"
+          }
+        }
+      ]
+    });
+    const finalizeReviews = vi.fn().mockResolvedValue({
+      ok: true,
+      items: [readyFinalized(request, digest)]
+    });
+    vi.mocked(desktopClient.publishStaged).mockResolvedValue({
+      protocolVersion: "masthead-pages-publish-batch-result-v1",
+      results: [
+        {
+          status: "published",
+          idempotencyKey: request.idempotencyKey,
+          pageId: "page-live",
+          objectId: "sha256-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          parentObjectId: request.expectedParentObjectId,
+          currentUrl: "https://masthead.page/u/demo/notes/page",
+          exactRevisionUrl: "https://masthead.page/r/new",
+          publishedAt: "2026-08-11T00:00:00.000Z"
+        }
+      ]
+    });
+    const recordResults = vi.fn().mockResolvedValue({ ok: true });
+    await renderController({ desktopClient, prepareReviews, finalizeReviews, recordResults });
+
+    await act(async () => {
+      await latest?.openSingleReview(artifactId);
+    });
+    await flushController();
+    expect(latest?.state.releaseState).toBe("changed_locally");
+    expect(latest?.state.confirmPublishLabel).toBe("Publish new revision");
+
+    await act(async () => {
+      await latest?.finalizeReview();
+    });
+    await flushController();
+    await act(async () => {
+      await latest?.confirmPublish();
+    });
+    await flushController();
+
+    expect(latest?.state.outcome.kind).toBe("published");
+    if (latest?.state.outcome.kind === "published") {
+      expect(latest.state.outcome.previousExactUrl).toBe("https://masthead.page/r/old");
+      expect(latest.state.outcome.exactUrl).toBe("https://masthead.page/r/new");
+      expect(latest.state.outcome.friendlyUrl).toBe("https://masthead.page/u/demo/notes/page");
+    }
+  });
+
+  test("replays staged publication after timeout with the same digest", async () => {
+    const desktopClient = mockDesktopClient();
+    const request = await sampleRequest();
+    const digest = await sha256CanonicalRequest(request);
+    const getPendingOperation = vi.fn().mockResolvedValue({
+      operation: {
+        operationKind: "publish",
+        requestDigest: digest,
+        idempotencyKey: request.idempotencyKey,
+        requestJson: JSON.stringify(request)
+      }
+    });
+    vi.mocked(desktopClient.publishStaged).mockResolvedValue({
+      protocolVersion: "masthead-pages-publish-batch-result-v1",
+      results: [
+        {
+          status: "idempotent-replay",
+          idempotencyKey: request.idempotencyKey,
+          pageId: "page_1",
+          objectId: request.objectId,
+          currentUrl: "https://masthead.page/u/demo/notes/page",
+          exactRevisionUrl: "https://masthead.page/r/obj",
+          publishedAt: "2026-08-11T00:00:00.000Z"
+        }
+      ]
+    });
+    const recordResults = vi.fn().mockResolvedValue({ ok: true });
+    await renderController({
+      desktopClient,
+      prepareReviews: vi.fn().mockResolvedValue({ ok: true, items: [eligiblePrepared()] }),
+      getPendingOperation,
+      recordResults
+    });
+
+    await act(async () => {
+      await latest?.openSingleReview(artifactId);
+    });
+    await flushController();
+    await act(async () => {
+      await latest?.retryPendingPublication(artifactId);
+    });
+    await flushController();
+
+    expect(getPendingOperation).toHaveBeenCalledWith(artifactId, baseUrl);
+    expect(desktopClient.publishStaged).toHaveBeenCalledWith([{ artifactId, requestDigest: digest }]);
+    expect(latest?.state.phase).toBe("complete");
+    expect(latest?.state.outcome.kind).toBe("published");
+  });
+
+  test("parent conflict records hosted object id and requires refresh rather than overwrite", async () => {
+    const desktopClient = mockDesktopClient();
+    const request = await sampleRequest();
+    request.pageId = "page-live";
+    request.expectedParentObjectId = "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const digest = await sha256CanonicalRequest(request);
+    const hostedCurrent = "sha256-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+    const prepareReviews = vi.fn().mockResolvedValue({
+      ok: true,
+      items: [
+        {
+          ...eligiblePrepared(),
+          existingRelease: {
+            status: "live",
+            pageId: "page-live",
+            objectId: request.expectedParentObjectId,
+            localContentFingerprint: "fp-1",
+            publicLogbookId: "logbook-1"
+          }
+        }
+      ]
+    });
+    const finalizeReviews = vi.fn().mockResolvedValue({
+      ok: true,
+      items: [readyFinalized(request, digest)]
+    });
+    const recordResults = vi.fn().mockResolvedValue({ ok: true });
+    vi.mocked(desktopClient.publishStaged).mockResolvedValue({
+      protocolVersion: "masthead-pages-publish-batch-result-v1",
+      results: [
+        {
+          status: "conflict",
+          idempotencyKey: request.idempotencyKey,
+          code: "parent-conflict",
+          retryable: false,
+          message: "stale parent",
+          currentObjectId: hostedCurrent
+        }
+      ]
+    });
+    await renderController({ desktopClient, prepareReviews, finalizeReviews, recordResults });
+
+    await act(async () => {
+      await latest?.openSingleReview(artifactId);
+    });
+    await flushController();
+    await act(async () => {
+      await latest?.finalizeReview();
+    });
+    await flushController();
+    await act(async () => {
+      await latest?.confirmPublish();
+    });
+    await flushController();
+
+    expect(recordResults).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "failure",
+        failure: expect.objectContaining({
+          errorClass: "parent-conflict",
+          currentObjectId: hostedCurrent,
+          retryable: false
+        })
+      }),
+      baseUrl
+    );
+    expect(latest?.state.gate).toBe("parent_conflict");
+    expect(latest?.state.parentConflictObjectId).toBe(hostedCurrent);
+    expect(latest?.state.finalized).toBeUndefined();
+    expect(latest?.canConfirmPublish).toBe(false);
+  });
+
+  test("stages removal and records success without claiming local erasure", async () => {
+    const desktopClient = mockDesktopClient();
+    const stageRemoval = vi.fn().mockResolvedValue({
+      ok: true,
+      requestDigest: "sha256-remove-digest",
+      mapping: {
+        status: "live",
+        pageId: "page-live",
+        pendingOperationKind: "remove",
+        pendingRequestDigest: "sha256-remove-digest",
+        pendingIdempotencyKey: "idem-remove"
+      }
+    });
+    vi.mocked(desktopClient.withdrawStaged).mockResolvedValue({
+      protocolVersion: "masthead-pages-remove-result-v1",
+      pageId: "page-live",
+      idempotencyKey: "idem-remove",
+      status: "removed",
+      removedAt: "2026-08-11T12:00:00.000Z",
+      retryable: false
+    });
+    const recordResults = vi.fn().mockResolvedValue({ ok: true });
+    await renderController({
+      desktopClient,
+      prepareReviews: vi.fn().mockResolvedValue({
+        ok: true,
+        items: [
+          {
+            ...eligiblePrepared(),
+            existingRelease: {
+              status: "live",
+              pageId: "page-live",
+              objectId: "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              localContentFingerprint: "fp-1",
+              friendlyUrl: "https://masthead.page/u/demo/notes/page"
+            }
+          }
+        ]
+      }),
+      stageRemoval,
+      recordResults
+    });
+
+    await act(async () => {
+      await latest?.openSingleReview(artifactId);
+    });
+    await flushController();
+    await act(async () => {
+      latest?.beginRemoval();
+    });
+    expect(latest?.state.removalConfirmOpen).toBe(true);
+    await act(async () => {
+      await latest?.confirmRemoval();
+    });
+    await flushController();
+
+    expect(stageRemoval).toHaveBeenCalledWith({ artifactId }, baseUrl);
+    expect(desktopClient.withdrawStaged).toHaveBeenCalledWith({
+      artifactId,
+      requestDigest: "sha256-remove-digest"
+    });
+    expect(recordResults).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "removed", artifactId }),
+      baseUrl
+    );
+    expect(latest?.state.outcome.kind).toBe("removed");
+    expect(latest?.state.releaseState).toBe("removed");
+  });
+
+  test("replays staged removal after timeout with the same digest", async () => {
+    const desktopClient = mockDesktopClient();
+    const getPendingOperation = vi.fn().mockResolvedValue({
+      operation: {
+        operationKind: "remove",
+        requestDigest: "sha256-remove-retry",
+        idempotencyKey: "idem-remove-retry"
+      }
+    });
+    vi.mocked(desktopClient.withdrawStaged).mockResolvedValue({
+      protocolVersion: "masthead-pages-remove-result-v1",
+      pageId: "page-live",
+      idempotencyKey: "idem-remove-retry",
+      status: "idempotent-replay",
+      removedAt: "2026-08-11T12:00:00.000Z",
+      retryable: false
+    });
+    const recordResults = vi.fn().mockResolvedValue({ ok: true });
+    const stageRemoval = vi.fn();
+    await renderController({
+      desktopClient,
+      prepareReviews: vi.fn().mockResolvedValue({
+        ok: true,
+        items: [
+          {
+            ...eligiblePrepared(),
+            existingRelease: {
+              status: "live",
+              pageId: "page-live",
+              objectId: "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              pendingOperationKind: "remove",
+              pendingRequestDigest: "sha256-remove-retry",
+              pendingIdempotencyKey: "idem-remove-retry"
+            }
+          }
+        ]
+      }),
+      getPendingOperation,
+      stageRemoval,
+      recordResults
+    });
+
+    await act(async () => {
+      await latest?.openSingleReview(artifactId);
+    });
+    await flushController();
+    await act(async () => {
+      await latest?.retryPendingRemoval(artifactId);
+    });
+    await flushController();
+
+    expect(getPendingOperation).toHaveBeenCalled();
+    expect(stageRemoval).not.toHaveBeenCalled();
+    expect(desktopClient.withdrawStaged).toHaveBeenCalledWith({
+      artifactId,
+      requestDigest: "sha256-remove-retry"
+    });
+    expect(latest?.state.outcome.kind).toBe("removed");
+  });
+
   test("records hosted failure without claiming local Logbook mutation", async () => {
     const desktopClient = mockDesktopClient();
     const request = await sampleRequest();
@@ -308,6 +628,8 @@ async function renderController(deps: {
   prepareReviews?: ReturnType<typeof vi.fn>;
   finalizeReviews?: ReturnType<typeof vi.fn>;
   recordResults?: ReturnType<typeof vi.fn>;
+  stageRemoval?: ReturnType<typeof vi.fn>;
+  getPendingOperation?: ReturnType<typeof vi.fn>;
 }) {
   container = document.createElement("div");
   document.body.append(container);
@@ -320,7 +642,9 @@ async function renderController(deps: {
       desktopAvailable: deps.desktopAvailable ?? (() => true),
       prepareReviews: deps.prepareReviews as never,
       finalizeReviews: deps.finalizeReviews as never,
-      recordResults: deps.recordResults as never
+      recordResults: deps.recordResults as never,
+      stageRemoval: deps.stageRemoval as never,
+      getPendingOperation: deps.getPendingOperation as never
     });
     latest = controller;
     useEffect(() => {

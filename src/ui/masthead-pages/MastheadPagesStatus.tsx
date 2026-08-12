@@ -46,11 +46,17 @@ function connectionLabel(connection?: MastheadPagesConnectionState): string {
 
 function outcomeLabel(outcome: MastheadPagesPublicationOutcome): string {
   if (outcome.kind === "publishing") return "Publishing to Masthead Pages…";
+  if (outcome.kind === "removing") return "Removing from Masthead Pages…";
   if (outcome.kind === "published") {
-    return outcome.result.status === "idempotent-replay" ? "Already published (idempotent replay)." : "Published to Masthead Pages.";
+    return outcome.result.status === "idempotent-replay"
+      ? "Already published (idempotent replay)."
+      : "Published to Masthead Pages.";
+  }
+  if (outcome.kind === "removed") {
+    return "Removed from Masthead Pages. Local Logbook content is unchanged.";
   }
   if (outcome.kind === "failed") {
-    return outcome.retryable ? `Publish failed (retryable): ${outcome.message}` : `Publish failed: ${outcome.message}`;
+    return outcome.retryable ? `Operation failed (retryable): ${outcome.message}` : `Operation failed: ${outcome.message}`;
   }
   return "";
 }

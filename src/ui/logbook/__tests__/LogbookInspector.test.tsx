@@ -494,6 +494,32 @@ describe("LogbookInspector", () => {
     );
     expect(unknown).not.toContain("Publish to Masthead Pages");
   });
+
+  test("labels Publish new revision when the local Page changed after a live release", () => {
+    const html = renderToStaticMarkup(
+      <LogbookInspector
+        onClose={() => undefined}
+        onPublishToMastheadPages={() => undefined}
+        mastheadPagesReleaseState="changed_locally"
+        mastheadPagesFriendlyUrl="https://masthead.page/u/demo/notes/page"
+        mastheadPagesExactUrl="https://masthead.page/r/old"
+        onRemoveFromMastheadPages={() => undefined}
+        artifact={{
+          artifactId: "artifact-live",
+          kind: "session_dossier",
+          schemaVersion: "canonical-session-dossier-v1",
+          title: "Live dossier",
+          body: canonicalDossierBody(),
+          provenanceSessionIds: ["canonical-session-1"],
+          mastheadPagesEligible: true
+        }}
+      />
+    );
+    expect(html).toContain("Publish new revision");
+    expect(html).toContain("Changed locally");
+    expect(html).toContain("Remove from Masthead Pages");
+    expect(html).toContain("https://masthead.page/r/old");
+  });
 });
 
 function canonicalDossierBody() {
