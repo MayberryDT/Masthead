@@ -12,6 +12,7 @@ import "./styles/logbook.css";
 import "./styles/sources.css";
 import "./styles/settings.css";
 import "./styles/session-dossier.css";
+import "./styles/masthead-pages.css";
 import "./styles/masthead.css";
 
 createRoot(document.getElementById("root") as HTMLElement).render(

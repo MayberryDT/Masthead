@@ -50,6 +50,7 @@ type Props = {
   onSessionSelect?: (sessionId: string) => void;
   onSortChange?: (sort: LogbookSort) => void;
   onTranscriptFilterChange?: (filter: SessionTranscriptKindFilter) => void;
+  onPublishToMastheadPages?: (artifactId: string) => void;
   pageIndex?: number;
   pageSize?: number;
   transcriptFilter?: SessionTranscriptKindFilter;
@@ -136,6 +137,7 @@ export function HistoryPanel({
   onSessionSelect,
   onSortChange,
   onTranscriptFilterChange,
+  onPublishToMastheadPages,
   pageIndex = 0,
   pageSize = 100,
   query,
@@ -275,6 +277,7 @@ export function HistoryPanel({
                 loading={detailLoading}
                 transcriptFilter={transcriptFilter}
                 onClose={onCloseDetail ?? (() => undefined)}
+                onPublishToMastheadPages={onPublishToMastheadPages}
                 onTranscriptFilterChange={onTranscriptFilterChange}
               />
             </div>

@@ -69,12 +69,15 @@ import { APP_VERSION_LABEL } from "./version";
 import type { ConnectionState } from "../ui/ConnectionStatus";
 import { useBoardSessionDetailController } from "./board/useBoardSessionDetailController";
 import { useLogbookController } from "./logbook/useLogbookController";
+import { useMastheadPagesController } from "./mastheadPages/useMastheadPagesController";
+import { isMastheadPagesDesktopClientAvailable } from "./mastheadPages/desktopClient";
 import { useSettingsDataController } from "./settings/useSettingsDataController";
 import { useSourcesController } from "./sources/useSourcesController";
 import { useSourcesConnectorsController } from "./sources/useSourcesConnectorsController";
 import { useKnowledgeFlowSummary } from "./sidebar/useKnowledgeFlowSummary";
 import { useWorkbenchController } from "./workbench/useWorkbenchController";
 import { clearUnsupportedLocationHash } from "./locationHash";
+import { MastheadPagesReviewDialog } from "../ui/masthead-pages/MastheadPagesReviewDialog";
 
 type ConnectorActionState = ConnectorActionView;
 type LiveProjectionLoadResult = "loaded" | "superseded" | "failed";
@@ -202,6 +205,14 @@ export function App() {
     externalRefreshKey: sourceLibraryRefreshKey,
     isLive: hasDaemonConnection
   });
+  const mastheadPages = useMastheadPagesController({
+    baseUrl: activeProjectionUrl
+  });
+  useEffect(() => {
+    if (activeSurface !== "settings" && activeSurface !== "logbook") return;
+    if (!isMastheadPagesDesktopClientAvailable()) return;
+    void mastheadPages.refreshConnection();
+  }, [activeSurface, activeProjectionUrl]);
   const [sessionActionStatus, setSessionActionStatus] = useState<{ sessionId: string; message: string }>();
   const searchInputRef = useRef<CollapsibleSearchHandle | null>(null);
   const liveRequestIdRef = useRef(0);
@@ -739,6 +750,54 @@ export function App() {
             onSessionSelect={logbook.selectSession}
             onSortChange={logbook.changeSort}
             onTranscriptFilterChange={logbook.changeTranscriptFilter}
+            onPublishToMastheadPages={(artifactId) => {
+              void mastheadPages.openSingleReview(artifactId);
+            }}
+          />
+          <MastheadPagesReviewDialog
+            open={mastheadPages.state.phase !== "closed"}
+            phase={mastheadPages.state.phase}
+            title={mastheadPages.state.title}
+            artifactId={mastheadPages.state.artifactId}
+            connection={mastheadPages.state.connection}
+            logbooks={mastheadPages.state.logbooks}
+            publicLogbookId={mastheadPages.state.publicLogbookId}
+            license={mastheadPages.state.license}
+            slug={mastheadPages.state.slug}
+            evidenceCandidates={mastheadPages.state.evidenceCandidates}
+            selectedEvidenceRefs={mastheadPages.state.selectedEvidenceRefs}
+            sourceLinks={mastheadPages.state.sourceLinks}
+            includeSourceDate={mastheadPages.state.includeSourceDate}
+            acknowledgeWarnings={mastheadPages.state.acknowledgeWarnings}
+            findings={mastheadPages.findings}
+            previewObject={mastheadPages.previewObject}
+            previewRequest={mastheadPages.previewRequest}
+            decision={mastheadPages.state.finalized?.decision}
+            canConfirmPublish={mastheadPages.canConfirmPublish}
+            outcome={mastheadPages.state.outcome}
+            error={mastheadPages.state.error}
+            gate={mastheadPages.state.gate}
+            busy={
+              mastheadPages.state.phase === "loading" ||
+              mastheadPages.state.phase === "finalizing" ||
+              mastheadPages.state.phase === "publishing"
+            }
+            onClose={mastheadPages.closeReview}
+            onConnect={() => {
+              void mastheadPages.connect();
+            }}
+            onPublicLogbookIdChange={mastheadPages.setPublicLogbookId}
+            onLicenseChange={mastheadPages.setLicense}
+            onSlugChange={mastheadPages.setSlug}
+            onEvidenceChange={mastheadPages.selectEvidence}
+            onIncludeSourceDateChange={mastheadPages.setIncludeSourceDate}
+            onAcknowledgeWarningsChange={mastheadPages.setAcknowledgeWarnings}
+            onFinalize={() => {
+              void mastheadPages.finalizeReview();
+            }}
+            onConfirmPublish={() => {
+              void mastheadPages.confirmPublish();
+            }}
           />
         </>
       </LogbookSurface>
@@ -816,6 +875,18 @@ export function App() {
             onRequestDeleteLocalData={settingsData.requestDeleteLocalData}
             onConfirmDeleteLocalData={settingsData.confirmDeleteLocalData}
             readOnly={!connection.writable}
+            mastheadPagesConnection={mastheadPages.state.connection}
+            mastheadPagesDesktopAvailable={isMastheadPagesDesktopClientAvailable()}
+            mastheadPagesError={mastheadPages.state.error}
+            onMastheadPagesConnect={() => {
+              void mastheadPages.connect();
+            }}
+            onMastheadPagesDisconnect={() => {
+              void mastheadPages.disconnect();
+            }}
+            onMastheadPagesRefresh={() => {
+              void mastheadPages.refreshConnection();
+            }}
           />
         )}
       </SettingsSurface>

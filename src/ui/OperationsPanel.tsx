@@ -15,6 +15,8 @@ import type { SettingsFeedback } from "./settings/SettingsActionFeedback";
 import { SettingsSpineCard } from "./settings/SettingsSpineCard";
 import { StorageSettings } from "./settings/StorageSettings";
 import { AppButton } from "./primitives/AppButton";
+import type { MastheadPagesConnectionState } from "../app/desktopBridge";
+import { MastheadPagesConnectionSection } from "./masthead-pages/MastheadPagesConnectionSection";
 
 export type DeletionScopeKind = "project" | "session" | "runtime" | "host";
 export type LocalDataAction = "none" | "export" | "raw_copies" | "scoped_delete" | "delete_all";
@@ -65,6 +67,12 @@ type Props = {
   onConfirmScopedDelete?: () => void;
   onRequestDeleteLocalData?: () => void;
   onConfirmDeleteLocalData?: () => void;
+  mastheadPagesConnection?: MastheadPagesConnectionState;
+  mastheadPagesDesktopAvailable?: boolean;
+  mastheadPagesError?: string;
+  onMastheadPagesConnect?: () => void;
+  onMastheadPagesDisconnect?: () => void;
+  onMastheadPagesRefresh?: () => void;
 };
 
 export function OperationsPanel({
@@ -94,7 +102,13 @@ export function OperationsPanel({
   onRequestPruneLocalData,
   onRequestScopedDelete,
   readOnly = false,
-  settingsState
+  settingsState,
+  mastheadPagesConnection,
+  mastheadPagesDesktopAvailable = false,
+  mastheadPagesError,
+  onMastheadPagesConnect,
+  onMastheadPagesDisconnect,
+  onMastheadPagesRefresh
 }: Props) {
   const [loadedSettings, setLoadedSettings] = useState<SettingsStateDto | undefined>();
   const [localSettingsError, setLocalSettingsError] = useState<string>();
@@ -196,6 +210,15 @@ export function OperationsPanel({
               writeDisabled={writesDisabled}
             />
             <OnboardingSettings onOpenOnboarding={onOpenOnboarding} readOnly={readOnly} />
+            <MastheadPagesConnectionSection
+              busy={busy || readOnly}
+              connection={mastheadPagesConnection}
+              desktopAvailable={mastheadPagesDesktopAvailable}
+              error={mastheadPagesError}
+              onConnect={onMastheadPagesConnect}
+              onDisconnect={onMastheadPagesDisconnect}
+              onRefresh={onMastheadPagesRefresh}
+            />
             <McpSettings baseUrl={baseUrl} privacy={effectiveSettings?.privacy} />
             <AdvancedSettings settings={effectiveSettings} />
             <DangerZone

@@ -441,6 +441,59 @@ describe("LogbookInspector", () => {
     expect(html).toContain("&quot;foo&quot;");
     expect(html).toContain("&quot;bar&quot;");
   });
+
+  test("shows Publish to Masthead Pages only when eligibility is known true", () => {
+    const onPublish = vi.fn();
+    const eligible = renderToStaticMarkup(
+      <LogbookInspector
+        onClose={() => undefined}
+        onPublishToMastheadPages={onPublish}
+        artifact={{
+          artifactId: "artifact-eligible",
+          kind: "session_dossier",
+          schemaVersion: "canonical-session-dossier-v1",
+          title: "Eligible dossier",
+          body: canonicalDossierBody(),
+          provenanceSessionIds: ["canonical-session-1"],
+          mastheadPagesEligible: true
+        }}
+      />
+    );
+    expect(eligible).toContain("Publish to Masthead Pages");
+
+    const ineligible = renderToStaticMarkup(
+      <LogbookInspector
+        onClose={() => undefined}
+        onPublishToMastheadPages={onPublish}
+        artifact={{
+          artifactId: "artifact-ineligible",
+          kind: "session_dossier",
+          schemaVersion: "canonical-session-dossier-v1",
+          title: "Ineligible dossier",
+          body: canonicalDossierBody(),
+          provenanceSessionIds: ["canonical-session-1"],
+          mastheadPagesEligible: false
+        }}
+      />
+    );
+    expect(ineligible).not.toContain("Publish to Masthead Pages");
+
+    const unknown = renderToStaticMarkup(
+      <LogbookInspector
+        onClose={() => undefined}
+        onPublishToMastheadPages={onPublish}
+        artifact={{
+          artifactId: "artifact-unknown",
+          kind: "session_dossier",
+          schemaVersion: "canonical-session-dossier-v1",
+          title: "Unknown eligibility",
+          body: canonicalDossierBody(),
+          provenanceSessionIds: ["canonical-session-1"]
+        }}
+      />
+    );
+    expect(unknown).not.toContain("Publish to Masthead Pages");
+  });
 });
 
 function canonicalDossierBody() {
