@@ -1,4 +1,4 @@
-import type { MastheadPagesController } from "../../app/mastheadPages/useMastheadPagesController";
+import type { MastheadPagesController } from "../../app/mastheadPages/publicLogbookController";
 import type { LogbookVisibility, PageLicense } from "../../mastheadPages/types";
 import { AppButton } from "../primitives/AppButton";
 import { PublicLogbookCoverPicker } from "./PublicLogbookCoverPicker";

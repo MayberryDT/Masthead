@@ -10,7 +10,7 @@ import {
   publicLogbookLicenseChoices,
   unlistedVisibilityWarning,
   validateCompanionUrl
-} from "../../../app/mastheadPages/useMastheadPagesController";
+} from "../../../app/mastheadPages/publicLogbookController";
 import type { CoverPreview } from "../../../electron/mastheadPagesCover";
 import type { PublicLogbookSummaryV1 } from "../../../mastheadPages/types";
 import { PublicLogbookDialog } from "../PublicLogbookDialog";

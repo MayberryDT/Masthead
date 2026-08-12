@@ -1,8 +1,10 @@
 import type { LogbookArtifactDetail, SessionTranscriptResult } from "../daemonClient";
 import type { PublishedSessionDossierV1 } from "../../shared/sessionDossier";
+import { checkSessionDossierEligibility } from "../../mastheadPages/eligibility";
 
 /** Inspector-facing view of a published Logbook artifact. */
 export type LogbookInspectorArtifact = {
+  artifactId?: string;
   kind: string;
   /** The persisted artifact schema is authoritative for choosing a renderer. */
   schemaVersion?: string;
@@ -15,6 +17,10 @@ export type LogbookInspectorArtifact = {
   joinRationale?: string;
   body: unknown;
   evidenceRefs?: string[];
+  status?: string;
+  publicationStatus?: string;
+  mastheadPagesEligible?: boolean;
+  mastheadPagesIneligibilityReason?: string;
   provenanceTranscript?: SessionTranscriptResult;
   provenanceTranscriptLoading?: boolean;
   provenanceTranscriptError?: string;
@@ -179,7 +185,8 @@ function isUsage(value: unknown): boolean {
 
 /** Map daemon artifact detail into inspector props. */
 export function toLogbookInspectorArtifact(detail: LogbookArtifactDetail): LogbookInspectorArtifact {
-  return {
+  const base: LogbookInspectorArtifact = {
+    artifactId: detail.capsule.artifactId,
     body: detail.body,
     confidence: detail.confidence ?? detail.capsule.confidence,
     evidenceRefs: detail.evidenceRefs,
@@ -190,6 +197,34 @@ export function toLogbookInspectorArtifact(detail: LogbookArtifactDetail): Logbo
     provenanceLabel: detail.capsule.provenanceLabel,
     provenanceSessionIds: detail.provenanceSessionIds,
     publishedAt: detail.capsule.publishedAt,
+    publicationStatus: detail.publicationStatus,
+    status: detail.status,
     title: detail.capsule.title
+  };
+
+  if (
+    detail.capsule.kind === "session_dossier" &&
+    detail.schemaVersion === CANONICAL_SESSION_DOSSIER_SCHEMA &&
+    isPublishedSessionDossierV1(detail.body)
+  ) {
+    const eligibility = checkSessionDossierEligibility({
+      artifactKind: detail.capsule.kind,
+      status: detail.status,
+      publicationStatus: detail.publicationStatus,
+      schemaVersion: detail.schemaVersion,
+      content: detail.body,
+      provenanceSessionIds: detail.provenanceSessionIds
+    });
+    return {
+      ...base,
+      mastheadPagesEligible: eligibility.eligible,
+      mastheadPagesIneligibilityReason: eligibility.eligible ? undefined : eligibility.reason
+    };
+  }
+
+  return {
+    ...base,
+    mastheadPagesEligible: false,
+    mastheadPagesIneligibilityReason: "unsupported_kind"
   };
 }

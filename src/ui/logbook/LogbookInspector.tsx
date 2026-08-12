@@ -19,6 +19,7 @@ type Props = {
   artifact?: LogbookInspectorArtifact;
   transcriptFilter?: SessionTranscriptKindFilter;
   onTranscriptFilterChange?: (filter: SessionTranscriptKindFilter) => void;
+  onPublishToMastheadPages?: (artifactId: string) => void;
   onClose: () => void;
 };
 
@@ -27,6 +28,7 @@ export function LogbookInspector({
   error,
   loading = false,
   onClose,
+  onPublishToMastheadPages,
   onTranscriptFilterChange,
   transcriptFilter = "all"
 }: Props) {
@@ -34,6 +36,10 @@ export function LogbookInspector({
 
   const title = artifact?.title ?? (loading ? "Loading Page" : error ? "Could not load Page" : "Page detail");
   const label = artifact ? kindLabel(artifact.kind) : "Page detail";
+  const showPublish =
+    Boolean(onPublishToMastheadPages) &&
+    Boolean(artifact?.artifactId) &&
+    artifact?.mastheadPagesEligible === true;
 
   return (
     <aside className="logbook-inspector metal-surface" aria-label="Page detail">
@@ -50,6 +56,19 @@ export function LogbookInspector({
 
       {artifact ? (
         <>
+          {showPublish ? (
+            <div className="logbook-inspector-actions">
+              <button
+                type="button"
+                className="app-button app-button-primary metal-control"
+                onClick={() => {
+                  if (artifact.artifactId) onPublishToMastheadPages?.(artifact.artifactId);
+                }}
+              >
+                Publish to Masthead Pages
+              </button>
+            </div>
+          ) : null}
           <div className="logbook-inspector-body">
             {renderArtifactBody(artifact, { onTranscriptFilterChange, transcriptFilter })}
           </div>
