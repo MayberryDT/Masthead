@@ -37,7 +37,9 @@ function fakeSafeStorage(options: {
     getSelectedStorageBackend: () => options.backend ?? "gnome_libsecret",
     encryptStringAsync: async (plainText: string) => {
       plaintexts.push(plainText);
-      return Buffer.from(`v${keyVersion}:${plainText}`, "utf8");
+      const encrypted = Buffer.from(`v${keyVersion}:${plainText}`, "utf8");
+      keyVersion += 1;
+      return encrypted;
     },
     decryptStringAsync: async (encrypted: Buffer) => {
       const text = encrypted.toString("utf8");

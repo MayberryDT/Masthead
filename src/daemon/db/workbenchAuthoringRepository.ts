@@ -88,14 +88,18 @@ export function listCompletedV1AuthoringRunsForRecovery(
        AND runs.completed_at IS NOT NULL
      ORDER BY runs.run_id`
   ).all() as Array<Omit<CompletedV1AuthoringRunRecoveryRow, "claimIds" | "sessionIds">>;
-  const memberships = db.prepare(
-    `SELECT session_id AS sessionId, claim_id AS claimId
+  const membershipsByRunId = new Map<string, Array<{ claimId: string; sessionId: string }>>();
+  for (const member of db.prepare(
+    `SELECT run_id AS runId, session_id AS sessionId, claim_id AS claimId
      FROM workbench_authoring_run_sessions
-     WHERE run_id = ?
-     ORDER BY ordinal, session_id`
-  );
+     ORDER BY run_id, ordinal, session_id`
+  ).all() as Array<{ claimId: string; runId: string; sessionId: string }>) {
+    const existing = membershipsByRunId.get(member.runId) ?? [];
+    existing.push({ claimId: member.claimId, sessionId: member.sessionId });
+    membershipsByRunId.set(member.runId, existing);
+  }
   return rows.map((row) => {
-    const members = memberships.all(row.runId) as Array<{ claimId: string; sessionId: string }>;
+    const members = membershipsByRunId.get(row.runId) ?? [];
     return {
       ...row,
       claimIds: members.map(({ claimId }) => claimId),

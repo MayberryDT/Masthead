@@ -1,8 +1,8 @@
-import { access, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterAll, afterEach, describe, expect, test } from "vitest";
 import { seedSession } from "./sessionTestHelpers.ts";
 import { migrateTestDatabaseThrough } from "./schemaTestHelpers.ts";
 import { getSessionDossier } from "../sessionDossierRepository.ts";
@@ -19,7 +19,7 @@ import {
   wipePublishedArtifactState
 } from "../sessionArtifactRepository.ts";
 import { getOrCreateDatabaseIdentity, migrateDatabase } from "../schema.ts";
-import { openMastheadDatabase, type MastheadDatabase } from "../sqlite.ts";
+import { openMastheadDatabase, withImmediateTransaction, type MastheadDatabase } from "../sqlite.ts";
 import { createSingleConsistentBackup } from "../../databaseBackup.ts";
 import { getDataRevisions } from "../dataRevisionRepository.ts";
 import { acquireDatabaseWriterLock, acquireLegacyDataDirectoryGuard } from "../../../core/daemonOwnership.ts";
@@ -30,10 +30,18 @@ import {
 } from "../../../workbench/authoring/dossierSnapshot.ts";
 
 const tempDirs: string[] = [];
+const suiteTempDirs: string[] = [];
+const failedV1TemplatePromises = new Map<string, Promise<string>>();
 
 afterEach(async () => {
   await Promise.all(tempDirs.map((path) => rm(path, { force: true, recursive: true })));
   tempDirs.length = 0;
+});
+
+afterAll(async () => {
+  await Promise.all(suiteTempDirs.map((path) => rm(path, { force: true, recursive: true })));
+  suiteTempDirs.length = 0;
+  failedV1TemplatePromises.clear();
 });
 
 describe("session artifact repository", () => {
@@ -663,8 +671,7 @@ describe("session artifact repository", () => {
   });
 
   test("audits only the exact 1,283-dossier failed V1 generation without mutation", async () => {
-    const db = await testDb();
-    seedExactFailedV1Generation(db);
+    const db = await openFailedV1Fixture();
     const changesBefore = totalChanges(db);
 
     const audit = auditFailedV1Generation(db);
@@ -686,8 +693,7 @@ describe("session artifact repository", () => {
   }, 60_000);
 
   test("audits the exact failed V1 generation from a schema 21 database", async () => {
-    const db = await testDb(21);
-    seedExactFailedV1Generation(db, { schema21: true });
+    const db = await openFailedV1Fixture({ schema21: true });
 
     expect(auditFailedV1Generation(db)).toMatchObject({
       contractVersion: "workbench-authoring-v1",
@@ -699,15 +705,13 @@ describe("session artifact repository", () => {
   }, 60_000);
 
   test("refuses an otherwise exact 1,283-dossier and 66-run population with useful non-template dossiers", async () => {
-    const db = await testDb();
-    seedExactFailedV1Generation(db, { usefulDossiers: true });
+    const db = await openFailedV1Fixture({ usefulDossiers: true });
 
     expect(() => auditFailedV1Generation(db)).toThrow("template_signature");
   }, 60_000);
 
   test("refuses mixed V1 populations and detects relevant state changes by audit hash", async () => {
-    const db = await testDb();
-    seedExactFailedV1Generation(db);
+    const db = await openFailedV1Fixture();
     const databaseId = getOrCreateDatabaseIdentity(db);
     const audit = auditFailedV1Generation(db);
     const recoveryBackup = failedGenerationRecoveryBackup(databaseId, audit);
@@ -739,8 +743,7 @@ describe("session artifact repository", () => {
   }, 60_000);
 
   test("invalidates exact failed output, preserves V1 audit history, resets N/A, and rolls back every boundary", async () => {
-    const db = await testDb();
-    seedExactFailedV1Generation(db);
+    const db = await openFailedV1Fixture();
     const databaseId = getOrCreateDatabaseIdentity(db);
     const audit = auditFailedV1Generation(db);
     const recoveryBackup = failedGenerationRecoveryBackup(databaseId, audit);
@@ -953,7 +956,48 @@ const FAILED_CREATED_AT = "2026-07-11T08:00:00.000Z";
 const FAILED_PUBLISHED_AT = "2026-07-11T08:30:00.000Z";
 const FAILED_COMPLETED_AT = "2026-07-11T09:00:00.000Z";
 
+async function openFailedV1Fixture(
+  options: { schema21?: boolean; usefulDossiers?: boolean } = {}
+): Promise<MastheadDatabase> {
+  const templatePath = await failedV1TemplatePath(options);
+  const tempDir = await mkdtemp(join(tmpdir(), "masthead-session-artifact-failed-v1-"));
+  tempDirs.push(tempDir);
+  const databasePath = join(tempDir, "masthead.sqlite");
+  await copyFile(templatePath, databasePath);
+  return openMastheadDatabase(databasePath);
+}
+
+async function failedV1TemplatePath(
+  options: { schema21?: boolean; usefulDossiers?: boolean } = {}
+): Promise<string> {
+  const key = `${options.schema21 ? "schema21" : "current"}:${options.usefulDossiers ? "useful" : "template"}`;
+  let pending = failedV1TemplatePromises.get(key);
+  if (!pending) {
+    pending = (async () => {
+      const tempDir = await mkdtemp(join(tmpdir(), `masthead-failed-v1-template-${key.replace(":", "-")}-`));
+      suiteTempDirs.push(tempDir);
+      const databasePath = join(tempDir, "masthead.sqlite");
+      const db = await openMastheadDatabase(databasePath);
+      if (options.schema21) migrateTestDatabaseThrough(db, 21);
+      else migrateDatabase(db);
+      getOrCreateDatabaseIdentity(db);
+      seedExactFailedV1Generation(db, options);
+      db.close();
+      return databasePath;
+    })();
+    failedV1TemplatePromises.set(key, pending);
+  }
+  return pending;
+}
+
 function seedExactFailedV1Generation(
+  db: MastheadDatabase,
+  options: { schema21?: boolean; usefulDossiers?: boolean } = {}
+): void {
+  withImmediateTransaction(db, () => seedExactFailedV1GenerationInTransaction(db, options));
+}
+
+function seedExactFailedV1GenerationInTransaction(
   db: MastheadDatabase,
   options: { schema21?: boolean; usefulDossiers?: boolean } = {}
 ): void {

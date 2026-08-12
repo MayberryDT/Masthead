@@ -781,7 +781,8 @@ function selectFailedV1Generation(db: MastheadDatabase): FailedGenerationSelecti
         throw new Error("failed_v1_generation_template_signature_mismatch");
       }
       expectedTemplateSignature ??= templateSignature;
-      const expectedFingerprint = recoveryFingerprint(dossier);
+      const dossierCanonical = stableRecoveryStringify(dossier);
+      const expectedFingerprint = createHash("sha256").update(dossierCanonical).digest("hex");
       const artifact = receiptArtifactIds
         .map((artifactId) => artifactsById.get(artifactId))
         .find((row) =>
@@ -795,6 +796,7 @@ function selectFailedV1Generation(db: MastheadDatabase): FailedGenerationSelecti
       }
       const validation = parseRecoveryObject(recoveryString(artifact.validationJson), `validation:${artifact.artifactId}`);
       const content = parseRecoveryObject(recoveryString(artifact.contentJson), `content:${artifact.artifactId}`);
+      const contentCanonical = stableRecoveryStringify(content);
       const publishedAt = recoveryString(artifact.publishedAt);
       if (
         artifact.createdBy !== `workbench_authoring:${run.actorId}` ||
@@ -803,8 +805,7 @@ function selectFailedV1Generation(db: MastheadDatabase): FailedGenerationSelecti
         artifact.publicationStatus !== "published" ||
         validation.contract !== "workbench-authoring-v1" ||
         validation.schemaVersion !== "session_dossier-v2" ||
-        recoveryFingerprint(content) !== expectedFingerprint ||
-        stableRecoveryStringify(content) !== stableRecoveryStringify(dossier) ||
+        contentCanonical !== dossierCanonical ||
         publishedAt < run.createdAt ||
         publishedAt > run.completedAt ||
         artifactIds.has(recoveryString(artifact.artifactId))
@@ -899,7 +900,8 @@ function selectFailedV1Generation(db: MastheadDatabase): FailedGenerationSelecti
     runs: selectedRuns.sort(compareRecoveryRows("runId")),
     search: searchRows.sort(compareRecoveryRows("artifactId"))
   };
-  const auditHash = createHash("sha256").update(stableRecoveryStringify(snapshot)).digest("hex");
+  // Stream the stable canonical bytes so large exact populations do not allocate one giant string.
+  const auditHash = hashStableRecoveryValue(snapshot);
   const byKind = countRecoveryRows(artifacts, (row) => recoveryString(row.artifactKind));
   const byStatus = countRecoveryRows(
     artifacts,
@@ -954,6 +956,32 @@ function selectFailedV1Generation(db: MastheadDatabase): FailedGenerationSelecti
   };
 }
 
+const FAILED_V1_TEMPLATE_APPROACH = stableRecoveryStringify([
+  "read every canonical evidence item through cursor pagination.",
+  "kept all claims single-session and limited unsupported root-cause or publication assertions."
+]);
+const FAILED_V1_TEMPLATE_KEY_DECISIONS = stableRecoveryStringify([
+  "keep the package single-provenance and avoid weak multi-session joins."
+]);
+const FAILED_V1_TEMPLATE_OUTCOME =
+  "the canonical redacted record was fully reviewed; no stronger published outcome is asserted without direct supporting evidence.";
+const FAILED_V1_TEMPLATE_MISSING_EVIDENCE = stableRecoveryStringify([
+  "the redacted session record does not independently establish a published artifact or durable root cause."
+]);
+const FAILED_V1_TEMPLATE_FILES = normalizeRecoveryText(stableRecoveryStringify([
+  {
+    label: "No canonical file effect recorded",
+    role: "No file effect was asserted in the reviewed evidence."
+  }
+]));
+const FAILED_V1_TEMPLATE_TOOLS = normalizeRecoveryText(stableRecoveryStringify([
+  {
+    label: "Masthead Workbench evidence reader",
+    purpose: "Read the session manifest to completion.",
+    status: "completed"
+  }
+]));
+
 function failedV1TemplateSignature(dossier: Record<string, unknown>): Record<string, unknown> {
   const approach = recoveryStringArray(dossier.approach).map(normalizeRecoveryText);
   const keyDecisions = recoveryStringArray(dossier.keyDecisions).map(normalizeRecoveryText);
@@ -965,31 +993,13 @@ function failedV1TemplateSignature(dossier: Record<string, unknown>): Record<str
   const filesText = normalizeRecoveryText(stableRecoveryStringify(filesTouched));
   const toolsText = normalizeRecoveryText(stableRecoveryStringify(commandsAndTools));
   if (
-    stableRecoveryStringify(approach) !== stableRecoveryStringify([
-      "read every canonical evidence item through cursor pagination.",
-      "kept all claims single-session and limited unsupported root-cause or publication assertions."
-    ]) ||
-    stableRecoveryStringify(keyDecisions) !== stableRecoveryStringify([
-      "keep the package single-provenance and avoid weak multi-session joins."
-    ]) ||
-    outcome !== "the canonical redacted record was fully reviewed; no stronger published outcome is asserted without direct supporting evidence." ||
+    stableRecoveryStringify(approach) !== FAILED_V1_TEMPLATE_APPROACH ||
+    stableRecoveryStringify(keyDecisions) !== FAILED_V1_TEMPLATE_KEY_DECISIONS ||
+    outcome !== FAILED_V1_TEMPLATE_OUTCOME ||
     !problemStatement ||
-    stableRecoveryStringify(missingEvidence) !== stableRecoveryStringify([
-      "the redacted session record does not independently establish a published artifact or durable root cause."
-    ]) ||
-    filesText !== normalizeRecoveryText(stableRecoveryStringify([
-      {
-        label: "No canonical file effect recorded",
-        role: "No file effect was asserted in the reviewed evidence."
-      }
-    ])) ||
-    toolsText !== normalizeRecoveryText(stableRecoveryStringify([
-      {
-        label: "Masthead Workbench evidence reader",
-        purpose: "Read the session manifest to completion.",
-        status: "completed"
-      }
-    ]))
+    stableRecoveryStringify(missingEvidence) !== FAILED_V1_TEMPLATE_MISSING_EVIDENCE ||
+    filesText !== FAILED_V1_TEMPLATE_FILES ||
+    toolsText !== FAILED_V1_TEMPLATE_TOOLS
   ) {
     throw new Error("failed_v1_generation_template_signature_mismatch");
   }
@@ -1066,7 +1076,39 @@ function recoveryString(value: unknown): string {
 }
 
 function recoveryFingerprint(value: unknown): string {
-  return createHash("sha256").update(stableRecoveryStringify(value)).digest("hex");
+  return hashStableRecoveryValue(value);
+}
+
+function hashStableRecoveryValue(value: unknown): string {
+  const hash = createHash("sha256");
+  updateStableRecoveryHash(hash, value);
+  return hash.digest("hex");
+}
+
+function updateStableRecoveryHash(hash: ReturnType<typeof createHash>, value: unknown): void {
+  if (Array.isArray(value)) {
+    hash.update("[");
+    value.forEach((entry, index) => {
+      if (index > 0) hash.update(",");
+      updateStableRecoveryHash(hash, entry);
+    });
+    hash.update("]");
+    return;
+  }
+  if (value && typeof value === "object") {
+    hash.update("{");
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .forEach(([key, entry], index) => {
+        if (index > 0) hash.update(",");
+        hash.update(JSON.stringify(key));
+        hash.update(":");
+        updateStableRecoveryHash(hash, entry);
+      });
+    hash.update("}");
+    return;
+  }
+  hash.update(JSON.stringify(value) ?? "null");
 }
 
 function stableRecoveryStringify(value: unknown): string {

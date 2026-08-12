@@ -12,7 +12,7 @@ import type { DaemonConfig } from "../../daemon/config.ts";
 import { markSessionCompileReady, seedSession } from "../../daemon/db/__tests__/sessionTestHelpers.ts";
 import { migrateTestDatabaseThrough } from "../../daemon/db/__tests__/schemaTestHelpers.ts";
 import { getOrCreateDatabaseIdentity } from "../../daemon/db/schema.ts";
-import { openMastheadDatabase } from "../../daemon/db/sqlite.ts";
+import { openMastheadDatabase, withImmediateTransaction } from "../../daemon/db/sqlite.ts";
 import { migrateDatabase } from "../../daemon/db/schema.ts";
 import { runMastheadCli } from "../mastheadctl.ts";
 import { MastheadAuthoringClient } from "../authoringClient.ts";
@@ -32,6 +32,7 @@ const suiteTempDirs: string[] = [];
 const daemons: MastheadDaemon[] = [];
 const execFileAsync = promisify(execFile);
 let exactCliRecoveryTemplatePromise: Promise<ExactCliRecoveryTemplate> | undefined;
+let schema21CliRecoveryTemplatePromise: Promise<string> | undefined;
 const SMALL_RECOVERY_AUDIT_HASH = "b".repeat(64);
 const SMALL_ALTERED_RECOVERY_AUDIT_HASH = "c".repeat(64);
 
@@ -1032,11 +1033,7 @@ describe("mastheadctl daemon-owned Workbench authoring", () => {
   test("audits the exact failed V1 generation through the CLI on schema 21", async () => {
     const tempDir = await makeTempDir("masthead-cli-v1-schema21-audit-");
     const dbPath = join(tempDir, "masthead.sqlite");
-    const db = await openMastheadDatabase(dbPath);
-    migrateTestDatabaseThrough(db, 21);
-    getOrCreateDatabaseIdentity(db);
-    seedCliFailedV1Generation(db, { schema21: true });
-    db.close();
+    await copyFile(await schema21CliRecoveryTemplatePath(), dbPath);
 
     const audited = await runMastheadCli(
       ["workbench", "audit-v1-generation", "--db", dbPath, "--json"],
@@ -1115,6 +1112,21 @@ async function exactCliRecoveryTemplate(): Promise<ExactCliRecoveryTemplate> {
     return { auditHash, databaseId, databasePath };
   })();
   return exactCliRecoveryTemplatePromise;
+}
+
+async function schema21CliRecoveryTemplatePath(): Promise<string> {
+  schema21CliRecoveryTemplatePromise ??= (async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-cli-v1-schema21-template-"));
+    suiteTempDirs.push(tempDir);
+    const databasePath = join(tempDir, "masthead.sqlite");
+    const database = await openMastheadDatabase(databasePath);
+    migrateTestDatabaseThrough(database, 21);
+    getOrCreateDatabaseIdentity(database);
+    seedCliFailedV1Generation(database, { schema21: true });
+    database.close();
+    return databasePath;
+  })();
+  return schema21CliRecoveryTemplatePromise;
 }
 
 async function makeExactCliRecoveryFixture(
@@ -1243,6 +1255,13 @@ function authoringOutputCounts(db: Awaited<ReturnType<typeof openMastheadDatabas
 }
 
 function seedCliFailedV1Generation(
+  db: Awaited<ReturnType<typeof openMastheadDatabase>>,
+  options: { dossierCount?: number; schema21?: boolean } = {}
+): void {
+  withImmediateTransaction(db, () => seedCliFailedV1GenerationInTransaction(db, options));
+}
+
+function seedCliFailedV1GenerationInTransaction(
   db: Awaited<ReturnType<typeof openMastheadDatabase>>,
   options: { dossierCount?: number; schema21?: boolean } = {}
 ): void {
