@@ -22,6 +22,8 @@ import {
 import { sha256CanonicalRequest } from "./requestDigest";
 import type {
   FinalizedPageReviewItem,
+  MastheadPagesBatchItem,
+  MastheadPagesBatchState,
   MastheadPagesEvidenceCandidate,
   MastheadPagesEvidenceSelection,
   MastheadPagesPublicationOutcome,
@@ -54,6 +56,32 @@ const initialState = (): MastheadPagesReviewState => ({
   prepareFindings: [],
   outcome: { kind: "idle" }
 });
+
+const initialBatchState = (): MastheadPagesBatchState => ({
+  phase: "closed",
+  artifactIds: [],
+  items: [],
+  logbooks: [],
+  publicLogbookId: "",
+  license: "all-rights-reserved",
+  acknowledgeWarnings: false
+});
+
+function slugifyArtifact(title: string | undefined, artifactId: string): string {
+  return slugify(title ?? artifactId);
+}
+
+function defaultEvidenceSelections(prepared: PreparedPageReviewItem): MastheadPagesEvidenceSelection[] {
+  return prepared.evidenceCandidates
+    .filter((candidate) => !candidate.lowValue)
+    .slice(0, 20)
+    .map((candidate) => ({
+      ref: candidate.ref,
+      kind: defaultKind(candidate),
+      label: candidate.label?.trim() || candidate.toolName || candidate.ref,
+      supports: defaultSupports(candidate)
+    }));
+}
 
 function slugify(title: string): string {
   const slug = title
@@ -136,6 +164,9 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
   const [state, setState] = useState<MastheadPagesReviewState>(initialState);
   const stateRef = useRef(state);
   stateRef.current = state;
+  const [batchState, setBatchState] = useState<MastheadPagesBatchState>(initialBatchState);
+  const batchStateRef = useRef(batchState);
+  batchStateRef.current = batchState;
   const finalizeReviewRef = useRef<(() => Promise<void>) | undefined>(undefined);
 
   const desktopAvailable = deps.desktopAvailable ?? isMastheadPagesDesktopClientAvailable;
@@ -152,6 +183,14 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
     setState((current) => {
       const next = typeof update === "function" ? update(current) : { ...current, ...update };
       stateRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const patchBatch = useCallback((update: Partial<MastheadPagesBatchState> | ((current: MastheadPagesBatchState) => MastheadPagesBatchState)) => {
+    setBatchState((current) => {
+      const next = typeof update === "function" ? update(current) : { ...current, ...update };
+      batchStateRef.current = next;
       return next;
     });
   }, []);
@@ -218,6 +257,386 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
   const closeReview = useCallback(() => {
     patch(initialState());
   }, [patch]);
+
+  const closeBatchReview = useCallback(() => {
+    patchBatch(initialBatchState());
+  }, [patchBatch]);
+
+  const openBatchReview = useCallback(
+    async (artifactIds: string[]) => {
+      const uniqueIds = [...new Set(artifactIds.filter(Boolean))].slice(0, 500);
+      patchBatch({
+        ...initialBatchState(),
+        phase: "loading",
+        artifactIds: uniqueIds,
+        items: uniqueIds.map((artifactId) => ({
+          artifactId,
+          selectedForPublish: false,
+          outcome: { kind: "idle" }
+        }))
+      });
+      // Single-page dialog must not compete with batch review.
+      patch(initialState());
+
+      if (!desktopAvailable()) {
+        patchBatch({
+          phase: "error",
+          gate: "desktop_unavailable",
+          error: "Masthead Pages requires the desktop app."
+        });
+        return;
+      }
+
+      const connection = await refreshConnection();
+      const gate = connectionGate(connection);
+      if (gate) {
+        patchBatch({
+          phase: "editing",
+          connection,
+          gate,
+          error:
+            gate === "disconnected"
+              ? "Connect Masthead Pages before publishing."
+              : gate === "secure_storage_unavailable"
+                ? "OS secure storage is unavailable."
+                : "Publisher access is required to publish Pages."
+        });
+        return;
+      }
+
+      const logbooks = await loadLogbooks();
+      try {
+        const response = (await prepareReviews({ artifactIds: uniqueIds }, deps.baseUrl)) as {
+          ok?: boolean;
+          items?: unknown[];
+        };
+        const preparedItems = (response.items ?? []).map(parsePrepared);
+        const byId = new Map(preparedItems.map((item) => [item.artifactId, item]));
+        const items: MastheadPagesBatchItem[] = uniqueIds.map((artifactId) => {
+          const prepared = byId.get(artifactId) ?? {
+            artifactId,
+            eligibility: "ineligible" as const,
+            ineligibilityReason: "prepare_missing",
+            evidenceCandidates: [],
+            findings: []
+          };
+          return {
+            artifactId,
+            title: prepared.title,
+            prepared,
+            contentFingerprint: prepared.contentFingerprint,
+            selectedForPublish: false,
+            outcome: { kind: "idle" as const }
+          };
+        });
+        const preferredLogbookId =
+          items.find((item) => item.prepared?.existingRelease?.publicLogbookId)?.prepared?.existingRelease?.publicLogbookId ||
+          logbooks[0]?.id ||
+          "";
+        patchBatch({
+          phase: "editing",
+          connection,
+          logbooks,
+          publicLogbookId: preferredLogbookId,
+          items,
+          gate: undefined,
+          error: undefined
+        });
+      } catch (error) {
+        patchBatch({
+          phase: "error",
+          connection,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    },
+    [deps.baseUrl, desktopAvailable, loadLogbooks, patch, patchBatch, prepareReviews, refreshConnection]
+  );
+
+  const setBatchLicense = useCallback(
+    (license: PageLicense) => {
+      patchBatch({ license });
+    },
+    [patchBatch]
+  );
+
+  const setBatchPublicLogbookId = useCallback(
+    (publicLogbookId: string) => {
+      patchBatch({ publicLogbookId });
+    },
+    [patchBatch]
+  );
+
+  const setBatchAcknowledgeWarnings = useCallback(
+    (acknowledgeWarnings: boolean) => {
+      patchBatch({ acknowledgeWarnings });
+    },
+    [patchBatch]
+  );
+
+  const setBatchItemSelectedForPublish = useCallback(
+    (artifactId: string, selected: boolean) => {
+      patchBatch((current) => ({
+        ...current,
+        items: current.items.map((item) =>
+          item.artifactId === artifactId && item.finalized?.decision === "ready" && item.finalized.staged
+            ? { ...item, selectedForPublish: selected }
+            : item
+        )
+      }));
+    },
+    [patchBatch]
+  );
+
+  const finalizeBatchReview = useCallback(async () => {
+    const current = batchStateRef.current;
+    if (current.phase === "closed" || current.items.length === 0) return;
+    if (
+      current.gate === "desktop_unavailable" ||
+      current.gate === "disconnected" ||
+      current.gate === "secure_storage_unavailable" ||
+      current.gate === "non_publisher"
+    ) {
+      return;
+    }
+    if (!current.publicLogbookId.trim()) {
+      patchBatch({ error: "Choose a destination Public Logbook." });
+      return;
+    }
+    const connection = current.connection;
+    if (!connection || connection.status !== "connected") {
+      patchBatch({ gate: "disconnected", error: "Connect Masthead Pages before publishing." });
+      return;
+    }
+
+    const eligible = current.items.filter((item) => item.prepared?.eligibility === "eligible");
+    if (eligible.length === 0) {
+      patchBatch({ error: "No eligible Pages in this batch.", phase: "reviewing" });
+      return;
+    }
+
+    patchBatch({ phase: "finalizing", error: undefined });
+    try {
+      const response = (await finalizeReviews(
+        {
+          items: eligible.map((item) => ({
+            artifactId: item.artifactId,
+            publicLogbookId: current.publicLogbookId,
+            pagesAccountId: connection.account.accountId,
+            slug: slugifyArtifact(item.title ?? item.prepared?.title, item.artifactId),
+            license: current.license,
+            evidenceSelections: item.prepared ? defaultEvidenceSelections(item.prepared) : [],
+            acknowledgeWarnings: current.acknowledgeWarnings
+          }))
+        },
+        deps.baseUrl
+      )) as { ok?: boolean; items?: unknown[] };
+
+      const finalizedById = new Map((response.items ?? []).map((raw) => {
+        const finalized = parseFinalized(raw);
+        return [finalized.artifactId, finalized] as const;
+      }));
+
+      patchBatch((prev) => {
+        const items = prev.items.map((item) => {
+          const finalized = finalizedById.get(item.artifactId);
+          if (!finalized) return item;
+          const ready = finalized.decision === "ready" && finalized.staged === true;
+          return {
+            ...item,
+            finalized,
+            selectedForPublish: ready,
+            outcome: { kind: "idle" as const }
+          };
+        });
+        return {
+          ...prev,
+          phase: "reviewing",
+          items,
+          error: undefined,
+          gate: undefined
+        };
+      });
+    } catch (error) {
+      patchBatch({
+        phase: "editing",
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }, [deps.baseUrl, finalizeReviews, patchBatch]);
+
+  const confirmBatchPublish = useCallback(async () => {
+    const current = batchStateRef.current;
+    const readyRefs = current.items.filter(
+      (item) =>
+        item.selectedForPublish &&
+        item.finalized?.decision === "ready" &&
+        item.finalized.staged &&
+        item.finalized.request &&
+        item.finalized.requestDigest
+    );
+    if (readyRefs.length === 0) {
+      patchBatch({ error: "Select at least one Ready Page to publish." });
+      return;
+    }
+    if (!desktopAvailable()) {
+      patchBatch({ gate: "desktop_unavailable", error: "Masthead Pages requires the desktop app." });
+      return;
+    }
+
+    // Recompute digests before IPC — never pass envelopes through the bridge.
+    for (const item of readyRefs) {
+      const recomputed = await sha256CanonicalRequest(item.finalized!.request!);
+      if (recomputed !== item.finalized!.requestDigest) {
+        patchBatch({
+          phase: "editing",
+          error: `Outbound request digest changed for ${item.artifactId}. Re-run review before publishing.`
+        });
+        return;
+      }
+    }
+
+    patchBatch({ phase: "publishing", error: undefined });
+    try {
+      const batch = (await desktopClient.publishStaged(
+        readyRefs.map((item) => ({
+          artifactId: item.artifactId,
+          requestDigest: item.finalized!.requestDigest!
+        }))
+      )) as PublishPageBatchResultV1;
+
+      const resultsByKey = new Map(
+        (batch.results ?? []).map((result) => [result.idempotencyKey, result] as const)
+      );
+      const connection = current.connection;
+      const pagesAccountId =
+        connection && connection.status === "connected" ? connection.account.accountId : "";
+
+      const nextItems: MastheadPagesBatchItem[] = [];
+      for (const item of current.items) {
+        if (!readyRefs.some((ref) => ref.artifactId === item.artifactId)) {
+          nextItems.push(item);
+          continue;
+        }
+        const key = item.finalized?.request?.idempotencyKey;
+        const result = key ? resultsByKey.get(key) : undefined;
+        if (!result) {
+          const message = "Hosted publish returned no itemized result.";
+          try {
+            await recordResults(
+              {
+                kind: "failure",
+                failure: {
+                  artifactId: item.artifactId,
+                  errorClass: "missing_item_result",
+                  message,
+                  retryable: true,
+                  recordedAt: now()
+                }
+              },
+              deps.baseUrl
+            );
+          } catch {
+            // keep going
+          }
+          nextItems.push({
+            ...item,
+            outcome: { kind: "failed", message, retryable: true }
+          });
+          continue;
+        }
+
+        if (isSuccessResult(result)) {
+          await recordResults(
+            {
+              kind: "publication",
+              receipt: {
+                artifactId: item.artifactId,
+                pageId: result.pageId,
+                objectId: result.objectId,
+                parentObjectId: result.parentObjectId,
+                pagesAccountId,
+                publicLogbookId: item.finalized!.request!.publicLogbookId,
+                localContentFingerprint: item.contentFingerprint ?? item.prepared?.contentFingerprint ?? "",
+                egressFingerprint: item.finalized!.requestDigest,
+                friendlyUrl: result.currentUrl,
+                exactUrl: result.exactRevisionUrl,
+                publishedAt: result.publishedAt
+              }
+            },
+            deps.baseUrl
+          );
+          nextItems.push({
+            ...item,
+            selectedForPublish: false,
+            finalized: item.finalized ? { ...item.finalized, staged: false } : item.finalized,
+            outcome: {
+              kind: "published",
+              result,
+              friendlyUrl: result.currentUrl,
+              exactUrl: result.exactRevisionUrl
+            }
+          });
+          continue;
+        }
+
+        await recordResults(
+          {
+            kind: "failure",
+            failure: {
+              artifactId: item.artifactId,
+              errorClass: result.code,
+              message: result.message,
+              retryable: result.retryable === true,
+              recordedAt: now(),
+              currentObjectId: result.currentObjectId
+            }
+          },
+          deps.baseUrl
+        );
+        nextItems.push({
+          ...item,
+          outcome: {
+            kind: "failed",
+            message: result.message,
+            retryable: result.retryable === true,
+            code: result.code
+          }
+        });
+      }
+
+      patchBatch({
+        phase: "complete",
+        items: nextItems,
+        error: undefined
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      for (const item of readyRefs) {
+        try {
+          await recordResults(
+            {
+              kind: "failure",
+              failure: {
+                artifactId: item.artifactId,
+                errorClass: "hosted_transport_error",
+                message,
+                retryable: true,
+                recordedAt: now()
+              }
+            },
+            deps.baseUrl
+          );
+        } catch {
+          // keep going
+        }
+      }
+      patchBatch({
+        phase: "reviewing",
+        error: message
+      });
+    }
+  }, [deps.baseUrl, desktopAvailable, desktopClient, now, patchBatch, recordResults]);
 
   const openSingleReview = useCallback(
     async (artifactId: string) => {
@@ -650,11 +1069,23 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
   const previewRequest = state.finalized?.request;
   const findings: EgressFinding[] = state.finalized?.findings ?? state.prepareFindings;
 
+  const batchReadyCount = useMemo(
+    () =>
+      batchState.items.filter(
+        (item) => item.selectedForPublish && item.finalized?.decision === "ready" && item.finalized.staged
+      ).length,
+    [batchState.items]
+  );
+
   return {
     state,
     phase: state.phase as MastheadPagesReviewPhase,
+    batchState,
+    batchReadyCount,
     openSingleReview,
+    openBatchReview,
     closeReview,
+    closeBatchReview,
     connect,
     disconnect,
     refreshConnection,
@@ -666,6 +1097,12 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
     setSourceLinks,
     setIncludeSourceDate,
     setAcknowledgeWarnings,
+    setBatchLicense,
+    setBatchPublicLogbookId,
+    setBatchAcknowledgeWarnings,
+    setBatchItemSelectedForPublish,
+    finalizeBatchReview,
+    confirmBatchPublish,
     finalizeReview,
     confirmPublish,
     canConfirmPublish,

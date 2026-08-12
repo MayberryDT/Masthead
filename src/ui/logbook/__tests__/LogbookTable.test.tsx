@@ -53,6 +53,39 @@ describe("LogbookTable", () => {
     expect(html).toContain("<tbody");
     expect(html).not.toContain('type="checkbox"');
     expect(html).toContain("KIND");
+
+    const selectable = renderToStaticMarkup(
+      <LogbookTable
+        density="comfortable"
+        pagesSelectionMode
+        selectedArtifactIds={["artifact-1"]}
+        sessions={[
+          {
+            errorCount: 0,
+            fileCount: 0,
+            hostId: "2 sessions",
+            lastActivityAt: "2026-06-25T22:42:00.000Z",
+            lifecycle: "session_dossier",
+            models: ["high"],
+            project: "Pip",
+            runtime: "session_dossier",
+            sessionId: "artifact-1",
+            title: "Repair OAuth callback",
+            toolCount: 2
+          },
+          {
+            lifecycle: "runbook",
+            runtime: "runbook",
+            sessionId: "artifact-2",
+            title: "Ops runbook"
+          }
+        ]}
+        onSelect={() => undefined}
+      />
+    );
+    expect(selectable).toContain('type="checkbox"');
+    expect(selectable).toContain("Ineligible");
+
     expect(html).toContain("TITLE / HIGHLIGHT");
     expect(html).toContain("PROVENANCE");
     expect(html).toContain("PUBLISHED");

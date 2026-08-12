@@ -114,4 +114,42 @@ export type MastheadPagesReviewState = {
     | "needs_warning_ack";
 };
 
+export type MastheadPagesBatchItemOutcome =
+  | { kind: "idle" }
+  | { kind: "published"; result: PublishPageResultV1; friendlyUrl?: string; exactUrl?: string }
+  | { kind: "failed"; message: string; retryable: boolean; code?: string };
+
+export type MastheadPagesBatchItem = {
+  artifactId: string;
+  title?: string;
+  prepared?: PreparedPageReviewItem;
+  finalized?: FinalizedPageReviewItem;
+  selectedForPublish: boolean;
+  contentFingerprint?: string;
+  outcome: MastheadPagesBatchItemOutcome;
+};
+
+export type MastheadPagesBatchPhase =
+  | "closed"
+  | "loading"
+  | "editing"
+  | "finalizing"
+  | "reviewing"
+  | "publishing"
+  | "complete"
+  | "error";
+
+export type MastheadPagesBatchState = {
+  phase: MastheadPagesBatchPhase;
+  artifactIds: string[];
+  items: MastheadPagesBatchItem[];
+  connection?: MastheadPagesConnectionState;
+  logbooks: PublicLogbookSummaryV1[];
+  publicLogbookId: string;
+  license: PageLicense;
+  acknowledgeWarnings: boolean;
+  error?: string;
+  gate?: MastheadPagesReviewState["gate"];
+};
+
 export type { PublishPageBatchResultV1, PublishPageRequestV1, PageLicense, SourceLinkV1, ObjectId };

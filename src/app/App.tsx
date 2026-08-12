@@ -78,6 +78,7 @@ import { useKnowledgeFlowSummary } from "./sidebar/useKnowledgeFlowSummary";
 import { useWorkbenchController } from "./workbench/useWorkbenchController";
 import { clearUnsupportedLocationHash } from "./locationHash";
 import { MastheadPagesReviewDialog } from "../ui/masthead-pages/MastheadPagesReviewDialog";
+import { MastheadPagesBatchReview } from "../ui/masthead-pages/MastheadPagesBatchReview";
 
 type ConnectorActionState = ConnectorActionView;
 type LiveProjectionLoadResult = "loaded" | "superseded" | "failed";
@@ -750,6 +751,23 @@ export function App() {
             onSessionSelect={logbook.selectSession}
             onSortChange={logbook.changeSort}
             onTranscriptFilterChange={logbook.changeTranscriptFilter}
+            pagesSelectionMode={logbook.pagesSelectionMode}
+            selectedArtifactIds={logbook.selectedArtifactIds}
+            batchCap={logbook.batchCap}
+            selectionBusy={logbook.selectionBusy}
+            selectionError={logbook.selectionError}
+            onEnterPagesSelectionMode={logbook.enterPagesSelectionMode}
+            onCancelPagesSelectionMode={logbook.cancelPagesSelectionMode}
+            onSelectCurrentPage={logbook.selectCurrentPage}
+            onSelectMatchingResults={() => {
+              void logbook.selectMatchingResults();
+            }}
+            onOpenBatchReview={() => {
+              const ids = [...logbook.selectedArtifactIds];
+              logbook.openBatchReview();
+              if (ids.length > 0) void mastheadPages.openBatchReview(ids);
+            }}
+            onArtifactSelectedChange={logbook.setArtifactSelected}
             onPublishToMastheadPages={(artifactId) => {
               void mastheadPages.openSingleReview(artifactId);
             }}
@@ -797,6 +815,33 @@ export function App() {
             }}
             onConfirmPublish={() => {
               void mastheadPages.confirmPublish();
+            }}
+          />
+          <MastheadPagesBatchReview
+            open={mastheadPages.batchState.phase !== "closed" || Boolean(logbook.batchReview?.open)}
+            batch={mastheadPages.batchState}
+            readyCount={mastheadPages.batchReadyCount}
+            busy={
+              mastheadPages.batchState.phase === "loading" ||
+              mastheadPages.batchState.phase === "finalizing" ||
+              mastheadPages.batchState.phase === "publishing"
+            }
+            onClose={() => {
+              mastheadPages.closeBatchReview();
+              logbook.closeBatchReview();
+            }}
+            onConnect={() => {
+              void mastheadPages.connect();
+            }}
+            onPublicLogbookIdChange={mastheadPages.setBatchPublicLogbookId}
+            onLicenseChange={mastheadPages.setBatchLicense}
+            onAcknowledgeWarningsChange={mastheadPages.setBatchAcknowledgeWarnings}
+            onItemSelectedChange={mastheadPages.setBatchItemSelectedForPublish}
+            onFinalize={() => {
+              void mastheadPages.finalizeBatchReview();
+            }}
+            onConfirmPublish={() => {
+              void mastheadPages.confirmBatchPublish();
             }}
           />
         </>

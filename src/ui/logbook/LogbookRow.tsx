@@ -1,5 +1,6 @@
 import type { CSSProperties, KeyboardEvent, MouseEvent } from "react";
 import type { LogbookSession } from "../HistoryPanel";
+import { rowKind, selectionStateForRow } from "../../app/logbook/mastheadPagesSelection";
 
 type Props = {
   density: "comfortable" | "compact";
@@ -7,13 +8,31 @@ type Props = {
   selected?: boolean;
   session: LogbookSession;
   onSelect: (sessionId: string) => void;
+  pagesSelectionMode?: boolean;
+  selectedArtifactIds?: readonly string[];
+  onArtifactSelectedChange?: (artifactId: string, selected: boolean) => void;
 };
 
-export function LogbookRow({ density, onSelect, rowIndex = 0, selected = false, session }: Props) {
+export function LogbookRow({
+  density,
+  onArtifactSelectedChange,
+  onSelect,
+  pagesSelectionMode = false,
+  rowIndex = 0,
+  selected = false,
+  selectedArtifactIds = [],
+  session
+}: Props) {
   const title = session.title || "Untitled Page";
   const highlight = session.snippet || session.objective;
-  const kind = session.runtime ?? session.lifecycle ?? "artifact";
+  const kind = rowKind(session);
   const publishedAt = session.lastActivityAt;
+  const selection = selectionStateForRow({
+    pagesSelectionMode,
+    selectedArtifactIds,
+    sessionId: session.sessionId,
+    kind
+  });
   const style = {
     "--logbook-row-index": Math.min(rowIndex, 12)
   } as CSSProperties & { "--logbook-row-index": number };
@@ -31,7 +50,7 @@ export function LogbookRow({ density, onSelect, rowIndex = 0, selected = false, 
 
   return (
     <tr
-      className={`logbook-row ${density === "compact" ? "compact" : ""} ${selected ? "selected" : ""}`.trim()}
+      className={`logbook-row ${density === "compact" ? "compact" : ""} ${selected ? "selected" : ""} ${selection?.disabled ? "is-ineligible" : ""}`.trim()}
       tabIndex={0}
       aria-label={`Open Page: ${title}`}
       aria-selected={selected}
@@ -39,6 +58,23 @@ export function LogbookRow({ density, onSelect, rowIndex = 0, selected = false, 
       onClick={handleRowClick}
       onKeyDown={handleRowKeyDown}
     >
+      {selection ? (
+        <td className="logbook-col-select">
+          <input
+            aria-label={
+              selection.disabled
+                ? `Ineligible: ${selection.disabledReason ?? title}`
+                : `Select ${title} for Masthead Pages`
+            }
+            checked={selection.selected}
+            disabled={selection.disabled}
+            title={selection.disabledReason}
+            type="checkbox"
+            onChange={(event) => onArtifactSelectedChange?.(session.sessionId, event.currentTarget.checked)}
+            onClick={(event) => event.stopPropagation()}
+          />
+        </td>
+      ) : null}
       <td className="logbook-col-kind">
         <span className="state-token">{kindLabel(kind)}</span>
       </td>

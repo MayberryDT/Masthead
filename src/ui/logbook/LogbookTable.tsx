@@ -11,9 +11,22 @@ type Props = {
   selectedSessionId?: string;
   updating?: boolean;
   onSelect: (sessionId: string) => void;
+  pagesSelectionMode?: boolean;
+  selectedArtifactIds?: readonly string[];
+  onArtifactSelectedChange?: (artifactId: string, selected: boolean) => void;
 };
 
-export function LogbookTable({ animateOnMount = false, density, onSelect, selectedSessionId, sessions, updating = false }: Props) {
+export function LogbookTable({
+  animateOnMount = false,
+  density,
+  onArtifactSelectedChange,
+  onSelect,
+  pagesSelectionMode = false,
+  selectedArtifactIds = [],
+  selectedSessionId,
+  sessions,
+  updating = false
+}: Props) {
   const incomingSignature = useMemo(() => sessions.map((session) => session.sessionId).join("|"), [sessions]);
   const [displayedSessions, setDisplayedSessions] = useState(sessions);
   const [outgoingSessions, setOutgoingSessions] = useState<LogbookSession[]>();
@@ -73,6 +86,9 @@ export function LogbookTable({ animateOnMount = false, density, onSelect, select
           density={density}
           sessions={outgoingSessions}
           selectedSessionId={selectedSessionId}
+          pagesSelectionMode={pagesSelectionMode}
+          selectedArtifactIds={selectedArtifactIds}
+          onArtifactSelectedChange={onArtifactSelectedChange}
           onSelect={onSelect}
         />
       ) : null}
@@ -81,6 +97,9 @@ export function LogbookTable({ animateOnMount = false, density, onSelect, select
         density={density}
         sessions={displayedSessions}
         selectedSessionId={selectedSessionId}
+        pagesSelectionMode={pagesSelectionMode}
+        selectedArtifactIds={selectedArtifactIds}
+        onArtifactSelectedChange={onArtifactSelectedChange}
         onSelect={onSelect}
       />
     </div>
@@ -91,7 +110,10 @@ function LogbookTableLayer({
   ariaHidden,
   className,
   density,
+  onArtifactSelectedChange,
   onSelect,
+  pagesSelectionMode = false,
+  selectedArtifactIds = [],
   selectedSessionId,
   sessions
 }: {
@@ -101,11 +123,19 @@ function LogbookTableLayer({
   sessions: LogbookSession[];
   selectedSessionId?: string;
   onSelect: (sessionId: string) => void;
+  pagesSelectionMode?: boolean;
+  selectedArtifactIds?: readonly string[];
+  onArtifactSelectedChange?: (artifactId: string, selected: boolean) => void;
 }) {
   return (
     <table aria-hidden={ariaHidden} className={`logbook-table ${density === "compact" ? "compact" : ""} ${className}`.trim()}>
       <thead>
         <tr>
+          {pagesSelectionMode ? (
+            <th scope="col" className="logbook-col-select">
+              <span className="visually-hidden">Select</span>
+            </th>
+          ) : null}
           {logbookColumns.map((column) => (
             <th key={column.key} scope="col" className={column.className}>
               {column.label}
@@ -121,6 +151,9 @@ function LogbookTableLayer({
             rowIndex={rowIndex}
             session={session}
             selected={session.sessionId === selectedSessionId}
+            pagesSelectionMode={pagesSelectionMode}
+            selectedArtifactIds={selectedArtifactIds}
+            onArtifactSelectedChange={onArtifactSelectedChange}
             onSelect={onSelect}
           />
         ))}
