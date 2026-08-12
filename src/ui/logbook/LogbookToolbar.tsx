@@ -17,6 +17,16 @@ type Props = {
   onFilterChange?: (filters: LogbookFilterState) => void;
   onQueryChange: (query: string) => void;
   onSortChange: (sort: LogbookSort) => void;
+  pagesSelectionMode?: boolean;
+  selectedCount?: number;
+  batchCap?: number;
+  selectionBusy?: boolean;
+  selectionError?: string;
+  onEnterPagesSelectionMode?: () => void;
+  onCancelPagesSelectionMode?: () => void;
+  onSelectCurrentPage?: () => void;
+  onSelectMatchingResults?: () => void;
+  onOpenBatchReview?: () => void;
 };
 
 const kindOptions = [
@@ -47,7 +57,25 @@ function dropdownCloseDelayMs(): number {
   return cssDurationMs(window.getComputedStyle(document.documentElement).getPropertyValue("--dropdown-close-dur"), 150);
 }
 
-export function LogbookToolbar({ filterOptions, filters = {}, onFilterChange, onQueryChange, onSortChange, query, sort }: Props) {
+export function LogbookToolbar({
+  batchCap = 500,
+  filterOptions,
+  filters = {},
+  onCancelPagesSelectionMode,
+  onEnterPagesSelectionMode,
+  onFilterChange,
+  onOpenBatchReview,
+  onQueryChange,
+  onSelectCurrentPage,
+  onSelectMatchingResults,
+  onSortChange,
+  pagesSelectionMode = false,
+  query,
+  selectedCount = 0,
+  selectionBusy = false,
+  selectionError,
+  sort
+}: Props) {
   const projectOptions = optionRows(filterOptions?.projects, filters.project);
   const activeDateFilterCount = [filters.dateFrom, filters.dateTo].filter(Boolean).length;
   const [dateState, setDateState] = useState<"closed" | "open" | "closing">("closed");
@@ -195,6 +223,41 @@ export function LogbookToolbar({ filterOptions, filters = {}, onFilterChange, on
 
         <AppSelect label="Sort Pages" icon="recentActivity" value={sort} options={sortOptions} className="logbook-sort" onChange={(value) => onSortChange(value as LogbookSort)} />
       </div>
+
+      {pagesSelectionMode ? (
+        <div className="logbook-pages-selection-bar" aria-label="Masthead Pages selection">
+          <span className="mono-label">
+            {selectedCount} selected · cap {batchCap}
+          </span>
+          <AppButton disabled={selectionBusy} onClick={onSelectCurrentPage} variant="default">
+            Select current page
+          </AppButton>
+          <AppButton disabled={selectionBusy} onClick={onSelectMatchingResults} variant="default">
+            Select eligible matching results (up to {batchCap})
+          </AppButton>
+          <AppButton
+            disabled={selectionBusy || selectedCount === 0}
+            onClick={onOpenBatchReview}
+            variant="primary"
+          >
+            Review {selectedCount} Pages
+          </AppButton>
+          <AppButton onClick={onCancelPagesSelectionMode} variant="quiet">
+            Cancel Masthead Pages selection
+          </AppButton>
+          {selectionError ? (
+            <p className="toolbar-result surface-status" role="alert">
+              {selectionError}
+            </p>
+          ) : null}
+        </div>
+      ) : onEnterPagesSelectionMode ? (
+        <div className="logbook-pages-selection-bar" aria-label="Masthead Pages actions">
+          <AppButton onClick={onEnterPagesSelectionMode} variant="default">
+            Publish to Masthead Pages
+          </AppButton>
+        </div>
+      ) : null}
     </div>
   );
 }

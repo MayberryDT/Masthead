@@ -23,6 +23,44 @@ afterEach(() => {
 });
 
 describe("LogbookToolbar", () => {
+  test("shows temporary Masthead Pages selection controls only in selection mode", () => {
+    const idle = renderToStaticMarkup(
+      <LogbookToolbar
+        query=""
+        sort="recent"
+        onEnterPagesSelectionMode={() => undefined}
+        onFilterChange={() => undefined}
+        onQueryChange={() => undefined}
+        onSortChange={() => undefined}
+      />
+    );
+    expect(idle).toContain("Publish to Masthead Pages");
+    expect(idle).not.toContain("Cancel Masthead Pages selection");
+    expect(idle).not.toContain('type="checkbox"');
+
+    const active = renderToStaticMarkup(
+      <LogbookToolbar
+        query=""
+        sort="recent"
+        pagesSelectionMode
+        selectedCount={3}
+        batchCap={500}
+        onCancelPagesSelectionMode={() => undefined}
+        onSelectCurrentPage={() => undefined}
+        onSelectMatchingResults={() => undefined}
+        onOpenBatchReview={() => undefined}
+        onFilterChange={() => undefined}
+        onQueryChange={() => undefined}
+        onSortChange={() => undefined}
+      />
+    );
+    expect(active).toContain("3 selected");
+    expect(active).toContain("Select current page");
+    expect(active).toContain("Select eligible matching results (up to 500)");
+    expect(active).toContain("Review 3 Pages");
+    expect(active).toContain("Cancel Masthead Pages selection");
+  });
+
   test("renders Logbook filters as primary toolbar controls", () => {
     const html = renderToStaticMarkup(
       <LogbookToolbar
@@ -35,6 +73,8 @@ describe("LogbookToolbar", () => {
         onSortChange={() => undefined}
       />
     );
+
+    expect(html).not.toContain("Cancel Masthead Pages selection");
 
     expect(html).toContain("Search published Pages");
     expect(html).toContain("Search published Pages…");

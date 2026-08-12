@@ -209,3 +209,56 @@
 .masthead-pages-connection-section .masthead-pages-status {
   margin-bottom: 10px;
 }
+
+.masthead-pages-batch-dialog {
+  width: min(960px, 100%);
+}
+
+.masthead-pages-batch-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.masthead-pages-batch-list li {
+  display: grid;
+  gap: 4px;
+  border: 1px solid rgba(92, 153, 187, 0.12);
+  border-radius: 5px;
+  padding: 10px;
+  background: rgba(4, 18, 28, 0.55);
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.logbook-pages-selection-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding-top: 8px;
+}
+
+.logbook-col-select {
+  width: 36px;
+  text-align: center;
+}
+
+.logbook-row.is-ineligible {
+  opacity: 0.72;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

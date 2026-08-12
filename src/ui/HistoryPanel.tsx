@@ -51,6 +51,17 @@ type Props = {
   onSortChange?: (sort: LogbookSort) => void;
   onTranscriptFilterChange?: (filter: SessionTranscriptKindFilter) => void;
   onPublishToMastheadPages?: (artifactId: string) => void;
+  pagesSelectionMode?: boolean;
+  selectedArtifactIds?: readonly string[];
+  batchCap?: number;
+  selectionBusy?: boolean;
+  selectionError?: string;
+  onEnterPagesSelectionMode?: () => void;
+  onCancelPagesSelectionMode?: () => void;
+  onSelectCurrentPage?: () => void;
+  onSelectMatchingResults?: () => void;
+  onOpenBatchReview?: () => void;
+  onArtifactSelectedChange?: (artifactId: string, selected: boolean) => void;
   pageIndex?: number;
   pageSize?: number;
   transcriptFilter?: SessionTranscriptKindFilter;
@@ -138,6 +149,17 @@ export function HistoryPanel({
   onSortChange,
   onTranscriptFilterChange,
   onPublishToMastheadPages,
+  pagesSelectionMode = false,
+  selectedArtifactIds = [],
+  batchCap = 500,
+  selectionBusy = false,
+  selectionError,
+  onEnterPagesSelectionMode,
+  onCancelPagesSelectionMode,
+  onSelectCurrentPage,
+  onSelectMatchingResults,
+  onOpenBatchReview,
+  onArtifactSelectedChange,
   pageIndex = 0,
   pageSize = 100,
   query,
@@ -238,6 +260,16 @@ export function HistoryPanel({
         filterOptions={filterOptions}
         query={query}
         sort={sort}
+        pagesSelectionMode={pagesSelectionMode}
+        selectedCount={selectedArtifactIds.length}
+        batchCap={batchCap}
+        selectionBusy={selectionBusy}
+        selectionError={selectionError}
+        onEnterPagesSelectionMode={onEnterPagesSelectionMode}
+        onCancelPagesSelectionMode={onCancelPagesSelectionMode}
+        onSelectCurrentPage={onSelectCurrentPage}
+        onSelectMatchingResults={onSelectMatchingResults}
+        onOpenBatchReview={onOpenBatchReview}
         onFilterChange={onFilterChange ?? (() => undefined)}
         onQueryChange={onQueryChange}
         onSortChange={onSortChange ?? (() => undefined)}
@@ -266,6 +298,9 @@ export function HistoryPanel({
               sessions={tableSessions}
               selectedSessionId={selectedSessionId}
               updating={isLoading}
+              pagesSelectionMode={pagesSelectionMode}
+              selectedArtifactIds={selectedArtifactIds}
+              onArtifactSelectedChange={onArtifactSelectedChange}
               onSelect={(sessionId) => onSessionSelect?.(sessionId)}
             />
           </div>

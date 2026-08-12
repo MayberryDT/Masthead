@@ -5,13 +5,23 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { HistoryPanel } from "../../../ui/HistoryPanel";
 import { useLogbookController } from "../useLogbookController";
-import { getDataRevisions, getLogbookArtifact, getSessionTranscript, listProjects, searchLogbook, type LogbookArtifactDetail, type LogbookSession } from "../../daemonClient";
+import {
+  getDataRevisions,
+  getLogbookArtifact,
+  getSessionTranscript,
+  listProjects,
+  resolveMastheadPagesSelection,
+  searchLogbook,
+  type LogbookArtifactDetail,
+  type LogbookSession
+} from "../../daemonClient";
 
 const daemonClientMocks = vi.hoisted(() => ({
   getDataRevisions: vi.fn().mockResolvedValue({ logbook: 0, workbench: 0 }),
   getLogbookArtifact: vi.fn(),
   getSessionTranscript: vi.fn(),
   listProjects: vi.fn(),
+  resolveMastheadPagesSelection: vi.fn(),
   searchLogbook: vi.fn()
 }));
 
@@ -549,6 +559,19 @@ function LogbookHarness() {
       selectedSessionId={logbook.selectedSessionId}
       sort={logbook.sort}
       transcriptFilter={logbook.transcriptFilter}
+      pagesSelectionMode={logbook.pagesSelectionMode}
+      selectedArtifactIds={logbook.selectedArtifactIds}
+      batchCap={logbook.batchCap}
+      selectionBusy={logbook.selectionBusy}
+      selectionError={logbook.selectionError}
+      onEnterPagesSelectionMode={logbook.enterPagesSelectionMode}
+      onCancelPagesSelectionMode={logbook.cancelPagesSelectionMode}
+      onSelectCurrentPage={logbook.selectCurrentPage}
+      onSelectMatchingResults={() => {
+        void logbook.selectMatchingResults();
+      }}
+      onOpenBatchReview={logbook.openBatchReview}
+      onArtifactSelectedChange={logbook.setArtifactSelected}
       onCloseDetail={logbook.closeSession}
       onFilterChange={logbook.changeFilters}
       onPageChange={logbook.changePage}
@@ -560,6 +583,161 @@ function LogbookHarness() {
     />
   );
 }
+
+describe("useLogbookController Masthead Pages selection", () => {
+  test("removes every checkbox when Masthead Pages mode closes", async () => {
+    mockLogbookSearch(
+      [
+        session("artifact-a", "Alpha", "session_dossier"),
+        session("artifact-b", "Beta", "runbook")
+      ],
+      2
+    );
+    mockMetadata();
+    await renderHarness();
+    await flushAsync();
+
+    expect(container?.querySelectorAll('input[type="checkbox"]').length ?? 0).toBe(0);
+
+    await act(async () => {
+      const button = Array.from(container?.querySelectorAll("button") ?? []).find((el) =>
+        el.textContent?.includes("Publish to Masthead Pages")
+      );
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await flushAsync();
+
+    expect((container?.querySelectorAll('input[type="checkbox"]').length ?? 0) > 0).toBe(true);
+
+    await act(async () => {
+      const button = Array.from(container?.querySelectorAll("button") ?? []).find((el) =>
+        el.textContent?.includes("Cancel Masthead Pages selection")
+      );
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await flushAsync();
+
+    expect(container?.querySelector('input[type="checkbox"]')).toBeNull();
+    expect(latestController?.pagesSelectionMode).toBe(false);
+    expect(latestController?.selectedArtifactIds).toEqual([]);
+  });
+
+  test("keeps selection across pagination and filter changes", async () => {
+    const pageOne = [session("artifact-a", "Alpha", "session_dossier"), session("artifact-b", "Beta", "session_dossier")];
+    const pageTwo = [session("artifact-c", "Gamma", "session_dossier")];
+    vi.mocked(searchLogbook)
+      .mockResolvedValueOnce({ sessions: pageOne, total: 3, nextCursor: "2" })
+      .mockResolvedValueOnce({ sessions: pageTwo, total: 3, nextCursor: undefined })
+      .mockResolvedValue({ sessions: pageOne, total: 3, nextCursor: "2" });
+    mockMetadata();
+    await renderHarness();
+    await flushAsync();
+
+    await act(async () => {
+      latestController?.enterPagesSelectionMode();
+      latestController?.setArtifactSelected("artifact-a", true);
+      await Promise.resolve();
+    });
+    expect(latestController?.selectedArtifactIds).toEqual(["artifact-a"]);
+
+    await act(async () => {
+      latestController?.changePage(1);
+      await Promise.resolve();
+    });
+    await flushAsync();
+    expect(latestController?.selectedArtifactIds).toEqual(["artifact-a"]);
+
+    await act(async () => {
+      latestController?.changeQuery("oauth");
+      await Promise.resolve();
+    });
+    await flushAsync();
+    expect(latestController?.selectedArtifactIds).toEqual(["artifact-a"]);
+    expect(latestController?.pagesSelectionMode).toBe(true);
+  });
+
+  test("select current page only adds eligible session dossiers", async () => {
+    mockLogbookSearch(
+      [
+        session("artifact-a", "Alpha", "session_dossier"),
+        session("artifact-b", "Beta", "runbook"),
+        session("artifact-c", "Gamma", "session_dossier")
+      ],
+      3
+    );
+    mockMetadata();
+    await renderHarness();
+    await flushAsync();
+
+    await act(async () => {
+      latestController?.enterPagesSelectionMode();
+      latestController?.selectCurrentPage();
+      await Promise.resolve();
+    });
+
+    expect(latestController?.selectedArtifactIds).toEqual(["artifact-a", "artifact-c"]);
+    expect(latestController?.selectionScope).toBe("current_page");
+  });
+
+  test("matching-result selection snapshots resolved IDs immediately and never expands later", async () => {
+    mockLogbookSearch([session("artifact-a", "Alpha", "session_dossier")], 1);
+    mockMetadata();
+    vi.mocked(resolveMastheadPagesSelection).mockResolvedValue({
+      ok: true,
+      artifactIds: Array.from({ length: 12 }, (_, index) => `artifact-${index + 1}`)
+    });
+    await renderHarness();
+    await flushAsync();
+
+    await act(async () => {
+      latestController?.enterPagesSelectionMode();
+      await latestController?.selectMatchingResults();
+    });
+    await flushAsync();
+
+    expect(resolveMastheadPagesSelection).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: 500 }),
+      baseUrl
+    );
+    expect(latestController?.selectedArtifactIds).toHaveLength(12);
+    expect(latestController?.selectionScope).toBe("matching");
+
+    await act(async () => {
+      latestController?.changeQuery("new-filter");
+      await Promise.resolve();
+    });
+    await flushAsync();
+    expect(latestController?.selectedArtifactIds).toHaveLength(12);
+    expect(resolveMastheadPagesSelection).toHaveBeenCalledTimes(1);
+  });
+
+  test("disables ineligible rows with reasons while selection mode is open", async () => {
+    mockLogbookSearch(
+      [
+        session("artifact-a", "Alpha", "session_dossier"),
+        session("artifact-b", "Beta", "runbook")
+      ],
+      2
+    );
+    mockMetadata();
+    await renderHarness();
+    await flushAsync();
+
+    await act(async () => {
+      latestController?.enterPagesSelectionMode();
+      await Promise.resolve();
+    });
+    await flushAsync();
+
+    const checkboxes = Array.from(container?.querySelectorAll('input[type="checkbox"]') ?? []) as HTMLInputElement[];
+    expect(checkboxes).toHaveLength(2);
+    expect(checkboxes[0]?.disabled).toBe(false);
+    expect(checkboxes[1]?.disabled).toBe(true);
+    expect(checkboxes[1]?.getAttribute("aria-label") ?? "").toContain("Ineligible");
+  });
+});
 
 function mockLogbookSearch(sessions: LogbookSession[], total: number): void {
   vi.mocked(searchLogbook).mockResolvedValue({
@@ -602,16 +780,16 @@ function artifactDetail(sessionId: string, problemStatement: string): LogbookArt
   };
 }
 
-function session(sessionId: string, title: string): LogbookSession {
+function session(sessionId: string, title: string, kind = "session_dossier"): LogbookSession {
   return {
     errorCount: 0,
     fileCount: 0,
     hostId: "test-host",
     lastActivityAt: "2026-07-01T10:00:00.000Z",
-    lifecycle: "ended",
+    lifecycle: kind,
     models: ["gpt-5"],
     project: "Masthead",
-    runtime: "opencode",
+    runtime: kind,
     sessionId,
     sourceConfidence: "authoritative",
     sourceSessionId: `source:${sessionId}`,
