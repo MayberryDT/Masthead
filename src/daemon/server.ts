@@ -98,6 +98,7 @@ import {
   getLogbookArtifactSummary,
   searchLogbookArtifacts
 } from "./db/logbookArtifactRepository.ts";
+import { backfillMastheadPagesArtifactEligibilityBatch } from "./db/mastheadPagesEligibilityRepository.ts";
 import { getSessionDetail, getSessionExcerpts, listProjects, querySessions, type SessionQuery } from "./db/sessionQueryRepository.ts";
 import { getOrCreateDatabaseIdentity, hasPendingMigrations, migrateDatabase } from "./db/schema.ts";
 import { canonicalSessionId, createSessionRepository, ingestAdapterRecord, runtimeIdFor, type SessionRepository } from "./db/sessionRepository.ts";
@@ -800,6 +801,27 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
 
   let closed = false;
   let closePromise: Promise<void> | undefined;
+  const mastheadPagesEligibilityBackfillPromise = (async () => {
+    let cursor: string | undefined;
+    while (!closed) {
+      // Startup stays responsive: each event-loop turn reads and evaluates at most one immutable body.
+      await new Promise<void>((resolveImmediate) => setImmediate(resolveImmediate));
+      if (closed) return;
+      const result = backfillMastheadPagesArtifactEligibilityBatch(database, {
+        afterArtifactId: cursor,
+        batchSize: 1
+      });
+      if (result.complete) return;
+      cursor = result.nextCursor;
+    }
+  })().catch((error) => {
+    recordRuntimeDiagnostic({
+      details: { error },
+      kind: "masthead_pages_eligibility_backfill_failed",
+      message: "Masthead Pages eligibility backfill stopped before completion.",
+      severity: "warning"
+    });
+  });
   let hydrationStarted = false;
   let hydrationPromise: Promise<void> = Promise.resolve();
 
@@ -4001,6 +4023,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
           });
         }
         await hydrationPromise;
+        await mastheadPagesEligibilityBackfillPromise;
         if (gitRefreshTimer) clearInterval(gitRefreshTimer);
         await new Promise<void>((resolve) => {
           server.close(() => resolve());

@@ -36,7 +36,8 @@ bridges must not forward them.
 | --- | --- | --- |
 | `POST` | `/masthead-pages/reviews/prepare` | Eligibility + base projection + evidence candidates + findings |
 | `POST` | `/masthead-pages/reviews/finalize` | Build exact `PublishPageRequestV1`, egress scan, stage ready items |
-| `POST` | `/masthead-pages/selection/resolve` | Snapshot ≤500 eligible artifact IDs |
+| `POST` | `/masthead-pages/selection/resolve` | Legacy authoritative ≤500-ID snapshot until Local 19 cutover |
+| `POST` | `/masthead-pages/selection/materialized/resolve` | Dormant complete/incomplete zero-partial-ID shadow resolver for Local 19 |
 | `POST` | `/masthead-pages/operations/removal/stage` | Stage removal from private mapping (`artifactId` only) |
 | `GET` | `/masthead-pages/operations/pending/:artifactId` | Exact staged JSON + digest for Electron main |
 | `POST` | `/masthead-pages/publications/record` | Record hosted success into private mapping |
@@ -53,7 +54,9 @@ bridges must not forward them.
 
 The normal Logbook table has **no permanent checkboxes**. Checkboxes appear only while temporary
 Masthead Pages selection mode is active and disappear when the mode ends. Matching selection
-snapshots at most 500 existing eligible IDs and never expands to future matches.
+snapshots at most 500 existing eligible IDs and never expands to future matches. The additive
+materialized resolver defines an explicit retryable or non-retryable incomplete result with zero IDs;
+Local 19 will wire that result to the production route only after shadow parity and cutover proof.
 
 ## Transport
 
@@ -75,6 +78,23 @@ Cover upload runs only after explicit confirm and never accepts local paths over
 
 Imported under `schemas/masthead-pages/v1/` and verified by `npm run check:masthead-pages-contract`.
 Object IDs must match hosted vectors (`npm run smoke:masthead-pages`).
+
+## Local data-foundation probe
+
+`npm run probe:local-data-foundation -- --db <sqlite-copy> --output <report.json>` measures the
+legacy and materialized matching paths over no-filter, search, project, date, and combined scenarios
+at limits 1, 10, 50, 100, and 500. It calls the shipped legacy, materialized, and capsule
+repository functions through read-only instrumentation, records per-scenario population/selectivity,
+and marks whether generated scenarios and required corpus outliers are representative. Selection
+comparisons share one SQLite read snapshot. Each capsule cold sample uses a new read-only connection
+and read transaction to clear SQLite's connection-local page cache; the report explicitly notes that it
+does not evict the operating-system page cache. Capsule plans come from the exact SQL and bound shape
+executed by the shipped repository. Replacement comparisons are reported only when current-policy
+eligibility is fully materialized; missing or error rows produce `not_comparable`, not a production
+completeness claim. Probe-only readiness counts are outside timed repository calls. Resolver errors are
+reported independently, never as successful parity. Allocation evidence uses the Node inspector's
+sampled-allocation profiler. Reports omit filter values, local paths, and reusable identifier digests.
+Use a private database snapshot when stable timing must be isolated from concurrent local writes.
 
 ## Gates
 

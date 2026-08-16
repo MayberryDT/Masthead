@@ -57,6 +57,7 @@
     "prepare:electron-resources": "node scripts/prepare-electron-resources.js",
     "probe": "node scripts/masthead-endpoint-matrix.js",
     "probe:authoring-perf": "npm run build:daemon && node scripts/masthead-authoring-perf-probe.js",
+    "probe:local-data-foundation": "npm run build:daemon && node scripts/masthead-local-data-foundation-probe.js",
     "probe:local": "node scripts/masthead-endpoint-matrix.js http://127.0.0.1:17373",
     "typecheck": "tsc --noEmit",
     "test": "npm run build:daemon && NODE_OPTIONS=--max-old-space-size=4096 vitest",

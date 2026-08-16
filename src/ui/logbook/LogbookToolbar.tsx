@@ -233,7 +233,7 @@ export function LogbookToolbar({
             Select current page
           </AppButton>
           <AppButton disabled={selectionBusy} onClick={onSelectMatchingResults} variant="default">
-            Select eligible matching results (up to {batchCap})
+            {selectionError ? "Retry matching selection" : `Select eligible matching results (up to ${batchCap})`}
           </AppButton>
           <AppButton
             disabled={selectionBusy || selectedCount === 0}

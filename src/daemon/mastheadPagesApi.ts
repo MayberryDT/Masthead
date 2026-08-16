@@ -16,6 +16,7 @@ import type {
   SourceLinkV1
 } from "../mastheadPages/types.ts";
 import type { PublishedSessionDossierV1 } from "../shared/sessionDossier.ts";
+import type { ResolveMastheadPagesSelectionResult } from "../mastheadPages/selection.ts";
 import { getAuthoringValidationEvidenceByRef } from "../workbench/authoring/evidenceCatalog.ts";
 import {
   getLogbookArtifactDetail,
@@ -23,6 +24,7 @@ import {
   type LogbookArtifactDetailDto,
   type LogbookArtifactSearchQuery
 } from "./db/logbookArtifactRepository.ts";
+import { resolveMaterializedMastheadPagesSelection } from "./db/mastheadPagesEligibilityRepository.ts";
 import {
   getMastheadPagesMapping,
   getPendingMastheadPagesOperation,
@@ -107,6 +109,7 @@ export function isMastheadPagesPath(pathname: string): boolean {
     pathname === "/masthead-pages/reviews/prepare" ||
     pathname === "/masthead-pages/reviews/finalize" ||
     pathname === "/masthead-pages/selection/resolve" ||
+    pathname === "/masthead-pages/selection/materialized/resolve" ||
     pathname === "/masthead-pages/operations/removal/stage" ||
     pathname === "/masthead-pages/publications/record" ||
     pathname === "/masthead-pages/failures/record" ||
@@ -145,6 +148,11 @@ export function routeMastheadPagesRequest(
     if (pathname === "/masthead-pages/selection/resolve") {
       if (request.method !== "POST") return methodNotAllowed();
       return { status: 200, body: resolveSelection(context, request.body) };
+    }
+
+    if (pathname === "/masthead-pages/selection/materialized/resolve") {
+      if (request.method !== "POST") return methodNotAllowed();
+      return { status: 200, body: resolveMaterializedSelection(context, request.body) };
     }
 
     if (pathname === "/masthead-pages/operations/removal/stage") {
@@ -361,9 +369,28 @@ function finalizeOne(context: MastheadPagesHttpContext, raw: unknown): DaemonFin
   };
 }
 
-function resolveSelection(context: MastheadPagesHttpContext, body: unknown): {
-  ok: true;
-  artifactIds: string[];
+function resolveSelection(
+  context: MastheadPagesHttpContext,
+  body: unknown
+): { ok: true; artifactIds: string[] } {
+  const { limit, query } = selectionQuery(body);
+  // Local 19 owns the read cutover and may return the discriminated result only
+  // after shadow parity proves that the materialized resolver is complete.
+  const artifactIds = listEligibleMastheadPagesArtifactIds(context.db, query, limit);
+  return { ok: true, artifactIds };
+}
+
+function resolveMaterializedSelection(
+  context: MastheadPagesHttpContext,
+  body: unknown
+): { ok: true } & ResolveMastheadPagesSelectionResult {
+  const { limit, query } = selectionQuery(body);
+  return { ok: true, ...resolveMaterializedMastheadPagesSelection(context.db, query, limit) };
+}
+
+function selectionQuery(body: unknown): {
+  limit: number;
+  query: LogbookArtifactSearchQuery;
 } {
   assertNoRendererEnvelope(body, "selection");
   const record = asRecord(body ?? {});
@@ -372,16 +399,17 @@ function resolveSelection(context: MastheadPagesHttpContext, body: unknown): {
     typeof limitRaw === "number" && Number.isFinite(limitRaw)
       ? Math.max(1, Math.min(MASTHEAD_PAGES_MAX_ARTIFACT_IDS, Math.trunc(limitRaw)))
       : MASTHEAD_PAGES_MAX_ARTIFACT_IDS;
-  const query: LogbookArtifactSearchQuery = {
-    q: optionalString(record.q) ?? optionalString(record.query),
-    project: optionalString(record.project),
-    dateFrom: optionalString(record.dateFrom),
-    dateTo: optionalString(record.dateTo),
-    kind: "session_dossier",
-    limit
+  return {
+    limit,
+    query: {
+      q: optionalString(record.q) ?? optionalString(record.query),
+      project: optionalString(record.project),
+      dateFrom: optionalString(record.dateFrom),
+      dateTo: optionalString(record.dateTo),
+      kind: "session_dossier",
+      limit
+    }
   };
-  const artifactIds = listEligibleMastheadPagesArtifactIds(context.db, query, limit);
-  return { ok: true, artifactIds };
 }
 
 function stageRemoval(context: MastheadPagesHttpContext, body: unknown): {

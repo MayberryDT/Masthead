@@ -685,8 +685,8 @@ describe("useLogbookController Masthead Pages selection", () => {
     mockLogbookSearch([session("artifact-a", "Alpha", "session_dossier")], 1);
     mockMetadata();
     vi.mocked(resolveMastheadPagesSelection).mockResolvedValue({
-      ok: true,
-      artifactIds: Array.from({ length: 12 }, (_, index) => `artifact-${index + 1}`)
+      artifactIds: Array.from({ length: 12 }, (_, index) => `artifact-${index + 1}`),
+      status: "complete"
     });
     await renderHarness();
     await flushAsync();
@@ -711,6 +711,44 @@ describe("useLogbookController Masthead Pages selection", () => {
     await flushAsync();
     expect(latestController?.selectedArtifactIds).toHaveLength(12);
     expect(resolveMastheadPagesSelection).toHaveBeenCalledTimes(1);
+  });
+
+  test("incomplete matching selection exposes repair state and commits zero IDs", async () => {
+    mockLogbookSearch([session("artifact-a", "Alpha", "session_dossier")], 1);
+    mockMetadata();
+    vi.mocked(resolveMastheadPagesSelection).mockResolvedValue({
+      artifactIds: [],
+      reason: "eligibility_backfill_incomplete",
+      retryable: true,
+      status: "incomplete"
+    });
+    await renderHarness();
+    await flushAsync();
+
+    await act(async () => {
+      latestController?.enterPagesSelectionMode();
+      latestController?.setArtifactSelected("artifact-a", true);
+      await Promise.resolve();
+    });
+    await flushAsync();
+    await act(async () => {
+      latestController?.openBatchReview();
+      await Promise.resolve();
+    });
+    expect(latestController?.batchReview).toMatchObject({ artifactIds: ["artifact-a"], open: true });
+
+    await act(async () => {
+      await latestController?.selectMatchingResults();
+    });
+    await flushAsync();
+
+    expect(latestController?.selectedArtifactIds).toEqual([]);
+    expect(latestController?.batchReview).toBeNull();
+    expect(latestController?.selectionScope).toBe("none");
+    expect(latestController?.selectionError).toBe(
+      "Matching Pages are still being indexed. Retry selection in a moment."
+    );
+    expect(container?.textContent).toContain("Retry matching selection");
   });
 
   test("disables ineligible rows with reasons while selection mode is open", async () => {

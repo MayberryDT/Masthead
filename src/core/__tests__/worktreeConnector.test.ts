@@ -234,6 +234,7 @@ describe("Masthead worktree connector planning", () => {
     expect(isAllowedReadOnlyBridgeRequest("POST", "/masthead-pages/reviews/prepare")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/masthead-pages/reviews/finalize")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/masthead-pages/selection/resolve")).toBe(false);
+    expect(isAllowedReadOnlyBridgeRequest("POST", "/masthead-pages/selection/materialized/resolve")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/masthead-pages/operations/removal/stage")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/masthead-pages/publications/record")).toBe(false);
     expect(isAllowedReadOnlyBridgeRequest("POST", "/masthead-pages/failures/record")).toBe(false);

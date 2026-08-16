@@ -1,6 +1,7 @@
 import { checkSessionDossierEligibility } from "../../mastheadPages/eligibility.ts";
 import type { PublishedSessionDossierV1 } from "../../shared/sessionDossier.ts";
 import type { MastheadDatabase } from "./sqlite.ts";
+import { sanitizeMastheadPagesSearchQuery } from "./mastheadPagesEligibilityRepository.ts";
 import {
   getSessionArtifact,
   searchPublishedArtifactCapsules,
@@ -88,7 +89,7 @@ export function listEligibleMastheadPagesArtifactIds(
     searchJoin =
       "JOIN session_artifact_search ON session_artifact_search.artifact_id = session_artifacts.artifact_id";
     clauses.push("session_artifact_search MATCH ?");
-    params.push(sanitizeSimpleFtsQuery(searchQuery));
+    params.push(sanitizeMastheadPagesSearchQuery(searchQuery));
     ordering = `bm25(session_artifact_search, 0.0, 12.0, 10.0, 12.0, 1.0, 1.0, 1.0) ASC,
                 session_artifacts.published_at DESC,
                 session_artifacts.updated_at DESC,
@@ -126,15 +127,6 @@ export function listEligibleMastheadPagesArtifactIds(
   return ids;
 }
 
-function sanitizeSimpleFtsQuery(value: string): string {
-  const tokens = value
-    .replace(/["']/g, " ")
-    .split(/\s+/u)
-    .map((token) => token.trim())
-    .filter((token) => token.length > 0 && !/^(AND|OR|NOT)$/i.test(token))
-    .map((token) => `"${token.replace(/"/g, "")}"`);
-  return tokens.length > 0 ? tokens.join(" ") : '""';
-}
 
 function isEligibleMastheadPagesArtifact(db: MastheadDatabase, artifactId: string): boolean {
   const detail = getLogbookArtifactDetail(db, artifactId);

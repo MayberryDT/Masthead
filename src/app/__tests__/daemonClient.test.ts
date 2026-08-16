@@ -43,6 +43,7 @@ import {
   prepareMastheadPagesReviews,
   finalizeAndStageMastheadPagesReviews,
   resolveMastheadPagesSelection,
+  resolveMastheadPagesSelectionShadow,
   stageMastheadPagesRemoval,
   getPendingMastheadPagesOperation,
   recordMastheadPagesResults
@@ -91,8 +92,8 @@ describe("daemon client masthead pages", () => {
       items: [{ staged: true }]
     });
     await expect(resolveMastheadPagesSelection({ q: "alpha" }, base)).resolves.toEqual({
-      ok: true,
-      artifactIds: ["artifact:1"]
+      artifactIds: ["artifact:1"],
+      status: "complete"
     });
     await expect(stageMastheadPagesRemoval({ artifactId: "a" }, base)).resolves.toMatchObject({ ok: true });
     await expect(getPendingMastheadPagesOperation("a", base)).resolves.toMatchObject({
@@ -108,6 +109,28 @@ describe("daemon client masthead pages", () => {
       }, base)
     ).resolves.toMatchObject({ mapping: { status: "failed" } });
   });
+  test("discards IDs from an incomplete selection response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        response({
+          ok: true,
+          artifactIds: ["artifact:must-not-escape"],
+          reason: "eligibility_backfill_incomplete",
+          retryable: true,
+          status: "incomplete"
+        })
+      )
+    );
+
+    await expect(resolveMastheadPagesSelectionShadow({}, "http://127.0.0.1:17373/projection")).resolves.toEqual({
+      artifactIds: [],
+      reason: "eligibility_backfill_incomplete",
+      retryable: true,
+      status: "incomplete"
+    });
+  });
+
 });
 
 describe("daemon client review dispositions", () => {

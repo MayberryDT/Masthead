@@ -7,9 +7,11 @@ export type EligibilityReason =
   | "current_enrichment_required"
   | "single_session_dossier_required";
 
-export type EligibilityResult =
+export type StableEligibilityReason = Exclude<EligibilityReason, "not_current_logbook_page">;
+
+export type EligibilityResult<Reason extends EligibilityReason = EligibilityReason> =
   | { eligible: true }
-  | { eligible: false; reason: EligibilityReason };
+  | { eligible: false; reason: Reason };
 
 export type LocalArtifactForPages = {
   artifactKind: string;
@@ -20,23 +22,25 @@ export type LocalArtifactForPages = {
   provenanceSessionIds: readonly string[];
 };
 
-function ineligible(reason: EligibilityReason): EligibilityResult {
+export type StableArtifactForPages = Pick<
+  LocalArtifactForPages,
+  "artifactKind" | "schemaVersion" | "content" | "provenanceSessionIds"
+>;
+
+function ineligible<Reason extends EligibilityReason>(reason: Reason): EligibilityResult<Reason> {
   return { eligible: false, reason };
 }
 
-export function checkSessionDossierEligibility(
-  input: LocalArtifactForPages,
-): EligibilityResult {
+export function evaluateStableSessionDossierEligibility(
+  input: StableArtifactForPages,
+): EligibilityResult<StableEligibilityReason> {
   if (input.artifactKind !== "session_dossier") {
     return ineligible("unsupported_kind");
   }
-  if (input.status !== "current" || input.publicationStatus !== "published") {
-    return ineligible("not_current_logbook_page");
-  }
-  if (input.schemaVersion !== "canonical-session-dossier-v1") {
-    return ineligible("unsupported_schema");
-  }
-  if (input.content.snapshotVersion !== "canonical-session-dossier-v1") {
+  if (
+    input.schemaVersion !== "canonical-session-dossier-v1" ||
+    input.content.snapshotVersion !== "canonical-session-dossier-v1"
+  ) {
     return ineligible("unsupported_schema");
   }
   if (
@@ -49,4 +53,16 @@ export function checkSessionDossierEligibility(
     return ineligible("single_session_dossier_required");
   }
   return { eligible: true };
+}
+
+export function checkSessionDossierEligibility(
+  input: LocalArtifactForPages,
+): EligibilityResult {
+  if (input.artifactKind !== "session_dossier") {
+    return ineligible("unsupported_kind");
+  }
+  if (input.status !== "current" || input.publicationStatus !== "published") {
+    return ineligible("not_current_logbook_page");
+  }
+  return evaluateStableSessionDossierEligibility(input);
 }

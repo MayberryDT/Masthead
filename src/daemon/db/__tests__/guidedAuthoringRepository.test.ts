@@ -66,8 +66,8 @@ describe("guided authoring repository", () => {
     migrateDatabase(db);
 
     expect(db.prepare("SELECT version, name FROM schema_migrations ORDER BY version DESC LIMIT 1").get()).toEqual({
-      name: "040_masthead_pages_release_mappings",
-      version: 40
+      name: "041_masthead_pages_artifact_eligibility",
+      version: 41
     });
     expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });

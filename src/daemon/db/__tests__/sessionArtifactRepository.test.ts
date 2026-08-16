@@ -609,6 +609,91 @@ describe("session artifact repository", () => {
     }
   );
 
+  test("capsule pages select no immutable bodies and aggregate provenance once per page", () => {
+    const preparedSql: string[] = [];
+    const rows = [
+      {
+        artifactId: "artifact:a",
+        artifactKind: "session_dossier",
+        confidence: "high",
+        highlight: null,
+        lineageId: "artifact:a",
+        projectLabel: "Masthead",
+        publishedAt: "2026-08-16T12:00:00.000Z",
+        signatureKey: null,
+        status: "current",
+        summary: "Summary A",
+        title: "A",
+        updatedAt: "2026-08-16T12:00:00.000Z"
+      },
+      {
+        artifactId: "artifact:b",
+        artifactKind: "runbook",
+        confidence: null,
+        highlight: null,
+        lineageId: "artifact:b",
+        projectLabel: null,
+        publishedAt: "2026-08-16T11:00:00.000Z",
+        signatureKey: null,
+        status: "current",
+        summary: null,
+        title: "B",
+        updatedAt: "2026-08-16T11:00:00.000Z"
+      }
+    ];
+    const fakeDb = {
+      prepare(sql: string) {
+        preparedSql.push(sql);
+        if (sql.includes("COUNT(*) AS count FROM session_artifacts")) {
+          return { get: () => ({ count: rows.length }) };
+        }
+        if (sql.includes("FROM session_artifact_provenance")) {
+          return {
+            all: () => [{ artifactId: "artifact:a", provenanceSize: 2 }]
+          };
+        }
+        return { all: () => rows };
+      }
+    } as unknown as MastheadDatabase;
+
+    const result = searchPublishedArtifactCapsules(fakeDb, { limit: 50 });
+
+    expect(result.artifacts.map(({ artifactId, provenanceSize }) => ({ artifactId, provenanceSize }))).toEqual([
+      { artifactId: "artifact:a", provenanceSize: 2 },
+      { artifactId: "artifact:b", provenanceSize: 1 }
+    ]);
+    expect(preparedSql).toHaveLength(3);
+    expect(preparedSql.filter((sql) => sql.includes("FROM session_artifact_provenance"))).toHaveLength(1);
+    expect(preparedSql.some((sql) => /\b(content_json|evidence_refs_json|validation_json)\b/u.test(sql))).toBe(false);
+    expect(preparedSql.some((sql) => /\bAS (updatedAt|lineageId)\b/u.test(sql))).toBe(false);
+  });
+
+  test("capsule pages remain readable when an immutable body cannot be parsed", async () => {
+    const db = await testDb();
+    seedSession(db, {
+      lifecycle: "ended",
+      model: "gpt-5",
+      project: "Masthead",
+      sessionId: "session:body-free-capsule",
+      title: "Body-free capsule"
+    });
+    const artifact = applySessionArtifact(
+      db,
+      runbookInput("fp-body-free-capsule", "Body-free capsule", "session:body-free-capsule")
+    );
+    publishSessionArtifact(db, artifact.artifactId);
+    db.prepare("DELETE FROM session_artifact_provenance WHERE artifact_id = ?").run(artifact.artifactId);
+    db.prepare("UPDATE session_artifacts SET content_json = 'not-json' WHERE artifact_id = ?").run(artifact.artifactId);
+
+    expect(searchPublishedArtifactCapsules(db).artifacts).toEqual([
+      expect.objectContaining({
+        artifactId: artifact.artifactId,
+        provenanceSize: 1,
+        title: "Body-free capsule"
+      })
+    ]);
+  });
+
   test("filters published artifacts by published_at dateFrom/dateTo bounds", async () => {
     const db = await testDb();
     seedSession(db, { lifecycle: "ended", model: "gpt-5", project: "Masthead", sessionId: "session:abc", title: "Artifact session" });

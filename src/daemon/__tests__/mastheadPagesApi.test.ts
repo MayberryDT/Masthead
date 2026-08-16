@@ -29,6 +29,7 @@ afterEach(async () => {
   await Promise.all(tempDirs.map((path) => rm(path, { force: true, recursive: true })));
   tempDirs.length = 0;
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("masthead pages daemon API", () => {
@@ -57,6 +58,127 @@ describe("masthead pages daemon API", () => {
     );
     expect(direct?.status).toBe(200);
     expect(fetchSpy.mock.calls).toHaveLength(1);
+  });
+
+  test("resolves the authoritative local matching path offline with an explicit complete result", async () => {
+    const db = await testDb();
+    const artifactId = seedEligibleArtifact(db, "session:offline-selection");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() => {
+      throw new Error("network access is forbidden");
+    });
+
+    const direct = routeMastheadPagesRequest(
+      { db },
+      {
+        method: "POST",
+        url: new URL("http://127.0.0.1/masthead-pages/selection/resolve"),
+        body: { limit: 500, q: "Ship portable" }
+      }
+    );
+
+    expect(direct).toEqual({
+      body: {
+        artifactIds: [artifactId],
+        ok: true
+      },
+      status: 200
+    });
+
+    const shadowComplete = routeMastheadPagesRequest(
+      { db },
+      {
+        method: "POST",
+        url: new URL("http://127.0.0.1/masthead-pages/selection/materialized/resolve"),
+        body: { limit: 500, q: "Ship portable" }
+      }
+    );
+    expect(shadowComplete?.body).toEqual({ ok: true, status: "complete", artifactIds: [artifactId] });
+
+    db.prepare(
+      `UPDATE masthead_pages_artifact_eligibility
+       SET status = 'error', reason_code = 'eligibility_evaluation_error'
+       WHERE artifact_id = ?`
+    ).run(artifactId);
+    const shadowIncomplete = routeMastheadPagesRequest(
+      { db },
+      {
+        method: "POST",
+        url: new URL("http://127.0.0.1/masthead-pages/selection/materialized/resolve"),
+        body: { limit: 500, q: "Ship portable" }
+      }
+    );
+    expect(shadowIncomplete?.body).toEqual({
+      ok: true,
+      status: "incomplete",
+      artifactIds: [],
+      reason: "eligibility_evaluation_failed",
+      retryable: false
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test("legacy and materialized selection both reject a dossier with missing provenance", async () => {
+    const db = await testDb();
+    const artifactId = seedEligibleArtifact(db, "session:missing-provenance");
+    db.prepare("DELETE FROM session_artifact_provenance WHERE artifact_id = ?").run(artifactId);
+    db.prepare("DELETE FROM masthead_pages_artifact_eligibility WHERE artifact_id = ?").run(artifactId);
+
+    const legacy = routeMastheadPagesRequest(
+      { db },
+      {
+        method: "POST",
+        url: new URL("http://127.0.0.1/masthead-pages/selection/resolve"),
+        body: { limit: 500 }
+      }
+    );
+    const materialized = routeMastheadPagesRequest(
+      { db },
+      {
+        method: "POST",
+        url: new URL("http://127.0.0.1/masthead-pages/selection/materialized/resolve"),
+        body: { limit: 500 }
+      }
+    );
+
+    expect(legacy?.body).toEqual({ ok: true, artifactIds: [] });
+    expect(materialized?.body).toEqual({ ok: true, status: "complete", artifactIds: [] });
+  });
+
+  test("continues bounded eligibility backfill across event-loop turns and closes cleanly", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "masthead-pages-backfill-drain-"));
+    tempDirs.push(tempDir);
+    const databasePath = join(tempDir, "masthead.sqlite");
+    const config = {
+      allowedOrigins: ["http://127.0.0.1:5173"],
+      codexHomeDir: tempDir,
+      databasePath,
+      fixturePath: join(tempDir, "fixture.json"),
+      gitRefreshMs: 0,
+      host: "127.0.0.1",
+      hookTranscriptCatchupEnabled: false,
+      legacyWorkbenchBackfillEnabled: false,
+      llmCopyEnabled: false,
+      port: 0,
+      storePath: join(tempDir, "events.ndjson")
+    } satisfies DaemonConfig;
+    const bootstrap = await openMastheadDatabase(databasePath);
+    migrateDatabase(bootstrap);
+    for (let index = 0; index < 105; index += 1) {
+      seedEligibleArtifact(bootstrap, `session:backfill-drain-${index}`);
+    }
+    bootstrap.prepare("DELETE FROM masthead_pages_artifact_eligibility").run();
+    bootstrap.close();
+
+    const daemon = await createMastheadDaemon(config);
+    daemons.push(daemon);
+    expect(Number(daemon.database.prepare(
+      "SELECT COUNT(*) AS count FROM masthead_pages_artifact_eligibility"
+    ).get()?.count)).toBe(0);
+    await waitForCondition(() =>
+      Number(daemon.database.prepare("SELECT COUNT(*) AS count FROM masthead_pages_artifact_eligibility").get()?.count) === 105
+    );
+
+    await expect(daemon.close()).resolves.toBeUndefined();
   });
 
   test("marks unsupported kind and schema as ineligible", async () => {
@@ -492,6 +614,14 @@ function listen(daemon: MastheadDaemon): Promise<string> {
       resolve(`http://127.0.0.1:${address.port}`);
     });
   });
+}
+
+async function waitForCondition(condition: () => boolean, timeoutMs = 5_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() >= deadline) throw new Error("Timed out waiting for condition");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
 }
 
 async function postJson(baseUrl: string, path: string, body: unknown): Promise<any> {

@@ -3,6 +3,7 @@ import { getJson, postJson } from "./httpJsonClient";
 import type { ReviewDisposition } from "../core/store";
 import type { KnowledgeFlowSummaryDto } from "../shared/knowledgeFlow";
 import type { SessionDossierDto, SessionDossierManualEnrichmentJob } from "../shared/sessionDossier";
+import type { ResolveMastheadPagesSelectionResult } from "../mastheadPages/selection";
 import type { SessionSummaryEnrichment, SessionTitleEnrichment } from "../shared/sessionEnrichment";
 import type { SessionTranscriptCoverage, SessionTranscriptItem, SessionTranscriptResult } from "../shared/sessionTranscript";
 import type { SourcesAdvancedDto, SourcesOnboardingScanDto, SourcesSetupDto, SourcesSetupRunRequest } from "../shared/sourcesSetup";
@@ -1992,23 +1993,65 @@ export async function finalizeAndStageMastheadPagesReviews(
   });
 }
 
+export type MastheadPagesSelectionInput = {
+  q?: string;
+  query?: string;
+  project?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  limit?: number;
+};
+
+type LegacyMastheadPagesSelectionResponse = { ok: true; artifactIds: string[]; status?: undefined };
+type MaterializedMastheadPagesSelectionResponse = ResolveMastheadPagesSelectionResult & { ok: true };
+
 export async function resolveMastheadPagesSelection(
-  input: {
-    q?: string;
-    query?: string;
-    project?: string;
-    dateFrom?: string;
-    dateTo?: string;
-    limit?: number;
-  } = {},
+  input: MastheadPagesSelectionInput = {},
   baseUrl = defaultLiveProjectionUrl(),
   options: { signal?: AbortSignal } = {}
-): Promise<{ ok: true; artifactIds: string[] }> {
-  return postJson(baseUrl, "/masthead-pages/selection/resolve", {
-    body: input,
-    label: "masthead pages resolve selection",
-    signal: options.signal
-  });
+): Promise<ResolveMastheadPagesSelectionResult> {
+  const response = await postJson<LegacyMastheadPagesSelectionResponse | MaterializedMastheadPagesSelectionResponse>(
+    baseUrl,
+    "/masthead-pages/selection/resolve",
+    {
+      body: input,
+      label: "masthead pages resolve selection",
+      signal: options.signal
+    }
+  );
+  return normalizeMastheadPagesSelectionResult(response);
+}
+
+/** Additive Local 17 contract probe. Production selection stays on the legacy endpoint until Local 19. */
+export async function resolveMastheadPagesSelectionShadow(
+  input: MastheadPagesSelectionInput = {},
+  baseUrl = defaultLiveProjectionUrl(),
+  options: { signal?: AbortSignal } = {}
+): Promise<ResolveMastheadPagesSelectionResult> {
+  const response = await postJson<MaterializedMastheadPagesSelectionResponse>(
+    baseUrl,
+    "/masthead-pages/selection/materialized/resolve",
+    {
+      body: input,
+      label: "masthead pages resolve materialized selection",
+      signal: options.signal
+    }
+  );
+  return normalizeMastheadPagesSelectionResult(response);
+}
+
+function normalizeMastheadPagesSelectionResult(
+  response: LegacyMastheadPagesSelectionResponse | MaterializedMastheadPagesSelectionResponse
+): ResolveMastheadPagesSelectionResult {
+  if (response.status === "incomplete") {
+    return {
+      artifactIds: [],
+      reason: response.reason,
+      retryable: response.retryable,
+      status: "incomplete"
+    };
+  }
+  return { artifactIds: response.artifactIds, status: "complete" };
 }
 
 export async function stageMastheadPagesRemoval(

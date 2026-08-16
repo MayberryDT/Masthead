@@ -247,7 +247,7 @@ describe("daemon database schema", () => {
     migrateDatabase(db);
     migrateDatabase(db);
 
-    expect(CURRENT_SCHEMA_VERSION).toBe(40);
+    expect(CURRENT_SCHEMA_VERSION).toBe(41);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'virtual') ORDER BY name").all() as Array<{ name: string }>;
     expect(tables.map((row) => row.name)).toEqual(
@@ -327,6 +327,7 @@ describe("daemon database schema", () => {
         "workbench_authoring_v5_evidence_access",
         "workbench_authoring_v5_evidence_snapshots",
         "masthead_data_revisions",
+        "masthead_pages_artifact_eligibility",
         "masthead_pages_release_mappings"
       ])
     );
@@ -371,7 +372,8 @@ describe("daemon database schema", () => {
       { version: 37, name: "037_guided_authoring_v5_contract" },
       { version: 38, name: "038_workbench_authoring_v5_evidence_snapshots" },
       { version: 39, name: "039_workbench_authoring_v5_preparation" },
-      { version: 40, name: "040_masthead_pages_release_mappings" }
+      { version: 40, name: "040_masthead_pages_release_mappings" },
+      { version: 41, name: "041_masthead_pages_artifact_eligibility" }
     ]);
     expect(
       (db.prepare("PRAGMA table_info(workbench_artifact_candidate_scans)").all() as Array<{ name: string }>).map(
@@ -649,7 +651,7 @@ describe("daemon database schema", () => {
       "2026-07-15T00:00:00.000Z"
     );
 
-    expect(CURRENT_SCHEMA_VERSION).toBe(40);
+    expect(CURRENT_SCHEMA_VERSION).toBe(41);
     expect(db.prepare("SELECT version, name FROM schema_migrations ORDER BY version DESC LIMIT 1").get()).toEqual({
       name: "024_artifact_candidate_detector_revision",
       version: 24
@@ -863,7 +865,8 @@ describe("daemon database schema", () => {
         { name: "037_guided_authoring_v5_contract", version: 37 },
         { name: "038_workbench_authoring_v5_evidence_snapshots", version: 38 },
         { name: "039_workbench_authoring_v5_preparation", version: 39 },
-        { name: "040_masthead_pages_release_mappings", version: 40 }
+        { name: "040_masthead_pages_release_mappings", version: 40 },
+        { name: "041_masthead_pages_artifact_eligibility", version: 41 }
       ]);
     expect(db.prepare(
       "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workbench_authoring_v5_requests'"

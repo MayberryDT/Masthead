@@ -355,7 +355,20 @@ export function useLogbookController({
         },
         activeProjectionUrl
       );
-      const ids = (resolved.artifactIds ?? []).slice(0, MASTHEAD_PAGES_BATCH_CAP);
+      if (resolved.status === "incomplete") {
+        setSelectedArtifactIds([]);
+        setSelectionScope("none");
+        setBatchReview(null);
+        setSelectionError(
+          resolved.reason === "eligibility_backfill_incomplete"
+            ? "Matching Pages are still being indexed. Retry selection in a moment."
+            : resolved.retryable
+              ? "Matching Pages could not be checked. Retry selection."
+              : "Matching Pages could not be checked. Repair the affected local Page before retrying."
+        );
+        return;
+      }
+      const ids = resolved.artifactIds.slice(0, MASTHEAD_PAGES_BATCH_CAP);
       // Snapshot immediately — never expand to future matches as filters change.
       setSelectedArtifactIds(ids);
       setSelectionScope("matching");

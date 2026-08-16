@@ -8,6 +8,7 @@ import {
   bumpDataRevisionInTransaction,
   withDataRevisionOperation
 } from "./dataRevisionRepository.ts";
+import { materializeMastheadPagesArtifactEligibilityInTransaction } from "./mastheadPagesEligibilityRepository.ts";
 
 export type SessionArtifactKind = "session_dossier" | "runbook" | "adr" | "incident_timeline";
 export type SessionArtifactStatus = "current" | "superseded" | "invalid";
@@ -209,6 +210,20 @@ type SessionArtifactRow = {
   validationJson: string;
 };
 
+type SessionArtifactCapsuleRow = Pick<
+  SessionArtifactRow,
+  | "artifactId"
+  | "artifactKind"
+  | "status"
+  | "title"
+  | "summary"
+  | "highlight"
+  | "confidence"
+  | "projectLabel"
+  | "signatureKey"
+  | "publishedAt"
+>;
+
 const ARTIFACT_SELECT = `SELECT
   session_artifacts.artifact_id AS artifactId,
   session_artifacts.session_id AS sessionId,
@@ -232,6 +247,19 @@ const ARTIFACT_SELECT = `SELECT
   session_artifacts.content_json AS contentJson,
   session_artifacts.evidence_refs_json AS evidenceRefsJson,
   session_artifacts.validation_json AS validationJson
+FROM session_artifacts`;
+
+const ARTIFACT_CAPSULE_SELECT = `SELECT
+  session_artifacts.artifact_id AS artifactId,
+  session_artifacts.artifact_kind AS artifactKind,
+  session_artifacts.status,
+  session_artifacts.title,
+  session_artifacts.summary,
+  session_artifacts.highlight,
+  session_artifacts.confidence,
+  session_artifacts.project_label AS projectLabel,
+  session_artifacts.signature_key AS signatureKey,
+  session_artifacts.published_at AS publishedAt
 FROM session_artifacts`;
 
 export function applySessionArtifact(db: MastheadDatabase, input: SessionArtifactInput): SessionArtifactRecord {
@@ -268,6 +296,13 @@ function applySessionArtifactOperationInTransaction(
   if (existing) {
     const logbookMembershipChanged = makeCurrentInTransaction(db, existing);
     indexArtifactScope(db, existing);
+    materializeMastheadPagesArtifactEligibilityInTransaction(db, {
+      artifactId: existing.artifactId,
+      artifactKind: existing.artifactKind,
+      content: existing.content,
+      provenanceSessionIds: existing.provenanceSessionIds,
+      schemaVersion: existing.schemaVersion
+    });
     return {
       artifact: readArtifactById(db, existing.artifactId)!,
       logbookMembershipChanged
@@ -315,6 +350,13 @@ function applySessionArtifactOperationInTransaction(
     artifactInput.joinRationale ?? null
   );
   replaceProvenance(db, artifactId, provenanceSessionIds);
+  materializeMastheadPagesArtifactEligibilityInTransaction(db, {
+    artifactId,
+    artifactKind: artifactInput.artifactKind,
+    content: artifactInput.content,
+    provenanceSessionIds,
+    schemaVersion: artifactInput.schemaVersion
+  });
   indexArtifactScope(db, artifactInput);
   return {
     artifact: readArtifactById(db, artifactId)!,
@@ -508,24 +550,23 @@ export function searchPublishedArtifactCapsules(
   const total = (
     db.prepare(`SELECT COUNT(*) AS count FROM session_artifacts ${searchJoin} ${where}`).get(...params) as { count: number }
   ).count;
-
   const ordering = searchQuery
     ? `bm25(session_artifact_search, 0.0, 12.0, 10.0, 12.0, 1.0, 1.0, 1.0) ASC,
          session_artifacts.published_at DESC, session_artifacts.updated_at DESC, session_artifacts.artifact_id DESC`
     : `session_artifacts.published_at DESC, session_artifacts.updated_at DESC, session_artifacts.artifact_id DESC`;
-
   const rows = db
     .prepare(
-      `${ARTIFACT_SELECT}
+      `${ARTIFACT_CAPSULE_SELECT}
       ${searchJoin}
       ${where}
       ORDER BY ${ordering}
       LIMIT ? OFFSET ?`
     )
-    .all(...params, limit, offset) as SessionArtifactRow[];
+    .all(...params, limit, offset) as SessionArtifactCapsuleRow[];
+  const provenanceCounts = provenanceCountsFor(db, rows.map((row) => row.artifactId));
 
   return {
-    artifacts: rows.map((row) => toCapsule(db, row)),
+    artifacts: rows.map((row) => toCapsule(row, provenanceCounts.get(row.artifactId) ?? 1)),
     total
   };
 }
@@ -1366,6 +1407,20 @@ function provenanceFor(db: MastheadDatabase, artifactId: string): string[] {
   return rows.map((row) => row.sessionId);
 }
 
+function provenanceCountsFor(db: MastheadDatabase, artifactIds: string[]): Map<string, number> {
+  if (artifactIds.length === 0) return new Map();
+  const placeholders = artifactIds.map(() => "?").join(", ");
+  const rows = db
+    .prepare(
+      `SELECT artifact_id AS artifactId, COUNT(*) AS provenanceSize
+       FROM session_artifact_provenance
+       WHERE artifact_id IN (${placeholders})
+       GROUP BY artifact_id`
+    )
+    .all(...artifactIds) as Array<{ artifactId: string; provenanceSize: number }>;
+  return new Map(rows.map((row) => [row.artifactId, Number(row.provenanceSize)]));
+}
+
 function rowToRecord(db: MastheadDatabase, row: SessionArtifactRow): SessionArtifactRecord {
   const provenanceSessionIds = provenanceFor(db, row.artifactId);
   return {
@@ -1381,7 +1436,7 @@ function rowToRecord(db: MastheadDatabase, row: SessionArtifactRow): SessionArti
     joinRationale: row.joinRationale ?? undefined,
     lineageId: row.lineageId ?? row.artifactId,
     projectLabel: row.projectLabel ?? undefined,
-    provenanceSessionIds: provenanceSessionIds.length > 0 ? provenanceSessionIds : [row.sessionId],
+    provenanceSessionIds,
     publicationStatus: row.publicationStatus ?? "applied",
     publishedAt: row.publishedAt ?? undefined,
     schemaVersion: row.schemaVersion,
@@ -1395,9 +1450,7 @@ function rowToRecord(db: MastheadDatabase, row: SessionArtifactRow): SessionArti
   };
 }
 
-function toCapsule(db: MastheadDatabase, row: SessionArtifactRow): ArtifactCapsule {
-  const provenanceSessionIds = provenanceFor(db, row.artifactId);
-  const size = provenanceSessionIds.length > 0 ? provenanceSessionIds.length : 1;
+function toCapsule(row: SessionArtifactCapsuleRow, size: number): ArtifactCapsule {
   return {
     artifactId: row.artifactId,
     confidence: row.confidence ?? undefined,

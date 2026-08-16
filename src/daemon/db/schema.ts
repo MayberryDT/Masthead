@@ -205,6 +205,11 @@ const migrations = [
     version: 40,
     name: "040_masthead_pages_release_mappings",
     path: resolve(currentDir, "migrations/040_masthead_pages_release_mappings.sql")
+  },
+  {
+    version: 41,
+    name: "041_masthead_pages_artifact_eligibility",
+    path: resolve(currentDir, "migrations/041_masthead_pages_artifact_eligibility.sql")
   }
 ];
 
@@ -288,7 +293,8 @@ const criticalTables = [
   "guided_authoring_operator_reviews",
   "guided_authoring_enrichment_provenance",
   "masthead_data_revisions",
-  "masthead_pages_release_mappings"
+  "masthead_pages_release_mappings",
+  "masthead_pages_artifact_eligibility"
 ];
 
 export function migrateDatabase(db: MastheadDatabase): void {
