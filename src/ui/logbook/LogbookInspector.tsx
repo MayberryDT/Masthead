@@ -56,7 +56,7 @@ export function LogbookInspector({
   const publishLabel =
     releaseState === "changed_locally" || releaseState === "live"
       ? "Publish new revision"
-      : "Publish to Masthead Pages";
+      : "Publish";
   const showReleaseActions =
     Boolean(artifact?.artifactId) &&
     (releaseState === "live" ||
@@ -83,7 +83,7 @@ export function LogbookInspector({
             <div className="logbook-inspector-actions">
               <button
                 type="button"
-                className="app-button app-button-primary metal-control"
+                className="app-button app-button-primary metal-control logbook-publish-button"
                 onClick={() => {
                   if (artifact.artifactId) onPublishToMastheadPages?.(artifact.artifactId);
                 }}

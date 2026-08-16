@@ -442,7 +442,7 @@ describe("LogbookInspector", () => {
     expect(html).toContain("&quot;bar&quot;");
   });
 
-  test("shows Publish to Masthead Pages only when eligibility is known true", () => {
+  test("shows the compact Publish action only when eligibility is known true", () => {
     const onPublish = vi.fn();
     const eligible = renderToStaticMarkup(
       <LogbookInspector
@@ -459,7 +459,8 @@ describe("LogbookInspector", () => {
         }}
       />
     );
-    expect(eligible).toContain("Publish to Masthead Pages");
+    expect(eligible).toContain('class="app-button app-button-primary metal-control logbook-publish-button"');
+    expect(eligible).toContain(">Publish</button>");
 
     const ineligible = renderToStaticMarkup(
       <LogbookInspector
@@ -476,7 +477,7 @@ describe("LogbookInspector", () => {
         }}
       />
     );
-    expect(ineligible).not.toContain("Publish to Masthead Pages");
+    expect(ineligible).not.toContain(">Publish</button>");
 
     const unknown = renderToStaticMarkup(
       <LogbookInspector
@@ -492,7 +493,7 @@ describe("LogbookInspector", () => {
         }}
       />
     );
-    expect(unknown).not.toContain("Publish to Masthead Pages");
+    expect(unknown).not.toContain(">Publish</button>");
   });
 
   test("labels Publish new revision when the local Page changed after a live release", () => {

@@ -984,7 +984,7 @@ export function App() {
             }}
             onArtifactSelectedChange={logbook.setArtifactSelected}
             onPublishToMastheadPages={(artifactId) => {
-              void mastheadPages.openSingleReview(artifactId);
+              void mastheadPages.openBatchReview([artifactId]);
             }}
           />
           <MastheadPagesReviewDialog
