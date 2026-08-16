@@ -1,6 +1,12 @@
-import { readFileSync, readdirSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import deviceAuthorizationSchema from "../../schemas/masthead-pages/v1/schema/device-authorization-v1.schema.json" with { type: "json" };
+import pageRevisionSchema from "../../schemas/masthead-pages/v1/schema/page-revision-v1.schema.json" with { type: "json" };
+import publicLogbookApiSchema from "../../schemas/masthead-pages/v1/schema/public-logbook-api-v1.schema.json" with { type: "json" };
+import publishPageBatchRequestSchema from "../../schemas/masthead-pages/v1/schema/publish-page-batch-request-v1.schema.json" with { type: "json" };
+import publishPageBatchResultSchema from "../../schemas/masthead-pages/v1/schema/publish-page-batch-result-v1.schema.json" with { type: "json" };
+import publishPageRequestSchema from "../../schemas/masthead-pages/v1/schema/publish-page-request-v1.schema.json" with { type: "json" };
+import publishPageResultSchema from "../../schemas/masthead-pages/v1/schema/publish-page-result-v1.schema.json" with { type: "json" };
+import publisherAccountSchema from "../../schemas/masthead-pages/v1/schema/publisher-account-v1.schema.json" with { type: "json" };
+import removePageApiSchema from "../../schemas/masthead-pages/v1/schema/remove-page-api-v1.schema.json" with { type: "json" };
 
 import Ajv2020, { type ErrorObject, type ValidateFunction } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
@@ -31,9 +37,17 @@ import type {
   ValidationResult,
 } from "./types.ts";
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-export const MASTHEAD_PAGES_CONTRACT_ROOT = join(HERE, "../../schemas/masthead-pages/v1");
-const SCHEMA_DIR = join(MASTHEAD_PAGES_CONTRACT_ROOT, "schema");
+const CONTRACT_SCHEMAS: readonly object[] = [
+  deviceAuthorizationSchema,
+  pageRevisionSchema,
+  publicLogbookApiSchema,
+  publishPageBatchRequestSchema,
+  publishPageBatchResultSchema,
+  publishPageRequestSchema,
+  publishPageResultSchema,
+  publisherAccountSchema,
+  removePageApiSchema,
+];
 
 function ok<T>(value: T): ValidationResult<T> {
   return { ok: true, value };
@@ -73,10 +87,6 @@ function mapAjvErrors(errors: ErrorObject[] | null | undefined): ValidationIssue
   });
 }
 
-function loadJson(path: string): unknown {
-  return JSON.parse(readFileSync(path, "utf8")) as unknown;
-}
-
 function createAjv(): Ajv2020 {
   const ajv = new Ajv2020({
     strict: true,
@@ -85,9 +95,7 @@ function createAjv(): Ajv2020 {
     code: { esm: true },
   });
   addFormats(ajv);
-  for (const name of readdirSync(SCHEMA_DIR).sort()) {
-    if (!name.endsWith(".schema.json")) continue;
-    const schema = loadJson(join(SCHEMA_DIR, name)) as object;
+  for (const schema of CONTRACT_SCHEMAS) {
     ajv.addSchema(schema);
   }
   return ajv;
