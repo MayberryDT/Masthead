@@ -342,6 +342,12 @@ describe("mastheadPagesRemoteClient", () => {
     await assertBlocked(
       "publish",
       [{ artifactId: "a1", requestDigest: publishDigest }],
+      async () => jsonResponse(200, { ...validPublishOperation, operationKind: "remove" }),
+      "staged_wrong_operation_kind"
+    );
+    await assertBlocked(
+      "publish",
+      [{ artifactId: "a1", requestDigest: publishDigest }],
       async () =>
         jsonResponse(200, {
           ...validPublishOperation,
@@ -402,6 +408,22 @@ describe("mastheadPagesRemoteClient", () => {
               }
         ),
       "staged_digest_mismatch"
+    );
+    await assertBlocked(
+      "remove",
+      [{ artifactId: "a1", requestDigest: removalDigest }],
+      async () =>
+        jsonResponse(200, {
+          sourceArtifactId: "a1",
+          operationKind: "remove",
+          requestJson: JSON.stringify({
+            ...removalRequest,
+            protocolVersion: "masthead-pages-remove-v0"
+          }),
+          requestDigest: removalDigest,
+          idempotencyKey: removalRequest.idempotencyKey
+        }),
+      "staged_invalid_remove_request"
     );
     await assertBlocked(
       "remove",

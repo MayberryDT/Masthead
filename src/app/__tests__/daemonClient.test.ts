@@ -109,6 +109,25 @@ describe("daemon client masthead pages", () => {
       }, base)
     ).resolves.toMatchObject({ mapping: { status: "failed" } });
   });
+
+  test("normalizes the materialized canonical response without changing renderer selection shape", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        response({
+          ok: true,
+          artifactIds: ["artifact:materialized"],
+          status: "complete"
+        })
+      )
+    );
+
+    await expect(resolveMastheadPagesSelection({}, "http://127.0.0.1:17373/projection")).resolves.toEqual({
+      artifactIds: ["artifact:materialized"],
+      status: "complete"
+    });
+  });
+
   test("discards IDs from an incomplete selection response", async () => {
     vi.stubGlobal(
       "fetch",
@@ -122,6 +141,13 @@ describe("daemon client masthead pages", () => {
         })
       )
     );
+
+    await expect(resolveMastheadPagesSelection({}, "http://127.0.0.1:17373/projection")).resolves.toEqual({
+      artifactIds: [],
+      reason: "eligibility_backfill_incomplete",
+      retryable: true,
+      status: "incomplete"
+    });
 
     await expect(resolveMastheadPagesSelectionShadow({}, "http://127.0.0.1:17373/projection")).resolves.toEqual({
       artifactIds: [],

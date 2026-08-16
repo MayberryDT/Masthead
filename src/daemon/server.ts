@@ -148,6 +148,7 @@ import { discoverHarnessConnectors, listHarnessConnectors, withHistoryDiscovery 
 import type { ImportScopeDto, ImportWorkUnitStatus } from "../shared/sourceImport.ts";
 import type { ImportRepairJobPlan, ImportRepairSourceMapping } from "../shared/importRepair.ts";
 import type { SessionDossierDto, SessionDossierManualEnrichmentJob } from "../shared/sessionDossier.ts";
+import { parseMastheadPagesSelectionResolverMode } from "../mastheadPages/selection.ts";
 import type {
   WorkbenchActivityDto,
   WorkbenchActivityResponse,
@@ -411,6 +412,9 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
     );
     const instanceManifestPath = resolve(process.env.MASTHEAD_INSTANCE_MANIFEST || instancePaths.instanceManifest);
     const authoringCommand = resolve(process.env.MASTHEAD_CLI_COMMAND || instancePaths.launcherPath);
+    const mastheadPagesSelectionResolverMode = parseMastheadPagesSelectionResolverMode(
+      process.env.MASTHEAD_PAGES_SELECTION_RESOLVER
+    );
     const buildSha = resolveReleaseIdentity().gitSha;
     const databaseId = getOrCreateDatabaseIdentity(database);
     let instanceManifestPublished = false;
@@ -2840,7 +2844,8 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       const result = routeMastheadPagesRequest(
         {
           db: database,
-          generatorVersion: resolveReleaseIdentity().version
+          generatorVersion: resolveReleaseIdentity().version,
+          selectionResolverMode: mastheadPagesSelectionResolverMode
         },
         { body, method: request.method ?? "GET", url }
       );

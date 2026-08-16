@@ -20,7 +20,8 @@ import { openMastheadDatabase, type MastheadDatabase } from "../db/sqlite.ts";
 import {
   MASTHEAD_PAGES_MAX_ARTIFACT_IDS,
   migrateLegacyPendingRemovalDigests,
-  routeMastheadPagesRequest
+  routeMastheadPagesRequest,
+  type MastheadPagesHttpContext
 } from "../mastheadPagesApi.ts";
 import { createMastheadDaemon, type MastheadDaemon } from "../server.ts";
 
@@ -146,6 +147,44 @@ describe("masthead pages daemon API", () => {
 
     expect(legacy?.body).toEqual({ ok: true, artifactIds: [] });
     expect(materialized?.body).toEqual({ ok: true, status: "complete", artifactIds: [] });
+  });
+
+  test("keeps legacy selection by default and requires the exact materialized context opt-in", async () => {
+    const db = await testDb();
+    const artifactId = seedEligibleArtifact(db, "session:resolver-mode");
+    const request = {
+      method: "POST",
+      url: new URL("http://127.0.0.1/masthead-pages/selection/resolve"),
+      body: { limit: 500 }
+    };
+
+    expect(routeMastheadPagesRequest({ db }, request)?.body).toEqual({
+      artifactIds: [artifactId],
+      ok: true
+    });
+    expect(routeMastheadPagesRequest({ db, selectionResolverMode: "materialized" }, request)?.body).toEqual({
+      artifactIds: [artifactId],
+      ok: true,
+      status: "complete"
+    });
+    const invalidContext = { db, selectionResolverMode: "future" } as unknown as MastheadPagesHttpContext;
+    expect(routeMastheadPagesRequest(invalidContext, request)?.body).toEqual({
+      artifactIds: [artifactId],
+      ok: true
+    });
+
+    db.prepare(
+      `UPDATE masthead_pages_artifact_eligibility
+       SET status = 'error', reason_code = 'eligibility_evaluation_error'
+       WHERE artifact_id = ?`
+    ).run(artifactId);
+    expect(routeMastheadPagesRequest({ db, selectionResolverMode: "materialized" }, request)?.body).toEqual({
+      artifactIds: [],
+      ok: true,
+      reason: "eligibility_evaluation_failed",
+      retryable: false,
+      status: "incomplete"
+    });
   });
 
   test("continues bounded eligibility backfill across event-loop turns and closes cleanly", async () => {

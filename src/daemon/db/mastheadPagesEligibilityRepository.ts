@@ -67,7 +67,7 @@ type SupportedArtifactRow = {
   contentJson: string;
 };
 
-type SelectionSql = {
+export type MastheadPagesSelectionSql = {
   from: string;
   predicates: string[];
   params: Array<string | number>;
@@ -78,6 +78,9 @@ const SUPPORTED_DOSSIER_PREDICATES = [
   "session_artifacts.artifact_kind = 'session_dossier'",
   "session_artifacts.schema_version = 'canonical-session-dossier-v1'"
 ];
+
+const LEGACY_MAX_CANDIDATE_WINDOW = 2_000;
+const LEGACY_CANDIDATE_OVERSAMPLE_FACTOR = 4;
 
 export function materializeMastheadPagesArtifactEligibilityInTransaction(
   db: MastheadDatabase,
@@ -341,8 +344,8 @@ export function resolveMaterializedMastheadPagesSelection(
   query: MaterializedMastheadPagesSelectionQuery = {},
   limit = MASTHEAD_PAGES_SELECTION_LIMIT
 ): ResolveMastheadPagesSelectionResult {
-  const capped = Math.max(1, Math.min(Math.trunc(limit || MASTHEAD_PAGES_SELECTION_LIMIT), MASTHEAD_PAGES_SELECTION_LIMIT));
-  const sql = buildSelectionSql(query);
+  const capped = capMastheadPagesSelectionLimit(limit);
+  const sql = buildMastheadPagesSelectionSql(query);
   const missing = db.prepare(
     `SELECT session_artifacts.artifact_id AS artifactId
      ${sql.from}
@@ -418,8 +421,8 @@ export function explainMaterializedMastheadPagesSelection(
   query: MaterializedMastheadPagesSelectionQuery = {},
   limit = MASTHEAD_PAGES_SELECTION_LIMIT
 ): Array<Record<string, unknown>> {
-  const capped = Math.max(1, Math.min(Math.trunc(limit || MASTHEAD_PAGES_SELECTION_LIMIT), MASTHEAD_PAGES_SELECTION_LIMIT));
-  const sql = buildSelectionSql(query);
+  const capped = capMastheadPagesSelectionLimit(limit);
+  const sql = buildMastheadPagesSelectionSql(query);
   return db.prepare(
     `EXPLAIN QUERY PLAN
      SELECT session_artifacts.artifact_id AS artifactId
@@ -493,7 +496,9 @@ function readProvenanceForArtifacts(db: MastheadDatabase, artifactIds: string[])
   return result;
 }
 
-function buildSelectionSql(query: MaterializedMastheadPagesSelectionQuery): SelectionSql {
+export function buildMastheadPagesSelectionSql(
+  query: MaterializedMastheadPagesSelectionQuery
+): MastheadPagesSelectionSql {
   const predicates = [
     "session_artifacts.publication_status = 'published'",
     "session_artifacts.status = 'current'",
@@ -528,6 +533,15 @@ function buildSelectionSql(query: MaterializedMastheadPagesSelectionQuery): Sele
     params.push(query.dateTo);
   }
   return { from, ordering, params, predicates };
+}
+
+export function capMastheadPagesSelectionLimit(limit: number): number {
+  return Math.max(1, Math.min(Math.trunc(limit || MASTHEAD_PAGES_SELECTION_LIMIT), MASTHEAD_PAGES_SELECTION_LIMIT));
+}
+
+export function mastheadPagesLegacyCandidateWindowSize(limit: number): number {
+  const capped = capMastheadPagesSelectionLimit(limit);
+  return Math.min(Math.max(capped * LEGACY_CANDIDATE_OVERSAMPLE_FACTOR, capped), LEGACY_MAX_CANDIDATE_WINDOW);
 }
 
 export function sanitizeMastheadPagesSearchQuery(value: string): string {

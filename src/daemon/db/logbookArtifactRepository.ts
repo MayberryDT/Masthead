@@ -1,7 +1,11 @@
 import { checkSessionDossierEligibility } from "../../mastheadPages/eligibility.ts";
 import type { PublishedSessionDossierV1 } from "../../shared/sessionDossier.ts";
 import type { MastheadDatabase } from "./sqlite.ts";
-import { sanitizeMastheadPagesSearchQuery } from "./mastheadPagesEligibilityRepository.ts";
+import {
+  buildMastheadPagesSelectionSql,
+  capMastheadPagesSelectionLimit,
+  mastheadPagesLegacyCandidateWindowSize
+} from "./mastheadPagesEligibilityRepository.ts";
 import {
   getSessionArtifact,
   searchPublishedArtifactCapsules,
@@ -67,55 +71,19 @@ export function listEligibleMastheadPagesArtifactIds(
   query: LogbookArtifactSearchQuery = {},
   limit = 500
 ): string[] {
-  const capped = Math.max(1, Math.min(Math.trunc(limit || 500), 500));
-  const clauses = [
-    `session_artifacts.publication_status = 'published'`,
-    `session_artifacts.status = 'current'`,
-    `session_artifacts.artifact_kind = 'session_dossier'`,
-    `session_artifacts.schema_version = 'canonical-session-dossier-v1'`
-  ];
-  const params: Array<string | number> = [];
-  let searchJoin = "";
-  let ordering = `session_artifacts.published_at DESC,
-                session_artifacts.updated_at DESC,
-                session_artifacts.artifact_id DESC`;
-
-  if (query.project) {
-    clauses.push("session_artifacts.project_label = ?");
-    params.push(query.project);
-  }
-  const searchQuery = typeof query.q === "string" ? query.q.trim() : "";
-  if (searchQuery) {
-    searchJoin =
-      "JOIN session_artifact_search ON session_artifact_search.artifact_id = session_artifacts.artifact_id";
-    clauses.push("session_artifact_search MATCH ?");
-    params.push(sanitizeMastheadPagesSearchQuery(searchQuery));
-    ordering = `bm25(session_artifact_search, 0.0, 12.0, 10.0, 12.0, 1.0, 1.0, 1.0) ASC,
-                session_artifacts.published_at DESC,
-                session_artifacts.updated_at DESC,
-                session_artifacts.artifact_id DESC`;
-  }
-  if (query.dateFrom) {
-    clauses.push("session_artifacts.published_at >= ?");
-    params.push(query.dateFrom);
-  }
-  if (query.dateTo) {
-    clauses.push("session_artifacts.published_at <= ?");
-    params.push(query.dateTo);
-  }
+  const capped = capMastheadPagesSelectionLimit(limit);
+  const sql = buildMastheadPagesSelectionSql(query);
 
   // Single oversampled read, then filter eligibility in-process (enrichment / provenance).
-  const oversample = Math.min(Math.max(capped * 4, capped), 2000);
   const rows = db
     .prepare(
       `SELECT session_artifacts.artifact_id AS artifactId
-       FROM session_artifacts
-       ${searchJoin}
-       WHERE ${clauses.join(" AND ")}
-       ORDER BY ${ordering}
+       ${sql.from}
+       WHERE ${sql.predicates.join(" AND ")}
+       ORDER BY ${sql.ordering}
        LIMIT ?`
     )
-    .all(...params, oversample) as Array<{ artifactId: string }>;
+    .all(...sql.params, mastheadPagesLegacyCandidateWindowSize(capped)) as Array<{ artifactId: string }>;
 
   const ids: string[] = [];
   for (const row of rows) {

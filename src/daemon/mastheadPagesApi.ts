@@ -17,7 +17,10 @@ import type {
   SourceLinkV1
 } from "../mastheadPages/types.ts";
 import type { PublishedSessionDossierV1 } from "../shared/sessionDossier.ts";
-import type { ResolveMastheadPagesSelectionResult } from "../mastheadPages/selection.ts";
+import type {
+  MastheadPagesSelectionResolverMode,
+  ResolveMastheadPagesSelectionResult
+} from "../mastheadPages/selection.ts";
 import { getAuthoringValidationEvidenceByRef } from "../workbench/authoring/evidenceCatalog.ts";
 import {
   getLogbookArtifactDetail,
@@ -144,6 +147,7 @@ export type MastheadPagesHttpResult = { status: number; body: unknown };
 export type MastheadPagesHttpContext = {
   db: MastheadDatabase;
   generatorVersion?: string;
+  selectionResolverMode?: MastheadPagesSelectionResolverMode;
 };
 
 export function isMastheadPagesPath(pathname: string): boolean {
@@ -189,7 +193,11 @@ export function routeMastheadPagesRequest(
 
     if (pathname === "/masthead-pages/selection/resolve") {
       if (request.method !== "POST") return methodNotAllowed();
-      return { status: 200, body: resolveSelection(context, request.body) };
+      const body =
+        context.selectionResolverMode === "materialized"
+          ? resolveMaterializedSelection(context, request.body)
+          : resolveSelection(context, request.body);
+      return { status: 200, body };
     }
 
     if (pathname === "/masthead-pages/selection/materialized/resolve") {
