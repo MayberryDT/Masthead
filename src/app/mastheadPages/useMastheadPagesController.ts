@@ -282,6 +282,17 @@ function withReleaseFields(
   };
 }
 
+function availablePublicLogbookId(
+  preferredId: string | undefined,
+  logbooks: PublicLogbookSummaryV1[],
+  fallbackId = "",
+): string {
+  if (preferredId && logbooks.some((logbook) => logbook.id === preferredId)) {
+    return preferredId;
+  }
+  return logbooks[0]?.id || fallbackId;
+}
+
 export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
   const [state, setState] = useState<MastheadPagesReviewState>(initialState);
   const stateRef = useRef(state);
@@ -507,11 +518,11 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
             outcome: { kind: "idle" as const },
           };
         });
-        const preferredLogbookId =
+        const preferredLogbookId = availablePublicLogbookId(
           items.find((item) => item.prepared?.existingRelease?.publicLogbookId)
-            ?.prepared?.existingRelease?.publicLogbookId ||
-          logbooks[0]?.id ||
-          "";
+            ?.prepared?.existingRelease?.publicLogbookId,
+          logbooks,
+        );
         patchBatch({
           phase: "editing",
           connection,
@@ -937,11 +948,11 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
         }
 
         const defaultSlug = slugify(prepared.title ?? artifactId);
-        const preferredLogbookId =
-          prepared.existingRelease?.publicLogbookId ||
-          logbooks[0]?.id ||
-          stateRef.current.publicLogbookId ||
-          "";
+        const preferredLogbookId = availablePublicLogbookId(
+          prepared.existingRelease?.publicLogbookId,
+          logbooks,
+          stateRef.current.publicLogbookId,
+        );
         patch({
           phase: "editing",
           artifactId,

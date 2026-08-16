@@ -94,6 +94,29 @@ describe("useMastheadPagesController", () => {
     );
   });
 
+  test("falls back when a prior release references an unavailable Public Logbook", async () => {
+    const desktopClient = mockDesktopClient();
+    const prepared = {
+      ...eligiblePrepared(),
+      existingRelease: { publicLogbookId: "deleted-logbook" },
+    };
+    const prepareReviews = vi
+      .fn()
+      .mockResolvedValue({ ok: true, items: [prepared] });
+    await renderController({ desktopClient, prepareReviews });
+
+    await act(async () => {
+      await latest?.openBatchReview([artifactId]);
+    });
+    expect(latest?.batchState.publicLogbookId).toBe("logbook-1");
+
+    await act(async () => {
+      latest?.closeBatchReview();
+      await latest?.openSingleReview(artifactId);
+    });
+    expect(latest?.state.publicLogbookId).toBe("logbook-1");
+  });
+
   test("blocks when desktop bridge is unavailable", async () => {
     const desktopClient = mockDesktopClient();
     await renderController({
