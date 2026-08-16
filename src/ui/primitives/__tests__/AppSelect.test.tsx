@@ -55,7 +55,36 @@ describe("AppSelect", () => {
       />
     );
 
-    expect(html).toContain('class="toolbar-select metal-control  refresh"');
+    expect(html).toContain('class="toolbar-select metal-control refresh"');
+  });
+
+  test("disables the shared trigger without opening a menu", async () => {
+    const onChange = vi.fn();
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    act(() => {
+      root?.render(
+        <AppSelect
+          label="Public Logbook"
+          icon="logbook"
+          value="none"
+          options={[{ value: "none", label: "No Public Logbooks" }]}
+          disabled
+          onChange={onChange}
+        />
+      );
+    });
+
+    expect(container.querySelector(".toolbar-select")?.className).toContain("is-disabled");
+    expect(triggerButton().disabled).toBe(true);
+
+    await act(async () => {
+      triggerButton().click();
+    });
+
+    expect(document.body.querySelector(".toolbar-select-menu")).toBeNull();
+    expect(onChange).not.toHaveBeenCalled();
   });
 
   test("opens menu items with stagger indices and a selection lock state", async () => {

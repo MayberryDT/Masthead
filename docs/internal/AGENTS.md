@@ -70,7 +70,7 @@ Surface archetypes:
 
 - Now: live cards.
 - Workbench: dense ops table plus terminal-like Activity rail and selection-driven pipeline actions.
-- Logbook: dense **Page** table backed by artifact capsules plus body/provenance inspector, with always-visible hosted-publication checkboxes and filtered Select all (no bulk enrich or summary strip).
+- Logbook: dense **Page** table backed by artifact capsules plus body/provenance inspector, with always-visible hosted-publication checkboxes and table-header Select all for the current page (no bulk enrich or summary strip).
 - Sources: harness connector rows plus live enablement (Discover → Enable → Activate → Test); see `../reference/sources-v2.md`.
 - Settings: one centered compact steel card with direct preferences and one inline detail section
   at a time for Data, Agent access, Advanced, or Danger zone.

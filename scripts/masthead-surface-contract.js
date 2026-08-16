@@ -33,18 +33,18 @@ for (const check of forbiddenPairs) {
   }
 }
 
-// Logbook Page selection is permanent: row and filtered-scope checkboxes stay visible.
+// Logbook Page selection is permanent: row and current-page header checkboxes stay visible.
 try {
   const row = await readFile("src/ui/logbook/LogbookRow.tsx", "utf8");
-  const toolbar = await readFile("src/ui/logbook/LogbookToolbar.tsx", "utf8");
+  const table = await readFile("src/ui/logbook/LogbookTable.tsx", "utf8");
 
   if (!/type=["']checkbox["']/.test(row)) {
     failures.push("LogbookRow missing permanent Page selection checkbox");
   }
-  if (!/type=["']checkbox["']/.test(toolbar) || !/Select all/.test(toolbar)) {
-    failures.push("LogbookToolbar missing filtered Select all checkbox");
+  if (!/type=["']checkbox["']/.test(table) || !/Select all eligible Pages on this page/.test(table)) {
+    failures.push("LogbookTable missing current-page Select all checkbox");
   }
-  if (/pagesSelectionMode/.test(`${row}\n${toolbar}`)) {
+  if (/pagesSelectionMode/.test(`${row}\n${table}`)) {
     failures.push("Logbook Page selection is still gated by temporary selection mode");
   }
 

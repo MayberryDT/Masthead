@@ -52,9 +52,9 @@ bridges must not forward them.
 
 ## Page selection
 
-The Logbook table keeps Page checkboxes visible. **Select all** snapshots at most 500 existing eligible
-IDs matching the current filters and never expands to future matches. Individual eligible Pages remain
-directly selectable. The compact **Publish** button is disabled until the selection is non-empty and
+The Logbook table keeps Page checkboxes visible. Its header **Select all** affects only eligible Pages
+on the current page; selections on other pages remain unchanged and total selection stays capped at 500.
+Individual eligible Pages remain directly selectable. The compact **Publish** button is disabled until the selection is non-empty and
 opens batch review directly; no temporary selection mode or auxiliary selection actions exist. The additive
 materialized resolver defines an explicit retryable or non-retryable incomplete result with zero IDs;
 Local 19 will wire that result to the production route only after shadow parity and cutover proof.

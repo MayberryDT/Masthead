@@ -1,4 +1,11 @@
-import { useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+} from "react";
 import { Icon, type IconName } from "../icons/Icon";
 import { iconWeights } from "../icons/icon-tokens";
 import { createPortal } from "react-dom";
@@ -15,16 +22,27 @@ type AppSelectProps<T extends string> = {
   options: AppSelectOption<T>[];
   onChange: (value: string) => void;
   className?: string;
+  disabled?: boolean;
 };
 
-export function AppSelect<T extends string>({ label, icon, value, options, onChange, className = "" }: AppSelectProps<T>) {
-  const [menuState, setMenuState] = useState<"closed" | "open" | "closing">("closed");
+export function AppSelect<T extends string>({
+  label,
+  icon,
+  value,
+  options,
+  onChange,
+  className = "",
+  disabled = false,
+}: AppSelectProps<T>) {
+  const [menuState, setMenuState] = useState<"closed" | "open" | "closing">(
+    "closed",
+  );
   const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
   const open = menuState === "open";
   const menuMounted = menuState !== "closed";
   const selectedIndex = Math.max(
     0,
-    options.findIndex((option) => option.value === value)
+    options.findIndex((option) => option.value === value),
   );
   const selected = options[selectedIndex];
   const selectedLabel = selected?.label ?? label;
@@ -37,7 +55,9 @@ export function AppSelect<T extends string>({ label, icon, value, options, onCha
   const closeTimerRef = useRef<number | undefined>(undefined);
   const closeFrameRef = useRef<number | undefined>(undefined);
   const selectionTimerRef = useRef<number | undefined>(undefined);
-  const [selectingValue, setSelectingValue] = useState<string | undefined>(undefined);
+  const [selectingValue, setSelectingValue] = useState<string | undefined>(
+    undefined,
+  );
 
   const clearCloseTimers = () => {
     if (closeTimerRef.current !== undefined) {
@@ -61,17 +81,24 @@ export function AppSelect<T extends string>({ label, icon, value, options, onCha
     if (!trigger) return;
     const rect = trigger.getBoundingClientRect();
     const viewportPadding = 12;
-    const menuWidth = Math.min(Math.max(rect.width, 180), window.innerWidth - viewportPadding * 2);
-    const left = Math.min(Math.max(viewportPadding, rect.left), window.innerWidth - viewportPadding - menuWidth);
+    const menuWidth = Math.min(
+      Math.max(rect.width, 180),
+      window.innerWidth - viewportPadding * 2,
+    );
+    const left = Math.min(
+      Math.max(viewportPadding, rect.left),
+      window.innerWidth - viewportPadding - menuWidth,
+    );
     setMenuStyle({
       left,
       minWidth: menuWidth,
       position: "fixed",
-      top: rect.bottom + 6
+      top: rect.bottom + 6,
     });
   };
 
   const openMenu = () => {
+    if (disabled) return;
     clearCloseTimers();
     setSelectingValue(undefined);
     updateMenuPlacement();
@@ -82,7 +109,12 @@ export function AppSelect<T extends string>({ label, icon, value, options, onCha
     clearCloseTimers();
     setSelectingValue(undefined);
 
-    const closeMs = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--dropdown-close-dur")) || 150;
+    const closeMs =
+      parseFloat(
+        getComputedStyle(document.documentElement).getPropertyValue(
+          "--dropdown-close-dur",
+        ),
+      ) || 150;
     setMenuState((current) => (current === "closed" ? current : "closing"));
     closeFrameRef.current = window.requestAnimationFrame(() => {
       closeFrameRef.current = window.requestAnimationFrame(() => {
@@ -100,7 +132,11 @@ export function AppSelect<T extends string>({ label, icon, value, options, onCha
 
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target as Node;
-      if (!rootRef.current?.contains(target) && !menuRef.current?.contains(target)) closeMenu();
+      if (
+        !rootRef.current?.contains(target) &&
+        !menuRef.current?.contains(target)
+      )
+        closeMenu();
     };
 
     const onReposition = () => updateMenuPlacement();
@@ -128,6 +164,7 @@ export function AppSelect<T extends string>({ label, icon, value, options, onCha
   useEffect(() => clearCloseTimers, []);
 
   const choose = (nextValue: string) => {
+    if (disabled) return;
     clearCloseTimers();
     setSelectingValue(nextValue);
     onChange(nextValue);
@@ -144,7 +181,11 @@ export function AppSelect<T extends string>({ label, icon, value, options, onCha
   };
 
   const onTriggerKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
-    if (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ") {
+    if (
+      event.key === "ArrowDown" ||
+      event.key === "Enter" ||
+      event.key === " "
+    ) {
       event.preventDefault();
       openMenu();
     }
@@ -157,7 +198,9 @@ export function AppSelect<T extends string>({ label, icon, value, options, onCha
   };
 
   const onMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    const activeIndex = optionRefs.current.findIndex((item) => item === document.activeElement);
+    const activeIndex = optionRefs.current.findIndex(
+      (item) => item === document.activeElement,
+    );
 
     if (event.key === "Escape") {
       event.preventDefault();
@@ -218,7 +261,18 @@ export function AppSelect<T extends string>({ label, icon, value, options, onCha
   );
 
   return (
-    <div ref={rootRef} className={`toolbar-select metal-control ${open ? "open" : ""} ${className}`.trim()}>
+    <div
+      ref={rootRef}
+      className={[
+        "toolbar-select",
+        "metal-control",
+        open && "open",
+        disabled && "is-disabled",
+        className,
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
       <button
         ref={triggerRef}
         type="button"
@@ -227,15 +281,28 @@ export function AppSelect<T extends string>({ label, icon, value, options, onCha
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={listboxId}
+        disabled={disabled}
         onClick={() => (open ? closeMenu() : openMenu())}
         onKeyDown={onTriggerKeyDown}
       >
-        <Icon name={icon} size="toolbar" weight={iconWeights.toolbar} className="toolbar-select-leading-icon" />
+        <Icon
+          name={icon}
+          size="toolbar"
+          weight={iconWeights.toolbar}
+          className="toolbar-select-leading-icon"
+        />
         <span>{selectedLabel}</span>
-        <Icon name="selectChevron" size="inline" weight={iconWeights.inline} className="toolbar-select-chevron" />
+        <Icon
+          name="selectChevron"
+          size="inline"
+          weight={iconWeights.inline}
+          className="toolbar-select-chevron"
+        />
       </button>
 
-      {menuMounted && typeof document !== "undefined" ? createPortal(menu, document.body) : null}
+      {menuMounted && typeof document !== "undefined"
+        ? createPortal(menu, document.body)
+        : null}
     </div>
   );
 }

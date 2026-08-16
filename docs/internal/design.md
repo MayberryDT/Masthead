@@ -381,9 +381,9 @@ Provenance · Published) plus a selection-driven inspector with **kind-specific 
 **always-visible provenance**. Page selection checkboxes remain visible in the table. They exist only
 for optional hosted publication; Logbook has no bulk enrich chrome or session-era summary metrics strip.
 
-The filter row includes one compact **Select all** checkbox. It selects the current filtered eligible
-Page snapshot, capped by the hosted-publication contract, and never future matches. Individual eligible
-Pages remain directly selectable. The toolbar adds exactly one hosted-publication button, visibly labeled
+The table header includes one standard **Select all** checkbox above the row-selection column. It selects
+only eligible Pages visible on the current page, remains capped by the hosted-publication contract, and
+leaves selections on other pages unchanged. Individual eligible Pages remain directly selectable. The toolbar adds exactly one hosted-publication button, visibly labeled
 **Publish**. It stays disabled until at least one eligible Page is selected and opens batch review directly.
 The Logbook context and accessible name must make the Masthead Pages destination explicit; no temporary
 selection mode, current-Page shortcut, matching-results button, or cancel-selection control is permitted.

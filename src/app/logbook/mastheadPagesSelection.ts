@@ -1,6 +1,6 @@
 export const MASTHEAD_PAGES_BATCH_CAP = 500;
 
-export type MastheadPagesSelectionScope = "none" | "manual" | "filtered";
+
 
 export type LogbookRowSelectionState = {
   selectable: boolean;

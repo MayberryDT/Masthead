@@ -29,19 +29,8 @@
   justify-content: stretch;
 }
 
-.logbook-select-all {
-  flex: 0 0 104px;
-  padding-inline: 10px;
-  white-space: nowrap;
-}
-
 .logbook-publish-button {
   flex: 0 0 88px;
-}
-
-.logbook-selection-error {
-  flex: 1 0 100%;
-  margin: 0;
 }
 
 .logbook-toolbar .logbook-search.expanded {
@@ -1217,9 +1206,8 @@
     max-height: 520px;
   }
 
-  .logbook-select-all,
   .logbook-publish-button {
-    flex: 1 1 calc(50% - 4px);
+    flex: 1 1 100%;
   }
 
   .toolbar-select.logbook-sort,

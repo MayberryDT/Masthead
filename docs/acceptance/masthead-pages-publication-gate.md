@@ -32,7 +32,7 @@ Acceptance checklist for local **Publish to Masthead Pages**. Complements
 - [ ] Long-lived credentials never enter renderer, daemon, SQLite, settings, logs, or previews.
 - [ ] Linux `basic_text` safe storage fails closed.
 - [ ] No generic external-URL or secret-reading IPC channel was added.
-- [ ] Logbook Page checkboxes and filtered **Select all** remain visible; selection is capped and includes only eligible Pages.
+- [ ] Logbook Page checkboxes remain visible; the table-header **Select all** affects only eligible Pages on the current page and selection remains capped.
 - [ ] The compact Logbook **Publish** action stays disabled until selection and opens Masthead Pages review directly; revision/removal actions remain explicitly qualified.
 
 ## Local-first failure

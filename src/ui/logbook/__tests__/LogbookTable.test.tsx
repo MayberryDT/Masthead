@@ -84,6 +84,7 @@ describe("LogbookTable", () => {
       />
     );
     expect(selectable).toContain('type="checkbox"');
+    expect(selectable).toContain('aria-label="Select all eligible Pages on this page"');
     expect(selectable).toContain("Ineligible");
 
     expect(html).toContain("TITLE / HIGHLIGHT");

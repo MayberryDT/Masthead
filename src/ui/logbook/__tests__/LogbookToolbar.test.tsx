@@ -23,14 +23,12 @@ afterEach(() => {
 });
 
 describe("LogbookToolbar", () => {
-  test("keeps one filtered Select all control and one compact Publish action visible", () => {
+  test("keeps one compact Publish action and no selection control", () => {
     const html = renderToStaticMarkup(
       <LogbookToolbar
-        allFilteredSelected
         query=""
         selectedCount={3}
         sort="recent"
-        onAllFilteredSelectedChange={() => undefined}
         onOpenBatchReview={() => undefined}
         onFilterChange={() => undefined}
         onQueryChange={() => undefined}
@@ -38,9 +36,8 @@ describe("LogbookToolbar", () => {
       />
     );
 
-    expect(html).toContain('aria-label="Select all filtered eligible Pages"');
+    expect(html).not.toContain("Select all");
     expect(html).toContain('aria-label="Publish selected Pages to Masthead Pages"');
-    expect(html).toContain(">Select all</span>");
     expect(html).toContain(">Publish</button>");
     expect(html).not.toContain("Select current page");
     expect(html).not.toContain("Select eligible matching results");
@@ -54,7 +51,6 @@ describe("LogbookToolbar", () => {
         query=""
         selectedCount={0}
         sort="recent"
-        onAllFilteredSelectedChange={() => undefined}
         onOpenBatchReview={() => undefined}
         onFilterChange={() => undefined}
         onQueryChange={() => undefined}
@@ -124,7 +120,7 @@ describe("LogbookToolbar", () => {
       />
     );
 
-    expect(html).toContain("Select all");
+    expect(html).not.toContain("Select all");
     expect(html).toContain("Publish");
     expect(html).not.toContain("Select current page");
     expect(html).not.toContain("Select all matching filter");

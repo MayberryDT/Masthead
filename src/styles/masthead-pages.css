@@ -58,51 +58,35 @@
   font-size: 13px;
 }
 
-.masthead-pages-field input,
-.masthead-pages-field select {
+.masthead-pages-field input {
   min-height: 40px;
   border: 1px solid rgba(92, 153, 187, 0.24);
   border-radius: 3px;
   background-color: var(--control-raised, #081d2a);
   color: var(--ink);
-  padding: 8px 34px 8px 10px;
+  padding: 8px 10px;
   transition: border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
 }
 
-.masthead-pages-field select {
-  appearance: none;
-  background-image:
-    linear-gradient(45deg, transparent 50%, #91a8ba 50%),
-    linear-gradient(135deg, #91a8ba 50%, transparent 50%);
-  background-position:
-    calc(100% - 15px) 17px,
-    calc(100% - 10px) 17px;
-  background-repeat: no-repeat;
-  background-size: 5px 5px, 5px 5px;
-}
-
-.masthead-pages-field select:hover:not(:disabled),
 .masthead-pages-field input:hover:not(:disabled) {
   border-color: rgba(112, 173, 205, 0.42);
   background-color: var(--control-raised-hover, #0b2636);
 }
 
-.masthead-pages-field select:focus-visible,
 .masthead-pages-field input:focus-visible {
   outline: 0;
   border-color: rgba(116, 185, 224, 0.72);
   box-shadow: 0 0 0 2px rgba(46, 167, 255, 0.18);
 }
 
-.masthead-pages-field select:disabled,
 .masthead-pages-field input:disabled {
   cursor: not-allowed;
   opacity: 0.5;
 }
 
-.masthead-pages-field select option {
-  background: #071b28;
-  color: var(--ink);
+.masthead-pages-field .masthead-pages-app-select {
+  width: 100%;
+  min-width: 0;
 }
 
 .masthead-pages-checkbox {
@@ -399,9 +383,14 @@
   text-align: center;
 }
 
-.logbook-row-checkbox {
+.logbook-row-checkbox,
+.logbook-page-select-all {
   justify-content: center;
   width: 40px;
+}
+
+.logbook-page-select-all {
+  margin-inline: auto;
 }
 
 @media (max-width: 600px) {

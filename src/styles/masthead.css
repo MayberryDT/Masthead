@@ -5199,6 +5199,15 @@ body {
   text-align: left;
 }
 
+.toolbar-select.is-disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.toolbar-select-trigger:disabled {
+  cursor: not-allowed;
+}
+
 .toolbar-select-trigger span {
   display: block;
   overflow: hidden;

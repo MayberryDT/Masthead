@@ -52,12 +52,9 @@ type Props = {
   onTranscriptFilterChange?: (filter: SessionTranscriptKindFilter) => void;
   onPublishToMastheadPages?: (artifactId: string) => void;
   selectedArtifactIds?: readonly string[];
-  allFilteredSelected?: boolean;
-  selectionBusy?: boolean;
-  selectionError?: string;
-  onAllFilteredSelectedChange?: (selected: boolean) => void;
   onOpenBatchReview?: () => void;
   onArtifactSelectedChange?: (artifactId: string, selected: boolean) => void;
+  onCurrentPageSelectedChange?: (artifactIds: readonly string[], selected: boolean) => void;
   pageIndex?: number;
   pageSize?: number;
   transcriptFilter?: SessionTranscriptKindFilter;
@@ -146,12 +143,9 @@ export function HistoryPanel({
   onTranscriptFilterChange,
   onPublishToMastheadPages,
   selectedArtifactIds = [],
-  allFilteredSelected = false,
-  selectionBusy = false,
-  selectionError,
-  onAllFilteredSelectedChange,
   onOpenBatchReview,
   onArtifactSelectedChange,
+  onCurrentPageSelectedChange,
   pageIndex = 0,
   pageSize = 100,
   query,
@@ -253,10 +247,6 @@ export function HistoryPanel({
         query={query}
         sort={sort}
         selectedCount={selectedArtifactIds.length}
-        allFilteredSelected={allFilteredSelected}
-        selectionBusy={selectionBusy}
-        selectionError={selectionError}
-        onAllFilteredSelectedChange={onAllFilteredSelectedChange}
         onOpenBatchReview={onOpenBatchReview}
         onFilterChange={onFilterChange ?? (() => undefined)}
         onQueryChange={onQueryChange}
@@ -288,6 +278,7 @@ export function HistoryPanel({
               updating={isLoading}
               selectedArtifactIds={selectedArtifactIds}
               onArtifactSelectedChange={onArtifactSelectedChange}
+              onCurrentPageSelectedChange={onCurrentPageSelectedChange}
               onSelect={(sessionId) => onSessionSelect?.(sessionId)}
             />
           </div>

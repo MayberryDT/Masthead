@@ -18,10 +18,6 @@ type Props = {
   onQueryChange: (query: string) => void;
   onSortChange: (sort: LogbookSort) => void;
   selectedCount?: number;
-  allFilteredSelected?: boolean;
-  selectionBusy?: boolean;
-  selectionError?: string;
-  onAllFilteredSelectedChange?: (selected: boolean) => void;
   onOpenBatchReview?: () => void;
 };
 
@@ -54,18 +50,14 @@ function dropdownCloseDelayMs(): number {
 }
 
 export function LogbookToolbar({
-  allFilteredSelected = false,
   filterOptions,
   filters = {},
-  onAllFilteredSelectedChange,
   onFilterChange,
   onOpenBatchReview,
   onQueryChange,
   onSortChange,
   query,
   selectedCount = 0,
-  selectionBusy = false,
-  selectionError,
   sort
 }: Props) {
   const projectOptions = optionRows(filterOptions?.projects, filters.project);
@@ -214,31 +206,16 @@ export function LogbookToolbar({
         />
 
         <AppSelect label="Sort Pages" icon="recentActivity" value={sort} options={sortOptions} className="logbook-sort" onChange={(value) => onSortChange(value as LogbookSort)} />
-        <label className="logbook-select-all masthead-checkbox-control">
-          <input
-            aria-label="Select all filtered eligible Pages"
-            checked={allFilteredSelected}
-            disabled={selectionBusy}
-            type="checkbox"
-            onChange={(event) => onAllFilteredSelectedChange?.(event.currentTarget.checked)}
-          />
-          <span>{selectionBusy ? "Selecting…" : "Select all"}</span>
-        </label>
         <AppButton
           aria-label="Publish selected Pages to Masthead Pages"
           className="logbook-publish-button"
-          disabled={selectionBusy || selectedCount === 0}
+          disabled={selectedCount === 0}
           onClick={onOpenBatchReview}
           variant="primary"
         >
           Publish
         </AppButton>
       </div>
-      {selectionError ? (
-        <p className="toolbar-result surface-status logbook-selection-error" role="alert">
-          {selectionError}
-        </p>
-      ) : null}
     </div>
   );
 }

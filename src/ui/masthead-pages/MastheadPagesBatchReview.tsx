@@ -1,6 +1,14 @@
 import type { PageLicense, PublicLogbookSummaryV1 } from "../../mastheadPages/types";
 import type { MastheadPagesBatchState } from "../../app/mastheadPages/types";
 import { AppButton } from "../primitives/AppButton";
+import { AppSelect } from "../primitives/AppSelect";
+
+const licenseOptions = [
+  { value: "all-rights-reserved", label: "All rights reserved" },
+  { value: "cc-by-4.0", label: "CC BY 4.0" },
+  { value: "cc-by-sa-4.0", label: "CC BY-SA 4.0" },
+  { value: "cc0-1.0", label: "CC0 1.0" }
+];
 
 export type MastheadPagesBatchReviewProps = {
   open: boolean;
@@ -69,36 +77,37 @@ export function MastheadPagesBatchReview({
           <section className="masthead-pages-review-step masthead-pages-batch-destination" aria-label="Destination">
             <p className="mono-label">Destination</p>
             <div className="masthead-pages-batch-fields">
-            <label className="masthead-pages-field">
-              Public Logbook
-              <select
-                aria-label="Destination Public Logbook"
-                disabled={fieldsLocked || batch.logbooks.length === 0}
-                value={batch.publicLogbookId}
-                onChange={(event) => onPublicLogbookIdChange(event.currentTarget.value)}
-              >
-                {batch.logbooks.length === 0 ? <option value="">No Public Logbooks</option> : null}
-                {batch.logbooks.map((logbook: PublicLogbookSummaryV1) => (
-                  <option key={logbook.id} value={logbook.id}>
-                    {logbook.title} ({logbook.slug})
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="masthead-pages-field">
-              License
-              <select
-                aria-label="Page license"
-                disabled={fieldsLocked}
-                value={batch.license}
-                onChange={(event) => onLicenseChange(event.currentTarget.value as PageLicense)}
-              >
-                <option value="all-rights-reserved">All rights reserved</option>
-                <option value="cc-by-4.0">CC BY 4.0</option>
-                <option value="cc-by-sa-4.0">CC BY-SA 4.0</option>
-                <option value="cc0-1.0">CC0 1.0</option>
-              </select>
-            </label>
+              <div className="masthead-pages-field">
+                <span>Public Logbook</span>
+                <AppSelect
+                  className="masthead-pages-app-select"
+                  disabled={fieldsLocked || batch.logbooks.length === 0}
+                  icon="logbook"
+                  label="Destination Public Logbook"
+                  options={
+                    batch.logbooks.length === 0
+                      ? [{ value: "", label: "No Public Logbooks" }]
+                      : batch.logbooks.map((logbook: PublicLogbookSummaryV1) => ({
+                          value: logbook.id,
+                          label: `${logbook.title} (${logbook.slug})`
+                        }))
+                  }
+                  value={batch.publicLogbookId}
+                  onChange={onPublicLogbookIdChange}
+                />
+              </div>
+              <div className="masthead-pages-field">
+                <span>License</span>
+                <AppSelect
+                  className="masthead-pages-app-select"
+                  disabled={fieldsLocked}
+                  icon="blocked"
+                  label="Page license"
+                  options={licenseOptions}
+                  value={batch.license}
+                  onChange={(value) => onLicenseChange(value as PageLicense)}
+                />
+              </div>
             </div>
             <label className="masthead-pages-checkbox masthead-checkbox-control">
               <input

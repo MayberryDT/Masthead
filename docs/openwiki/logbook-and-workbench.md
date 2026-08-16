@@ -128,7 +128,7 @@ selection, and any new imports can still fill Workbench.
 - **Columns:** Kind · Title/Highlight · Project · Conf · Provenance · Published.
 - **Layout:** left capsule table, right inspector = **body + always-visible provenance** (join rationale when multi-session).
 - **Filters:** kind · project · date · search (no runtime/model primary, no bulk enrich, no summary strip).
-- **Masthead Pages selection:** Page checkboxes remain visible. **Select all** snapshots current filtered eligible Pages, capped at 500; individual eligible Pages remain directly selectable.
+- **Masthead Pages selection:** Page checkboxes remain visible. The table-header **Select all** affects eligible Pages on the current page only; individual eligible Pages remain directly selectable and total selection stays capped at 500.
 - **Publish:** the compact toolbar button is disabled with no selection and opens Masthead Pages batch review directly. Its accessible name names the hosted destination. See [Masthead Pages integration](../reference/masthead-pages-integration.md).
 - **Empty after wipe:** normal until Workbench republishes. Hosted outages never remove or block local Logbook Pages.
 
@@ -253,7 +253,7 @@ status, reviews, and receipts remain audit history; their mutations return
 ## Anti-patterns for agents
 
 - Do not turn Logbook selection into bulk enrich or reintroduce a summary metrics strip.
-- Do not add hosted-publication selection modes or extra selection actions. Keep Page checkboxes and filtered **Select all** visible, with one compact **Publish** button that opens Masthead Pages review.
+- Do not add hosted-publication selection modes or extra selection actions. Keep Page checkboxes and the current-page table-header **Select all** visible, with one compact **Publish** button that opens Masthead Pages review.
 - Do not treat “published session” as a Logbook search hit.
 - Do not document Logbook as a session library or dual session/artifact browser.
 - Do not put Workbench process tracking into Logbook.

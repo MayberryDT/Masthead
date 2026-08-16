@@ -118,6 +118,11 @@ describe("MastheadPagesBatchReview", () => {
     expect(html).toContain("Needs Review Page");
     expect(html).toContain("Blocked Page");
     expect(html).toContain("Masthead Pages requires the desktop app.");
+    expect(html).toContain('class="toolbar-select metal-control');
+    expect(html.match(/class="toolbar-select-trigger"/g)).toHaveLength(2);
+    expect(html).toContain("Destination Public Logbook: Notes (notes)");
+    expect(html).toContain("Page license: All rights reserved");
+    expect(html).not.toContain("<select");
     expect(html).not.toContain("Ready items are daemon-staged before transfer");
     expect(html).not.toContain("Desktop unavailable");
     expect(html).not.toContain("Connection");

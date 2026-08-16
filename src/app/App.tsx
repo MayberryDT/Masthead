@@ -753,12 +753,7 @@ export function App() {
             onSortChange={logbook.changeSort}
             onTranscriptFilterChange={logbook.changeTranscriptFilter}
             selectedArtifactIds={logbook.selectedArtifactIds}
-            allFilteredSelected={logbook.allFilteredSelected}
-            selectionBusy={logbook.selectionBusy}
-            selectionError={logbook.selectionError}
-            onAllFilteredSelectedChange={(selected) => {
-              void logbook.selectAllFilteredPages(selected);
-            }}
+            onCurrentPageSelectedChange={logbook.setCurrentPageSelected}
             onOpenBatchReview={() => {
               const ids = [...logbook.selectedArtifactIds];
               logbook.openBatchReview();

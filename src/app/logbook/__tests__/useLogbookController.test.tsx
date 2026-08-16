@@ -10,7 +10,6 @@ import {
   getLogbookArtifact,
   getSessionTranscript,
   listProjects,
-  resolveMastheadPagesSelection,
   searchLogbook,
   type LogbookArtifactDetail,
   type LogbookSession
@@ -21,7 +20,6 @@ const daemonClientMocks = vi.hoisted(() => ({
   getLogbookArtifact: vi.fn(),
   getSessionTranscript: vi.fn(),
   listProjects: vi.fn(),
-  resolveMastheadPagesSelection: vi.fn(),
   searchLogbook: vi.fn()
 }));
 
@@ -562,14 +560,9 @@ function LogbookHarness() {
       sort={logbook.sort}
       transcriptFilter={logbook.transcriptFilter}
       selectedArtifactIds={logbook.selectedArtifactIds}
-      allFilteredSelected={logbook.allFilteredSelected}
-      selectionBusy={logbook.selectionBusy}
-      selectionError={logbook.selectionError}
-      onAllFilteredSelectedChange={(selected) => {
-        void logbook.selectAllFilteredPages(selected);
-      }}
       onOpenBatchReview={logbook.openBatchReview}
       onArtifactSelectedChange={logbook.setArtifactSelected}
+      onCurrentPageSelectedChange={logbook.setCurrentPageSelected}
       onCloseDetail={logbook.closeSession}
       onFilterChange={logbook.changeFilters}
       onPageChange={logbook.changePage}
@@ -583,7 +576,7 @@ function LogbookHarness() {
 }
 
 describe("useLogbookController Masthead Pages selection", () => {
-  test("keeps Select all and Page checkboxes visible without a temporary mode", async () => {
+  test("keeps current-page Select all and Page checkboxes visible", async () => {
     mockLogbookSearch(
       [
         session("artifact-a", "Alpha", "session_dossier"),
@@ -597,20 +590,58 @@ describe("useLogbookController Masthead Pages selection", () => {
 
     const checkboxes = Array.from(container?.querySelectorAll('input[type="checkbox"]') ?? []) as HTMLInputElement[];
     expect(checkboxes).toHaveLength(3);
-    expect(checkboxes[0]?.getAttribute("aria-label")).toBe("Select all filtered eligible Pages");
+    expect(checkboxes[0]?.getAttribute("aria-label")).toBe("Select all eligible Pages on this page");
     expect(checkboxes[1]?.disabled).toBe(false);
     expect(checkboxes[2]?.disabled).toBe(true);
-    expect(container?.textContent).not.toContain("Select current page");
-    expect(container?.textContent).not.toContain("Cancel Masthead Pages selection");
+    expect(container?.querySelector(".logbook-toolbar")?.textContent).not.toContain("Select all");
   });
 
-  test("keeps manual selection across pagination and filter changes", async () => {
-    const pageOne = [session("artifact-a", "Alpha", "session_dossier"), session("artifact-b", "Beta", "session_dossier")];
-    const pageTwo = [session("artifact-c", "Gamma", "session_dossier")];
+  test("table-header Select all affects only eligible Pages on the current page", async () => {
+    mockLogbookSearch(
+      [
+        session("artifact-a", "Alpha", "session_dossier"),
+        session("artifact-b", "Beta", "session_dossier"),
+        session("artifact-c", "Gamma", "runbook")
+      ],
+      3
+    );
+    mockMetadata();
+    await renderHarness();
+    await flushAsync();
+
+    await act(async () => {
+      latestController?.setArtifactSelected("artifact-other-page", true);
+      await Promise.resolve();
+    });
+    const selectAll = container?.querySelector<HTMLInputElement>(
+      'input[aria-label="Select all eligible Pages on this page"]'
+    );
+    await act(async () => {
+      selectAll?.click();
+      await Promise.resolve();
+    });
+
+    expect(latestController?.selectedArtifactIds).toEqual([
+      "artifact-other-page",
+      "artifact-a",
+      "artifact-b"
+    ]);
+    expect(selectAll?.checked).toBe(true);
+
+    await act(async () => {
+      selectAll?.click();
+      await Promise.resolve();
+    });
+    expect(latestController?.selectedArtifactIds).toEqual(["artifact-other-page"]);
+  });
+
+  test("keeps selection across pagination and filter changes", async () => {
+    const pageOne = [session("artifact-a", "Alpha", "session_dossier")];
+    const pageTwo = [session("artifact-b", "Beta", "session_dossier")];
     vi.mocked(searchLogbook)
-      .mockResolvedValueOnce({ sessions: pageOne, total: 3, nextCursor: "2" })
-      .mockResolvedValueOnce({ sessions: pageTwo, total: 3, nextCursor: undefined })
-      .mockResolvedValue({ sessions: pageOne, total: 3, nextCursor: "2" });
+      .mockResolvedValueOnce({ sessions: pageOne, total: 2, nextCursor: "2" })
+      .mockResolvedValueOnce({ sessions: pageTwo, total: 2, nextCursor: undefined })
+      .mockResolvedValue({ sessions: pageOne, total: 2, nextCursor: "2" });
     mockMetadata();
     await renderHarness();
     await flushAsync();
@@ -619,91 +650,18 @@ describe("useLogbookController Masthead Pages selection", () => {
       latestController?.setArtifactSelected("artifact-a", true);
       await Promise.resolve();
     });
-    expect(latestController?.selectedArtifactIds).toEqual(["artifact-a"]);
-
     await act(async () => {
       latestController?.changePage(1);
       await Promise.resolve();
     });
     await flushAsync();
-    expect(latestController?.selectedArtifactIds).toEqual(["artifact-a"]);
-
     await act(async () => {
       latestController?.changeQuery("oauth");
       await Promise.resolve();
     });
     await flushAsync();
+
     expect(latestController?.selectedArtifactIds).toEqual(["artifact-a"]);
-    expect(latestController?.selectionScope).toBe("manual");
-  });
-
-  test("Select all snapshots filtered eligible IDs and unchecks when filters change", async () => {
-    mockLogbookSearch([session("artifact-a", "Alpha", "session_dossier")], 1);
-    mockMetadata();
-    vi.mocked(resolveMastheadPagesSelection).mockResolvedValue({
-      artifactIds: Array.from({ length: 12 }, (_, index) => `artifact-${index + 1}`),
-      status: "complete"
-    });
-    await renderHarness();
-    await flushAsync();
-
-    await act(async () => {
-      await latestController?.selectAllFilteredPages(true);
-    });
-    await flushAsync();
-
-    expect(resolveMastheadPagesSelection).toHaveBeenCalledWith(
-      expect.objectContaining({ limit: 500 }),
-      baseUrl
-    );
-    expect(latestController?.selectedArtifactIds).toHaveLength(12);
-    expect(latestController?.selectionScope).toBe("filtered");
-    expect(latestController?.allFilteredSelected).toBe(true);
-
-    await act(async () => {
-      latestController?.changeQuery("new-filter");
-      await Promise.resolve();
-    });
-    await flushAsync();
-    expect(latestController?.selectedArtifactIds).toHaveLength(12);
-    expect(latestController?.selectionScope).toBe("manual");
-    expect(latestController?.allFilteredSelected).toBe(false);
-    expect(resolveMastheadPagesSelection).toHaveBeenCalledTimes(1);
-  });
-
-  test("discards a pending Select all snapshot when filters change", async () => {
-    mockLogbookSearch([session("artifact-a", "Alpha", "session_dossier")], 1);
-    mockMetadata();
-    let settleSelection: ((value: { artifactIds: string[]; status: "complete" }) => void) | undefined;
-    vi.mocked(resolveMastheadPagesSelection).mockImplementationOnce(
-      () => new Promise((resolve) => {
-        settleSelection = resolve;
-      })
-    );
-    await renderHarness();
-    await flushAsync();
-
-    let pendingSelection: Promise<void> | undefined;
-    await act(async () => {
-      pendingSelection = latestController?.selectAllFilteredPages(true);
-      await Promise.resolve();
-    });
-    expect(latestController?.selectionBusy).toBe(true);
-
-    await act(async () => {
-      latestController?.changeQuery("new-filter");
-      await Promise.resolve();
-    });
-    expect(latestController?.selectionBusy).toBe(false);
-
-    await act(async () => {
-      settleSelection?.({ artifactIds: ["artifact-a"], status: "complete" });
-      await pendingSelection;
-    });
-
-    expect(latestController?.selectedArtifactIds).toEqual([]);
-    expect(latestController?.selectionScope).toBe("none");
-    expect(latestController?.allFilteredSelected).toBe(false);
   });
 
   test("clears selected Pages and review when the active projection changes", async () => {
@@ -730,62 +688,7 @@ describe("useLogbookController Masthead Pages selection", () => {
     await flushAsync();
 
     expect(latestController?.selectedArtifactIds).toEqual([]);
-    expect(latestController?.selectionScope).toBe("none");
     expect(latestController?.batchReview).toBeNull();
-  });
-
-  test("unchecking Select all clears its snapshot", async () => {
-    mockLogbookSearch([session("artifact-a", "Alpha", "session_dossier")], 1);
-    mockMetadata();
-    vi.mocked(resolveMastheadPagesSelection).mockResolvedValue({ artifactIds: ["artifact-a"], status: "complete" });
-    await renderHarness();
-    await flushAsync();
-
-    await act(async () => {
-      await latestController?.selectAllFilteredPages(true);
-      await latestController?.selectAllFilteredPages(false);
-    });
-    await flushAsync();
-
-    expect(latestController?.selectedArtifactIds).toEqual([]);
-    expect(latestController?.selectionScope).toBe("none");
-    expect(latestController?.allFilteredSelected).toBe(false);
-  });
-
-  test("incomplete filtered selection exposes customer-facing repair state and commits zero IDs", async () => {
-    mockLogbookSearch([session("artifact-a", "Alpha", "session_dossier")], 1);
-    mockMetadata();
-    vi.mocked(resolveMastheadPagesSelection).mockResolvedValue({
-      artifactIds: [],
-      reason: "eligibility_backfill_incomplete",
-      retryable: true,
-      status: "incomplete"
-    });
-    await renderHarness();
-    await flushAsync();
-
-    await act(async () => {
-      latestController?.setArtifactSelected("artifact-a", true);
-      await Promise.resolve();
-    });
-    await act(async () => {
-      latestController?.openBatchReview();
-      await Promise.resolve();
-    });
-    expect(latestController?.batchReview).toMatchObject({ artifactIds: ["artifact-a"], open: true });
-
-    await act(async () => {
-      await latestController?.selectAllFilteredPages(true);
-    });
-    await flushAsync();
-
-    expect(latestController?.selectedArtifactIds).toEqual([]);
-    expect(latestController?.batchReview).toBeNull();
-    expect(latestController?.selectionScope).toBe("none");
-    expect(latestController?.selectionError).toBe(
-      "Filtered Pages are still being indexed. Try again in a moment."
-    );
-    expect(container?.textContent).toContain("Filtered Pages are still being indexed");
   });
 
   test("disables ineligible row checkboxes with reasons", async () => {
