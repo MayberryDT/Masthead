@@ -1106,6 +1106,13 @@ export function App() {
             onConfirmPublish={() => {
               void mastheadPages.confirmBatchPublish();
             }}
+            onRemoveItem={(artifactId) => {
+              mastheadPages.closeBatchReview();
+              logbook.closeBatchReview();
+              void mastheadPages.openSingleReview(artifactId, {
+                openRemovalConfirmation: true,
+              });
+            }}
           />
         </>
       </LogbookSurface>

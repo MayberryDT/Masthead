@@ -94,6 +94,61 @@ describe("useMastheadPagesController", () => {
     );
   });
 
+  test("records batch parent conflicts as non-retryable and clears the staged operation", async () => {
+    const request = await sampleRequest();
+    const digest = await sha256CanonicalRequest(request);
+    const hostedCurrent =
+      "sha256-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const desktopClient = mockDesktopClient({
+      publishStaged: vi.fn().mockResolvedValue({
+        protocolVersion: "masthead-pages-publish-batch-result-v1",
+        results: [{
+          status: "conflict",
+          idempotencyKey: request.idempotencyKey,
+          code: "parent-conflict",
+          retryable: true,
+          message: "stale parent",
+          currentObjectId: hostedCurrent,
+        }],
+      }),
+    });
+    const recordResults = vi.fn().mockResolvedValue({ ok: true });
+    await renderController({
+      desktopClient,
+      prepareReviews: vi.fn().mockResolvedValue({ ok: true, items: [eligiblePrepared()] }),
+      finalizeReviews: vi.fn().mockResolvedValue({ ok: true, items: [readyFinalized(request, digest)] }),
+      recordResults,
+    });
+
+    await act(async () => {
+      await latest?.openBatchReview([artifactId]);
+    });
+    await flushController();
+    await act(async () => {
+      await latest?.finalizeBatchReview();
+    });
+    await flushController();
+    await act(async () => {
+      await latest?.confirmBatchPublish();
+    });
+    await flushController();
+
+    expect(recordResults).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "failure",
+        failure: expect.objectContaining({
+          errorClass: "parent-conflict",
+          retryable: false,
+          currentObjectId: hostedCurrent,
+        }),
+      }),
+      baseUrl,
+    );
+    expect(latest?.batchState.items[0]?.outcome).toEqual(
+      expect.objectContaining({ kind: "failed", retryable: false }),
+    );
+  });
+
   test("falls back when a prior release references an unavailable Public Logbook", async () => {
     const desktopClient = mockDesktopClient();
     const prepared = {
@@ -596,12 +651,11 @@ describe("useMastheadPagesController", () => {
     });
 
     await act(async () => {
-      await latest?.openSingleReview(artifactId);
+      await latest?.openSingleReview(artifactId, {
+        openRemovalConfirmation: true,
+      });
     });
     await flushController();
-    await act(async () => {
-      latest?.beginRemoval();
-    });
     expect(latest?.state.removalConfirmOpen).toBe(true);
     await act(async () => {
       await latest?.confirmRemoval();

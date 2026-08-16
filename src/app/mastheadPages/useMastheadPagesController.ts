@@ -814,6 +814,8 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
           continue;
         }
 
+        const retryable =
+          result.retryable === true && result.code !== "parent-conflict";
         await recordResults(
           {
             kind: "failure",
@@ -821,7 +823,7 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
               artifactId: item.artifactId,
               errorClass: result.code,
               message: result.message,
-              retryable: result.retryable === true,
+              retryable,
               recordedAt: now(),
               currentObjectId: result.currentObjectId,
             },
@@ -833,7 +835,7 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
           outcome: {
             kind: "failed",
             message: result.message,
-            retryable: result.retryable === true,
+            retryable,
             code: result.code,
           },
         });
@@ -880,7 +882,10 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
   ]);
 
   const openSingleReview = useCallback(
-    async (artifactId: string) => {
+    async (
+      artifactId: string,
+      options?: { openRemovalConfirmation?: boolean },
+    ) => {
       patch({
         ...initialState(),
         phase: "loading",
@@ -971,7 +976,9 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
           error: undefined,
           finalized: undefined,
           acknowledgeWarnings: false,
-          removalConfirmOpen: false,
+          removalConfirmOpen:
+            options?.openRemovalConfirmation === true &&
+            canRemoveFromPages(prepared.existingRelease),
           parentConflictObjectId: undefined,
           outcome: { kind: "idle" },
         });

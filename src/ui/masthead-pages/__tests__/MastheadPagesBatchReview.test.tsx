@@ -162,6 +162,50 @@ describe("MastheadPagesBatchReview", () => {
     expect(html).not.toContain("Desktop unavailable");
   });
 
+  test("offers the explicit removal path for one Page with a live release", () => {
+    const html = renderToStaticMarkup(
+      <MastheadPagesBatchReview
+        open
+        batch={{
+          phase: "editing",
+          artifactIds: ["a1"],
+          items: [{
+            artifactId: "a1",
+            title: "Live Page",
+            selectedForPublish: true,
+            outcome: { kind: "idle" },
+            prepared: {
+              artifactId: "a1",
+              eligibility: "eligible",
+              evidenceCandidates: [],
+              findings: [],
+              existingRelease: {
+                status: "live",
+                pageId: "page-1",
+                objectId: "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              }
+            }
+          }],
+          logbooks: [],
+          publicLogbookId: "",
+          license: "all-rights-reserved",
+          acknowledgeWarnings: false
+        }}
+        readyCount={0}
+        onClose={() => undefined}
+        onPublicLogbookIdChange={() => undefined}
+        onLicenseChange={() => undefined}
+        onAcknowledgeWarningsChange={() => undefined}
+        onItemSelectedChange={() => undefined}
+        onFinalize={() => undefined}
+        onConfirmPublish={() => undefined}
+        onRemoveItem={() => undefined}
+      />
+    );
+
+    expect(html).toContain("Remove from Masthead Pages");
+  });
+
   test("hides when closed", () => {
     const html = renderToStaticMarkup(
       <MastheadPagesBatchReview

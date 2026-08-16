@@ -1,5 +1,6 @@
 import type { PageLicense, PublicLogbookSummaryV1 } from "../../mastheadPages/types";
 import type { MastheadPagesBatchState } from "../../app/mastheadPages/types";
+import { canRemoveFromPages } from "../../mastheadPages/releaseState";
 import { AppButton } from "../primitives/AppButton";
 import { AppSelect } from "../primitives/AppSelect";
 
@@ -22,6 +23,7 @@ export type MastheadPagesBatchReviewProps = {
   onItemSelectedChange: (artifactId: string, selected: boolean) => void;
   onFinalize: () => void;
   onConfirmPublish: () => void;
+  onRemoveItem?: (artifactId: string) => void;
 };
 
 export function MastheadPagesBatchReview({
@@ -34,6 +36,7 @@ export function MastheadPagesBatchReview({
   onItemSelectedChange,
   onLicenseChange,
   onPublicLogbookIdChange,
+  onRemoveItem,
   open,
   readyCount
 }: MastheadPagesBatchReviewProps) {
@@ -50,6 +53,14 @@ export function MastheadPagesBatchReview({
       (!item.finalized && batch.phase === "reviewing")
   );
   const showGroups = batch.phase === "reviewing" || batch.phase === "publishing" || batch.phase === "complete";
+  const singleItem = batch.items.length === 1 ? batch.items[0] : undefined;
+  const singleRelease = singleItem?.finalized?.existingRelease ?? singleItem?.prepared?.existingRelease;
+  const canRemoveSingleItem =
+    Boolean(onRemoveItem) &&
+    Boolean(singleItem) &&
+    canRemoveFromPages(singleRelease) &&
+    batch.phase !== "publishing" &&
+    batch.phase !== "complete";
 
   return (
     <div className="masthead-pages-review-backdrop" role="presentation" onClick={onClose}>
@@ -156,6 +167,17 @@ export function MastheadPagesBatchReview({
         </div>
 
         <footer className="masthead-pages-review-actions">
+          {canRemoveSingleItem ? (
+            <AppButton
+              disabled={busy}
+              onClick={() => {
+                if (singleItem) onRemoveItem?.(singleItem.artifactId);
+              }}
+              variant="quiet"
+            >
+              Remove from Masthead Pages
+            </AppButton>
+          ) : null}
           {batch.phase === "editing" || batch.phase === "loading" || batch.phase === "error" || batch.phase === "finalizing" ? (
             <AppButton
               disabled={busy || batch.phase === "loading" || batch.phase === "finalizing" || Boolean(batch.gate && batch.gate !== "needs_warning_ack")}
