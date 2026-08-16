@@ -7,7 +7,7 @@ import {
   canRetryPendingRemoval,
   confirmPublishLabel,
   deriveReleaseState,
-  type ReleaseMappingSnapshot
+  type ReleaseMappingSnapshot,
 } from "../../mastheadPages/releaseState";
 import type {
   PageLicense,
@@ -16,20 +16,20 @@ import type {
   PublishPageResultV1,
   PublicLogbookSummaryV1,
   RemovePageResultV1,
-  SourceLinkV1
+  SourceLinkV1,
 } from "../../mastheadPages/types";
 import {
   finalizeAndStageMastheadPagesReviews,
   getPendingMastheadPagesOperation,
   prepareMastheadPagesReviews,
   recordMastheadPagesResults,
-  stageMastheadPagesRemoval
+  stageMastheadPagesRemoval,
 } from "../daemonClient";
 import type { MastheadPagesConnectionState } from "../desktopBridge";
 import {
   createMastheadPagesDesktopClient,
   isMastheadPagesDesktopClientAvailable,
-  type MastheadPagesDesktopClient
+  type MastheadPagesDesktopClient,
 } from "./desktopClient";
 import { sha256CanonicalRequest } from "./requestDigest";
 import type {
@@ -42,7 +42,7 @@ import type {
   MastheadPagesPublicationOutcome,
   MastheadPagesReviewPhase,
   MastheadPagesReviewState,
-  PreparedPageReviewItem
+  PreparedPageReviewItem,
 } from "./types";
 
 export type MastheadPagesControllerDeps = {
@@ -72,7 +72,7 @@ const initialState = (): MastheadPagesReviewState => ({
   releaseState: "not_on_pages",
   confirmPublishLabel: "Publish to Masthead Pages",
   removalConfirmOpen: false,
-  outcome: { kind: "idle" }
+  outcome: { kind: "idle" },
 });
 
 const initialBatchState = (): MastheadPagesBatchState => ({
@@ -82,14 +82,19 @@ const initialBatchState = (): MastheadPagesBatchState => ({
   logbooks: [],
   publicLogbookId: "",
   license: "all-rights-reserved",
-  acknowledgeWarnings: false
+  acknowledgeWarnings: false,
 });
 
-function slugifyArtifact(title: string | undefined, artifactId: string): string {
+function slugifyArtifact(
+  title: string | undefined,
+  artifactId: string,
+): string {
   return slugify(title ?? artifactId);
 }
 
-function defaultEvidenceSelections(prepared: PreparedPageReviewItem): MastheadPagesEvidenceSelection[] {
+function defaultEvidenceSelections(
+  prepared: PreparedPageReviewItem,
+): MastheadPagesEvidenceSelection[] {
   return prepared.evidenceCandidates
     .filter((candidate) => !candidate.lowValue)
     .slice(0, 20)
@@ -97,7 +102,7 @@ function defaultEvidenceSelections(prepared: PreparedPageReviewItem): MastheadPa
       ref: candidate.ref,
       kind: defaultKind(candidate),
       label: candidate.label?.trim() || candidate.toolName || candidate.ref,
-      supports: defaultSupports(candidate)
+      supports: defaultSupports(candidate),
     }));
 }
 
@@ -111,15 +116,22 @@ function slugify(title: string): string {
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }
 
-function parseReleaseMapping(raw: unknown): ExistingReleaseSnapshot | undefined {
+function parseReleaseMapping(
+  raw: unknown,
+): ExistingReleaseSnapshot | undefined {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
   const row = raw as Record<string, unknown>;
   const statusRaw = row.status;
   const status =
-    statusRaw === "live" || statusRaw === "failed" || statusRaw === "removed" || statusRaw === "none"
+    statusRaw === "live" ||
+    statusRaw === "failed" ||
+    statusRaw === "removed" ||
+    statusRaw === "none"
       ? statusRaw
       : "none";
   const mapping: ExistingReleaseSnapshot = {
@@ -129,17 +141,32 @@ function parseReleaseMapping(raw: unknown): ExistingReleaseSnapshot | undefined 
       : {}),
     ...(typeof row.pageId === "string" ? { pageId: row.pageId } : {}),
     ...(typeof row.objectId === "string" ? { objectId: row.objectId } : {}),
-    ...(typeof row.parentObjectId === "string" ? { parentObjectId: row.parentObjectId } : {}),
-    ...(typeof row.friendlyUrl === "string" ? { friendlyUrl: row.friendlyUrl } : {}),
+    ...(typeof row.parentObjectId === "string"
+      ? { parentObjectId: row.parentObjectId }
+      : {}),
+    ...(typeof row.friendlyUrl === "string"
+      ? { friendlyUrl: row.friendlyUrl }
+      : {}),
     ...(typeof row.exactUrl === "string" ? { exactUrl: row.exactUrl } : {}),
-    ...(typeof row.publicLogbookId === "string" ? { publicLogbookId: row.publicLogbookId } : {}),
-    ...(row.pendingOperationKind === "publish" || row.pendingOperationKind === "remove"
+    ...(typeof row.publicLogbookId === "string"
+      ? { publicLogbookId: row.publicLogbookId }
+      : {}),
+    ...(row.pendingOperationKind === "publish" ||
+    row.pendingOperationKind === "remove"
       ? { pendingOperationKind: row.pendingOperationKind }
       : {}),
-    ...(typeof row.pendingRequestDigest === "string" ? { pendingRequestDigest: row.pendingRequestDigest } : {}),
-    ...(typeof row.pendingIdempotencyKey === "string" ? { pendingIdempotencyKey: row.pendingIdempotencyKey } : {}),
-    ...(typeof row.lastErrorClass === "string" ? { lastErrorClass: row.lastErrorClass } : {}),
-    ...(typeof row.lastErrorMessage === "string" ? { lastErrorMessage: row.lastErrorMessage } : {})
+    ...(typeof row.pendingRequestDigest === "string"
+      ? { pendingRequestDigest: row.pendingRequestDigest }
+      : {}),
+    ...(typeof row.pendingIdempotencyKey === "string"
+      ? { pendingIdempotencyKey: row.pendingIdempotencyKey }
+      : {}),
+    ...(typeof row.lastErrorClass === "string"
+      ? { lastErrorClass: row.lastErrorClass }
+      : {}),
+    ...(typeof row.lastErrorMessage === "string"
+      ? { lastErrorMessage: row.lastErrorMessage }
+      : {}),
   };
   return mapping;
 }
@@ -149,16 +176,24 @@ function parsePrepared(raw: unknown): PreparedPageReviewItem {
   return {
     artifactId: String(row.artifactId ?? ""),
     eligibility: row.eligibility === "eligible" ? "eligible" : "ineligible",
-    ineligibilityReason: typeof row.ineligibilityReason === "string" ? row.ineligibilityReason : undefined,
+    ineligibilityReason:
+      typeof row.ineligibilityReason === "string"
+        ? row.ineligibilityReason
+        : undefined,
     evidenceCandidates: Array.isArray(row.evidenceCandidates)
       ? (row.evidenceCandidates as MastheadPagesEvidenceCandidate[])
       : [],
-    findings: Array.isArray(row.findings) ? (row.findings as EgressFinding[]) : [],
+    findings: Array.isArray(row.findings)
+      ? (row.findings as EgressFinding[])
+      : [],
     title: typeof row.title === "string" ? row.title : undefined,
-    contentFingerprint: typeof row.contentFingerprint === "string" ? row.contentFingerprint : undefined,
+    contentFingerprint:
+      typeof row.contentFingerprint === "string"
+        ? row.contentFingerprint
+        : undefined,
     lineageId: typeof row.lineageId === "string" ? row.lineageId : undefined,
     baseObject: row.baseObject,
-    existingRelease: parseReleaseMapping(row.existingRelease)
+    existingRelease: parseReleaseMapping(row.existingRelease),
   };
 }
 
@@ -167,64 +202,83 @@ function parseFinalized(raw: unknown): FinalizedPageReviewItem {
   return {
     artifactId: String(row.artifactId ?? ""),
     decision:
-      row.decision === "ready" || row.decision === "needs_review" || row.decision === "blocked"
+      row.decision === "ready" ||
+      row.decision === "needs_review" ||
+      row.decision === "blocked"
         ? row.decision
         : "blocked",
-    findings: Array.isArray(row.findings) ? (row.findings as EgressFinding[]) : [],
+    findings: Array.isArray(row.findings)
+      ? (row.findings as EgressFinding[])
+      : [],
     request: row.request as PublishPageRequestV1 | undefined,
     requestDigest:
-      typeof row.requestDigest === "string" ? (row.requestDigest as FinalizedPageReviewItem["requestDigest"]) : undefined,
+      typeof row.requestDigest === "string"
+        ? (row.requestDigest as FinalizedPageReviewItem["requestDigest"])
+        : undefined,
     staged: row.staged === true,
-    existingRelease: parseReleaseMapping(row.existingRelease)
+    existingRelease: parseReleaseMapping(row.existingRelease),
   };
 }
 
 function defaultSupports(candidate: MastheadPagesEvidenceCandidate): string[] {
-  if (candidate.kind === "verification" || candidate.role === "verification") return ["verification"];
-  return ["summary"];
+  if (candidate.kind === "verification" || candidate.role === "verification")
+    return ["verification"];
+  return ["outcome"];
 }
 
-function defaultKind(candidate: MastheadPagesEvidenceCandidate): "excerpt" | "verification" {
-  if (candidate.kind === "verification" || candidate.role === "verification") return "verification";
+function defaultKind(
+  candidate: MastheadPagesEvidenceCandidate,
+): "excerpt" | "verification" {
+  if (candidate.kind === "verification" || candidate.role === "verification")
+    return "verification";
   return "excerpt";
 }
 
-function connectionGate(connection: MastheadPagesConnectionState | undefined): MastheadPagesReviewState["gate"] {
+function connectionGate(
+  connection: MastheadPagesConnectionState | undefined,
+): MastheadPagesReviewState["gate"] {
   if (!connection) return "disconnected";
   if (connection.status === "disconnected") return "disconnected";
-  if (connection.status === "secure_storage_unavailable") return "secure_storage_unavailable";
-  if (connection.status === "connected" && connection.account.publisherAccess !== "publisher") {
+  if (connection.status === "secure_storage_unavailable")
+    return "secure_storage_unavailable";
+  if (
+    connection.status === "connected" &&
+    connection.account.publisherAccess !== "publisher"
+  ) {
     return "non_publisher";
   }
   return undefined;
 }
 
 function isSuccessResult(
-  result: PublishPageResultV1
-): result is Extract<PublishPageResultV1, { status: "published" | "idempotent-replay" }> {
+  result: PublishPageResultV1,
+): result is Extract<
+  PublishPageResultV1,
+  { status: "published" | "idempotent-replay" }
+> {
   return result.status === "published" || result.status === "idempotent-replay";
 }
 
 function withReleaseFields(
   state: MastheadPagesReviewState,
-  overrides: Partial<MastheadPagesReviewState> = {}
+  overrides: Partial<MastheadPagesReviewState> = {},
 ): MastheadPagesReviewState {
   const next = { ...state, ...overrides };
-  const mapping = (next.releaseMapping ?? next.finalized?.existingRelease ?? next.prepared?.existingRelease) as
-    | ReleaseMappingSnapshot
-    | undefined;
+  const mapping = (next.releaseMapping ??
+    next.finalized?.existingRelease ??
+    next.prepared?.existingRelease) as ReleaseMappingSnapshot | undefined;
   const releaseState = deriveReleaseState({
     mapping,
     currentFingerprint: next.prepared?.contentFingerprint,
     phase: next.phase,
     decision: next.finalized?.decision,
-    outcomeKind: next.outcome.kind
+    outcomeKind: next.outcome.kind,
   });
   return {
     ...next,
     releaseMapping: mapping,
     releaseState,
-    confirmPublishLabel: confirmPublishLabel(mapping, releaseState)
+    confirmPublishLabel: confirmPublishLabel(mapping, releaseState),
   };
 }
 
@@ -232,46 +286,69 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
   const [state, setState] = useState<MastheadPagesReviewState>(initialState);
   const stateRef = useRef(state);
   stateRef.current = state;
-  const [batchState, setBatchState] = useState<MastheadPagesBatchState>(initialBatchState);
+  const [batchState, setBatchState] =
+    useState<MastheadPagesBatchState>(initialBatchState);
   const batchStateRef = useRef(batchState);
   batchStateRef.current = batchState;
-  const finalizeReviewRef = useRef<(() => Promise<void>) | undefined>(undefined);
+  const finalizeReviewRef = useRef<(() => Promise<void>) | undefined>(
+    undefined,
+  );
 
-  const desktopAvailable = deps.desktopAvailable ?? isMastheadPagesDesktopClientAvailable;
+  const desktopAvailable =
+    deps.desktopAvailable ?? isMastheadPagesDesktopClientAvailable;
   const desktopClient = useMemo(
     () => deps.desktopClient ?? createMastheadPagesDesktopClient(),
-    [deps.desktopClient]
+    [deps.desktopClient],
   );
   const prepareReviews = deps.prepareReviews ?? prepareMastheadPagesReviews;
-  const finalizeReviews = deps.finalizeReviews ?? finalizeAndStageMastheadPagesReviews;
+  const finalizeReviews =
+    deps.finalizeReviews ?? finalizeAndStageMastheadPagesReviews;
   const recordResults = deps.recordResults ?? recordMastheadPagesResults;
   const stageRemoval = deps.stageRemoval ?? stageMastheadPagesRemoval;
-  const getPendingOperation = deps.getPendingOperation ?? getPendingMastheadPagesOperation;
+  const getPendingOperation =
+    deps.getPendingOperation ?? getPendingMastheadPagesOperation;
   const now = deps.now ?? (() => new Date().toISOString());
 
   const patch = useCallback(
     (
-      update: Partial<MastheadPagesReviewState> | ((current: MastheadPagesReviewState) => MastheadPagesReviewState)
+      update:
+        | Partial<MastheadPagesReviewState>
+        | ((current: MastheadPagesReviewState) => MastheadPagesReviewState),
     ) => {
       setState((current) => {
-        const merged = typeof update === "function" ? update(current) : { ...current, ...update };
+        const merged =
+          typeof update === "function"
+            ? update(current)
+            : { ...current, ...update };
         const next = withReleaseFields(merged);
         stateRef.current = next;
         return next;
       });
     },
-    []
+    [],
   );
 
-  const patchBatch = useCallback((update: Partial<MastheadPagesBatchState> | ((current: MastheadPagesBatchState) => MastheadPagesBatchState)) => {
-    setBatchState((current) => {
-      const next = typeof update === "function" ? update(current) : { ...current, ...update };
-      batchStateRef.current = next;
-      return next;
-    });
-  }, []);
+  const patchBatch = useCallback(
+    (
+      update:
+        | Partial<MastheadPagesBatchState>
+        | ((current: MastheadPagesBatchState) => MastheadPagesBatchState),
+    ) => {
+      setBatchState((current) => {
+        const next =
+          typeof update === "function"
+            ? update(current)
+            : { ...current, ...update };
+        batchStateRef.current = next;
+        return next;
+      });
+    },
+    [],
+  );
 
-  const refreshConnection = useCallback(async (): Promise<MastheadPagesConnectionState | undefined> => {
+  const refreshConnection = useCallback(async (): Promise<
+    MastheadPagesConnectionState | undefined
+  > => {
     if (!desktopAvailable()) {
       patch({ connection: undefined, gate: "desktop_unavailable" });
       return undefined;
@@ -282,16 +359,18 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
       patch({
         connection,
         gate:
-          gate === "disconnected" || gate === "secure_storage_unavailable" || gate === "non_publisher"
+          gate === "disconnected" ||
+          gate === "secure_storage_unavailable" ||
+          gate === "non_publisher"
             ? gate
-            : undefined
+            : undefined,
       });
       return connection;
     } catch (error) {
       patch({
         connection: undefined,
         error: error instanceof Error ? error.message : String(error),
-        gate: "desktop_unavailable"
+        gate: "desktop_unavailable",
       });
       return undefined;
     }
@@ -305,8 +384,8 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
         withReleaseFields({
           ...current,
           logbooks,
-          publicLogbookId: current.publicLogbookId || logbooks[0]?.id || ""
-        })
+          publicLogbookId: current.publicLogbookId || logbooks[0]?.id || "",
+        }),
       );
       return logbooks;
     } catch (error) {
@@ -317,14 +396,20 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
 
   const connect = useCallback(async () => {
     if (!desktopAvailable()) {
-      patch({ gate: "desktop_unavailable", error: "Masthead Pages requires the desktop app." });
+      patch({
+        gate: "desktop_unavailable",
+        error: "Masthead Pages requires the desktop app.",
+      });
       return;
     }
     try {
       const connection = await desktopClient.connect();
       const gate = connectionGate(connection);
       patch({ connection, gate, error: undefined });
-      if (connection.status === "connected" && connection.account.publisherAccess === "publisher") {
+      if (
+        connection.status === "connected" &&
+        connection.account.publisherAccess === "publisher"
+      ) {
         await loadLogbooks();
       }
     } catch (error) {
@@ -335,7 +420,11 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
   const disconnect = useCallback(async () => {
     if (!desktopAvailable()) return;
     await desktopClient.disconnect();
-    patch({ connection: { status: "disconnected" }, gate: "disconnected", logbooks: [] });
+    patch({
+      connection: { status: "disconnected" },
+      gate: "disconnected",
+      logbooks: [],
+    });
   }, [desktopAvailable, desktopClient, patch]);
 
   const closeReview = useCallback(() => {
@@ -356,8 +445,8 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
         items: uniqueIds.map((artifactId) => ({
           artifactId,
           selectedForPublish: false,
-          outcome: { kind: "idle" }
-        }))
+          outcome: { kind: "idle" },
+        })),
       });
       // Single-page dialog must not compete with batch review.
       patch(initialState());
@@ -366,7 +455,7 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
         patchBatch({
           phase: "error",
           gate: "desktop_unavailable",
-          error: "Masthead Pages requires the desktop app."
+          error: "Masthead Pages requires the desktop app.",
         });
         return;
       }
@@ -383,26 +472,31 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
               ? "Connect Masthead Pages before publishing."
               : gate === "secure_storage_unavailable"
                 ? "OS secure storage is unavailable."
-                : "Publisher access is required to publish Pages."
+                : "Publisher access is required to publish Pages.",
         });
         return;
       }
 
       const logbooks = await loadLogbooks();
       try {
-        const response = (await prepareReviews({ artifactIds: uniqueIds }, deps.baseUrl)) as {
+        const response = (await prepareReviews(
+          { artifactIds: uniqueIds },
+          deps.baseUrl,
+        )) as {
           ok?: boolean;
           items?: unknown[];
         };
         const preparedItems = (response.items ?? []).map(parsePrepared);
-        const byId = new Map(preparedItems.map((item) => [item.artifactId, item]));
+        const byId = new Map(
+          preparedItems.map((item) => [item.artifactId, item]),
+        );
         const items: MastheadPagesBatchItem[] = uniqueIds.map((artifactId) => {
           const prepared = byId.get(artifactId) ?? {
             artifactId,
             eligibility: "ineligible" as const,
             ineligibilityReason: "prepare_missing",
             evidenceCandidates: [],
-            findings: []
+            findings: [],
           };
           return {
             artifactId,
@@ -410,11 +504,12 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
             prepared,
             contentFingerprint: prepared.contentFingerprint,
             selectedForPublish: false,
-            outcome: { kind: "idle" as const }
+            outcome: { kind: "idle" as const },
           };
         });
         const preferredLogbookId =
-          items.find((item) => item.prepared?.existingRelease?.publicLogbookId)?.prepared?.existingRelease?.publicLogbookId ||
+          items.find((item) => item.prepared?.existingRelease?.publicLogbookId)
+            ?.prepared?.existingRelease?.publicLogbookId ||
           logbooks[0]?.id ||
           "";
         patchBatch({
@@ -424,38 +519,46 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
           publicLogbookId: preferredLogbookId,
           items,
           gate: undefined,
-          error: undefined
+          error: undefined,
         });
       } catch (error) {
         patchBatch({
           phase: "error",
           connection,
-          error: error instanceof Error ? error.message : String(error)
+          error: error instanceof Error ? error.message : String(error),
         });
       }
     },
-    [deps.baseUrl, desktopAvailable, loadLogbooks, patch, patchBatch, prepareReviews, refreshConnection]
+    [
+      deps.baseUrl,
+      desktopAvailable,
+      loadLogbooks,
+      patch,
+      patchBatch,
+      prepareReviews,
+      refreshConnection,
+    ],
   );
 
   const setBatchLicense = useCallback(
     (license: PageLicense) => {
       patchBatch({ license });
     },
-    [patchBatch]
+    [patchBatch],
   );
 
   const setBatchPublicLogbookId = useCallback(
     (publicLogbookId: string) => {
       patchBatch({ publicLogbookId });
     },
-    [patchBatch]
+    [patchBatch],
   );
 
   const setBatchAcknowledgeWarnings = useCallback(
     (acknowledgeWarnings: boolean) => {
       patchBatch({ acknowledgeWarnings });
     },
-    [patchBatch]
+    [patchBatch],
   );
 
   const setBatchItemSelectedForPublish = useCallback(
@@ -463,13 +566,15 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
       patchBatch((current) => ({
         ...current,
         items: current.items.map((item) =>
-          item.artifactId === artifactId && item.finalized?.decision === "ready" && item.finalized.staged
+          item.artifactId === artifactId &&
+          item.finalized?.decision === "ready" &&
+          item.finalized.staged
             ? { ...item, selectedForPublish: selected }
-            : item
-        )
+            : item,
+        ),
       }));
     },
-    [patchBatch]
+    [patchBatch],
   );
 
   const finalizeBatchReview = useCallback(async () => {
@@ -489,13 +594,21 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
     }
     const connection = current.connection;
     if (!connection || connection.status !== "connected") {
-      patchBatch({ gate: "disconnected", error: "Connect Masthead Pages before publishing." });
+      patchBatch({
+        gate: "disconnected",
+        error: "Connect Masthead Pages before publishing.",
+      });
       return;
     }
 
-    const eligible = current.items.filter((item) => item.prepared?.eligibility === "eligible");
+    const eligible = current.items.filter(
+      (item) => item.prepared?.eligibility === "eligible",
+    );
     if (eligible.length === 0) {
-      patchBatch({ error: "No eligible Pages in this batch.", phase: "reviewing" });
+      patchBatch({
+        error: "No eligible Pages in this batch.",
+        phase: "reviewing",
+      });
       return;
     }
 
@@ -507,30 +620,38 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
             artifactId: item.artifactId,
             publicLogbookId: current.publicLogbookId,
             pagesAccountId: connection.account.accountId,
-            slug: slugifyArtifact(item.title ?? item.prepared?.title, item.artifactId),
+            slug: slugifyArtifact(
+              item.title ?? item.prepared?.title,
+              item.artifactId,
+            ),
             license: current.license,
-            evidenceSelections: item.prepared ? defaultEvidenceSelections(item.prepared) : [],
-            acknowledgeWarnings: current.acknowledgeWarnings
-          }))
+            evidenceSelections: item.prepared
+              ? defaultEvidenceSelections(item.prepared)
+              : [],
+            acknowledgeWarnings: current.acknowledgeWarnings,
+          })),
         },
-        deps.baseUrl
+        deps.baseUrl,
       )) as { ok?: boolean; items?: unknown[] };
 
-      const finalizedById = new Map((response.items ?? []).map((raw) => {
-        const finalized = parseFinalized(raw);
-        return [finalized.artifactId, finalized] as const;
-      }));
+      const finalizedById = new Map(
+        (response.items ?? []).map((raw) => {
+          const finalized = parseFinalized(raw);
+          return [finalized.artifactId, finalized] as const;
+        }),
+      );
 
       patchBatch((prev) => {
         const items = prev.items.map((item) => {
           const finalized = finalizedById.get(item.artifactId);
           if (!finalized) return item;
-          const ready = finalized.decision === "ready" && finalized.staged === true;
+          const ready =
+            finalized.decision === "ready" && finalized.staged === true;
           return {
             ...item,
             finalized,
             selectedForPublish: ready,
-            outcome: { kind: "idle" as const }
+            outcome: { kind: "idle" as const },
           };
         });
         return {
@@ -538,13 +659,13 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
           phase: "reviewing",
           items,
           error: undefined,
-          gate: undefined
+          gate: undefined,
         };
       });
     } catch (error) {
       patchBatch({
         phase: "editing",
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
       });
     }
   }, [deps.baseUrl, finalizeReviews, patchBatch]);
@@ -557,26 +678,34 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
         item.finalized?.decision === "ready" &&
         item.finalized.staged &&
         item.finalized.request &&
-        item.finalized.requestDigest
+        item.finalized.requestDigest,
     );
     if (readyRefs.length === 0) {
       patchBatch({ error: "Select at least one Ready Page to publish." });
       return;
     }
     if (!desktopAvailable()) {
-      patchBatch({ gate: "desktop_unavailable", error: "Masthead Pages requires the desktop app." });
+      patchBatch({
+        gate: "desktop_unavailable",
+        error: "Masthead Pages requires the desktop app.",
+      });
       return;
     }
 
-    // Recompute digests before IPC — never pass envelopes through the bridge.
-    for (const item of readyRefs) {
-      const recomputed = await sha256CanonicalRequest(item.finalized!.request!);
-      if (recomputed !== item.finalized!.requestDigest) {
-        patchBatch({
-          phase: "editing",
-          error: `Outbound request digest changed for ${item.artifactId}. Re-run review before publishing.`
-        });
-        return;
+    // The browser review client never sends hosted traffic and validates each staged
+    // daemon digest itself; insecure HTTP review origins do not expose Web Crypto.
+    if (!desktopClient.browserReviewOnly) {
+      for (const item of readyRefs) {
+        const recomputed = await sha256CanonicalRequest(
+          item.finalized!.request!,
+        );
+        if (recomputed !== item.finalized!.requestDigest) {
+          patchBatch({
+            phase: "editing",
+            error: `Outbound request digest changed for ${item.artifactId}. Re-run review before publishing.`,
+          });
+          return;
+        }
       }
     }
 
@@ -585,16 +714,20 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
       const batch = (await desktopClient.publishStaged(
         readyRefs.map((item) => ({
           artifactId: item.artifactId,
-          requestDigest: item.finalized!.requestDigest!
-        }))
+          requestDigest: item.finalized!.requestDigest!,
+        })),
       )) as PublishPageBatchResultV1;
 
       const resultsByKey = new Map(
-        (batch.results ?? []).map((result) => [result.idempotencyKey, result] as const)
+        (batch.results ?? []).map(
+          (result) => [result.idempotencyKey, result] as const,
+        ),
       );
       const connection = current.connection;
       const pagesAccountId =
-        connection && connection.status === "connected" ? connection.account.accountId : "";
+        connection && connection.status === "connected"
+          ? connection.account.accountId
+          : "";
 
       const nextItems: MastheadPagesBatchItem[] = [];
       for (const item of current.items) {
@@ -615,51 +748,57 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
                   errorClass: "missing_item_result",
                   message,
                   retryable: true,
-                  recordedAt: now()
-                }
+                  recordedAt: now(),
+                },
               },
-              deps.baseUrl
+              deps.baseUrl,
             );
           } catch {
             // keep going
           }
           nextItems.push({
             ...item,
-            outcome: { kind: "failed", message, retryable: true }
+            outcome: { kind: "failed", message, retryable: true },
           });
           continue;
         }
 
         if (isSuccessResult(result)) {
-          await recordResults(
-            {
-              kind: "publication",
-              receipt: {
-                artifactId: item.artifactId,
-                pageId: result.pageId,
-                objectId: result.objectId,
-                parentObjectId: result.parentObjectId,
-                pagesAccountId,
-                publicLogbookId: item.finalized!.request!.publicLogbookId,
-                localContentFingerprint: item.contentFingerprint ?? item.prepared?.contentFingerprint ?? "",
-                egressFingerprint: item.finalized!.requestDigest,
-                friendlyUrl: result.currentUrl,
-                exactUrl: result.exactRevisionUrl,
-                publishedAt: result.publishedAt
-              }
-            },
-            deps.baseUrl
-          );
+          if (!desktopClient.browserReviewOnly)
+            await recordResults(
+              {
+                kind: "publication",
+                receipt: {
+                  artifactId: item.artifactId,
+                  pageId: result.pageId,
+                  objectId: result.objectId,
+                  parentObjectId: result.parentObjectId,
+                  pagesAccountId,
+                  publicLogbookId: item.finalized!.request!.publicLogbookId,
+                  localContentFingerprint:
+                    item.contentFingerprint ??
+                    item.prepared?.contentFingerprint ??
+                    "",
+                  egressFingerprint: item.finalized!.requestDigest,
+                  friendlyUrl: result.currentUrl,
+                  exactUrl: result.exactRevisionUrl,
+                  publishedAt: result.publishedAt,
+                },
+              },
+              deps.baseUrl,
+            );
           nextItems.push({
             ...item,
             selectedForPublish: false,
-            finalized: item.finalized ? { ...item.finalized, staged: false } : item.finalized,
+            finalized: item.finalized
+              ? { ...item.finalized, staged: false }
+              : item.finalized,
             outcome: {
               kind: "published",
               result,
               friendlyUrl: result.currentUrl,
-              exactUrl: result.exactRevisionUrl
-            }
+              exactUrl: result.exactRevisionUrl,
+            },
           });
           continue;
         }
@@ -673,10 +812,10 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
               message: result.message,
               retryable: result.retryable === true,
               recordedAt: now(),
-              currentObjectId: result.currentObjectId
-            }
+              currentObjectId: result.currentObjectId,
+            },
           },
-          deps.baseUrl
+          deps.baseUrl,
         );
         nextItems.push({
           ...item,
@@ -684,15 +823,15 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
             kind: "failed",
             message: result.message,
             retryable: result.retryable === true,
-            code: result.code
-          }
+            code: result.code,
+          },
         });
       }
 
       patchBatch({
         phase: "complete",
         items: nextItems,
-        error: undefined
+        error: undefined,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -706,10 +845,10 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
                 errorClass: "hosted_transport_error",
                 message,
                 retryable: true,
-                recordedAt: now()
-              }
+                recordedAt: now(),
+              },
             },
-            deps.baseUrl
+            deps.baseUrl,
           );
         } catch {
           // keep going
@@ -717,10 +856,17 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
       }
       patchBatch({
         phase: "reviewing",
-        error: message
+        error: message,
       });
     }
-  }, [deps.baseUrl, desktopAvailable, desktopClient, now, patchBatch, recordResults]);
+  }, [
+    deps.baseUrl,
+    desktopAvailable,
+    desktopClient,
+    now,
+    patchBatch,
+    recordResults,
+  ]);
 
   const openSingleReview = useCallback(
     async (artifactId: string) => {
@@ -728,7 +874,7 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
         ...initialState(),
         phase: "loading",
         artifactId,
-        outcome: { kind: "idle" }
+        outcome: { kind: "idle" },
       });
 
       if (!desktopAvailable()) {
@@ -736,7 +882,7 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
           phase: "error",
           artifactId,
           gate: "desktop_unavailable",
-          error: "Masthead Pages requires the desktop app."
+          error: "Masthead Pages requires the desktop app.",
         });
         return;
       }
@@ -754,7 +900,7 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
               ? "Connect Masthead Pages before publishing."
               : gate === "secure_storage_unavailable"
                 ? "OS secure storage is unavailable."
-                : "Publisher access is required to publish Pages."
+                : "Publisher access is required to publish Pages.",
         });
         return;
       }
@@ -762,7 +908,10 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
       const logbooks = await loadLogbooks();
 
       try {
-        const response = (await prepareReviews({ artifactIds: [artifactId] }, deps.baseUrl)) as {
+        const response = (await prepareReviews(
+          { artifactIds: [artifactId] },
+          deps.baseUrl,
+        )) as {
           ok?: boolean;
           items?: unknown[];
         };
@@ -782,7 +931,7 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
             gate: "ineligible",
             error: prepared.ineligibilityReason
               ? `This Page is not eligible: ${prepared.ineligibilityReason}`
-              : "This Page is not eligible for Masthead Pages."
+              : "This Page is not eligible for Masthead Pages.",
           });
           return;
         }
@@ -813,18 +962,25 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
           acknowledgeWarnings: false,
           removalConfirmOpen: false,
           parentConflictObjectId: undefined,
-          outcome: { kind: "idle" }
+          outcome: { kind: "idle" },
         });
       } catch (error) {
         patch({
           phase: "error",
           artifactId,
           connection,
-          error: error instanceof Error ? error.message : String(error)
+          error: error instanceof Error ? error.message : String(error),
         });
       }
     },
-    [deps.baseUrl, desktopAvailable, loadLogbooks, patch, prepareReviews, refreshConnection]
+    [
+      deps.baseUrl,
+      desktopAvailable,
+      loadLogbooks,
+      patch,
+      prepareReviews,
+      refreshConnection,
+    ],
   );
 
   const setLicense = useCallback(
@@ -832,11 +988,14 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
       patch({
         license,
         finalized: undefined,
-        phase: stateRef.current.phase === "finalized" ? "editing" : stateRef.current.phase,
-        acknowledgeWarnings: false
+        phase:
+          stateRef.current.phase === "finalized"
+            ? "editing"
+            : stateRef.current.phase,
+        acknowledgeWarnings: false,
       });
     },
-    [patch]
+    [patch],
   );
 
   const setSlug = useCallback(
@@ -844,11 +1003,14 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
       patch({
         slug,
         finalized: undefined,
-        phase: stateRef.current.phase === "finalized" ? "editing" : stateRef.current.phase,
-        acknowledgeWarnings: false
+        phase:
+          stateRef.current.phase === "finalized"
+            ? "editing"
+            : stateRef.current.phase,
+        acknowledgeWarnings: false,
       });
     },
-    [patch]
+    [patch],
   );
 
   const setPublicLogbookId = useCallback(
@@ -856,11 +1018,14 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
       patch({
         publicLogbookId,
         finalized: undefined,
-        phase: stateRef.current.phase === "finalized" ? "editing" : stateRef.current.phase,
-        acknowledgeWarnings: false
+        phase:
+          stateRef.current.phase === "finalized"
+            ? "editing"
+            : stateRef.current.phase,
+        acknowledgeWarnings: false,
       });
     },
-    [patch]
+    [patch],
   );
 
   const selectEvidence = useCallback(
@@ -868,11 +1033,14 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
       patch({
         selectedEvidenceRefs: [...refs],
         finalized: undefined,
-        phase: stateRef.current.phase === "finalized" ? "editing" : stateRef.current.phase,
-        acknowledgeWarnings: false
+        phase:
+          stateRef.current.phase === "finalized"
+            ? "editing"
+            : stateRef.current.phase,
+        acknowledgeWarnings: false,
       });
     },
-    [patch]
+    [patch],
   );
 
   const setSourceLinks = useCallback(
@@ -880,11 +1048,14 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
       patch({
         sourceLinks,
         finalized: undefined,
-        phase: stateRef.current.phase === "finalized" ? "editing" : stateRef.current.phase,
-        acknowledgeWarnings: false
+        phase:
+          stateRef.current.phase === "finalized"
+            ? "editing"
+            : stateRef.current.phase,
+        acknowledgeWarnings: false,
       });
     },
-    [patch]
+    [patch],
   );
 
   const setIncludeSourceDate = useCallback(
@@ -892,45 +1063,54 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
       patch({
         includeSourceDate,
         finalized: undefined,
-        phase: stateRef.current.phase === "finalized" ? "editing" : stateRef.current.phase,
-        acknowledgeWarnings: false
+        phase:
+          stateRef.current.phase === "finalized"
+            ? "editing"
+            : stateRef.current.phase,
+        acknowledgeWarnings: false,
       });
     },
-    [patch]
+    [patch],
   );
 
   const setAcknowledgeWarnings = useCallback(
     (acknowledgeWarnings: boolean) => {
       patch({ acknowledgeWarnings });
-      if (acknowledgeWarnings && stateRef.current.finalized?.decision === "needs_review") {
+      if (
+        acknowledgeWarnings &&
+        stateRef.current.finalized?.decision === "needs_review"
+      ) {
         queueMicrotask(() => {
           void finalizeReviewRef.current?.();
         });
       }
     },
-    [patch]
+    [patch],
   );
 
-  const buildEvidenceSelections = useCallback((): MastheadPagesEvidenceSelection[] => {
-    const current = stateRef.current;
-    return current.selectedEvidenceRefs.map((ref) => {
-      const candidate = current.evidenceCandidates.find((item) => item.ref === ref);
-      if (!candidate) {
+  const buildEvidenceSelections =
+    useCallback((): MastheadPagesEvidenceSelection[] => {
+      const current = stateRef.current;
+      return current.selectedEvidenceRefs.map((ref) => {
+        const candidate = current.evidenceCandidates.find(
+          (item) => item.ref === ref,
+        );
+        if (!candidate) {
+          return {
+            ref,
+            kind: "excerpt" as const,
+            label: ref,
+            supports: ["outcome"],
+          };
+        }
         return {
-          ref,
-          kind: "excerpt" as const,
-          label: ref,
-          supports: ["summary"]
+          ref: candidate.ref,
+          kind: defaultKind(candidate),
+          label: candidate.label?.trim() || candidate.toolName || candidate.ref,
+          supports: defaultSupports(candidate),
         };
-      }
-      return {
-        ref: candidate.ref,
-        kind: defaultKind(candidate),
-        label: candidate.label?.trim() || candidate.toolName || candidate.ref,
-        supports: defaultSupports(candidate)
-      };
-    });
-  }, []);
+      });
+    }, []);
 
   const finalizeReview = useCallback(async () => {
     const current = stateRef.current;
@@ -954,11 +1134,19 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
     }
     const connection = current.connection;
     if (!connection || connection.status !== "connected") {
-      patch({ gate: "disconnected", error: "Connect Masthead Pages before publishing." });
+      patch({
+        gate: "disconnected",
+        error: "Connect Masthead Pages before publishing.",
+      });
       return;
     }
 
-    patch({ phase: "finalizing", error: undefined, outcome: { kind: "idle" }, parentConflictObjectId: undefined });
+    patch({
+      phase: "finalizing",
+      error: undefined,
+      outcome: { kind: "idle" },
+      parentConflictObjectId: undefined,
+    });
     try {
       const response = (await finalizeReviews(
         {
@@ -970,13 +1158,16 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
               slug: current.slug.trim(),
               license: current.license,
               evidenceSelections: buildEvidenceSelections(),
-              sourceLinks: current.sourceLinks.length > 0 ? current.sourceLinks : undefined,
+              sourceLinks:
+                current.sourceLinks.length > 0
+                  ? current.sourceLinks
+                  : undefined,
               includeSourceDate: current.includeSourceDate,
-              acknowledgeWarnings: current.acknowledgeWarnings
-            }
-          ]
+              acknowledgeWarnings: current.acknowledgeWarnings,
+            },
+          ],
         },
-        deps.baseUrl
+        deps.baseUrl,
       )) as { ok?: boolean; items?: unknown[] };
 
       const finalized = parseFinalized(response.items?.[0]);
@@ -986,17 +1177,21 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
           finalized,
           releaseMapping: finalized.existingRelease ?? current.releaseMapping,
           gate: "blocked",
-          error: "Outbound review blocked this Page. Fix findings before publishing."
+          error:
+            "Outbound review blocked this Page. Fix findings before publishing.",
         });
         return;
       }
-      if (finalized.decision === "needs_review" && !current.acknowledgeWarnings) {
+      if (
+        finalized.decision === "needs_review" &&
+        !current.acknowledgeWarnings
+      ) {
         patch({
           phase: "finalized",
           finalized,
           releaseMapping: finalized.existingRelease ?? current.releaseMapping,
           gate: "needs_warning_ack",
-          error: "Acknowledge warnings before publishing."
+          error: "Acknowledge warnings before publishing.",
         });
         return;
       }
@@ -1005,8 +1200,11 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
           phase: "finalized",
           finalized,
           releaseMapping: finalized.existingRelease ?? current.releaseMapping,
-          gate: finalized.decision === "needs_review" ? "needs_warning_ack" : "blocked",
-          error: "Daemon did not stage a publishable request."
+          gate:
+            finalized.decision === "needs_review"
+              ? "needs_warning_ack"
+              : "blocked",
+          error: "Daemon did not stage a publishable request.",
         });
         return;
       }
@@ -1015,12 +1213,12 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
         finalized,
         releaseMapping: finalized.existingRelease ?? current.releaseMapping,
         gate: undefined,
-        error: undefined
+        error: undefined,
       });
     } catch (error) {
       patch({
         phase: "editing",
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
       });
     }
   }, [buildEvidenceSelections, deps.baseUrl, finalizeReviews, patch]);
@@ -1030,7 +1228,12 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
   const confirmPublish = useCallback(async () => {
     const current = stateRef.current;
     const finalized = current.finalized;
-    if (!current.artifactId || !finalized?.request || !finalized.requestDigest || !finalized.staged) {
+    if (
+      !current.artifactId ||
+      !finalized?.request ||
+      !finalized.requestDigest ||
+      !finalized.staged
+    ) {
       patch({ error: "Finalize a ready review before publishing." });
       return;
     }
@@ -1039,29 +1242,45 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
       return;
     }
     if (finalized.decision === "needs_review" && !current.acknowledgeWarnings) {
-      patch({ gate: "needs_warning_ack", error: "Acknowledge warnings before publishing." });
+      patch({
+        gate: "needs_warning_ack",
+        error: "Acknowledge warnings before publishing.",
+      });
       return;
     }
     if (!desktopAvailable()) {
-      patch({ gate: "desktop_unavailable", error: "Masthead Pages requires the desktop app." });
-      return;
-    }
-
-    const recomputed = await sha256CanonicalRequest(finalized.request);
-    if (recomputed !== finalized.requestDigest) {
       patch({
-        phase: "editing",
-        finalized: undefined,
-        error: "Outbound request digest changed. Re-run review before publishing."
+        gate: "desktop_unavailable",
+        error: "Masthead Pages requires the desktop app.",
       });
       return;
     }
 
+    if (!desktopClient.browserReviewOnly) {
+      const recomputed = await sha256CanonicalRequest(finalized.request);
+      if (recomputed !== finalized.requestDigest) {
+        patch({
+          phase: "editing",
+          finalized: undefined,
+          error:
+            "Outbound request digest changed. Re-run review before publishing.",
+        });
+        return;
+      }
+    }
+
     const previousExactUrl = current.releaseMapping?.exactUrl;
-    patch({ phase: "publishing", outcome: { kind: "publishing" }, error: undefined });
+    patch({
+      phase: "publishing",
+      outcome: { kind: "publishing" },
+      error: undefined,
+    });
     try {
       const batch = (await desktopClient.publishStaged([
-        { artifactId: current.artifactId, requestDigest: finalized.requestDigest }
+        {
+          artifactId: current.artifactId,
+          requestDigest: finalized.requestDigest,
+        },
       ])) as PublishPageBatchResultV1;
       const result = batch.results?.[0];
       if (!result) {
@@ -1072,26 +1291,29 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
         const contentFingerprint = current.prepared?.contentFingerprint ?? "";
         const connection = current.connection;
         const pagesAccountId =
-          connection && connection.status === "connected" ? connection.account.accountId : "";
-        await recordResults(
-          {
-            kind: "publication",
-            receipt: {
-              artifactId: current.artifactId,
-              pageId: result.pageId,
-              objectId: result.objectId,
-              parentObjectId: result.parentObjectId,
-              pagesAccountId,
-              publicLogbookId: finalized.request.publicLogbookId,
-              localContentFingerprint: contentFingerprint,
-              egressFingerprint: finalized.requestDigest,
-              friendlyUrl: result.currentUrl,
-              exactUrl: result.exactRevisionUrl,
-              publishedAt: result.publishedAt
-            }
-          },
-          deps.baseUrl
-        );
+          connection && connection.status === "connected"
+            ? connection.account.accountId
+            : "";
+        if (!desktopClient.browserReviewOnly)
+          await recordResults(
+            {
+              kind: "publication",
+              receipt: {
+                artifactId: current.artifactId,
+                pageId: result.pageId,
+                objectId: result.objectId,
+                parentObjectId: result.parentObjectId,
+                pagesAccountId,
+                publicLogbookId: finalized.request.publicLogbookId,
+                localContentFingerprint: contentFingerprint,
+                egressFingerprint: finalized.requestDigest,
+                friendlyUrl: result.currentUrl,
+                exactUrl: result.exactRevisionUrl,
+                publishedAt: result.publishedAt,
+              },
+            },
+            deps.baseUrl,
+          );
         const outcome: MastheadPagesPublicationOutcome = {
           kind: "published",
           result,
@@ -1099,7 +1321,7 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
           exactUrl: result.exactRevisionUrl,
           ...(previousExactUrl && previousExactUrl !== result.exactRevisionUrl
             ? { previousExactUrl }
-            : {})
+            : {}),
         };
         patch({
           phase: "complete",
@@ -1114,18 +1336,19 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
             friendlyUrl: result.currentUrl,
             exactUrl: result.exactRevisionUrl,
             localContentFingerprint: contentFingerprint,
-            publicLogbookId: finalized.request.publicLogbookId
+            publicLogbookId: finalized.request.publicLogbookId,
           },
           finalized: {
             ...finalized,
-            staged: false
-          }
+            staged: false,
+          },
         });
         return;
       }
 
       const parentConflictObjectId =
-        result.code === "parent-conflict" && typeof result.currentObjectId === "string"
+        result.code === "parent-conflict" &&
+        typeof result.currentObjectId === "string"
           ? result.currentObjectId
           : undefined;
 
@@ -1136,12 +1359,13 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
             artifactId: current.artifactId,
             errorClass: result.code,
             message: result.message,
-            retryable: result.retryable === true && result.code !== "parent-conflict",
+            retryable:
+              result.retryable === true && result.code !== "parent-conflict",
             recordedAt: now(),
-            currentObjectId: result.currentObjectId
-          }
+            currentObjectId: result.currentObjectId,
+          },
         },
-        deps.baseUrl
+        deps.baseUrl,
       );
 
       if (parentConflictObjectId) {
@@ -1156,16 +1380,19 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
             retryable: false,
             code: result.code,
             result,
-            parentConflictObjectId
+            parentConflictObjectId,
           },
           error: PARENT_CONFLICT_COPY,
           releaseMapping: {
             ...(current.releaseMapping ?? { status: "live" as const }),
-            status: current.releaseMapping?.status === "live" ? "live" : (current.releaseMapping?.status ?? "failed"),
+            status:
+              current.releaseMapping?.status === "live"
+                ? "live"
+                : (current.releaseMapping?.status ?? "failed"),
             objectId: parentConflictObjectId,
             lastErrorClass: "parent-conflict",
-            lastErrorMessage: result.message
-          }
+            lastErrorMessage: result.message,
+          },
         });
         return;
       }
@@ -1177,17 +1404,22 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
           message: result.message,
           retryable: result.retryable === true,
           code: result.code,
-          result
+          result,
         },
         error: result.message,
         releaseMapping: {
           ...(current.releaseMapping ?? { status: "none" as const }),
-          pendingOperationKind: result.retryable === true ? "publish" : undefined,
-          pendingRequestDigest: result.retryable === true ? finalized.requestDigest : undefined,
-          pendingIdempotencyKey: result.retryable === true ? finalized.request.idempotencyKey : undefined,
+          pendingOperationKind:
+            result.retryable === true ? "publish" : undefined,
+          pendingRequestDigest:
+            result.retryable === true ? finalized.requestDigest : undefined,
+          pendingIdempotencyKey:
+            result.retryable === true
+              ? finalized.request.idempotencyKey
+              : undefined,
           lastErrorClass: result.code,
-          lastErrorMessage: result.message
-        }
+          lastErrorMessage: result.message,
+        },
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1200,10 +1432,10 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
               errorClass: "hosted_transport_error",
               message,
               retryable: true,
-              recordedAt: now()
-            }
+              recordedAt: now(),
+            },
           },
-          deps.baseUrl
+          deps.baseUrl,
         );
       } catch {
         // Recording failure must not mask the publish error.
@@ -1218,11 +1450,18 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
           pendingRequestDigest: finalized.requestDigest,
           pendingIdempotencyKey: finalized.request.idempotencyKey,
           lastErrorClass: "hosted_transport_error",
-          lastErrorMessage: message
-        }
+          lastErrorMessage: message,
+        },
       });
     }
-  }, [deps.baseUrl, desktopAvailable, desktopClient, now, patch, recordResults]);
+  }, [
+    deps.baseUrl,
+    desktopAvailable,
+    desktopClient,
+    now,
+    patch,
+    recordResults,
+  ]);
 
   const retryPendingPublication = useCallback(
     async (artifactId?: string) => {
@@ -1232,11 +1471,19 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
         return;
       }
       if (!desktopAvailable()) {
-        patch({ gate: "desktop_unavailable", error: "Masthead Pages requires the desktop app." });
+        patch({
+          gate: "desktop_unavailable",
+          error: "Masthead Pages requires the desktop app.",
+        });
         return;
       }
 
-      patch({ phase: "publishing", outcome: { kind: "publishing" }, error: undefined, artifactId: id });
+      patch({
+        phase: "publishing",
+        outcome: { kind: "publishing" },
+        error: undefined,
+        artifactId: id,
+      });
       try {
         const pendingRaw = (await getPendingOperation(id, deps.baseUrl)) as {
           operation?: {
@@ -1247,27 +1494,41 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
           };
         };
         const operation = pendingRaw.operation;
-        if (!operation || operation.operationKind !== "publish" || !operation.requestDigest) {
+        if (
+          !operation ||
+          operation.operationKind !== "publish" ||
+          !operation.requestDigest
+        ) {
           patch({
             phase: "editing",
-            outcome: { kind: "failed", message: "No staged publication to retry.", retryable: false },
-            error: "No staged publication to retry. Run outbound review again."
+            outcome: {
+              kind: "failed",
+              message: "No staged publication to retry.",
+              retryable: false,
+            },
+            error: "No staged publication to retry. Run outbound review again.",
           });
           return;
         }
 
         if (operation.requestJson) {
-          const parsed = JSON.parse(operation.requestJson) as PublishPageRequestV1;
-          const recomputed = await sha256CanonicalRequest(parsed);
+          const parsed = JSON.parse(
+            operation.requestJson,
+          ) as PublishPageRequestV1;
+          const recomputed = desktopClient.browserReviewOnly
+            ? operation.requestDigest
+            : await sha256CanonicalRequest(parsed);
           if (recomputed !== operation.requestDigest) {
             patch({
               phase: "editing",
               outcome: {
                 kind: "failed",
-                message: "Staged publication digest no longer matches stored bytes.",
-                retryable: false
+                message:
+                  "Staged publication digest no longer matches stored bytes.",
+                retryable: false,
               },
-              error: "Staged publication digest no longer matches stored bytes. Run outbound review again."
+              error:
+                "Staged publication digest no longer matches stored bytes. Run outbound review again.",
             });
             return;
           }
@@ -1275,37 +1536,44 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
 
         const previousExactUrl = stateRef.current.releaseMapping?.exactUrl;
         const batch = (await desktopClient.publishStaged([
-          { artifactId: id, requestDigest: operation.requestDigest }
+          { artifactId: id, requestDigest: operation.requestDigest },
         ])) as PublishPageBatchResultV1;
         const result = batch.results?.[0];
-        if (!result) throw new Error("Hosted publish returned no itemized result.");
+        if (!result)
+          throw new Error("Hosted publish returned no itemized result.");
 
         if (isSuccessResult(result)) {
-          const contentFingerprint = stateRef.current.prepared?.contentFingerprint ?? "";
+          const contentFingerprint =
+            stateRef.current.prepared?.contentFingerprint ?? "";
           const connection = stateRef.current.connection;
           const pagesAccountId =
-            connection && connection.status === "connected" ? connection.account.accountId : "";
+            connection && connection.status === "connected"
+              ? connection.account.accountId
+              : "";
           const publicLogbookId =
-            stateRef.current.publicLogbookId || stateRef.current.releaseMapping?.publicLogbookId || "";
-          await recordResults(
-            {
-              kind: "publication",
-              receipt: {
-                artifactId: id,
-                pageId: result.pageId,
-                objectId: result.objectId,
-                parentObjectId: result.parentObjectId,
-                pagesAccountId,
-                publicLogbookId,
-                localContentFingerprint: contentFingerprint,
-                egressFingerprint: operation.requestDigest,
-                friendlyUrl: result.currentUrl,
-                exactUrl: result.exactRevisionUrl,
-                publishedAt: result.publishedAt
-              }
-            },
-            deps.baseUrl
-          );
+            stateRef.current.publicLogbookId ||
+            stateRef.current.releaseMapping?.publicLogbookId ||
+            "";
+          if (!desktopClient.browserReviewOnly)
+            await recordResults(
+              {
+                kind: "publication",
+                receipt: {
+                  artifactId: id,
+                  pageId: result.pageId,
+                  objectId: result.objectId,
+                  parentObjectId: result.parentObjectId,
+                  pagesAccountId,
+                  publicLogbookId,
+                  localContentFingerprint: contentFingerprint,
+                  egressFingerprint: operation.requestDigest,
+                  friendlyUrl: result.currentUrl,
+                  exactUrl: result.exactRevisionUrl,
+                  publishedAt: result.publishedAt,
+                },
+              },
+              deps.baseUrl,
+            );
           patch({
             phase: "complete",
             outcome: {
@@ -1313,9 +1581,10 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
               result,
               friendlyUrl: result.currentUrl,
               exactUrl: result.exactRevisionUrl,
-              ...(previousExactUrl && previousExactUrl !== result.exactRevisionUrl
+              ...(previousExactUrl &&
+              previousExactUrl !== result.exactRevisionUrl
                 ? { previousExactUrl }
-                : {})
+                : {}),
             },
             releaseMapping: {
               status: "live",
@@ -1324,9 +1593,9 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
               friendlyUrl: result.currentUrl,
               exactUrl: result.exactRevisionUrl,
               localContentFingerprint: contentFingerprint,
-              publicLogbookId
+              publicLogbookId,
             },
-            error: undefined
+            error: undefined,
           });
           return;
         }
@@ -1340,10 +1609,10 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
               message: result.message,
               retryable: result.retryable === true,
               recordedAt: now(),
-              currentObjectId: result.currentObjectId
-            }
+              currentObjectId: result.currentObjectId,
+            },
           },
-          deps.baseUrl
+          deps.baseUrl,
         );
         patch({
           phase: "finalized",
@@ -1352,26 +1621,38 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
             message: result.message,
             retryable: result.retryable === true,
             code: result.code,
-            result
+            result,
           },
-          error: result.message
+          error: result.message,
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         patch({
           phase: "editing",
           outcome: { kind: "failed", message, retryable: true },
-          error: message
+          error: message,
         });
       }
     },
-    [deps.baseUrl, desktopAvailable, desktopClient, getPendingOperation, now, patch, recordResults]
+    [
+      deps.baseUrl,
+      desktopAvailable,
+      desktopClient,
+      getPendingOperation,
+      now,
+      patch,
+      recordResults,
+    ],
   );
 
   const beginRemoval = useCallback(() => {
-    const mapping = stateRef.current.releaseMapping ?? stateRef.current.prepared?.existingRelease;
+    const mapping =
+      stateRef.current.releaseMapping ??
+      stateRef.current.prepared?.existingRelease;
     if (!canRemoveFromPages(mapping)) {
-      patch({ error: "No live Masthead Pages mapping is available to remove." });
+      patch({
+        error: "No live Masthead Pages mapping is available to remove.",
+      });
       return;
     }
     patch({ removalConfirmOpen: true, error: undefined });
@@ -1381,110 +1662,140 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
     patch({ removalConfirmOpen: false });
   }, [patch]);
 
-  const confirmRemoval = useCallback(async (stagedDigest?: string) => {
-    const current = stateRef.current;
-    const artifactId = current.artifactId;
-    if (!artifactId) return;
-    if (!desktopAvailable()) {
-      patch({ gate: "desktop_unavailable", error: "Masthead Pages requires the desktop app." });
-      return;
-    }
-
-    patch({ phase: "removing", outcome: { kind: "removing" }, error: undefined, removalConfirmOpen: false });
-    try {
-      let requestDigest =
-        stagedDigest ||
-        (current.releaseMapping?.pendingOperationKind === "remove"
-          ? current.releaseMapping.pendingRequestDigest
-          : undefined);
-      if (!requestDigest) {
-        const staged = (await stageRemoval({ artifactId }, deps.baseUrl)) as {
-          requestDigest?: string;
-          mapping?: ExistingReleaseSnapshot;
-        };
-        requestDigest = staged.requestDigest;
-        if (staged.mapping) {
-          patch({ releaseMapping: parseReleaseMapping(staged.mapping) ?? staged.mapping });
-        }
-      }
-      if (!requestDigest) {
-        throw new Error("Daemon did not stage a removal request.");
-      }
-
-      const result = (await desktopClient.withdrawStaged({
-        artifactId,
-        requestDigest
-      })) as RemovePageResultV1;
-
-      if (result.status === "removed" || result.status === "idempotent-replay") {
-        await recordResults(
-          {
-            kind: "removed",
-            artifactId,
-            removedAt: result.removedAt ?? now()
-          },
-          deps.baseUrl
-        );
+  const confirmRemoval = useCallback(
+    async (stagedDigest?: string) => {
+      const current = stateRef.current;
+      const artifactId = current.artifactId;
+      if (!artifactId) return;
+      if (!desktopAvailable()) {
         patch({
-          phase: "complete",
-          outcome: { kind: "removed", result, message: result.message },
-          releaseMapping: {
-            ...(current.releaseMapping ?? { status: "removed" as const }),
-            status: "removed",
-            pageId: result.pageId || current.releaseMapping?.pageId
-          },
-          error: undefined
+          gate: "desktop_unavailable",
+          error: "Masthead Pages requires the desktop app.",
         });
         return;
       }
 
-      await recordResults(
-        {
-          kind: "failure",
-          failure: {
-            artifactId,
-            errorClass: result.code ?? "removal_failed",
+      patch({
+        phase: "removing",
+        outcome: { kind: "removing" },
+        error: undefined,
+        removalConfirmOpen: false,
+      });
+      try {
+        let requestDigest =
+          stagedDigest ||
+          (current.releaseMapping?.pendingOperationKind === "remove"
+            ? current.releaseMapping.pendingRequestDigest
+            : undefined);
+        if (!requestDigest) {
+          const staged = (await stageRemoval({ artifactId }, deps.baseUrl)) as {
+            requestDigest?: string;
+            mapping?: ExistingReleaseSnapshot;
+          };
+          requestDigest = staged.requestDigest;
+          if (staged.mapping) {
+            patch({
+              releaseMapping:
+                parseReleaseMapping(staged.mapping) ?? staged.mapping,
+            });
+          }
+        }
+        if (!requestDigest) {
+          throw new Error("Daemon did not stage a removal request.");
+        }
+
+        const result = (await desktopClient.withdrawStaged({
+          artifactId,
+          requestDigest,
+        })) as RemovePageResultV1;
+
+        if (
+          result.status === "removed" ||
+          result.status === "idempotent-replay"
+        ) {
+          await recordResults(
+            {
+              kind: "removed",
+              artifactId,
+              removedAt: result.removedAt ?? now(),
+            },
+            deps.baseUrl,
+          );
+          patch({
+            phase: "complete",
+            outcome: { kind: "removed", result, message: result.message },
+            releaseMapping: {
+              ...(current.releaseMapping ?? { status: "removed" as const }),
+              status: "removed",
+              pageId: result.pageId || current.releaseMapping?.pageId,
+            },
+            error: undefined,
+          });
+          return;
+        }
+
+        await recordResults(
+          {
+            kind: "failure",
+            failure: {
+              artifactId,
+              errorClass: result.code ?? "removal_failed",
+              message: result.message ?? "Removal failed",
+              retryable: result.retryable === true,
+              recordedAt: now(),
+            },
+          },
+          deps.baseUrl,
+        );
+        patch({
+          phase: "editing",
+          outcome: {
+            kind: "failed",
             message: result.message ?? "Removal failed",
             retryable: result.retryable === true,
-            recordedAt: now()
-          }
-        },
-        deps.baseUrl
-      );
-      patch({
-        phase: "editing",
-        outcome: {
-          kind: "failed",
-          message: result.message ?? "Removal failed",
-          retryable: result.retryable === true,
-          code: result.code,
-          result
-        },
-        error: result.message ?? "Removal failed",
-        releaseMapping: {
-          ...(current.releaseMapping ?? { status: "live" as const }),
-          pendingOperationKind: result.retryable === true ? "remove" : undefined,
-          pendingRequestDigest: result.retryable === true ? requestDigest : undefined,
-          lastErrorClass: result.code ?? "removal_failed",
-          lastErrorMessage: result.message
-        }
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      patch({
-        phase: "editing",
-        outcome: { kind: "failed", message, retryable: true },
-        error: message
-      });
-    }
-  }, [deps.baseUrl, desktopAvailable, desktopClient, now, patch, recordResults, stageRemoval]);
+            code: result.code,
+            result,
+          },
+          error: result.message ?? "Removal failed",
+          releaseMapping: {
+            ...(current.releaseMapping ?? { status: "live" as const }),
+            pendingOperationKind:
+              result.retryable === true ? "remove" : undefined,
+            pendingRequestDigest:
+              result.retryable === true ? requestDigest : undefined,
+            lastErrorClass: result.code ?? "removal_failed",
+            lastErrorMessage: result.message,
+          },
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        patch({
+          phase: "editing",
+          outcome: { kind: "failed", message, retryable: true },
+          error: message,
+        });
+      }
+    },
+    [
+      deps.baseUrl,
+      desktopAvailable,
+      desktopClient,
+      now,
+      patch,
+      recordResults,
+      stageRemoval,
+    ],
+  );
 
   const retryPendingRemoval = useCallback(
     async (artifactId?: string) => {
       const id = artifactId ?? stateRef.current.artifactId;
       if (!id) return;
       if (!desktopAvailable()) {
-        patch({ gate: "desktop_unavailable", error: "Masthead Pages requires the desktop app." });
+        patch({
+          gate: "desktop_unavailable",
+          error: "Masthead Pages requires the desktop app.",
+        });
         return;
       }
       patch({
@@ -1492,18 +1803,26 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
         removalConfirmOpen: false,
         phase: "removing",
         outcome: { kind: "removing" },
-        error: undefined
+        error: undefined,
       });
       try {
         const pendingRaw = (await getPendingOperation(id, deps.baseUrl)) as {
           operation?: { operationKind?: string; requestDigest?: string };
         };
         const operation = pendingRaw.operation;
-        if (!operation || operation.operationKind !== "remove" || !operation.requestDigest) {
+        if (
+          !operation ||
+          operation.operationKind !== "remove" ||
+          !operation.requestDigest
+        ) {
           patch({
             phase: "editing",
-            outcome: { kind: "failed", message: "No staged removal to retry.", retryable: false },
-            error: "No staged removal to retry."
+            outcome: {
+              kind: "failed",
+              message: "No staged removal to retry.",
+              retryable: false,
+            },
+            error: "No staged removal to retry.",
           });
           return;
         }
@@ -1513,26 +1832,41 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
         patch({
           phase: "editing",
           outcome: { kind: "failed", message, retryable: true },
-          error: message
+          error: message,
         });
       }
     },
-    [confirmRemoval, deps.baseUrl, desktopAvailable, getPendingOperation, patch]
+    [
+      confirmRemoval,
+      deps.baseUrl,
+      desktopAvailable,
+      getPendingOperation,
+      patch,
+    ],
   );
 
   const canConfirmPublish = useMemo(() => {
     const finalized = state.finalized;
-    if (state.phase !== "finalized" || !finalized?.staged || !finalized.requestDigest) return false;
+    if (
+      state.phase !== "finalized" ||
+      !finalized?.staged ||
+      !finalized.requestDigest
+    )
+      return false;
     if (finalized.decision === "blocked") return false;
-    if (finalized.decision === "needs_review" && !state.acknowledgeWarnings) return false;
+    if (finalized.decision === "needs_review" && !state.acknowledgeWarnings)
+      return false;
     if (state.gate && state.gate !== "needs_warning_ack") return false;
-    if (finalized.decision === "needs_review" && state.acknowledgeWarnings) return true;
+    if (finalized.decision === "needs_review" && state.acknowledgeWarnings)
+      return true;
     return finalized.decision === "ready";
   }, [state.acknowledgeWarnings, state.finalized, state.gate, state.phase]);
 
-  const previewObject = state.finalized?.request?.object ?? state.prepared?.baseObject;
+  const previewObject =
+    state.finalized?.request?.object ?? state.prepared?.baseObject;
   const previewRequest = state.finalized?.request;
-  const findings: EgressFinding[] = state.finalized?.findings ?? state.prepareFindings;
+  const findings: EgressFinding[] =
+    state.finalized?.findings ?? state.prepareFindings;
   const mapping = state.releaseMapping;
   const canRetryPublish = canRetryPendingPublication(mapping);
   const canRetryRemove = canRetryPendingRemoval(mapping);
@@ -1541,9 +1875,12 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
   const batchReadyCount = useMemo(
     () =>
       batchState.items.filter(
-        (item) => item.selectedForPublish && item.finalized?.decision === "ready" && item.finalized.staged
+        (item) =>
+          item.selectedForPublish &&
+          item.finalized?.decision === "ready" &&
+          item.finalized.staged,
       ).length,
-    [batchState.items]
+    [batchState.items],
   );
 
   return {
@@ -1586,8 +1923,10 @@ export function useMastheadPagesController(deps: MastheadPagesControllerDeps) {
     previewObject,
     previewRequest,
     findings,
-    desktopClient
+    desktopClient,
   };
 }
 
-export type UseMastheadPagesControllerResult = ReturnType<typeof useMastheadPagesController>;
+export type UseMastheadPagesControllerResult = ReturnType<
+  typeof useMastheadPagesController
+>;

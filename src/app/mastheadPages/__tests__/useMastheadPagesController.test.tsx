@@ -4,11 +4,16 @@ import { act, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { MastheadPagesDesktopClient } from "../desktopClient";
-import { useMastheadPagesController, type UseMastheadPagesControllerResult } from "../useMastheadPagesController";
+import {
+  useMastheadPagesController,
+  type UseMastheadPagesControllerResult,
+} from "../useMastheadPagesController";
 import type { PublishPageRequestV1 } from "../../../mastheadPages/types";
 import { sha256CanonicalRequest } from "../requestDigest";
 
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+(
+  globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+).IS_REACT_ACT_ENVIRONMENT = true;
 
 const baseUrl = "http://127.0.0.1:17373/projection";
 const artifactId = "artifact-1";
@@ -31,13 +36,13 @@ describe("useMastheadPagesController", () => {
     const desktopClient = mockDesktopClient();
     const prepareReviews = vi.fn().mockResolvedValue({
       ok: true,
-      items: [eligiblePrepared()]
+      items: [eligiblePrepared()],
     });
     const request = await sampleRequest();
     const digest = await sha256CanonicalRequest(request);
     const finalizeReviews = vi.fn().mockResolvedValue({
       ok: true,
-      items: [readyFinalized(request, digest)]
+      items: [readyFinalized(request, digest)],
     });
     await renderController({ desktopClient, prepareReviews, finalizeReviews });
 
@@ -55,11 +60,45 @@ describe("useMastheadPagesController", () => {
     expect(desktopClient.publishStaged).not.toHaveBeenCalled();
   });
 
+  test("uses a valid public section for default batch evidence", async () => {
+    const desktopClient = mockDesktopClient();
+    const prepareReviews = vi
+      .fn()
+      .mockResolvedValue({ ok: true, items: [eligiblePrepared()] });
+    const request = await sampleRequest();
+    const digest = await sha256CanonicalRequest(request);
+    const finalizeReviews = vi.fn().mockResolvedValue({
+      ok: true,
+      items: [readyFinalized(request, digest)],
+    });
+    await renderController({ desktopClient, prepareReviews, finalizeReviews });
+
+    await act(async () => {
+      await latest?.openBatchReview([artifactId]);
+    });
+    await act(async () => {
+      await latest?.finalizeBatchReview();
+    });
+
+    expect(finalizeReviews).toHaveBeenCalledWith(
+      expect.objectContaining({
+        items: [
+          expect.objectContaining({
+            evidenceSelections: [
+              expect.objectContaining({ supports: ["outcome"] }),
+            ],
+          }),
+        ],
+      }),
+      baseUrl,
+    );
+  });
+
   test("blocks when desktop bridge is unavailable", async () => {
     const desktopClient = mockDesktopClient();
     await renderController({
       desktopClient,
-      desktopAvailable: () => false
+      desktopAvailable: () => false,
     });
 
     await act(async () => {
@@ -72,7 +111,7 @@ describe("useMastheadPagesController", () => {
 
   test("blocks disconnected accounts before hosted transfer", async () => {
     const desktopClient = mockDesktopClient({
-      getConnection: vi.fn(async () => ({ status: "disconnected" as const }))
+      getConnection: vi.fn(async () => ({ status: "disconnected" as const })),
     });
     await renderController({ desktopClient });
 
@@ -86,7 +125,7 @@ describe("useMastheadPagesController", () => {
 
   test("blocks non-publisher accounts", async () => {
     const desktopClient = mockDesktopClient({
-      getConnection: vi.fn(async () => connectedAccount("request_required"))
+      getConnection: vi.fn(async () => connectedAccount("request_required")),
     });
     await renderController({ desktopClient });
 
@@ -108,9 +147,9 @@ describe("useMastheadPagesController", () => {
           eligibility: "ineligible",
           ineligibilityReason: "current_enrichment_required",
           evidenceCandidates: [],
-          findings: []
-        }
-      ]
+          findings: [],
+        },
+      ],
     });
     await renderController({ desktopClient, prepareReviews });
 
@@ -125,19 +164,28 @@ describe("useMastheadPagesController", () => {
   test("keeps blocked reviews offline", async () => {
     const desktopClient = mockDesktopClient();
     const request = await sampleRequest();
-    const prepareReviews = vi.fn().mockResolvedValue({ ok: true, items: [eligiblePrepared()] });
+    const prepareReviews = vi
+      .fn()
+      .mockResolvedValue({ ok: true, items: [eligiblePrepared()] });
     const finalizeReviews = vi.fn().mockResolvedValue({
       ok: true,
       items: [
         {
           artifactId,
           decision: "blocked",
-          findings: [{ severity: "block", code: "secret", path: "/object", message: "blocked" }],
+          findings: [
+            {
+              severity: "block",
+              code: "secret",
+              path: "/object",
+              message: "blocked",
+            },
+          ],
           request,
           requestDigest: await sha256CanonicalRequest(request),
-          staged: false
-        }
-      ]
+          staged: false,
+        },
+      ],
     });
     await renderController({ desktopClient, prepareReviews, finalizeReviews });
 
@@ -159,19 +207,28 @@ describe("useMastheadPagesController", () => {
   test("requires warning acknowledgement before confirmation", async () => {
     const desktopClient = mockDesktopClient();
     const request = await sampleRequest();
-    const prepareReviews = vi.fn().mockResolvedValue({ ok: true, items: [eligiblePrepared()] });
+    const prepareReviews = vi
+      .fn()
+      .mockResolvedValue({ ok: true, items: [eligiblePrepared()] });
     const finalizeReviews = vi.fn().mockResolvedValue({
       ok: true,
       items: [
         {
           artifactId,
           decision: "needs_review",
-          findings: [{ severity: "warn", code: "review_language", path: "/object", message: "check" }],
+          findings: [
+            {
+              severity: "warn",
+              code: "review_language",
+              path: "/object",
+              message: "check",
+            },
+          ],
           request,
           requestDigest: await sha256CanonicalRequest(request),
-          staged: false
-        }
-      ]
+          staged: false,
+        },
+      ],
     });
     await renderController({ desktopClient, prepareReviews, finalizeReviews });
 
@@ -193,10 +250,12 @@ describe("useMastheadPagesController", () => {
     const desktopClient = mockDesktopClient();
     const request = await sampleRequest();
     const digest = await sha256CanonicalRequest(request);
-    const prepareReviews = vi.fn().mockResolvedValue({ ok: true, items: [eligiblePrepared()] });
+    const prepareReviews = vi
+      .fn()
+      .mockResolvedValue({ ok: true, items: [eligiblePrepared()] });
     const finalizeReviews = vi.fn().mockResolvedValue({
       ok: true,
-      items: [readyFinalized(request, digest)]
+      items: [readyFinalized(request, digest)],
     });
     const recordResults = vi.fn().mockResolvedValue({ ok: true });
     vi.mocked(desktopClient.publishStaged).mockResolvedValue({
@@ -209,12 +268,17 @@ describe("useMastheadPagesController", () => {
           objectId: request.objectId,
           currentUrl: "https://masthead.page/u/demo/notes/page",
           exactRevisionUrl: "https://masthead.page/r/obj",
-          publishedAt: "2026-08-11T00:00:00.000Z"
-        }
-      ]
+          publishedAt: "2026-08-11T00:00:00.000Z",
+        },
+      ],
     });
 
-    await renderController({ desktopClient, prepareReviews, finalizeReviews, recordResults });
+    await renderController({
+      desktopClient,
+      prepareReviews,
+      finalizeReviews,
+      recordResults,
+    });
 
     await act(async () => {
       await latest?.openSingleReview(artifactId);
@@ -232,17 +296,19 @@ describe("useMastheadPagesController", () => {
     await flushController();
 
     expect(desktopClient.publishStaged).toHaveBeenCalledTimes(1);
-    expect(desktopClient.publishStaged).toHaveBeenCalledWith([{ artifactId, requestDigest: digest }]);
+    expect(desktopClient.publishStaged).toHaveBeenCalledWith([
+      { artifactId, requestDigest: digest },
+    ]);
     expect(recordResults).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: "publication",
         receipt: expect.objectContaining({
           artifactId,
           pageId: "page_1",
-          friendlyUrl: "https://masthead.page/u/demo/notes/page"
-        })
+          friendlyUrl: "https://masthead.page/u/demo/notes/page",
+        }),
       }),
-      baseUrl
+      baseUrl,
     );
     expect(latest?.state.phase).toBe("complete");
     expect(latest?.state.outcome.kind).toBe("published");
@@ -252,7 +318,8 @@ describe("useMastheadPagesController", () => {
     const desktopClient = mockDesktopClient();
     const request = await sampleRequest();
     request.pageId = "page-live";
-    request.expectedParentObjectId = "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    request.expectedParentObjectId =
+      "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     const digest = await sha256CanonicalRequest(request);
     const prepareReviews = vi.fn().mockResolvedValue({
       ok: true,
@@ -263,18 +330,19 @@ describe("useMastheadPagesController", () => {
           existingRelease: {
             status: "live",
             pageId: "page-live",
-            objectId: "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            objectId:
+              "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             publicLogbookId: "logbook-1",
             localContentFingerprint: "fp-old",
             friendlyUrl: "https://masthead.page/u/demo/notes/page",
-            exactUrl: "https://masthead.page/r/old"
-          }
-        }
-      ]
+            exactUrl: "https://masthead.page/r/old",
+          },
+        },
+      ],
     });
     const finalizeReviews = vi.fn().mockResolvedValue({
       ok: true,
-      items: [readyFinalized(request, digest)]
+      items: [readyFinalized(request, digest)],
     });
     vi.mocked(desktopClient.publishStaged).mockResolvedValue({
       protocolVersion: "masthead-pages-publish-batch-result-v1",
@@ -283,16 +351,22 @@ describe("useMastheadPagesController", () => {
           status: "published",
           idempotencyKey: request.idempotencyKey,
           pageId: "page-live",
-          objectId: "sha256-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          objectId:
+            "sha256-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
           parentObjectId: request.expectedParentObjectId,
           currentUrl: "https://masthead.page/u/demo/notes/page",
           exactRevisionUrl: "https://masthead.page/r/new",
-          publishedAt: "2026-08-11T00:00:00.000Z"
-        }
-      ]
+          publishedAt: "2026-08-11T00:00:00.000Z",
+        },
+      ],
     });
     const recordResults = vi.fn().mockResolvedValue({ ok: true });
-    await renderController({ desktopClient, prepareReviews, finalizeReviews, recordResults });
+    await renderController({
+      desktopClient,
+      prepareReviews,
+      finalizeReviews,
+      recordResults,
+    });
 
     await act(async () => {
       await latest?.openSingleReview(artifactId);
@@ -312,9 +386,13 @@ describe("useMastheadPagesController", () => {
 
     expect(latest?.state.outcome.kind).toBe("published");
     if (latest?.state.outcome.kind === "published") {
-      expect(latest.state.outcome.previousExactUrl).toBe("https://masthead.page/r/old");
+      expect(latest.state.outcome.previousExactUrl).toBe(
+        "https://masthead.page/r/old",
+      );
       expect(latest.state.outcome.exactUrl).toBe("https://masthead.page/r/new");
-      expect(latest.state.outcome.friendlyUrl).toBe("https://masthead.page/u/demo/notes/page");
+      expect(latest.state.outcome.friendlyUrl).toBe(
+        "https://masthead.page/u/demo/notes/page",
+      );
     }
   });
 
@@ -327,8 +405,8 @@ describe("useMastheadPagesController", () => {
         operationKind: "publish",
         requestDigest: digest,
         idempotencyKey: request.idempotencyKey,
-        requestJson: JSON.stringify(request)
-      }
+        requestJson: JSON.stringify(request),
+      },
     });
     vi.mocked(desktopClient.publishStaged).mockResolvedValue({
       protocolVersion: "masthead-pages-publish-batch-result-v1",
@@ -340,16 +418,18 @@ describe("useMastheadPagesController", () => {
           objectId: request.objectId,
           currentUrl: "https://masthead.page/u/demo/notes/page",
           exactRevisionUrl: "https://masthead.page/r/obj",
-          publishedAt: "2026-08-11T00:00:00.000Z"
-        }
-      ]
+          publishedAt: "2026-08-11T00:00:00.000Z",
+        },
+      ],
     });
     const recordResults = vi.fn().mockResolvedValue({ ok: true });
     await renderController({
       desktopClient,
-      prepareReviews: vi.fn().mockResolvedValue({ ok: true, items: [eligiblePrepared()] }),
+      prepareReviews: vi
+        .fn()
+        .mockResolvedValue({ ok: true, items: [eligiblePrepared()] }),
       getPendingOperation,
-      recordResults
+      recordResults,
     });
 
     await act(async () => {
@@ -362,7 +442,9 @@ describe("useMastheadPagesController", () => {
     await flushController();
 
     expect(getPendingOperation).toHaveBeenCalledWith(artifactId, baseUrl);
-    expect(desktopClient.publishStaged).toHaveBeenCalledWith([{ artifactId, requestDigest: digest }]);
+    expect(desktopClient.publishStaged).toHaveBeenCalledWith([
+      { artifactId, requestDigest: digest },
+    ]);
     expect(latest?.state.phase).toBe("complete");
     expect(latest?.state.outcome.kind).toBe("published");
   });
@@ -371,9 +453,11 @@ describe("useMastheadPagesController", () => {
     const desktopClient = mockDesktopClient();
     const request = await sampleRequest();
     request.pageId = "page-live";
-    request.expectedParentObjectId = "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    request.expectedParentObjectId =
+      "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     const digest = await sha256CanonicalRequest(request);
-    const hostedCurrent = "sha256-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+    const hostedCurrent =
+      "sha256-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
     const prepareReviews = vi.fn().mockResolvedValue({
       ok: true,
       items: [
@@ -384,14 +468,14 @@ describe("useMastheadPagesController", () => {
             pageId: "page-live",
             objectId: request.expectedParentObjectId,
             localContentFingerprint: "fp-1",
-            publicLogbookId: "logbook-1"
-          }
-        }
-      ]
+            publicLogbookId: "logbook-1",
+          },
+        },
+      ],
     });
     const finalizeReviews = vi.fn().mockResolvedValue({
       ok: true,
-      items: [readyFinalized(request, digest)]
+      items: [readyFinalized(request, digest)],
     });
     const recordResults = vi.fn().mockResolvedValue({ ok: true });
     vi.mocked(desktopClient.publishStaged).mockResolvedValue({
@@ -403,11 +487,16 @@ describe("useMastheadPagesController", () => {
           code: "parent-conflict",
           retryable: false,
           message: "stale parent",
-          currentObjectId: hostedCurrent
-        }
-      ]
+          currentObjectId: hostedCurrent,
+        },
+      ],
     });
-    await renderController({ desktopClient, prepareReviews, finalizeReviews, recordResults });
+    await renderController({
+      desktopClient,
+      prepareReviews,
+      finalizeReviews,
+      recordResults,
+    });
 
     await act(async () => {
       await latest?.openSingleReview(artifactId);
@@ -428,10 +517,10 @@ describe("useMastheadPagesController", () => {
         failure: expect.objectContaining({
           errorClass: "parent-conflict",
           currentObjectId: hostedCurrent,
-          retryable: false
-        })
+          retryable: false,
+        }),
       }),
-      baseUrl
+      baseUrl,
     );
     expect(latest?.state.gate).toBe("parent_conflict");
     expect(latest?.state.parentConflictObjectId).toBe(hostedCurrent);
@@ -449,8 +538,8 @@ describe("useMastheadPagesController", () => {
         pageId: "page-live",
         pendingOperationKind: "remove",
         pendingRequestDigest: "sha256-remove-digest",
-        pendingIdempotencyKey: "idem-remove"
-      }
+        pendingIdempotencyKey: "idem-remove",
+      },
     });
     vi.mocked(desktopClient.withdrawStaged).mockResolvedValue({
       protocolVersion: "masthead-pages-remove-result-v1",
@@ -458,7 +547,7 @@ describe("useMastheadPagesController", () => {
       idempotencyKey: "idem-remove",
       status: "removed",
       removedAt: "2026-08-11T12:00:00.000Z",
-      retryable: false
+      retryable: false,
     });
     const recordResults = vi.fn().mockResolvedValue({ ok: true });
     await renderController({
@@ -471,15 +560,16 @@ describe("useMastheadPagesController", () => {
             existingRelease: {
               status: "live",
               pageId: "page-live",
-              objectId: "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              objectId:
+                "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
               localContentFingerprint: "fp-1",
-              friendlyUrl: "https://masthead.page/u/demo/notes/page"
-            }
-          }
-        ]
+              friendlyUrl: "https://masthead.page/u/demo/notes/page",
+            },
+          },
+        ],
       }),
       stageRemoval,
-      recordResults
+      recordResults,
     });
 
     await act(async () => {
@@ -498,11 +588,11 @@ describe("useMastheadPagesController", () => {
     expect(stageRemoval).toHaveBeenCalledWith({ artifactId }, baseUrl);
     expect(desktopClient.withdrawStaged).toHaveBeenCalledWith({
       artifactId,
-      requestDigest: "sha256-remove-digest"
+      requestDigest: "sha256-remove-digest",
     });
     expect(recordResults).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "removed", artifactId }),
-      baseUrl
+      baseUrl,
     );
     expect(latest?.state.outcome.kind).toBe("removed");
     expect(latest?.state.releaseState).toBe("removed");
@@ -514,8 +604,8 @@ describe("useMastheadPagesController", () => {
       operation: {
         operationKind: "remove",
         requestDigest: "sha256-remove-retry",
-        idempotencyKey: "idem-remove-retry"
-      }
+        idempotencyKey: "idem-remove-retry",
+      },
     });
     vi.mocked(desktopClient.withdrawStaged).mockResolvedValue({
       protocolVersion: "masthead-pages-remove-result-v1",
@@ -523,7 +613,7 @@ describe("useMastheadPagesController", () => {
       idempotencyKey: "idem-remove-retry",
       status: "idempotent-replay",
       removedAt: "2026-08-11T12:00:00.000Z",
-      retryable: false
+      retryable: false,
     });
     const recordResults = vi.fn().mockResolvedValue({ ok: true });
     const stageRemoval = vi.fn();
@@ -537,17 +627,18 @@ describe("useMastheadPagesController", () => {
             existingRelease: {
               status: "live",
               pageId: "page-live",
-              objectId: "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              objectId:
+                "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
               pendingOperationKind: "remove",
               pendingRequestDigest: "sha256-remove-retry",
-              pendingIdempotencyKey: "idem-remove-retry"
-            }
-          }
-        ]
+              pendingIdempotencyKey: "idem-remove-retry",
+            },
+          },
+        ],
       }),
       getPendingOperation,
       stageRemoval,
-      recordResults
+      recordResults,
     });
 
     await act(async () => {
@@ -563,7 +654,7 @@ describe("useMastheadPagesController", () => {
     expect(stageRemoval).not.toHaveBeenCalled();
     expect(desktopClient.withdrawStaged).toHaveBeenCalledWith({
       artifactId,
-      requestDigest: "sha256-remove-retry"
+      requestDigest: "sha256-remove-retry",
     });
     expect(latest?.state.outcome.kind).toBe("removed");
   });
@@ -572,10 +663,12 @@ describe("useMastheadPagesController", () => {
     const desktopClient = mockDesktopClient();
     const request = await sampleRequest();
     const digest = await sha256CanonicalRequest(request);
-    const prepareReviews = vi.fn().mockResolvedValue({ ok: true, items: [eligiblePrepared()] });
+    const prepareReviews = vi
+      .fn()
+      .mockResolvedValue({ ok: true, items: [eligiblePrepared()] });
     const finalizeReviews = vi.fn().mockResolvedValue({
       ok: true,
-      items: [readyFinalized(request, digest)]
+      items: [readyFinalized(request, digest)],
     });
     const recordResults = vi.fn().mockResolvedValue({ ok: true });
     vi.mocked(desktopClient.publishStaged).mockResolvedValue({
@@ -586,12 +679,17 @@ describe("useMastheadPagesController", () => {
           idempotencyKey: request.idempotencyKey,
           code: "temporarily-unavailable",
           retryable: true,
-          message: "hosted down"
-        }
-      ]
+          message: "hosted down",
+        },
+      ],
     });
 
-    await renderController({ desktopClient, prepareReviews, finalizeReviews, recordResults });
+    await renderController({
+      desktopClient,
+      prepareReviews,
+      finalizeReviews,
+      recordResults,
+    });
 
     await act(async () => {
       await latest?.openSingleReview(artifactId);
@@ -612,10 +710,10 @@ describe("useMastheadPagesController", () => {
         failure: expect.objectContaining({
           artifactId,
           retryable: true,
-          message: "hosted down"
-        })
+          message: "hosted down",
+        }),
       }),
-      baseUrl
+      baseUrl,
     );
     expect(latest?.state.phase).toBe("finalized");
     expect(latest?.state.outcome.kind).toBe("failed");
@@ -644,7 +742,7 @@ async function renderController(deps: {
       finalizeReviews: deps.finalizeReviews as never,
       recordResults: deps.recordResults as never,
       stageRemoval: deps.stageRemoval as never,
-      getPendingOperation: deps.getPendingOperation as never
+      getPendingOperation: deps.getPendingOperation as never,
     });
     latest = controller;
     useEffect(() => {
@@ -668,7 +766,9 @@ async function flushController() {
   });
 }
 
-function mockDesktopClient(overrides: Partial<MastheadPagesDesktopClient> = {}): MastheadPagesDesktopClient {
+function mockDesktopClient(
+  overrides: Partial<MastheadPagesDesktopClient> = {},
+): MastheadPagesDesktopClient {
   return {
     getConnection: vi.fn(async () => connectedAccount("publisher")),
     connect: vi.fn(async () => connectedAccount("publisher")),
@@ -681,26 +781,28 @@ function mockDesktopClient(overrides: Partial<MastheadPagesDesktopClient> = {}):
         slug: "notes",
         description: "",
         visibility: "discoverable" as const,
-        defaultLicense: "all-rights-reserved" as const
-      }
+        defaultLicense: "all-rights-reserved" as const,
+      },
     ]),
     createPublicLogbook: vi.fn(),
     chooseCover: vi.fn(async () => ({ canceled: true as const })),
     clearCover: vi.fn(async () => undefined),
     uploadCover: vi.fn(async () => ({
       protocolVersion: "masthead-pages-cover-result-v1" as const,
-      coverVersion: "cover-1"
+      coverVersion: "cover-1",
     })),
     publishStaged: vi.fn(async () => ({
       protocolVersion: "masthead-pages-publish-batch-result-v1" as const,
-      results: []
+      results: [],
     })),
     withdrawStaged: vi.fn(),
-    ...overrides
+    ...overrides,
   };
 }
 
-function connectedAccount(publisherAccess: "publisher" | "request_required" | "requested" | "suspended") {
+function connectedAccount(
+  publisherAccess: "publisher" | "request_required" | "requested" | "suspended",
+) {
   return {
     status: "connected" as const,
     account: {
@@ -708,8 +810,8 @@ function connectedAccount(publisherAccess: "publisher" | "request_required" | "r
       accountId: "account-1",
       handle: "demo",
       publisherAccess,
-      defaultLogbookVisibility: "discoverable" as const
-    }
+      defaultLogbookVisibility: "discoverable" as const,
+    },
   };
 }
 
@@ -727,10 +829,10 @@ function eligiblePrepared() {
         text: "fixed the callback",
         observedAt: "2026-08-11T00:00:00.000Z",
         label: "Callback fix",
-        lowValue: false
-      }
+        lowValue: false,
+      },
     ],
-    findings: []
+    findings: [],
   };
 }
 
@@ -740,7 +842,8 @@ async function sampleRequest(): Promise<PublishPageRequestV1> {
     publicLogbookId: "logbook-1",
     slug: "repair-oauth-callback",
     idempotencyKey: "idem-1",
-    objectId: "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    objectId:
+      "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     object: {
       schemaVersion: "masthead-page-revision-v1",
       kind: "session_dossier",
@@ -751,23 +854,28 @@ async function sampleRequest(): Promise<PublishPageRequestV1> {
         decisions: [],
         blockers: [],
         continuation: { openQuestions: [], constraints: [] },
-        warnings: []
+        warnings: [],
       },
       labels: { topics: [], technologies: [] },
-      verification: { status: "passed", summary: "ok", checks: [], failures: [] },
+      verification: {
+        status: "passed",
+        summary: "ok",
+        checks: [],
+        failures: [],
+      },
       evidence: [],
       provenance: {
         sourceKind: "session_dossier",
         sourceSchema: "canonical-session-dossier-v1",
-        sourceLinks: []
+        sourceLinks: [],
       },
       license: "all-rights-reserved",
       generator: {
         name: "Masthead",
         version: "0.1.15",
-        projection: "session-dossier-public-v1"
-      }
-    }
+        projection: "session-dossier-public-v1",
+      },
+    },
   };
 }
 
@@ -778,6 +886,6 @@ function readyFinalized(request: PublishPageRequestV1, digest: string) {
     findings: [],
     request,
     requestDigest: digest,
-    staged: true
+    staged: true,
   };
 }

@@ -4,15 +4,28 @@ import { buildHistoryRecords } from "../core/historyRecords";
 import {
   applyReviewDispositions,
   createReviewDisposition,
-  isReviewSafeAction
+  isReviewSafeAction,
 } from "../core/reviewDispositions";
 import type { ReviewDisposition } from "../core/store";
-import type { FixtureReplay, GitSnapshot, LiveBoardProjection, NormalizedEvent, SafeAction, SessionDetailView } from "../core/types";
+import type {
+  FixtureReplay,
+  GitSnapshot,
+  LiveBoardProjection,
+  NormalizedEvent,
+  SafeAction,
+  SessionDetailView,
+} from "../core/types";
 import { AttentionQueue } from "../ui/AttentionQueue";
 import { AppShell } from "../ui/AppShell";
 import { HistoryPanel } from "../ui/HistoryPanel";
-import { ObservabilitySidebar, type AppSurface } from "../ui/ObservabilitySidebar";
-import { buildObservabilityDemoBoard, observabilitySessionTotal } from "../ui/observabilityDemoBoard";
+import {
+  ObservabilitySidebar,
+  type AppSurface,
+} from "../ui/ObservabilitySidebar";
+import {
+  buildObservabilityDemoBoard,
+  observabilitySessionTotal,
+} from "../ui/observabilityDemoBoard";
 import { OperationsPanel } from "../ui/OperationsPanel";
 import {
   prefersReducedMotion,
@@ -21,7 +34,7 @@ import {
   readStoredSessionEndedNotificationsEnabled,
   writeStoredMotionDisabled,
   writeStoredKeepRunningInTray,
-  writeStoredSessionEndedNotificationsEnabled
+  writeStoredSessionEndedNotificationsEnabled,
 } from "../ui/motionPreference";
 import { emitSessionTransitionNotifications } from "./liveSessionEndedNotifications";
 import { readOnboardingDismissed } from "./onboardingPreference";
@@ -29,35 +42,45 @@ import { resolveDatabaseOnboardingRoute } from "./onboardingRoute";
 import {
   applyIdlePresentationToProjection,
   markIdleDoneSeen,
-  type IdlePresentationTrack
+  type IdlePresentationTrack,
 } from "./sessionIdlePresentation";
-import {
-  SessionBoard
-} from "../ui/SessionBoard";
+import { SessionBoard } from "../ui/SessionBoard";
 import { SessionDetailModal } from "../ui/SessionDetailModal";
 import { SourcesPanel } from "../ui/SourcesPanel";
 import { Toolbar } from "../ui/Toolbar";
 import type { CollapsibleSearchHandle } from "../ui/primitives/CollapsibleSearch";
-import { filterAttentionItemsForCards, filterCards, mainScanCards, summarizeMainScanCards, type BoardFilter } from "../ui/filterBoard";
+import {
+  filterAttentionItemsForCards,
+  filterCards,
+  mainScanCards,
+  summarizeMainScanCards,
+  type BoardFilter,
+} from "../ui/filterBoard";
 import {
   activityWindowMs,
   type ActivityWindow,
   type CardDensity,
   type HarnessFilter,
   type LifecycleFilter,
-  type SortMode
+  type SortMode,
 } from "../ui/toolbarOptions";
 import {
   defaultFixtureMode,
-
   isLiveProjectionEnvelope,
   normalizeLiveBoardProjection,
 } from "./liveProjectionClient";
 import { startLiveConnector } from "./connectorClient";
-import { invokeDesktopCommand, isDesktopBridgeAvailable } from "./desktopBridge";
+import {
+  invokeDesktopCommand,
+  isDesktopBridgeAvailable,
+} from "./desktopBridge";
 import { useMastheadConnection } from "./connection/useMastheadConnection";
 import { MastheadApiClient } from "./api/MastheadApiClient";
-import { ConnectionRecoveryPanel, type CollectorStartupLogEntry, type ConnectorActionView } from "../ui/ConnectionRecoveryPanel";
+import {
+  ConnectionRecoveryPanel,
+  type CollectorStartupLogEntry,
+  type ConnectorActionView,
+} from "../ui/ConnectionRecoveryPanel";
 import { saveReviewDisposition } from "./daemonClient";
 import { LogbookSurface } from "./surfaces/LogbookSurface";
 import { NowSurface } from "./surfaces/NowSurface";
@@ -71,6 +94,10 @@ import { useBoardSessionDetailController } from "./board/useBoardSessionDetailCo
 import { useLogbookController } from "./logbook/useLogbookController";
 import { useMastheadPagesController } from "./mastheadPages/useMastheadPagesController";
 import { isMastheadPagesDesktopClientAvailable } from "./mastheadPages/desktopClient";
+import {
+  createBrowserReviewDesktopClient,
+  isBrowserReviewPublishingEnabled,
+} from "./mastheadPages/browserReviewClient";
 import { useSettingsDataController } from "./settings/useSettingsDataController";
 import { useSourcesController } from "./sources/useSourcesController";
 import { useSourcesConnectorsController } from "./sources/useSourcesConnectorsController";
@@ -84,10 +111,15 @@ import { MastheadPagesBatchReview } from "../ui/masthead-pages/MastheadPagesBatc
 type ConnectorActionState = ConnectorActionView;
 type LiveProjectionLoadResult = "loaded" | "superseded" | "failed";
 
-const STARTUP_PROJECTION_ERROR_MESSAGE = "Collector started, but live projection did not load.";
+const STARTUP_PROJECTION_ERROR_MESSAGE =
+  "Collector started, but live projection did not load.";
 
 const replay = fixture as FixtureReplay;
 const startsInFixtureMode = defaultFixtureMode();
+const browserReviewPublishingEnabled = isBrowserReviewPublishingEnabled({
+  dev: import.meta.env.DEV,
+  search: typeof window === "undefined" ? "" : window.location.search,
+});
 
 const emptyLiveBoard: LiveBoardProjection = {
   summary: {
@@ -97,47 +129,66 @@ const emptyLiveBoard: LiveBoardProjection = {
     completed: 0,
     running: 0,
     needsAction: 0,
-    idle: 0
+    idle: 0,
   },
   lanes: [
     { laneId: "running", title: "Running", count: 0, sessionIds: [] },
     { laneId: "idle", title: "Idle", count: 0, sessionIds: [] },
     { laneId: "needs_action", title: "Needs action", count: 0, sessionIds: [] },
-    { laneId: "history", title: "History", count: 0, sessionIds: [] }
+    { laneId: "history", title: "History", count: 0, sessionIds: [] },
   ],
   cards: [],
   attentionQueue: [],
-  conflicts: []
+  conflicts: [],
 };
 
 export function App() {
-  const [activeSurface, setActiveSurface] = useState<AppSurface>(() => readOnboardingDismissed() ? "now" : "sources");
+  const [activeSurface, setActiveSurface] = useState<AppSurface>(() =>
+    readOnboardingDismissed() ? "now" : "sources",
+  );
   const onboardingRoutedDatabaseIdsRef = useRef(new Set<string>());
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
+    null,
+  );
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<BoardFilter>("all");
   const [harnessFilter, setHarnessFilter] = useState<HarnessFilter>("all");
-  const [lifecycleFilter, setLifecycleFilter] = useState<LifecycleFilter>("all");
+  const [lifecycleFilter, setLifecycleFilter] =
+    useState<LifecycleFilter>("all");
   const [sortMode, setSortMode] = useState<SortMode>("operational_priority");
   const [activityWindow, setActivityWindow] = useState<ActivityWindow>("7d");
   const [refreshRateMs, setRefreshRateMs] = useState(10_000);
   const [density, setDensity] = useState<CardDensity>("comfortable");
-  const [motionDisabled, setMotionDisabled] = useState(() => readStoredMotionDisabled());
-  const [keepRunningInTray, setKeepRunningInTray] = useState(() => readStoredKeepRunningInTray());
-  const [sessionEndedNotificationsEnabled, setSessionEndedNotificationsEnabled] = useState(() =>
-    readStoredSessionEndedNotificationsEnabled()
+  const [motionDisabled, setMotionDisabled] = useState(() =>
+    readStoredMotionDisabled(),
   );
+  const [keepRunningInTray, setKeepRunningInTray] = useState(() =>
+    readStoredKeepRunningInTray(),
+  );
+  const [
+    sessionEndedNotificationsEnabled,
+    setSessionEndedNotificationsEnabled,
+  ] = useState(() => readStoredSessionEndedNotificationsEnabled());
   const [detailModalOpen, setDetailModalOpen] = useState(false);
-  const [selectedSessionSnapshot, setSelectedSessionSnapshot] = useState<SessionDetailView>();
+  const [selectedSessionSnapshot, setSelectedSessionSnapshot] =
+    useState<SessionDetailView>();
   const [liveProjection, setLiveProjection] = useState<LiveBoardProjection>();
   const liveProjectionRef = useRef<LiveBoardProjection | undefined>(undefined);
-  const idlePresentationTracksRef = useRef(new Map<string, IdlePresentationTrack>());
+  const idlePresentationTracksRef = useRef(
+    new Map<string, IdlePresentationTrack>(),
+  );
   const notifiedSessionTransitionKeysRef = useRef(new Set<string>());
-  const [liveConnection, setLiveConnection] = useState<ConnectionState>({ state: "connecting" });
+  const [liveConnection, setLiveConnection] = useState<ConnectionState>({
+    state: "connecting",
+  });
   const [liveEvents, setLiveEvents] = useState<NormalizedEvent[]>();
   const [liveGitSnapshots, setLiveGitSnapshots] = useState<GitSnapshot[]>();
-  const [connectorAction, setConnectorAction] = useState<ConnectorActionState>({ state: "idle" });
-  const [collectorStartupLog, setCollectorStartupLog] = useState<CollectorStartupLogEntry[]>([]);
+  const [connectorAction, setConnectorAction] = useState<ConnectorActionState>({
+    state: "idle",
+  });
+  const [collectorStartupLog, setCollectorStartupLog] = useState<
+    CollectorStartupLogEntry[]
+  >([]);
   const connection = useMastheadConnection();
   const activeDatabaseId =
     connection.state.state === "ready" || connection.state.state === "read_only"
@@ -146,15 +197,22 @@ export function App() {
   const activeProjectionUrl = connection.baseUrl;
   const activeProjectionUrlRef = useRef(activeProjectionUrl);
   const [showDemoData, setShowDemoData] = useState(startsInFixtureMode);
-  const [reviewDispositions, setReviewDispositions] = useState<ReviewDisposition[]>([]);
+  const [reviewDispositions, setReviewDispositions] = useState<
+    ReviewDisposition[]
+  >([]);
   const [sourceLibraryRefreshKey, setSourceLibraryRefreshKey] = useState(0);
-  const hasDaemonConnection = connection.state.state === "ready" || connection.state.state === "read_only";
-  const handleSourceLibraryChanged = useCallback(() => setSourceLibraryRefreshKey((current) => current + 1), []);
+  const hasDaemonConnection =
+    connection.state.state === "ready" ||
+    connection.state.state === "read_only";
+  const handleSourceLibraryChanged = useCallback(
+    () => setSourceLibraryRefreshKey((current) => current + 1),
+    [],
+  );
   const sourcesController = useSourcesController({
     activeProjectionUrl,
     activeSurface,
     isLive: hasDaemonConnection,
-    onLibraryChanged: handleSourceLibraryChanged
+    onLibraryChanged: handleSourceLibraryChanged,
   });
   const {
     adapters,
@@ -184,19 +242,25 @@ export function App() {
     sources,
     status: sourcesStatus,
     syncAll: handleSyncSources,
-    syncRuntime: handleSyncAdapter
+    syncRuntime: handleSyncAdapter,
   } = sourcesController;
-  const sourcesConnectors = useSourcesConnectorsController(activeProjectionUrl, {
-    readOnly: !connection.writable,
-    databaseId: activeDatabaseId
-  });
+  const sourcesConnectors = useSourcesConnectorsController(
+    activeProjectionUrl,
+    {
+      readOnly: !connection.writable,
+      databaseId: activeDatabaseId,
+    },
+  );
   const reopenOnboarding = useCallback(() => {
     setActiveSurface("sources");
     sourcesConnectors.openOnboarding();
   }, [sourcesConnectors.openOnboarding]);
   useEffect(() => {
     if (!activeDatabaseId) return;
-    const surface = resolveDatabaseOnboardingRoute(activeDatabaseId, onboardingRoutedDatabaseIdsRef.current);
+    const surface = resolveDatabaseOnboardingRoute(
+      activeDatabaseId,
+      onboardingRoutedDatabaseIdsRef.current,
+    );
     if (surface) setActiveSurface(surface);
   }, [activeDatabaseId]);
   const logbook = useLogbookController({
@@ -205,40 +269,79 @@ export function App() {
     adapters,
     databaseId: activeDatabaseId,
     externalRefreshKey: sourceLibraryRefreshKey,
-    isLive: hasDaemonConnection
+    isLive: hasDaemonConnection,
   });
+  const browserReviewDesktopClient = useMemo(
+    () =>
+      browserReviewPublishingEnabled
+        ? createBrowserReviewDesktopClient({ baseUrl: activeProjectionUrl })
+        : undefined,
+    [activeProjectionUrl],
+  );
   const mastheadPages = useMastheadPagesController({
-    baseUrl: activeProjectionUrl
+    baseUrl: activeProjectionUrl,
+    desktopAvailable: browserReviewPublishingEnabled ? () => true : undefined,
+    desktopClient: browserReviewDesktopClient,
   });
   useEffect(() => {
     if (activeSurface !== "settings" && activeSurface !== "logbook") return;
-    if (!isMastheadPagesDesktopClientAvailable()) return;
+    if (
+      !browserReviewPublishingEnabled &&
+      !isMastheadPagesDesktopClientAvailable()
+    )
+      return;
     void mastheadPages.refreshConnection();
   }, [activeSurface, activeProjectionUrl]);
-  const [sessionActionStatus, setSessionActionStatus] = useState<{ sessionId: string; message: string }>();
+  const [sessionActionStatus, setSessionActionStatus] = useState<{
+    sessionId: string;
+    message: string;
+  }>();
   const searchInputRef = useRef<CollapsibleSearchHandle | null>(null);
   const liveRequestIdRef = useRef(0);
   const autoStartAttemptedRef = useRef(false);
   const collectorStartInFlightRef = useRef(false);
-  const fixtureBoard = useMemo(() => buildObservabilityDemoBoard(selectedSessionId), [selectedSessionId]);
-  const baseBoard = showDemoData ? fixtureBoard : liveProjection ?? emptyLiveBoard;
-  const board = useMemo(() => applyReviewDispositions(baseBoard, reviewDispositions), [baseBoard, reviewDispositions]);
-  const selectedActivityWindowMs = useMemo(() => activityWindowMs(activityWindow), [activityWindow]);
+  const fixtureBoard = useMemo(
+    () => buildObservabilityDemoBoard(selectedSessionId),
+    [selectedSessionId],
+  );
+  const baseBoard = showDemoData
+    ? fixtureBoard
+    : (liveProjection ?? emptyLiveBoard);
+  const board = useMemo(
+    () => applyReviewDispositions(baseBoard, reviewDispositions),
+    [baseBoard, reviewDispositions],
+  );
+  const selectedActivityWindowMs = useMemo(
+    () => activityWindowMs(activityWindow),
+    [activityWindow],
+  );
   const historyRecords = useMemo(
     () =>
       buildHistoryRecords({
-        events: showDemoData ? replay.events : liveEvents ?? [],
-        gitSnapshots: showDemoData ? replay.gitSnapshots : liveGitSnapshots ?? [],
+        events: showDemoData ? replay.events : (liveEvents ?? []),
+        gitSnapshots: showDemoData
+          ? replay.gitSnapshots
+          : (liveGitSnapshots ?? []),
         attentionItems: baseBoard.attentionQueue,
         conflicts: baseBoard.conflicts,
         reviewDispositions,
-        storedRecords: []
+        storedRecords: [],
       }),
-    [baseBoard.attentionQueue, baseBoard.conflicts, liveEvents, liveGitSnapshots, reviewDispositions, showDemoData]
+    [
+      baseBoard.attentionQueue,
+      baseBoard.conflicts,
+      liveEvents,
+      liveGitSnapshots,
+      reviewDispositions,
+      showDemoData,
+    ],
   );
   const scanCards = useMemo(
-    () => mainScanCards(board.cards, { activityWindowMs: selectedActivityWindowMs }),
-    [board.cards, selectedActivityWindowMs]
+    () =>
+      mainScanCards(board.cards, {
+        activityWindowMs: selectedActivityWindowMs,
+      }),
+    [board.cards, selectedActivityWindowMs],
   );
   const filteredCards = useMemo(
     () =>
@@ -247,11 +350,14 @@ export function App() {
         filter,
         harness: harnessFilter,
         lifecycle: lifecycleFilter,
-        sort: sortMode
+        sort: sortMode,
       }),
-    [filter, harnessFilter, lifecycleFilter, query, scanCards, sortMode]
+    [filter, harnessFilter, lifecycleFilter, query, scanCards, sortMode],
   );
-  const visibleSummary = useMemo(() => summarizeMainScanCards(filteredCards), [filteredCards]);
+  const visibleSummary = useMemo(
+    () => summarizeMainScanCards(filteredCards),
+    [filteredCards],
+  );
   const hasActiveToolbarFilters =
     Boolean(query) ||
     filter !== "all" ||
@@ -260,23 +366,37 @@ export function App() {
     activityWindow !== "7d";
   const filteredAttentionItems = useMemo(
     () => filterAttentionItemsForCards(board.attentionQueue, filteredCards),
-    [board.attentionQueue, filteredCards]
+    [board.attentionQueue, filteredCards],
   );
   const selectedLiveSession =
-    selectedSessionId && board.selectedSession?.sessionId === selectedSessionId ? board.selectedSession : undefined;
+    selectedSessionId && board.selectedSession?.sessionId === selectedSessionId
+      ? board.selectedSession
+      : undefined;
   const modalSelectedSession =
     selectedLiveSession ??
-    (selectedSessionSnapshot?.sessionId === selectedSessionId ? selectedSessionSnapshot : undefined);
-  const selectedBoardCanonicalSessionId = modalSelectedSession?.canonicalSessionId;
+    (selectedSessionSnapshot?.sessionId === selectedSessionId
+      ? selectedSessionSnapshot
+      : undefined);
+  const selectedBoardCanonicalSessionId =
+    modalSelectedSession?.canonicalSessionId;
   const boardDetail = useBoardSessionDetailController({
     activeProjectionUrl,
     open: detailModalOpen,
     sessionId: selectedBoardCanonicalSessionId,
-    showDemoData
+    showDemoData,
   });
   const effectiveLiveConnection = useMemo<ConnectionState>(() => {
-    if (connection.state.state === "offline" || connection.state.state === "incompatible") {
-      return { state: "offline", error: "error" in connection.state ? connection.state.error : "Masthead daemon unavailable" };
+    if (
+      connection.state.state === "offline" ||
+      connection.state.state === "incompatible"
+    ) {
+      return {
+        state: "offline",
+        error:
+          "error" in connection.state
+            ? connection.state.error
+            : "Masthead daemon unavailable",
+      };
     }
     if (connection.state.state === "probing") return { state: "connecting" };
     return liveConnection;
@@ -284,20 +404,31 @@ export function App() {
   const knowledgeFlow = useKnowledgeFlowSummary({
     activeProjectionUrl,
     isLive: hasDaemonConnection,
-    refreshKey: sourceLibraryRefreshKey
+    refreshKey: sourceLibraryRefreshKey,
   });
   const workbench = useWorkbenchController({
     active: activeSurface === "workbench",
     activeProjectionUrl,
     isLive: hasDaemonConnection,
     refreshKey: sourceLibraryRefreshKey,
-    onLibraryChanged: handleSourceLibraryChanged
+    onLibraryChanged: handleSourceLibraryChanged,
   });
-  const handleReviewDispositionsChanged = useCallback((dispositions: ReviewDisposition[]) => setReviewDispositions(dispositions), []);
-  const handleMotionDisabledChange = useCallback((disabled: boolean) => setMotionDisabled(disabled), []);
-  const appendCollectorStartupLog = useCallback((entry: CollectorStartupLogEntry) => {
-    setCollectorStartupLog((current) => upsertCollectorStartupLogEntry(current, entry));
-  }, []);
+  const handleReviewDispositionsChanged = useCallback(
+    (dispositions: ReviewDisposition[]) => setReviewDispositions(dispositions),
+    [],
+  );
+  const handleMotionDisabledChange = useCallback(
+    (disabled: boolean) => setMotionDisabled(disabled),
+    [],
+  );
+  const appendCollectorStartupLog = useCallback(
+    (entry: CollectorStartupLogEntry) => {
+      setCollectorStartupLog((current) =>
+        upsertCollectorStartupLogEntry(current, entry),
+      );
+    },
+    [],
+  );
 
   useEffect(() => {
     clearUnsupportedLocationHash();
@@ -313,15 +444,21 @@ export function App() {
 
   useEffect(() => {
     writeStoredKeepRunningInTray(keepRunningInTray);
-    void invokeDesktopCommand("set_keep_running_in_tray_command", { enabled: keepRunningInTray });
+    void invokeDesktopCommand("set_keep_running_in_tray_command", {
+      enabled: keepRunningInTray,
+    });
   }, [keepRunningInTray]);
 
   useEffect(() => {
-    writeStoredSessionEndedNotificationsEnabled(sessionEndedNotificationsEnabled);
+    writeStoredSessionEndedNotificationsEnabled(
+      sessionEndedNotificationsEnabled,
+    );
   }, [sessionEndedNotificationsEnabled]);
 
   useEffect(() => {
-    document.documentElement.dataset.mastheadMotion = motionDisabled ? "off" : "daily";
+    document.documentElement.dataset.mastheadMotion = motionDisabled
+      ? "off"
+      : "daily";
   }, [motionDisabled]);
 
   const handleCanonicalDataDeleted = useCallback(() => {
@@ -338,7 +475,7 @@ export function App() {
     isLive: hasDaemonConnection,
     onCanonicalDataDeleted: handleCanonicalDataDeleted,
     onReviewDispositionsChanged: handleReviewDispositionsChanged,
-    writable: connection.writable
+    writable: connection.writable,
   });
   useEffect(() => {
     if (
@@ -348,16 +485,27 @@ export function App() {
     ) {
       setActiveSurface("sources");
     }
-  }, [connection.writable, effectiveLiveConnection.state, sourcesConnectors.onboardingOpen]);
+  }, [
+    connection.writable,
+    effectiveLiveConnection.state,
+    sourcesConnectors.onboardingOpen,
+  ]);
 
   const toggleDensity = useCallback(() => {
-    setDensity((current) => (current === "compact" ? "comfortable" : "compact"));
+    setDensity((current) =>
+      current === "compact" ? "comfortable" : "compact",
+    );
   }, []);
 
   useEffect(() => {
     const focusSearch = (event: KeyboardEvent) => {
-      if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) return;
-      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+      if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey)
+        return;
+      if (
+        event.target instanceof HTMLInputElement ||
+        event.target instanceof HTMLTextAreaElement
+      )
+        return;
       event.preventDefault();
       searchInputRef.current?.focus();
     };
@@ -374,63 +522,93 @@ export function App() {
     if (selectedLiveSession) setSelectedSessionSnapshot(selectedLiveSession);
   }, [detailModalOpen, selectedLiveSession]);
 
-  const loadLiveProjection = useCallback(async (targetUrl?: string): Promise<LiveProjectionLoadResult> => {
-    const requestId = liveRequestIdRef.current + 1;
-    liveRequestIdRef.current = requestId;
-    const selectedLiveSessionId = selectedSessionId ?? undefined;
-    const isCurrentRequest = () => liveRequestIdRef.current === requestId;
+  const loadLiveProjection = useCallback(
+    async (targetUrl?: string): Promise<LiveProjectionLoadResult> => {
+      const requestId = liveRequestIdRef.current + 1;
+      liveRequestIdRef.current = requestId;
+      const selectedLiveSessionId = selectedSessionId ?? undefined;
+      const isCurrentRequest = () => liveRequestIdRef.current === requestId;
 
-    const mastheadApi = targetUrl ? new MastheadApiClient(targetUrl) : connection.api;
-    const isSupersededRequest = () => !isCurrentRequest() || mastheadApi.baseUrl !== activeProjectionUrlRef.current;
-    try {
-      const body = await mastheadApi.getLiveProjection(selectedLiveSessionId, { refreshIntervalMs: refreshRateMs });
-      if (isSupersededRequest()) return "superseded";
-      if (!isLiveProjectionEnvelope(body)) throw new Error("projection response did not match live envelope");
-      const previousProjection = liveProjectionRef.current;
-      const normalized = normalizeLiveBoardProjection(body.projection, selectedSessionId);
-      const presented = applyIdlePresentationToProjection(normalized, idlePresentationTracksRef.current);
-      liveProjectionRef.current = presented;
-      setLiveProjection(presented);
-      void emitSessionTransitionNotifications(previousProjection, presented, {
-        enabled: sessionEndedNotificationsEnabled,
-        notifiedTransitionKeys: notifiedSessionTransitionKeysRef.current
-      });
-      setShowDemoData(false);
-      setConnectorAction((current) =>
-        current.state === "idle" ? current : { state: "started", message: "Collector connected." }
-      );
-      setCollectorStartupLog((current) => {
-        const settled = current.map((entry) => (entry.state === "running" || entry.state === "error" ? { ...entry, state: "done" as const } : entry));
-        if (!settled.some((entry) => entry.id === "projection")) return settled;
-        return upsertCollectorStartupLogEntry(settled, {
-          id: "projection",
-          label: "Live projection",
-          detail: "Loaded live projection.",
-          state: "done"
+      const mastheadApi = targetUrl
+        ? new MastheadApiClient(targetUrl)
+        : connection.api;
+      const isSupersededRequest = () =>
+        !isCurrentRequest() ||
+        mastheadApi.baseUrl !== activeProjectionUrlRef.current;
+      try {
+        const body = await mastheadApi.getLiveProjection(
+          selectedLiveSessionId,
+          { refreshIntervalMs: refreshRateMs },
+        );
+        if (isSupersededRequest()) return "superseded";
+        if (!isLiveProjectionEnvelope(body))
+          throw new Error("projection response did not match live envelope");
+        const previousProjection = liveProjectionRef.current;
+        const normalized = normalizeLiveBoardProjection(
+          body.projection,
+          selectedSessionId,
+        );
+        const presented = applyIdlePresentationToProjection(
+          normalized,
+          idlePresentationTracksRef.current,
+        );
+        liveProjectionRef.current = presented;
+        setLiveProjection(presented);
+        void emitSessionTransitionNotifications(previousProjection, presented, {
+          enabled: sessionEndedNotificationsEnabled,
+          notifiedTransitionKeys: notifiedSessionTransitionKeysRef.current,
         });
-      });
-      setLiveConnection({
-        state: "live",
-        events: body.events,
-        gitSnapshots: body.gitSnapshots,
-        diagnostics: body.diagnostics,
-        generatedAt: body.generatedAt
-      });
-      return "loaded";
-    } catch (error) {
-      if (isSupersededRequest()) return "superseded";
-      liveProjectionRef.current = undefined;
-      notifiedSessionTransitionKeysRef.current.clear();
-      setLiveProjection(undefined);
-      setLiveEvents(undefined);
-      setLiveGitSnapshots(undefined);
-      setLiveConnection({
-        state: "offline",
-        error: error instanceof Error ? error.message : String(error)
-      });
-      return "failed";
-    }
-  }, [activeProjectionUrl, connection.api, refreshRateMs, selectedSessionId, sessionEndedNotificationsEnabled]);
+        setShowDemoData(false);
+        setConnectorAction((current) =>
+          current.state === "idle"
+            ? current
+            : { state: "started", message: "Collector connected." },
+        );
+        setCollectorStartupLog((current) => {
+          const settled = current.map((entry) =>
+            entry.state === "running" || entry.state === "error"
+              ? { ...entry, state: "done" as const }
+              : entry,
+          );
+          if (!settled.some((entry) => entry.id === "projection"))
+            return settled;
+          return upsertCollectorStartupLogEntry(settled, {
+            id: "projection",
+            label: "Live projection",
+            detail: "Loaded live projection.",
+            state: "done",
+          });
+        });
+        setLiveConnection({
+          state: "live",
+          events: body.events,
+          gitSnapshots: body.gitSnapshots,
+          diagnostics: body.diagnostics,
+          generatedAt: body.generatedAt,
+        });
+        return "loaded";
+      } catch (error) {
+        if (isSupersededRequest()) return "superseded";
+        liveProjectionRef.current = undefined;
+        notifiedSessionTransitionKeysRef.current.clear();
+        setLiveProjection(undefined);
+        setLiveEvents(undefined);
+        setLiveGitSnapshots(undefined);
+        setLiveConnection({
+          state: "offline",
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return "failed";
+      }
+    },
+    [
+      activeProjectionUrl,
+      connection.api,
+      refreshRateMs,
+      selectedSessionId,
+      sessionEndedNotificationsEnabled,
+    ],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -438,7 +616,8 @@ export function App() {
 
     const pollLiveProjection = async () => {
       await loadLiveProjection();
-      if (!cancelled) timeoutId = window.setTimeout(pollLiveProjection, refreshRateMs);
+      if (!cancelled)
+        timeoutId = window.setTimeout(pollLiveProjection, refreshRateMs);
     };
 
     void pollLiveProjection();
@@ -461,21 +640,23 @@ export function App() {
       collectorStartInFlightRef.current = true;
       setConnectorAction({
         state: "starting",
-        message: automatic ? "Starting local collector after app launch..." : "Starting local collector..."
+        message: automatic
+          ? "Starting local collector after app launch..."
+          : "Starting local collector...",
       });
       setCollectorStartupLog([
         {
           id: "bridge",
           label: "Desktop bridge",
           detail: "Requesting collector startup.",
-          state: "running"
-        }
+          state: "running",
+        },
       ]);
       let failureLogEntry: CollectorStartupLogEntry = {
         id: "bridge",
         label: "Desktop bridge",
         detail: "Collector startup failed.",
-        state: "error"
+        state: "error",
       };
 
       try {
@@ -485,25 +666,27 @@ export function App() {
             id: "bridge",
             label: "Desktop bridge",
             detail: "Collector startup response received.",
-            state: "done"
+            state: "done",
           });
           appendCollectorStartupLog({
             id: "daemon",
             label: "Daemon",
-            detail: result.started ? "Started local daemon." : "Reused running daemon.",
-            state: "done"
+            detail: result.started
+              ? "Started local daemon."
+              : "Reused running daemon.",
+            state: "done",
           });
           appendCollectorStartupLog({
             id: "connect",
             label: "Connection",
             detail: `Accepting ${result.projectionUrl}.`,
-            state: "running"
+            state: "running",
           });
           failureLogEntry = {
             id: "connect",
             label: "Connection",
             detail: "Connection setup failed.",
-            state: "error"
+            state: "error",
           };
           await connection.connectTo(result.projectionUrl);
           activeProjectionUrlRef.current = result.baseUrl;
@@ -511,42 +694,44 @@ export function App() {
             id: "connect",
             label: "Connection",
             detail: `Accepted ${result.projectionUrl}.`,
-            state: "done"
+            state: "done",
           });
           setConnectorAction({
             state: "started",
-            message: `${result.message} Connected to ${result.baseUrl}.`
+            message: `${result.message} Connected to ${result.baseUrl}.`,
           });
           appendCollectorStartupLog({
             id: "projection",
             label: "Live projection",
             detail: "Loading live projection.",
-            state: "running"
+            state: "running",
           });
           failureLogEntry = {
             id: "projection",
             label: "Live projection",
             detail: "Live projection did not load.",
-            state: "error"
+            state: "error",
           };
-          const projectionLoadResult = await loadLiveProjection(result.projectionUrl);
+          const projectionLoadResult = await loadLiveProjection(
+            result.projectionUrl,
+          );
           if (projectionLoadResult === "superseded") {
             appendCollectorStartupLog({
               id: "projection",
               label: "Live projection",
               detail: "Handed off to the refreshed connection.",
-              state: "done"
+              state: "done",
             });
           } else if (projectionLoadResult === "failed") {
             appendCollectorStartupLog({
               id: "projection",
               label: "Live projection",
               detail: "Live projection did not load.",
-              state: "error"
+              state: "error",
             });
             setConnectorAction({
               state: "error",
-              message: STARTUP_PROJECTION_ERROR_MESSAGE
+              message: STARTUP_PROJECTION_ERROR_MESSAGE,
             });
           }
           return;
@@ -556,23 +741,23 @@ export function App() {
           id: "bridge",
           label: "Desktop bridge",
           detail: "Collector startup is unsupported here.",
-          state: "error"
+          state: "error",
         });
         setConnectorAction({
           state: "unsupported",
-          message: result.message
+          message: result.message,
         });
       } catch (error) {
         appendCollectorStartupLog(failureLogEntry);
         setConnectorAction({
           state: "error",
-          message: `Could not start collector: ${error instanceof Error ? error.message : String(error)}`
+          message: `Could not start collector: ${error instanceof Error ? error.message : String(error)}`,
         });
       } finally {
         collectorStartInFlightRef.current = false;
       }
     },
-    [appendCollectorStartupLog, connection, loadLiveProjection]
+    [appendCollectorStartupLog, connection, loadLiveProjection],
   );
 
   const handleStartConnector = useCallback(() => {
@@ -583,7 +768,11 @@ export function App() {
     if (showDemoData) return;
     if (!isDesktopBridgeAvailable()) return;
     if (autoStartAttemptedRef.current) return;
-    if (connection.state.state !== "offline" && connection.state.state !== "incompatible") return;
+    if (
+      connection.state.state !== "offline" &&
+      connection.state.state !== "incompatible"
+    )
+      return;
 
     let cancelled = false;
     let secondFrame: number | undefined;
@@ -602,11 +791,15 @@ export function App() {
     };
   }, [connection.state.state, showDemoData, startCollector]);
 
-  const handleSessionAction = async (action: SafeAction, session: SessionDetailView) => {
+  const handleSessionAction = async (
+    action: SafeAction,
+    session: SessionDetailView,
+  ) => {
     if (!isReviewSafeAction(action)) {
       setSessionActionStatus({
         sessionId: session.sessionId,
-        message: "Open actions are read-only navigation placeholders in this prototype."
+        message:
+          "Open actions are read-only navigation placeholders in this prototype.",
       });
       return;
     }
@@ -616,8 +809,11 @@ export function App() {
       action,
       subject: { subjectId: session.sessionId, subjectType: "session" },
       recordedAt: recordedAt.toISOString(),
-      snoozedUntil: action === "snooze" ? new Date(recordedAt.getTime() + 60 * 60 * 1000).toISOString() : undefined,
-      reason: reasonForAction(action)
+      snoozedUntil:
+        action === "snooze"
+          ? new Date(recordedAt.getTime() + 60 * 60 * 1000).toISOString()
+          : undefined,
+      reason: reasonForAction(action),
     });
 
     try {
@@ -625,12 +821,12 @@ export function App() {
       setReviewDispositions((current) => [...current, disposition]);
       setSessionActionStatus({
         sessionId: session.sessionId,
-        message: messageForDisposition(disposition)
+        message: messageForDisposition(disposition),
       });
     } catch (error) {
       setSessionActionStatus({
         sessionId: session.sessionId,
-        message: `Local disposition failed: ${error instanceof Error ? error.message : String(error)}`
+        message: `Local disposition failed: ${error instanceof Error ? error.message : String(error)}`,
       });
     }
   };
@@ -639,9 +835,13 @@ export function App() {
     connectorAction.state === "starting" ||
     connectorAction.state === "error" ||
     connectorAction.state === "unsupported" ||
-    collectorStartupLog.some((entry) => entry.state === "running" || entry.state === "error");
+    collectorStartupLog.some(
+      (entry) => entry.state === "running" || entry.state === "error",
+    );
   const needsRecoveryPanel =
-    connection.state.state === "offline" || connection.state.state === "incompatible" || hasActiveCollectorStartup;
+    connection.state.state === "offline" ||
+    connection.state.state === "incompatible" ||
+    hasActiveCollectorStartup;
   const recoveryPanel = (
     <ConnectionRecoveryPanel
       action={connectorAction}
@@ -652,79 +852,96 @@ export function App() {
     />
   );
 
-
   const mainSurface =
     activeSurface === "sources" ? (
-      <SourcesSurface>{needsRecoveryPanel ? recoveryPanel : (
-        <SourcesPanel
-          sources={sources}
-          adapters={adapters}
-          imports={imports}
-          importTotal={importPage.total}
-          importFilterRuntime={importFilterRuntime}
-          lastRefreshAt={sourcesLastRefreshAt}
-          setup={sourcesSetup}
-          busy={sourcesBusy || sourcesConnectors.busy}
-          enrichment={settingsData.settingsState?.enrichment}
-          hooks={sourceHooks}
-          hookActionBusy={hookActionBusy}
-          llm={settingsData.settingsState?.llm}
-          onboardingOpen={sourcesConnectors.onboardingOpen}
-          readOnly={!connection.writable}
-          settingsBaseUrl={activeProjectionUrl}
-          status={sourcesConnectors.refreshStatus ?? sourcesStatus}
-          refreshStatus={sourcesConnectors.refreshStatus}
-          cardActionStatus={sourcesConnectors.cardActionStatus}
-          actionRuntime={sourcesConnectors.actionRuntime}
-          connectorsSnapshot={sourcesConnectors.snapshot}
-          selectedConnectorRuntime={sourcesConnectors.selectedRuntime}
-          onSelectConnectorRuntime={sourcesConnectors.setSelectedRuntime}
-          onDiscoverConnectors={() => sourcesConnectors.discover()}
-          onDiscoverHistory={() => sourcesConnectors.discoverHistory()}
-          onEnableConnector={(runtime) => sourcesConnectors.enable(runtime)}
-          onEnableAllDetectedConnectors={() => void sourcesConnectors.enableAllDetected()}
-          onTestConnector={(runtime) => sourcesConnectors.test(runtime)}
-          onUninstallConnector={(runtime) => void sourcesConnectors.uninstall(runtime)}
-          onConfirmConnectorActivation={(runtime) => void sourcesConnectors.confirmActivation(runtime)}
-          onCancelImport={handleCancelImport}
-          onClearImportJobsFilter={handleClearImportJobsFilter}
-          onCloseOnboarding={() => {
-            sourcesConnectors.closeOnboarding();
-            setActiveSurface("workbench");
-          }}
-          onRuntimeHookAction={handleRuntimeHookAction}
-          onConnectSelected={handleConnectSelectedSources}
-          onExcludePath={handleExcludeSourcePath}
-          onImportMetadata={handleImportMetadata}
-          onLoadImportReport={sourcesController.loadImportReport}
-          onLoadAdapterSources={handleLoadAdapterSources}
-          onOpenImportJobsForRuntime={handleOpenImportJobsForRuntime}
-          onOpenOnboarding={sourcesConnectors.openOnboarding}
-          onPollImports={handlePollActiveImports}
-          onPreviewImport={sourcesController.previewImport}
-          onPreviewImportRepair={sourcesController.previewImportRepair}
-          onRepairSources={handleRepairSources}
-          onRefresh={() => {
-            // Sources V2: refresh only live harness connections (not history import scan).
-            void sourcesConnectors.discover();
-          }}
-          onRetryImport={handleRetryImport}
-          onRunSetup={handleRunSourcesSetup}
-          onSaveLlmProvider={settingsData.saveLlmProviderSettings}
-          onScan={handleScanSources}
-          onScanSetup={handleScanSourcesSetup}
-          onSkipOnboarding={sourcesConnectors.skipOnboarding}
-          onSyncAdapter={handleSyncAdapter}
-          onSyncSources={handleSyncSources}
-        />
-      )}</SourcesSurface>
+      <SourcesSurface>
+        {needsRecoveryPanel ? (
+          recoveryPanel
+        ) : (
+          <SourcesPanel
+            sources={sources}
+            adapters={adapters}
+            imports={imports}
+            importTotal={importPage.total}
+            importFilterRuntime={importFilterRuntime}
+            lastRefreshAt={sourcesLastRefreshAt}
+            setup={sourcesSetup}
+            busy={sourcesBusy || sourcesConnectors.busy}
+            enrichment={settingsData.settingsState?.enrichment}
+            hooks={sourceHooks}
+            hookActionBusy={hookActionBusy}
+            llm={settingsData.settingsState?.llm}
+            onboardingOpen={sourcesConnectors.onboardingOpen}
+            readOnly={!connection.writable}
+            settingsBaseUrl={activeProjectionUrl}
+            status={sourcesConnectors.refreshStatus ?? sourcesStatus}
+            refreshStatus={sourcesConnectors.refreshStatus}
+            cardActionStatus={sourcesConnectors.cardActionStatus}
+            actionRuntime={sourcesConnectors.actionRuntime}
+            connectorsSnapshot={sourcesConnectors.snapshot}
+            selectedConnectorRuntime={sourcesConnectors.selectedRuntime}
+            onSelectConnectorRuntime={sourcesConnectors.setSelectedRuntime}
+            onDiscoverConnectors={() => sourcesConnectors.discover()}
+            onDiscoverHistory={() => sourcesConnectors.discoverHistory()}
+            onEnableConnector={(runtime) => sourcesConnectors.enable(runtime)}
+            onEnableAllDetectedConnectors={() =>
+              void sourcesConnectors.enableAllDetected()
+            }
+            onTestConnector={(runtime) => sourcesConnectors.test(runtime)}
+            onUninstallConnector={(runtime) =>
+              void sourcesConnectors.uninstall(runtime)
+            }
+            onConfirmConnectorActivation={(runtime) =>
+              void sourcesConnectors.confirmActivation(runtime)
+            }
+            onCancelImport={handleCancelImport}
+            onClearImportJobsFilter={handleClearImportJobsFilter}
+            onCloseOnboarding={() => {
+              sourcesConnectors.closeOnboarding();
+              setActiveSurface("workbench");
+            }}
+            onRuntimeHookAction={handleRuntimeHookAction}
+            onConnectSelected={handleConnectSelectedSources}
+            onExcludePath={handleExcludeSourcePath}
+            onImportMetadata={handleImportMetadata}
+            onLoadImportReport={sourcesController.loadImportReport}
+            onLoadAdapterSources={handleLoadAdapterSources}
+            onOpenImportJobsForRuntime={handleOpenImportJobsForRuntime}
+            onOpenOnboarding={sourcesConnectors.openOnboarding}
+            onPollImports={handlePollActiveImports}
+            onPreviewImport={sourcesController.previewImport}
+            onPreviewImportRepair={sourcesController.previewImportRepair}
+            onRepairSources={handleRepairSources}
+            onRefresh={() => {
+              // Sources V2: refresh only live harness connections (not history import scan).
+              void sourcesConnectors.discover();
+            }}
+            onRetryImport={handleRetryImport}
+            onRunSetup={handleRunSourcesSetup}
+            onSaveLlmProvider={settingsData.saveLlmProviderSettings}
+            onScan={handleScanSources}
+            onScanSetup={handleScanSourcesSetup}
+            onSkipOnboarding={sourcesConnectors.skipOnboarding}
+            onSyncAdapter={handleSyncAdapter}
+            onSyncSources={handleSyncSources}
+          />
+        )}
+      </SourcesSurface>
     ) : activeSurface === "logbook" ? (
       <LogbookSurface>
         <>
           <HistoryPanel
             records={showDemoData ? historyRecords : undefined}
             adapters={adapters}
-            connectionState={connection.state.state === "offline" ? "offline" : connection.state.state === "incompatible" ? "incompatible" : effectiveLiveConnection.state === "live" ? "live" : "connecting"}
+            connectionState={
+              connection.state.state === "offline"
+                ? "offline"
+                : connection.state.state === "incompatible"
+                  ? "incompatible"
+                  : effectiveLiveConnection.state === "live"
+                    ? "live"
+                    : "connecting"
+            }
             detailError={logbook.detailError}
             detailLoading={logbook.detailLoading}
             filterOptions={logbook.filterOptions}
@@ -734,7 +951,13 @@ export function App() {
             pageSize={logbook.pageSize}
             query={logbook.query}
             density="compact"
-            loadState={needsRecoveryPanel ? { state: "ready", sessions: [], total: 0 } : showDemoData ? undefined : logbook.loadState}
+            loadState={
+              needsRecoveryPanel
+                ? { state: "ready", sessions: [], total: 0 }
+                : showDemoData
+                  ? undefined
+                  : logbook.loadState
+            }
             refreshError={logbook.refreshError}
             selectedArtifact={logbook.selectedArtifact}
             selectedSessionId={logbook.selectedSessionId}
@@ -791,21 +1014,26 @@ export function App() {
                 friendlyUrl={mastheadPages.state.releaseMapping?.friendlyUrl}
                 exactUrl={
                   mastheadPages.state.outcome.kind === "published"
-                    ? mastheadPages.state.outcome.previousExactUrl ??
+                    ? (mastheadPages.state.outcome.previousExactUrl ??
                       mastheadPages.state.outcome.exactUrl ??
-                      mastheadPages.state.releaseMapping?.exactUrl
+                      mastheadPages.state.releaseMapping?.exactUrl)
                     : mastheadPages.state.releaseMapping?.exactUrl
                 }
                 lastError={
-                  mastheadPages.state.outcome.kind === "failed" ? mastheadPages.state.outcome.message : undefined
+                  mastheadPages.state.outcome.kind === "failed"
+                    ? mastheadPages.state.outcome.message
+                    : undefined
                 }
-                parentConflictObjectId={mastheadPages.state.parentConflictObjectId}
+                parentConflictObjectId={
+                  mastheadPages.state.parentConflictObjectId
+                }
                 canRetryPublish={mastheadPages.canRetryPublish}
                 canRetryRemove={mastheadPages.canRetryRemove}
                 canRemove={mastheadPages.canRemove}
                 showRemovalWarning={mastheadPages.state.removalConfirmOpen}
                 busy={
-                  mastheadPages.state.phase === "publishing" || mastheadPages.state.phase === "removing"
+                  mastheadPages.state.phase === "publishing" ||
+                  mastheadPages.state.phase === "removing"
                 }
                 onRetryPublish={() => {
                   void mastheadPages.retryPendingPublication();
@@ -851,7 +1079,10 @@ export function App() {
             }}
           />
           <MastheadPagesBatchReview
-            open={mastheadPages.batchState.phase !== "closed" || Boolean(logbook.batchReview?.open)}
+            open={
+              mastheadPages.batchState.phase !== "closed" ||
+              Boolean(logbook.batchReview?.open)
+            }
             batch={mastheadPages.batchState}
             readyCount={mastheadPages.batchReadyCount}
             busy={
@@ -865,7 +1096,9 @@ export function App() {
             }}
             onPublicLogbookIdChange={mastheadPages.setBatchPublicLogbookId}
             onLicenseChange={mastheadPages.setBatchLicense}
-            onAcknowledgeWarningsChange={mastheadPages.setBatchAcknowledgeWarnings}
+            onAcknowledgeWarningsChange={
+              mastheadPages.setBatchAcknowledgeWarnings
+            }
             onItemSelectedChange={mastheadPages.setBatchItemSelectedForPublish}
             onFinalize={() => {
               void mastheadPages.finalizeBatchReview();
@@ -931,7 +1164,9 @@ export function App() {
             keepRunningInTray={keepRunningInTray}
             motionDisabled={motionDisabled}
             sessionEndedNotificationsEnabled={sessionEndedNotificationsEnabled}
-            onSessionEndedNotificationsEnabledChange={setSessionEndedNotificationsEnabled}
+            onSessionEndedNotificationsEnabledChange={
+              setSessionEndedNotificationsEnabled
+            }
             settingsError={settingsData.settingsError}
             settingsLoadState={settingsData.settingsLoadState}
             settingsState={settingsData.settingsState}
@@ -951,7 +1186,10 @@ export function App() {
             onConfirmDeleteLocalData={settingsData.confirmDeleteLocalData}
             readOnly={!connection.writable}
             mastheadPagesConnection={mastheadPages.state.connection}
-            mastheadPagesDesktopAvailable={isMastheadPagesDesktopClientAvailable()}
+            mastheadPagesDesktopAvailable={
+              browserReviewPublishingEnabled ||
+              isMastheadPagesDesktopClientAvailable()
+            }
             mastheadPagesError={mastheadPages.state.error}
             onMastheadPagesConnect={() => {
               void mastheadPages.connect();
@@ -995,11 +1233,24 @@ export function App() {
             cards={filteredCards}
             lanes={board.lanes}
             variant="observability"
-            emptyTitle={emptyBoardTitle({ showDemoData, hasActiveToolbarFilters, liveConnection: effectiveLiveConnection })}
-            emptyMessage={emptyBoardMessage({ showDemoData, hasActiveToolbarFilters, liveConnection: effectiveLiveConnection })}
+            emptyTitle={emptyBoardTitle({
+              showDemoData,
+              hasActiveToolbarFilters,
+              liveConnection: effectiveLiveConnection,
+            })}
+            emptyMessage={emptyBoardMessage({
+              showDemoData,
+              hasActiveToolbarFilters,
+              liveConnection: effectiveLiveConnection,
+            })}
             emptyAction={
-              !showDemoData && !hasActiveToolbarFilters && effectiveLiveConnection.state === "live"
-                ? { label: "Open Sources", onClick: () => setActiveSurface("sources") }
+              !showDemoData &&
+              !hasActiveToolbarFilters &&
+              effectiveLiveConnection.state === "live"
+                ? {
+                    label: "Open Sources",
+                    onClick: () => setActiveSurface("sources"),
+                  }
                 : undefined
             }
             onDoneSeen={(sessionId) => {
@@ -1010,9 +1261,13 @@ export function App() {
                   ...current,
                   cards: current.cards.map((card) =>
                     card.sessionId === sessionId && card.displayState === "done"
-                      ? { ...card, displayState: "idle" as const, stateLabel: "Idle" }
-                      : card
-                  )
+                      ? {
+                          ...card,
+                          displayState: "idle" as const,
+                          stateLabel: "Idle",
+                        }
+                      : card,
+                  ),
                 };
                 liveProjectionRef.current = next;
                 return next;
@@ -1069,7 +1324,8 @@ export function App() {
             setActiveSurface("sources");
           }}
           actionStatus={
-            sessionActionStatus && sessionActionStatus.sessionId === modalSelectedSession.sessionId
+            sessionActionStatus &&
+            sessionActionStatus.sessionId === modalSelectedSession.sessionId
               ? sessionActionStatus.message
               : undefined
           }
@@ -1082,7 +1338,7 @@ export function App() {
 function emptyBoardTitle({
   showDemoData,
   hasActiveToolbarFilters,
-  liveConnection
+  liveConnection,
 }: {
   showDemoData: boolean;
   hasActiveToolbarFilters: boolean;
@@ -1097,7 +1353,7 @@ function emptyBoardTitle({
 
 function upsertCollectorStartupLogEntry(
   entries: CollectorStartupLogEntry[],
-  entry: CollectorStartupLogEntry
+  entry: CollectorStartupLogEntry,
 ): CollectorStartupLogEntry[] {
   const existingIndex = entries.findIndex((current) => current.id === entry.id);
   if (existingIndex === -1) return [...entries, entry];
@@ -1110,25 +1366,34 @@ function upsertCollectorStartupLogEntry(
 function emptyBoardMessage({
   showDemoData,
   hasActiveToolbarFilters,
-  liveConnection
+  liveConnection,
 }: {
   showDemoData: boolean;
   hasActiveToolbarFilters: boolean;
   liveConnection: ConnectionState;
 }): string {
-  if (hasActiveToolbarFilters) return "Adjust the toolbar filters to bring sessions back into view.";
-  if (showDemoData) return "Demo replay is available only when fixture data exists.";
-  if (liveConnection.state === "live") return "New activity from connected sources will appear here.";
-  if (liveConnection.state === "offline") return "Use the Connector panel to start or check the local collector.";
+  if (hasActiveToolbarFilters)
+    return "Adjust the toolbar filters to bring sessions back into view.";
+  if (showDemoData)
+    return "Demo replay is available only when fixture data exists.";
+  if (liveConnection.state === "live")
+    return "New activity from connected sources will appear here.";
+  if (liveConnection.state === "offline")
+    return "Use the Connector panel to start or check the local collector.";
   return "Board will switch to live sessions when the local collector responds.";
 }
 
-function reasonForAction(action: Extract<SafeAction, "snooze" | "dismiss" | "mark_reviewed" | "mark_expected">): string {
+function reasonForAction(
+  action: Extract<
+    SafeAction,
+    "snooze" | "dismiss" | "mark_reviewed" | "mark_expected"
+  >,
+): string {
   const reasons = {
     snooze: "Snoozed from Masthead Board.",
     dismiss: "Dismissed from Masthead Board.",
     mark_reviewed: "Marked reviewed from Masthead Board.",
-    mark_expected: "Marked expected from Masthead Board."
+    mark_expected: "Marked expected from Masthead Board.",
   };
   return reasons[action];
 }
@@ -1143,7 +1408,7 @@ function messageForDisposition(disposition: ReviewDisposition): string {
     expected: "Marked expected locally.",
     dismissed: "Dismissed locally.",
     snoozed: "Snoozed locally.",
-    false_positive: "Marked false positive locally."
+    false_positive: "Marked false positive locally.",
   };
   return labels[disposition.status];
 }
