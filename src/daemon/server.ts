@@ -198,6 +198,7 @@ import {
   getMastheadPagesBodyLimit,
   isMastheadPagesPath,
   mastheadPagesInvalidJsonResult,
+  migrateLegacyPendingRemovalDigests,
   routeMastheadPagesRequest
 } from "./mastheadPagesApi.ts";
 
@@ -262,6 +263,7 @@ export async function createMastheadDaemon(config: DaemonConfig): Promise<Masthe
       }
       migrateDatabase(database);
       if (pendingMigrations && !config.skipMigrationQuickCheck) quickCheckMastheadDatabase(database);
+      migrateLegacyPendingRemovalDigests(database);
       initializeSessionTranscriptFingerprintIndex(database);
       if (config.legacyWorkbenchBackfillEnabled !== false) runLegacyWorkbenchPublicationBackfill(database);
       // Bounded one-shot drain of stale quality-review purgatory (not per-request).

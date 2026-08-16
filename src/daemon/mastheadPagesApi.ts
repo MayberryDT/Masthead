@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 
+import { validateRemovePageRequestV1 } from "../mastheadPages/contract.ts";
 import { EvidenceSelectionError, resolvePublicEvidenceCandidates } from "../mastheadPages/evidence.ts";
 import { checkSessionDossierEligibility, type EligibilityReason } from "../mastheadPages/eligibility.ts";
 import { scanPageEgress, type EgressFinding } from "../mastheadPages/egressPreflight.ts";
@@ -43,6 +44,47 @@ import type { MastheadDatabase } from "./db/sqlite.ts";
 export const MASTHEAD_PAGES_MAX_ARTIFACT_IDS = 500;
 export const MASTHEAD_PAGES_BODY_LIMIT_BYTES = 1_048_576;
 const GENERATOR_VERSION_FALLBACK = "0.1.15";
+
+export function migrateLegacyPendingRemovalDigests(db: MastheadDatabase): number {
+  const rows = db.prepare(
+    `SELECT lineage_id AS lineageId,
+            pending_request_json AS requestJson,
+            pending_request_digest AS requestDigest,
+            pending_idempotency_key AS idempotencyKey
+     FROM masthead_pages_release_mappings
+     WHERE pending_operation_kind = 'remove'`
+  ).all() as Array<{
+    lineageId: string;
+    requestJson: string;
+    requestDigest: string;
+    idempotencyKey: string;
+  }>;
+  let migrated = 0;
+  for (const row of rows) {
+    const legacyDigest = `sha256-${createHash("sha256").update(row.requestJson, "utf8").digest("hex")}`;
+    if (row.requestDigest !== legacyDigest) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(row.requestJson) as unknown;
+    } catch {
+      continue;
+    }
+    const validated = validateRemovePageRequestV1(parsed);
+    if (!validated.ok || validated.value.idempotencyKey !== row.idempotencyKey) continue;
+    const canonicalDigest = sha256CanonicalRequest(validated.value);
+    if (canonicalDigest === row.requestDigest) continue;
+    const result = db.prepare(
+      `UPDATE masthead_pages_release_mappings
+       SET pending_request_digest = ?, updated_at = ?
+       WHERE lineage_id = ?
+         AND pending_operation_kind = 'remove'
+         AND pending_request_json = ?
+         AND pending_request_digest = ?`
+    ).run(canonicalDigest, new Date().toISOString(), row.lineageId, row.requestJson, row.requestDigest);
+    migrated += Number(result.changes);
+  }
+  return migrated;
+}
 
 const FORBIDDEN_RENDERER_ENVELOPE_KEYS = new Set([
   "object",
@@ -437,7 +479,7 @@ function stageRemoval(context: MastheadPagesHttpContext, body: unknown): {
     idempotencyKey
   };
   const requestJson = JSON.stringify(request);
-  const requestDigest = `sha256-${createHash("sha256").update(requestJson, "utf8").digest("hex")}` as ObjectId;
+  const requestDigest = sha256CanonicalRequest(request);
   const updated = stageMastheadPagesRemoval(context.db, {
     artifactId,
     requestJson,

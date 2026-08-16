@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -9,7 +8,13 @@ import { createMastheadPagesCredentialStore, type SafeStorageLike } from "../mas
 import { createCoverSelectionStore } from "../mastheadPagesCover";
 import { createMastheadPagesRemoteClient } from "../mastheadPagesRemoteClient";
 import { computePageObjectId } from "../../mastheadPages/objectIdentity";
-import type { PageRevisionV1, PublisherAccountV1, PublishPageRequestV1 } from "../../mastheadPages/types";
+import { sha256CanonicalRequest } from "../../mastheadPages/review";
+import type {
+  PageRevisionV1,
+  PublisherAccountV1,
+  PublishPageRequestV1,
+  RemovePageRequestV1
+} from "../../mastheadPages/types";
 
 const tempDirs: string[] = [];
 
@@ -220,7 +225,7 @@ describe("mastheadPagesRemoteClient", () => {
     const safeStorage = fakeSafeStorage();
     await store.save("refresh-1", account, safeStorage);
     const requestJson = JSON.stringify(publishRequest);
-    const requestDigest = `sha256-${createHash("sha256").update(requestJson, "utf8").digest("hex")}`;
+    const requestDigest = sha256CanonicalRequest(publishRequest);
 
     const fetchImpl = vi.fn(async (input: string | URL) => {
       const url = String(input);
@@ -276,6 +281,144 @@ describe("mastheadPagesRemoteClient", () => {
     const result = await client.publishStaged({ refs: [{ artifactId: "a1", requestDigest }] });
     expect(result.results[0]).toMatchObject({ status: "published", idempotencyKey: "idem-key-0001" });
     await expect(store.loadRefreshToken(safeStorage)).resolves.toBe("refresh-2");
+  });
+
+  test("staged integrity failures block credential and Hosted access for publication batches and removal", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "masthead-pages-integrity-"));
+    tempDirs.push(dir);
+    const store = createMastheadPagesCredentialStore({ userDataPath: dir, platform: "linux" });
+    const safeStorage = fakeSafeStorage();
+    await store.save("refresh-1", account, safeStorage);
+    const loadRefresh = vi.spyOn(store, "loadRefreshToken");
+    const hostedFetch = vi.fn();
+    const publishDigest = sha256CanonicalRequest(publishRequest);
+    const invalidDigest = `sha256-${"0".repeat(64)}`;
+    const validPublishOperation = {
+      sourceArtifactId: "a1",
+      operationKind: "publish" as const,
+      requestJson: JSON.stringify(publishRequest),
+      requestDigest: publishDigest,
+      idempotencyKey: publishRequest.idempotencyKey
+    };
+    const removalRequest: RemovePageRequestV1 = {
+      protocolVersion: "masthead-pages-remove-v1",
+      pageId: "22222222-2222-4222-8222-222222222222",
+      idempotencyKey: "idem-remove-1"
+    };
+    const removalDigest = sha256CanonicalRequest(removalRequest);
+
+    const assertBlocked = async (
+      operation: "publish" | "remove",
+      refs: Array<{ artifactId: string; requestDigest: string }>,
+      daemonFetch: (input: string | URL) => Promise<Response>,
+      expectedError: string
+    ): Promise<void> => {
+      loadRefresh.mockClear();
+      hostedFetch.mockClear();
+      const client = createMastheadPagesRemoteClient({
+        apiOrigin: "https://masthead.page",
+        credentialStore: store,
+        safeStorage,
+        fetchImpl: hostedFetch as never,
+        daemonBaseUrl: () => "http://127.0.0.1:17373",
+        daemonFetch: daemonFetch as never,
+        platform: "linux"
+      });
+      const transfer =
+        operation === "publish"
+          ? client.publishStaged({ refs })
+          : client.withdrawStaged({ refs });
+      await expect(transfer).rejects.toThrow(expectedError);
+      expect(loadRefresh).not.toHaveBeenCalled();
+      expect(hostedFetch).not.toHaveBeenCalled();
+    };
+
+    await assertBlocked(
+      "publish",
+      [{ artifactId: "missing", requestDigest: publishDigest }],
+      async () => jsonResponse(404, {}),
+      "staged_missing"
+    );
+    await assertBlocked(
+      "publish",
+      [{ artifactId: "a1", requestDigest: publishDigest }],
+      async () =>
+        jsonResponse(200, {
+          ...validPublishOperation,
+          requestJson: JSON.stringify({
+            ...publishRequest,
+            protocolVersion: "masthead-pages-publish-v0"
+          })
+        }),
+      "staged_invalid_publish_request"
+    );
+    await assertBlocked(
+      "publish",
+      [{ artifactId: "a1", requestDigest: publishDigest }],
+      async () =>
+        jsonResponse(200, {
+          ...validPublishOperation,
+          idempotencyKey: "different-idempotency-key"
+        }),
+      "staged_idempotency_mismatch"
+    );
+    await assertBlocked(
+      "publish",
+      [{ artifactId: "a1", requestDigest: publishDigest }],
+      async () =>
+        jsonResponse(200, {
+          ...validPublishOperation,
+          requestJson: JSON.stringify({ ...publishRequest, slug: "mutated-page" })
+        }),
+      "staged_digest_mismatch"
+    );
+    await assertBlocked(
+      "publish",
+      [{ artifactId: "a1", requestDigest: publishDigest }],
+      async () => jsonResponse(200, { ...validPublishOperation, requestDigest: invalidDigest }),
+      "staged_digest_mismatch"
+    );
+    await assertBlocked(
+      "publish",
+      [{ artifactId: "a1", requestDigest: invalidDigest }],
+      async () => jsonResponse(200, validPublishOperation),
+      "staged_digest_mismatch"
+    );
+    await assertBlocked(
+      "publish",
+      [
+        { artifactId: "a1", requestDigest: publishDigest },
+        { artifactId: "a2", requestDigest: publishDigest }
+      ],
+      async (input) =>
+        jsonResponse(
+          200,
+          String(input).endsWith("/a1")
+            ? validPublishOperation
+            : {
+                ...validPublishOperation,
+                sourceArtifactId: "a2",
+                requestJson: JSON.stringify({ ...publishRequest, slug: "mutated-batch-page" })
+              }
+        ),
+      "staged_digest_mismatch"
+    );
+    await assertBlocked(
+      "remove",
+      [{ artifactId: "a1", requestDigest: removalDigest }],
+      async () =>
+        jsonResponse(200, {
+          sourceArtifactId: "a1",
+          operationKind: "remove",
+          requestJson: JSON.stringify({
+            ...removalRequest,
+            pageId: "33333333-3333-4333-8333-333333333333"
+          }),
+          requestDigest: removalDigest,
+          idempotencyKey: removalRequest.idempotencyKey
+        }),
+      "staged_digest_mismatch"
+    );
   });
 
   test("uploadCover posts multipart without local paths and rejects path smuggling", async () => {

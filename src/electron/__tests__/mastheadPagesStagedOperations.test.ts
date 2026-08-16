@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +9,7 @@ import {
   type DaemonPendingOperation
 } from "../mastheadPagesStagedOperations";
 import { computePageObjectId } from "../../mastheadPages/objectIdentity";
+import { sha256CanonicalRequest } from "../../mastheadPages/review";
 import type { PageRevisionV1, PublishPageRequestV1, RemovePageRequestV1 } from "../../mastheadPages/types";
 
 const fixturePage = JSON.parse(
@@ -34,8 +34,8 @@ const removeRequest: RemovePageRequestV1 = {
   idempotencyKey: "idem-remove-1"
 };
 
-function digest(json: string): string {
-  return `sha256-${createHash("sha256").update(json, "utf8").digest("hex")}`;
+function digest(request: PublishPageRequestV1 | RemovePageRequestV1): string {
+  return sha256CanonicalRequest(request);
 }
 
 describe("mastheadPagesStagedOperations", () => {
@@ -104,13 +104,14 @@ describe("mastheadPagesStagedOperations", () => {
     expect(fetchPending).toHaveBeenCalledWith("a1");
   });
 
-  test("rejects digest mismatch and wrong operation kind", async () => {
+  test("rejects renderer and daemon digest mismatches independently", async () => {
     const requestJson = JSON.stringify(publishRequest);
+    const canonicalDigest = digest(publishRequest);
     const pending: DaemonPendingOperation = {
       sourceArtifactId: "a1",
       operationKind: "publish",
       requestJson,
-      requestDigest: digest(requestJson),
+      requestDigest: canonicalDigest,
       idempotencyKey: "idem-key-0001"
     };
     await expect(
@@ -118,13 +119,77 @@ describe("mastheadPagesStagedOperations", () => {
     ).rejects.toThrow("staged_digest_mismatch");
 
     await expect(
-      loadStagedRemoval({ artifactId: "a1", requestDigest: pending.requestDigest }, async () => pending)
+      loadStagedPublishBatch([{ artifactId: "a1", requestDigest: canonicalDigest }], async () => ({
+        ...pending,
+        requestDigest: "sha256-deadbeef"
+      }))
+    ).rejects.toThrow("staged_digest_mismatch");
+
+    const canonicalRemovalDigest = digest(removeRequest);
+    const pendingRemoval: DaemonPendingOperation = {
+      sourceArtifactId: "a1",
+      operationKind: "remove",
+      requestJson: JSON.stringify(removeRequest),
+      requestDigest: canonicalRemovalDigest,
+      idempotencyKey: removeRequest.idempotencyKey
+    };
+    await expect(
+      loadStagedRemoval({ artifactId: "a1", requestDigest: "sha256-deadbeef" }, async () => pendingRemoval)
+    ).rejects.toThrow("staged_digest_mismatch");
+    await expect(
+      loadStagedRemoval({ artifactId: "a1", requestDigest: canonicalRemovalDigest }, async () => ({
+        ...pendingRemoval,
+        requestDigest: "sha256-deadbeef"
+      }))
+    ).rejects.toThrow("staged_digest_mismatch");
+  });
+
+  test("rejects parsed mutation, unsupported schema, idempotency inconsistency, and wrong operation kind", async () => {
+    const canonicalDigest = digest(publishRequest);
+    const basePending: DaemonPendingOperation = {
+      sourceArtifactId: "a1",
+      operationKind: "publish",
+      requestJson: JSON.stringify(publishRequest),
+      requestDigest: canonicalDigest,
+      idempotencyKey: publishRequest.idempotencyKey
+    };
+
+    await expect(
+      loadStagedPublishBatch([{ artifactId: "a1", requestDigest: canonicalDigest }], async () => ({
+        ...basePending,
+        requestJson: JSON.stringify({ ...publishRequest, slug: "mutated-page" })
+      }))
+    ).rejects.toThrow("staged_digest_mismatch");
+
+    await expect(
+      loadStagedPublishBatch([{ artifactId: "a1", requestDigest: canonicalDigest }], async () => ({
+        ...basePending,
+        requestJson: JSON.stringify({ ...publishRequest, protocolVersion: "masthead-pages-publish-v0" })
+      }))
+    ).rejects.toThrow("staged_invalid_publish_request");
+
+    await expect(
+      loadStagedPublishBatch([{ artifactId: "a1", requestDigest: canonicalDigest }], async () => ({
+        ...basePending,
+        idempotencyKey: "different-idempotency-key"
+      }))
+    ).rejects.toThrow("staged_idempotency_mismatch");
+
+    await expect(
+      loadStagedRemoval({ artifactId: "a1", requestDigest: canonicalDigest }, async () => basePending)
     ).rejects.toThrow("staged_wrong_operation_kind");
   });
 
-  test("loads validated publish and removal staged operations", async () => {
-    const publishJson = JSON.stringify(publishRequest);
-    const publishDigest = digest(publishJson);
+  test("accepts canonical publication and removal digests regardless of JSON key order", async () => {
+    const publishJson = JSON.stringify({
+      object: publishRequest.object,
+      objectId: publishRequest.objectId,
+      idempotencyKey: publishRequest.idempotencyKey,
+      slug: publishRequest.slug,
+      publicLogbookId: publishRequest.publicLogbookId,
+      protocolVersion: publishRequest.protocolVersion
+    });
+    const publishDigest = digest(publishRequest);
     const batch = await loadStagedPublishBatch([{ artifactId: "a1", requestDigest: publishDigest }], async () => ({
       sourceArtifactId: "a1",
       operationKind: "publish",
@@ -135,8 +200,12 @@ describe("mastheadPagesStagedOperations", () => {
     expect(batch.requests).toHaveLength(1);
     expect(batch.requests[0]?.idempotencyKey).toBe("idem-key-0001");
 
-    const removeJson = JSON.stringify(removeRequest);
-    const removeDigest = digest(removeJson);
+    const removeJson = JSON.stringify({
+      idempotencyKey: removeRequest.idempotencyKey,
+      pageId: removeRequest.pageId,
+      protocolVersion: removeRequest.protocolVersion
+    });
+    const removeDigest = digest(removeRequest);
     const removal = await loadStagedRemoval({ artifactId: "a1", requestDigest: removeDigest }, async () => ({
       sourceArtifactId: "a1",
       operationKind: "remove",

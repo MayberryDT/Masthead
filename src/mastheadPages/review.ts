@@ -5,7 +5,7 @@ import canonicalize from "canonicalize";
 import { scanCompleteOutboundRequest, type EgressFinding } from "./egressPreflight.ts";
 import { computePageObjectId } from "./objectIdentity.ts";
 import { projectSessionDossier, type SessionDossierProjectionInput } from "./publicProjection.ts";
-import type { ObjectId, PageRevisionV1, PublishPageRequestV1 } from "./types.ts";
+import type { ObjectId, PageRevisionV1, PublishPageRequestV1, RemovePageRequestV1 } from "./types.ts";
 
 export type FinalizeReviewInput = SessionDossierProjectionInput & {
   publicLogbookId: string;
@@ -60,7 +60,7 @@ export function buildPublishPageRequest(input: {
   };
 }
 
-export function sha256CanonicalRequest(request: PublishPageRequestV1): ObjectId {
+export function sha256CanonicalRequest(request: PublishPageRequestV1 | RemovePageRequestV1): ObjectId {
   const canonical = canonicalize(request);
   if (canonical === undefined) throw new Error("canonicalize_failed");
   return `sha256-${createHash("sha256").update(canonical, "utf8").digest("hex")}` as ObjectId;

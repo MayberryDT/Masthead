@@ -1,8 +1,11 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { sha256CanonicalRequest } from "../../mastheadPages/review.ts";
+import type { RemovePageRequestV1 } from "../../mastheadPages/types.ts";
 import type { PublishedSessionDossierV1 } from "../../shared/sessionDossier.ts";
 import type { DaemonConfig } from "../config.ts";
 import {
@@ -16,6 +19,7 @@ import { migrateDatabase } from "../db/schema.ts";
 import { openMastheadDatabase, type MastheadDatabase } from "../db/sqlite.ts";
 import {
   MASTHEAD_PAGES_MAX_ARTIFACT_IDS,
+  migrateLegacyPendingRemovalDigests,
   routeMastheadPagesRequest
 } from "../mastheadPagesApi.ts";
 import { createMastheadDaemon, type MastheadDaemon } from "../server.ts";
@@ -393,12 +397,27 @@ describe("masthead pages daemon API", () => {
       }
     );
     expect(staged?.status).toBe(200);
-    const body = staged?.body as { requestDigest: string; operation: { operationKind: string; requestJson: string } };
+    const body = staged?.body as {
+      requestDigest: string;
+      operation: { operationKind: string; requestJson: string; requestDigest: string };
+    };
+    const removalRequest = JSON.parse(body.operation.requestJson) as RemovePageRequestV1;
     expect(body.operation.operationKind).toBe("remove");
-    expect(JSON.parse(body.operation.requestJson)).toMatchObject({
+    expect(removalRequest).toMatchObject({
       protocolVersion: "masthead-pages-remove-v1",
       pageId: "11111111-1111-4111-8111-111111111111"
     });
+    expect(body.requestDigest).toBe(sha256CanonicalRequest(removalRequest));
+    expect(body.operation.requestDigest).toBe(body.requestDigest);
+
+    const legacyDigest = `sha256-${createHash("sha256").update(body.operation.requestJson, "utf8").digest("hex")}`;
+    expect(legacyDigest).not.toBe(body.requestDigest);
+    db.prepare(
+      "UPDATE masthead_pages_release_mappings SET pending_request_digest = ? WHERE source_artifact_id = ?"
+    ).run(legacyDigest, artifactId);
+    expect(migrateLegacyPendingRemovalDigests(db)).toBe(1);
+    expect(getPendingMastheadPagesOperation(db, artifactId)?.requestDigest).toBe(body.requestDigest);
+    expect(migrateLegacyPendingRemovalDigests(db)).toBe(0);
 
     const rejected = routeMastheadPagesRequest(
       { db },

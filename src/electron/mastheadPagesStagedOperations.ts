@@ -1,10 +1,9 @@
-import { createHash } from "node:crypto";
-
 import {
   validatePublishPageBatchRequestV1,
   validatePublishPageRequestV1,
   validateRemovePageRequestV1
 } from "../mastheadPages/contract.ts";
+import { sha256CanonicalRequest } from "../mastheadPages/review.ts";
 import type {
   PublishPageBatchRequestV1,
   PublishPageRequestV1,
@@ -126,10 +125,6 @@ export function assertStagedRefsOnly(args: unknown, label: string): StagedOperat
   return refs;
 }
 
-export function digestRequestJson(requestJson: string): string {
-  return `sha256-${createHash("sha256").update(requestJson, "utf8").digest("hex")}`;
-}
-
 export function parseAndValidatePendingPublish(operation: DaemonPendingOperation): PublishPageRequestV1 {
   if (operation.operationKind !== "publish") {
     throw new Error("staged_wrong_operation_kind");
@@ -166,17 +161,15 @@ export function parseAndValidatePendingRemoval(operation: DaemonPendingOperation
   return validated.value;
 }
 
-export function verifyPendingDigest(operation: DaemonPendingOperation, expectedDigest: string): void {
-  if (operation.requestDigest !== expectedDigest) {
+export function verifyPendingDigest(
+  request: PublishPageRequestV1 | RemovePageRequestV1,
+  operation: DaemonPendingOperation,
+  rendererDigest: string
+): void {
+  // Electron recomputes canonical identity; neither staged digest value is trusted.
+  const canonicalDigest = sha256CanonicalRequest(request);
+  if (canonicalDigest !== operation.requestDigest || canonicalDigest !== rendererDigest) {
     throw new Error("staged_digest_mismatch");
-  }
-  // Prefer recomputing when the stored digest uses the sha256- prefix convention.
-  if (expectedDigest.startsWith("sha256-") || expectedDigest.startsWith("sha256:")) {
-    const recomputed = digestRequestJson(operation.requestJson);
-    const normalizedExpected = expectedDigest.replace(/^sha256:/, "sha256-");
-    if (recomputed !== normalizedExpected && operation.requestDigest !== expectedDigest) {
-      throw new Error("staged_digest_mismatch");
-    }
   }
 }
 
@@ -188,8 +181,9 @@ export async function loadStagedPublishBatch(
   for (const ref of refs) {
     const pending = await fetchPending(ref.artifactId);
     if (!pending) throw new Error("staged_missing");
-    verifyPendingDigest(pending, ref.requestDigest);
-    requests.push(parseAndValidatePendingPublish(pending));
+    const request = parseAndValidatePendingPublish(pending);
+    verifyPendingDigest(request, pending, ref.requestDigest);
+    requests.push(request);
   }
   const batch: PublishPageBatchRequestV1 = {
     protocolVersion: "masthead-pages-publish-batch-v1",
@@ -206,8 +200,9 @@ export async function loadStagedRemoval(
 ): Promise<RemovePageRequestV1> {
   const pending = await fetchPending(ref.artifactId);
   if (!pending) throw new Error("staged_missing");
-  verifyPendingDigest(pending, ref.requestDigest);
-  return parseAndValidatePendingRemoval(pending);
+  const request = parseAndValidatePendingRemoval(pending);
+  verifyPendingDigest(request, pending, ref.requestDigest);
+  return request;
 }
 
 export function chunkPublishBatch(
