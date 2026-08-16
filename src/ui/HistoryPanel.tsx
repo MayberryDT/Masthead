@@ -51,15 +51,11 @@ type Props = {
   onSortChange?: (sort: LogbookSort) => void;
   onTranscriptFilterChange?: (filter: SessionTranscriptKindFilter) => void;
   onPublishToMastheadPages?: (artifactId: string) => void;
-  pagesSelectionMode?: boolean;
   selectedArtifactIds?: readonly string[];
-  batchCap?: number;
+  allFilteredSelected?: boolean;
   selectionBusy?: boolean;
   selectionError?: string;
-  onEnterPagesSelectionMode?: () => void;
-  onCancelPagesSelectionMode?: () => void;
-  onSelectCurrentPage?: () => void;
-  onSelectMatchingResults?: () => void;
+  onAllFilteredSelectedChange?: (selected: boolean) => void;
   onOpenBatchReview?: () => void;
   onArtifactSelectedChange?: (artifactId: string, selected: boolean) => void;
   pageIndex?: number;
@@ -149,15 +145,11 @@ export function HistoryPanel({
   onSortChange,
   onTranscriptFilterChange,
   onPublishToMastheadPages,
-  pagesSelectionMode = false,
   selectedArtifactIds = [],
-  batchCap = 500,
+  allFilteredSelected = false,
   selectionBusy = false,
   selectionError,
-  onEnterPagesSelectionMode,
-  onCancelPagesSelectionMode,
-  onSelectCurrentPage,
-  onSelectMatchingResults,
+  onAllFilteredSelectedChange,
   onOpenBatchReview,
   onArtifactSelectedChange,
   pageIndex = 0,
@@ -260,15 +252,11 @@ export function HistoryPanel({
         filterOptions={filterOptions}
         query={query}
         sort={sort}
-        pagesSelectionMode={pagesSelectionMode}
         selectedCount={selectedArtifactIds.length}
-        batchCap={batchCap}
+        allFilteredSelected={allFilteredSelected}
         selectionBusy={selectionBusy}
         selectionError={selectionError}
-        onEnterPagesSelectionMode={onEnterPagesSelectionMode}
-        onCancelPagesSelectionMode={onCancelPagesSelectionMode}
-        onSelectCurrentPage={onSelectCurrentPage}
-        onSelectMatchingResults={onSelectMatchingResults}
+        onAllFilteredSelectedChange={onAllFilteredSelectedChange}
         onOpenBatchReview={onOpenBatchReview}
         onFilterChange={onFilterChange ?? (() => undefined)}
         onQueryChange={onQueryChange}
@@ -298,7 +286,6 @@ export function HistoryPanel({
               sessions={tableSessions}
               selectedSessionId={selectedSessionId}
               updating={isLoading}
-              pagesSelectionMode={pagesSelectionMode}
               selectedArtifactIds={selectedArtifactIds}
               onArtifactSelectedChange={onArtifactSelectedChange}
               onSelect={(sessionId) => onSessionSelect?.(sessionId)}

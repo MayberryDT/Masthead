@@ -29,6 +29,21 @@
   justify-content: stretch;
 }
 
+.logbook-select-all {
+  flex: 0 0 104px;
+  padding-inline: 10px;
+  white-space: nowrap;
+}
+
+.logbook-publish-button {
+  flex: 0 0 88px;
+}
+
+.logbook-selection-error {
+  flex: 1 0 100%;
+  margin: 0;
+}
+
 .logbook-toolbar .logbook-search.expanded {
   flex: 0 1 clamp(280px, 34%, 420px);
   width: clamp(280px, 34%, 420px);
@@ -367,7 +382,7 @@
 
 .logbook-table {
   width: 100%;
-  /* kind · title · project · conf · provenance · published (no select column) */
+  /* select · kind · title · project · conf · provenance · published */
   min-width: 920px;
   table-layout: fixed;
   border-collapse: collapse;
@@ -1202,6 +1217,11 @@
     max-height: 520px;
   }
 
+  .logbook-select-all,
+  .logbook-publish-button {
+    flex: 1 1 calc(50% - 4px);
+  }
+
   .toolbar-select.logbook-sort,
   .toolbar-select.logbook-filter-select,
   .logbook-search,
@@ -1251,7 +1271,7 @@
   }
 }
 
-/* Artifact-first Logbook columns (no checkbox / select column) */
+/* Artifact-first Logbook columns */
 .logbook-col-kind {
   width: 6.5rem;
   max-width: 7.5rem;

@@ -28,9 +28,11 @@ collection of Pages, and the **Local Logbook** is private and canonical. Keep `a
 identifiers, persisted types, IDs, routes, schemas, MCP arguments, diagnostics that expose those
 contracts, and historical documentation. Do not rename artifact implementation identifiers opportunistically.
 
-Publication actions must name their destination: **Publish to Logbook** or **Publish to Masthead
-Pages**. Never introduce a bare **Publish** action, and do not imply that hosted Masthead Pages is
-required for the local product.
+Publication actions normally name their destination: **Publish to Logbook** or **Publish to
+Masthead Pages**. The one approved compact-label exception is the Logbook toolbar’s visible **Publish**
+button: always-visible Page checkboxes and its accessible name establish the Masthead Pages destination,
+and the button opens hosted batch review directly. Do not imply that hosted Masthead Pages is required
+for the local product.
 
 ## OpenWiki
 
@@ -68,7 +70,7 @@ Surface archetypes:
 
 - Now: live cards.
 - Workbench: dense ops table plus terminal-like Activity rail and selection-driven pipeline actions.
-- Logbook: dense **Page** table backed by artifact capsules plus body/provenance inspector (no bulk/checkboxes/summary strip).
+- Logbook: dense **Page** table backed by artifact capsules plus body/provenance inspector, with always-visible hosted-publication checkboxes and filtered Select all (no bulk enrich or summary strip).
 - Sources: harness connector rows plus live enablement (Discover → Enable → Activate → Test); see `../reference/sources-v2.md`.
 - Settings: one centered compact steel card with direct preferences and one inline detail section
   at a time for Data, Agent access, Advanced, or Danger zone.

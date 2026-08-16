@@ -25,7 +25,7 @@ Use qualified actions only:
 - **Publish new revision**
 - **Remove from Masthead Pages**
 
-Never a bare **Publish**. Local Logbook publication remains **Publish to Logbook**.
+Local Logbook publication remains **Publish to Logbook**. The Logbook toolbar may use the compact visible label **Publish** only for the always-visible Masthead Pages selection flow; its accessible name names the hosted destination.
 
 ## Daemon routes (primary only)
 
@@ -50,11 +50,12 @@ bridges must not forward them.
 - Tokens never enter renderer state, daemon settings, SQLite, logs, previews, or Page objects.
 - Only allowlisted `https://masthead.page` device verification URLs may open externally.
 
-## Selection mode
+## Page selection
 
-The normal Logbook table has **no permanent checkboxes**. Checkboxes appear only while temporary
-Masthead Pages selection mode is active and disappear when the mode ends. Matching selection
-snapshots at most 500 existing eligible IDs and never expands to future matches. The additive
+The Logbook table keeps Page checkboxes visible. **Select all** snapshots at most 500 existing eligible
+IDs matching the current filters and never expands to future matches. Individual eligible Pages remain
+directly selectable. The compact **Publish** button is disabled until the selection is non-empty and
+opens batch review directly; no temporary selection mode or auxiliary selection actions exist. The additive
 materialized resolver defines an explicit retryable or non-retryable incomplete result with zero IDs;
 Local 19 will wire that result to the production route only after shadow parity and cutover proof.
 

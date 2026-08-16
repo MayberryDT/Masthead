@@ -17,15 +17,11 @@ type Props = {
   onFilterChange?: (filters: LogbookFilterState) => void;
   onQueryChange: (query: string) => void;
   onSortChange: (sort: LogbookSort) => void;
-  pagesSelectionMode?: boolean;
   selectedCount?: number;
-  batchCap?: number;
+  allFilteredSelected?: boolean;
   selectionBusy?: boolean;
   selectionError?: string;
-  onEnterPagesSelectionMode?: () => void;
-  onCancelPagesSelectionMode?: () => void;
-  onSelectCurrentPage?: () => void;
-  onSelectMatchingResults?: () => void;
+  onAllFilteredSelectedChange?: (selected: boolean) => void;
   onOpenBatchReview?: () => void;
 };
 
@@ -58,18 +54,14 @@ function dropdownCloseDelayMs(): number {
 }
 
 export function LogbookToolbar({
-  batchCap = 500,
+  allFilteredSelected = false,
   filterOptions,
   filters = {},
-  onCancelPagesSelectionMode,
-  onEnterPagesSelectionMode,
+  onAllFilteredSelectedChange,
   onFilterChange,
   onOpenBatchReview,
   onQueryChange,
-  onSelectCurrentPage,
-  onSelectMatchingResults,
   onSortChange,
-  pagesSelectionMode = false,
   query,
   selectedCount = 0,
   selectionBusy = false,
@@ -222,41 +214,30 @@ export function LogbookToolbar({
         />
 
         <AppSelect label="Sort Pages" icon="recentActivity" value={sort} options={sortOptions} className="logbook-sort" onChange={(value) => onSortChange(value as LogbookSort)} />
+        <label className="logbook-select-all masthead-checkbox-control">
+          <input
+            aria-label="Select all filtered eligible Pages"
+            checked={allFilteredSelected}
+            disabled={selectionBusy}
+            type="checkbox"
+            onChange={(event) => onAllFilteredSelectedChange?.(event.currentTarget.checked)}
+          />
+          <span>{selectionBusy ? "Selecting…" : "Select all"}</span>
+        </label>
+        <AppButton
+          aria-label="Publish selected Pages to Masthead Pages"
+          className="logbook-publish-button"
+          disabled={selectionBusy || selectedCount === 0}
+          onClick={onOpenBatchReview}
+          variant="primary"
+        >
+          Publish
+        </AppButton>
       </div>
-
-      {pagesSelectionMode ? (
-        <div className="logbook-pages-selection-bar" aria-label="Masthead Pages selection">
-          <span className="mono-label">
-            {selectedCount} selected · cap {batchCap}
-          </span>
-          <AppButton disabled={selectionBusy} onClick={onSelectCurrentPage} variant="default">
-            Select current page
-          </AppButton>
-          <AppButton disabled={selectionBusy} onClick={onSelectMatchingResults} variant="default">
-            {selectionError ? "Retry matching selection" : `Select eligible matching results (up to ${batchCap})`}
-          </AppButton>
-          <AppButton
-            disabled={selectionBusy || selectedCount === 0}
-            onClick={onOpenBatchReview}
-            variant="primary"
-          >
-            Review {selectedCount} Pages
-          </AppButton>
-          <AppButton onClick={onCancelPagesSelectionMode} variant="quiet">
-            Cancel Masthead Pages selection
-          </AppButton>
-          {selectionError ? (
-            <p className="toolbar-result surface-status" role="alert">
-              {selectionError}
-            </p>
-          ) : null}
-        </div>
-      ) : onEnterPagesSelectionMode ? (
-        <div className="logbook-pages-selection-bar" aria-label="Masthead Pages actions">
-          <AppButton onClick={onEnterPagesSelectionMode} variant="default">
-            Publish to Masthead Pages
-          </AppButton>
-        </div>
+      {selectionError ? (
+        <p className="toolbar-result surface-status logbook-selection-error" role="alert">
+          {selectionError}
+        </p>
       ) : null}
     </div>
   );

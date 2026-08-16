@@ -376,9 +376,17 @@ Tier controls visual intensity. Lifecycle controls state meaning. Do not conflat
 The Logbook is not an old utility list or session library. It should optimize scanning, filtering,
 pagination, and opening published **Page** capsules while retaining the shared surface language.
 
-Locked composition: dense capsule table (Kind · Title/Highlight · Project · Conf · Provenance ·
-Published) plus a selection-driven inspector with **kind-specific body** and **always-visible
-provenance**. No bulk selection checkboxes, no bulk enrich chrome, no session-era summary metrics strip.
+Locked composition: dense capsule table (Select · Kind · Title/Highlight · Project · Conf ·
+Provenance · Published) plus a selection-driven inspector with **kind-specific body** and
+**always-visible provenance**. Page selection checkboxes remain visible in the table. They exist only
+for optional hosted publication; Logbook has no bulk enrich chrome or session-era summary metrics strip.
+
+The filter row includes one compact **Select all** checkbox. It selects the current filtered eligible
+Page snapshot, capped by the hosted-publication contract, and never future matches. Individual eligible
+Pages remain directly selectable. The toolbar adds exactly one hosted-publication button, visibly labeled
+**Publish**. It stays disabled until at least one eligible Page is selected and opens batch review directly.
+The Logbook context and accessible name must make the Masthead Pages destination explicit; no temporary
+selection mode, current-Page shortcut, matching-results button, or cancel-selection control is permitted.
 
 Each capsule should answer: what kind of knowledge this is, what it claims, where/when it was
 published, confidence, and which sessions provenance it. Body detail and multi-session join rationale
@@ -430,9 +438,9 @@ actions without turning the section into a code wall.
 
 ### Toolbar, Filters, And Dropdowns
 
-Toolbar controls should feel mechanical and responsive. Use raised dark controls, 40px minimum hit areas, exact-property transitions, and clear selected state.
+Toolbar controls should feel mechanical and responsive. Use raised dark controls, 40px minimum hit areas, exact-property transitions, and clear selected state. Native select elements and checkboxes must not ship with browser-default chrome: apply the shared raised-control surface, 3px corners, hairline border, readable hover/focus/disabled states, and a deliberate check indicator. Compact table checkboxes may use a 16px visible box inside a 40px hit target.
 
-Dropdowns must animate. Open with opacity and a slight scale from the trigger origin. Close with a short opacity/scale transition before unmounting. Chevron rotation should track the open state. Options should have hover and selected states, but they should not bounce or over-animate.
+Dropdowns must animate. Open with opacity and a slight scale from the trigger origin. Close with a short opacity/scale transition before unmounting. Chevron rotation should track the open state. Options should have hover and selected states, but they should not bounce or over-animate. If a native select is required, style its trigger and option colors consistently even though the operating system owns the menu transition.
 
 ### Layout Change Button
 

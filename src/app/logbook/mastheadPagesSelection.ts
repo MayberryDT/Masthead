@@ -1,6 +1,6 @@
 export const MASTHEAD_PAGES_BATCH_CAP = 500;
 
-export type MastheadPagesSelectionScope = "none" | "manual" | "current_page" | "matching";
+export type MastheadPagesSelectionScope = "none" | "manual" | "filtered";
 
 export type LogbookRowSelectionState = {
   selectable: boolean;
@@ -18,15 +18,14 @@ export function rowKind(session: { runtime?: string; lifecycle?: string }): stri
 }
 
 export function selectionStateForRow(input: {
-  pagesSelectionMode: boolean;
   selectedArtifactIds: ReadonlySet<string> | readonly string[];
   sessionId: string;
   kind?: string;
-}): LogbookRowSelectionState | undefined {
-  if (!input.pagesSelectionMode) return undefined;
+}): LogbookRowSelectionState {
   const selectedIds = input.selectedArtifactIds;
-  const selected =
-    selectedIds instanceof Set ? selectedIds.has(input.sessionId) : [...selectedIds].includes(input.sessionId);
+  const selected = "has" in selectedIds
+    ? selectedIds.has(input.sessionId)
+    : selectedIds.includes(input.sessionId);
   const eligible = isMastheadPagesListEligibleKind(input.kind);
   if (!eligible) {
     return {
@@ -52,18 +51,4 @@ export function toggleSelectedId(ids: readonly string[], artifactId: string, sel
     set.delete(artifactId);
   }
   return [...set];
-}
-
-export function selectEligibleCurrentPageIds(
-  sessions: Array<{ sessionId: string; runtime?: string; lifecycle?: string }>,
-  existing: readonly string[],
-  cap = MASTHEAD_PAGES_BATCH_CAP
-): string[] {
-  const next = new Set(existing);
-  for (const session of sessions) {
-    if (next.size >= cap) break;
-    if (!isMastheadPagesListEligibleKind(rowKind(session))) continue;
-    next.add(session.sessionId);
-  }
-  return [...next].slice(0, cap);
 }

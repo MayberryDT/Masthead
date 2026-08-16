@@ -51,13 +51,13 @@ describe("LogbookTable", () => {
     expect(html).toContain("<table");
     expect(html).toContain("<thead");
     expect(html).toContain("<tbody");
-    expect(html).not.toContain('type="checkbox"');
+    expect(html).toContain('type="checkbox"');
+    expect(html).toContain("Ineligible");
     expect(html).toContain("KIND");
 
     const selectable = renderToStaticMarkup(
       <LogbookTable
         density="comfortable"
-        pagesSelectionMode
         selectedArtifactIds={["artifact-1"]}
         sessions={[
           {
@@ -193,6 +193,20 @@ describe("LogbookTable", () => {
 
     expect(onSelect).toHaveBeenCalledTimes(1);
     expect(onSelect).toHaveBeenCalledWith("artifact-1");
+  });
+
+  test("does not open the artifact when the checkbox hit target is clicked", async () => {
+    const onSelect = vi.fn();
+    await renderTable(onSelect);
+
+    const checkboxTarget = currentContainer().querySelector<HTMLLabelElement>("tbody .logbook-row-checkbox");
+    expect(checkboxTarget).not.toBeNull();
+
+    await act(async () => {
+      checkboxTarget?.click();
+    });
+
+    expect(onSelect).not.toHaveBeenCalled();
   });
 
   test("opens the artifact from keyboard row activation", async () => {

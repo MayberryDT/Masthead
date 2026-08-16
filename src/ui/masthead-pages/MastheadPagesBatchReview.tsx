@@ -1,8 +1,6 @@
 import type { PageLicense, PublicLogbookSummaryV1 } from "../../mastheadPages/types";
 import type { MastheadPagesBatchState } from "../../app/mastheadPages/types";
-import type { MastheadPagesConnectionState } from "../../app/desktopBridge";
 import { AppButton } from "../primitives/AppButton";
-import { MastheadPagesStatus } from "./MastheadPagesStatus";
 
 export type MastheadPagesBatchReviewProps = {
   open: boolean;
@@ -10,7 +8,6 @@ export type MastheadPagesBatchReviewProps = {
   readyCount: number;
   busy?: boolean;
   onClose: () => void;
-  onConnect?: () => void;
   onPublicLogbookIdChange: (id: string) => void;
   onLicenseChange: (license: PageLicense) => void;
   onAcknowledgeWarningsChange: (value: boolean) => void;
@@ -25,7 +22,6 @@ export function MastheadPagesBatchReview({
   onAcknowledgeWarningsChange,
   onClose,
   onConfirmPublish,
-  onConnect,
   onFinalize,
   onItemSelectedChange,
   onLicenseChange,
@@ -56,35 +52,23 @@ export function MastheadPagesBatchReview({
         role="dialog"
         onClick={(event) => event.stopPropagation()}
       >
-        <header className="masthead-pages-review-header">
-          <div>
-            <p className="mono-label">Publish to Masthead Pages</p>
-            <h2 id="masthead-pages-batch-title">Review {batch.artifactIds.length} Pages</h2>
-            <p className="masthead-pages-help">
-              Ready items are daemon-staged before transfer. Needs review and Blocked items are never sent over IPC.
-            </p>
-          </div>
+        <header className="masthead-pages-review-header masthead-pages-batch-header">
+          <h2 id="masthead-pages-batch-title">Review {batch.artifactIds.length} {batch.artifactIds.length === 1 ? "Page" : "Pages"}</h2>
           <AppButton aria-label="Close Masthead Pages batch review" onClick={onClose} variant="quiet">
             Close
           </AppButton>
         </header>
 
-        <div className="masthead-pages-review-body">
-          <MastheadPagesStatus
-            connection={batch.connection as MastheadPagesConnectionState | undefined}
-            error={batch.error}
-            outcome={{ kind: "idle" }}
-          />
-          {batch.gate === "disconnected" || batch.gate === "desktop_unavailable" ? (
-            <div className="masthead-pages-review-actions">
-              <AppButton onClick={onConnect} variant="primary">
-                Connect Masthead Pages
-              </AppButton>
-            </div>
+        <div className="masthead-pages-review-body masthead-pages-batch-body">
+          {batch.error ? (
+            <p className="masthead-pages-status-error masthead-pages-batch-error" role="alert">
+              {batch.error}
+            </p>
           ) : null}
 
-          <section className="masthead-pages-review-step" aria-label="Destination">
+          <section className="masthead-pages-review-step masthead-pages-batch-destination" aria-label="Destination">
             <p className="mono-label">Destination</p>
+            <div className="masthead-pages-batch-fields">
             <label className="masthead-pages-field">
               Public Logbook
               <select
@@ -115,14 +99,15 @@ export function MastheadPagesBatchReview({
                 <option value="cc0-1.0">CC0 1.0</option>
               </select>
             </label>
-            <label className="masthead-pages-checkbox">
+            </div>
+            <label className="masthead-pages-checkbox masthead-checkbox-control">
               <input
                 checked={batch.acknowledgeWarnings}
                 disabled={fieldsLocked}
                 type="checkbox"
                 onChange={(event) => onAcknowledgeWarningsChange(event.currentTarget.checked)}
               />
-              <span>Acknowledge warnings for Needs review items so they can be staged when finalized</span>
+              <span>I’ve reviewed the warnings and want to include those Pages.</span>
             </label>
           </section>
 
@@ -130,17 +115,17 @@ export function MastheadPagesBatchReview({
             <section className="masthead-pages-review-step" aria-label="Batch selection">
               <p className="mono-label">Selected Pages</p>
               <ul className="masthead-pages-batch-list">
-                {batch.items.map((item) => (
+                {batch.items.map((item, index) => (
                   <li key={item.artifactId}>
-                    <strong>{item.title ?? item.artifactId}</strong>
+                    <strong>{item.title ?? `Page ${index + 1}`}</strong>
                     <span className="mono-label">
                       {item.prepared?.eligibility === "eligible"
                         ? "Eligible"
-                        : item.prepared?.ineligibilityReason
-                          ? `Ineligible: ${item.prepared.ineligibilityReason}`
+                        : item.prepared?.eligibility === "ineligible"
+                          ? "Not eligible"
                           : batch.phase === "loading"
                             ? "Preparing…"
-                            : "Ineligible"}
+                            : "Not checked"}
                     </span>
                   </li>
                 ))}
@@ -168,7 +153,7 @@ export function MastheadPagesBatchReview({
               onClick={onFinalize}
               variant="primary"
             >
-              {batch.phase === "finalizing" || busy ? "Finalizing…" : "Finalize batch review"}
+              {batch.phase === "finalizing" || busy ? "Checking…" : "Check Pages"}
             </AppButton>
           ) : null}
           {showGroups && batch.phase !== "complete" ? (
@@ -218,19 +203,19 @@ function BatchGroup({
         <p className="masthead-pages-help">{empty}</p>
       ) : (
         <ul className="masthead-pages-batch-list">
-          {items.map((item) => (
+          {items.map((item, index) => (
             <li key={item.artifactId}>
               {selectable ? (
-                <label className="masthead-pages-checkbox">
+                <label className="masthead-pages-checkbox masthead-checkbox-control">
                   <input
-                    aria-label={`Publish ${item.title ?? item.artifactId}`}
+                    aria-label={`Publish ${item.title ?? `Page ${index + 1}`}`}
                     checked={item.selectedForPublish}
                     disabled={!item.finalized?.staged}
                     type="checkbox"
                     onChange={(event) => onItemSelectedChange?.(item.artifactId, event.currentTarget.checked)}
                   />
                   <span>
-                    <strong>{item.title ?? item.artifactId}</strong>
+                    <strong>{item.title ?? `Page ${index + 1}`}</strong>
                     {item.outcome.kind === "published" ? (
                       <span className="masthead-pages-help"> Published</span>
                     ) : null}
@@ -241,7 +226,7 @@ function BatchGroup({
                 </label>
               ) : (
                 <span>
-                  <strong>{item.title ?? item.artifactId}</strong>
+                  <strong>{item.title ?? `Page ${index + 1}`}</strong>
                   {item.prepared?.ineligibilityReason ? (
                     <span className="masthead-pages-help"> — {item.prepared.ineligibilityReason}</span>
                   ) : null}

@@ -8,7 +8,6 @@ type Props = {
   selected?: boolean;
   session: LogbookSession;
   onSelect: (sessionId: string) => void;
-  pagesSelectionMode?: boolean;
   selectedArtifactIds?: readonly string[];
   onArtifactSelectedChange?: (artifactId: string, selected: boolean) => void;
 };
@@ -17,7 +16,6 @@ export function LogbookRow({
   density,
   onArtifactSelectedChange,
   onSelect,
-  pagesSelectionMode = false,
   rowIndex = 0,
   selected = false,
   selectedArtifactIds = [],
@@ -28,7 +26,6 @@ export function LogbookRow({
   const kind = rowKind(session);
   const publishedAt = session.lastActivityAt;
   const selection = selectionStateForRow({
-    pagesSelectionMode,
     selectedArtifactIds,
     sessionId: session.sessionId,
     kind
@@ -58,8 +55,8 @@ export function LogbookRow({
       onClick={handleRowClick}
       onKeyDown={handleRowKeyDown}
     >
-      {selection ? (
-        <td className="logbook-col-select">
+      <td className="logbook-col-select">
+        <label className="logbook-row-checkbox masthead-checkbox-control">
           <input
             aria-label={
               selection.disabled
@@ -73,8 +70,8 @@ export function LogbookRow({
             onChange={(event) => onArtifactSelectedChange?.(session.sessionId, event.currentTarget.checked)}
             onClick={(event) => event.stopPropagation()}
           />
-        </td>
-      ) : null}
+        </label>
+      </td>
       <td className="logbook-col-kind">
         <span className="state-token">{kindLabel(kind)}</span>
       </td>
@@ -112,7 +109,7 @@ export function LogbookRow({
 }
 
 function isInteractiveTarget(target: EventTarget | null): boolean {
-  return target instanceof Element && Boolean(target.closest("a, button, input, select, textarea, [data-logbook-row-stop]"));
+  return target instanceof Element && Boolean(target.closest("a, button, input, label, select, textarea, [data-logbook-row-stop]"));
 }
 
 function kindLabel(kind: string): string {

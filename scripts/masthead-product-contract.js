@@ -162,9 +162,9 @@ const pagesIntegration = normalizeWhitespace(fileContents("docs/reference/masthe
 for (const requirement of [
   { label: "qualified Publish to Masthead Pages", pattern: /\bPublish to Masthead Pages\b/ },
   { label: "local-first offline behavior", pattern: /fully useful without a Masthead Pages account/i },
-  { label: "temporary selection mode", pattern: /temporary Masthead Pages selection mode/i },
+  { label: "always-visible Page selection", pattern: /keeps Page checkboxes visible/i },
   { label: "OS-backed credentials", pattern: /safeStorage|OS-backed credentials/i },
-  { label: "no bare Publish", pattern: /Never a bare \*\*Publish\*\*/i }
+  { label: "scoped compact Publish exception", pattern: /compact visible label \*\*Publish\*\*.*accessible name names the hosted destination/i }
 ]) {
   if (!requirement.pattern.test(pagesIntegration)) {
     failures.push(`docs/reference/masthead-pages-integration.md missing ${requirement.label}`);

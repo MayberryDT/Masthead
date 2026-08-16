@@ -11,7 +11,6 @@ type Props = {
   selectedSessionId?: string;
   updating?: boolean;
   onSelect: (sessionId: string) => void;
-  pagesSelectionMode?: boolean;
   selectedArtifactIds?: readonly string[];
   onArtifactSelectedChange?: (artifactId: string, selected: boolean) => void;
 };
@@ -21,7 +20,6 @@ export function LogbookTable({
   density,
   onArtifactSelectedChange,
   onSelect,
-  pagesSelectionMode = false,
   selectedArtifactIds = [],
   selectedSessionId,
   sessions,
@@ -86,7 +84,6 @@ export function LogbookTable({
           density={density}
           sessions={outgoingSessions}
           selectedSessionId={selectedSessionId}
-          pagesSelectionMode={pagesSelectionMode}
           selectedArtifactIds={selectedArtifactIds}
           onArtifactSelectedChange={onArtifactSelectedChange}
           onSelect={onSelect}
@@ -97,7 +94,6 @@ export function LogbookTable({
         density={density}
         sessions={displayedSessions}
         selectedSessionId={selectedSessionId}
-        pagesSelectionMode={pagesSelectionMode}
         selectedArtifactIds={selectedArtifactIds}
         onArtifactSelectedChange={onArtifactSelectedChange}
         onSelect={onSelect}
@@ -112,7 +108,6 @@ function LogbookTableLayer({
   density,
   onArtifactSelectedChange,
   onSelect,
-  pagesSelectionMode = false,
   selectedArtifactIds = [],
   selectedSessionId,
   sessions
@@ -123,7 +118,6 @@ function LogbookTableLayer({
   sessions: LogbookSession[];
   selectedSessionId?: string;
   onSelect: (sessionId: string) => void;
-  pagesSelectionMode?: boolean;
   selectedArtifactIds?: readonly string[];
   onArtifactSelectedChange?: (artifactId: string, selected: boolean) => void;
 }) {
@@ -131,11 +125,9 @@ function LogbookTableLayer({
     <table aria-hidden={ariaHidden} className={`logbook-table ${density === "compact" ? "compact" : ""} ${className}`.trim()}>
       <thead>
         <tr>
-          {pagesSelectionMode ? (
-            <th scope="col" className="logbook-col-select">
-              <span className="visually-hidden">Select</span>
-            </th>
-          ) : null}
+          <th scope="col" className="logbook-col-select">
+            <span className="visually-hidden">Select</span>
+          </th>
           {logbookColumns.map((column) => (
             <th key={column.key} scope="col" className={column.className}>
               {column.label}
@@ -151,8 +143,7 @@ function LogbookTableLayer({
             rowIndex={rowIndex}
             session={session}
             selected={session.sessionId === selectedSessionId}
-            pagesSelectionMode={pagesSelectionMode}
-            selectedArtifactIds={selectedArtifactIds}
+              selectedArtifactIds={selectedArtifactIds}
             onArtifactSelectedChange={onArtifactSelectedChange}
             onSelect={onSelect}
           />

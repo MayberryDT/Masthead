@@ -33,24 +33,19 @@ for (const check of forbiddenPairs) {
   }
 }
 
-// Permanent Logbook checkboxes are forbidden; temporary Masthead Pages selection mode may use them.
+// Logbook Page selection is permanent: row and filtered-scope checkboxes stay visible.
 try {
   const row = await readFile("src/ui/logbook/LogbookRow.tsx", "utf8");
-  const table = await readFile("src/ui/logbook/LogbookTable.tsx", "utf8");
-  const combined = `${row}\n${table}`;
+  const toolbar = await readFile("src/ui/logbook/LogbookToolbar.tsx", "utf8");
 
-  if (/type=["']checkbox["']/.test(combined) && !/pagesSelectionMode/.test(combined)) {
-    failures.push("Logbook checkbox present without pagesSelectionMode gate");
+  if (!/type=["']checkbox["']/.test(row)) {
+    failures.push("LogbookRow missing permanent Page selection checkbox");
   }
-
-  // Checkbox markup must be gated on temporary Masthead Pages selection mode.
-  if (/type=["']checkbox["']/.test(combined)) {
-    const checkboxBlocks = combined.split(/type=["']checkbox["']/);
-    // Every checkbox occurrence should sit near a pagesSelectionMode condition in the same file.
-    if (!/pagesSelectionMode\s*(?:\?|&&|\|\||===|!==)/.test(combined) && !/pagesSelectionMode\s*\)/.test(combined)) {
-      failures.push("Logbook checkbox is not gated by pagesSelectionMode");
-    }
-    void checkboxBlocks;
+  if (!/type=["']checkbox["']/.test(toolbar) || !/Select all/.test(toolbar)) {
+    failures.push("LogbookToolbar missing filtered Select all checkbox");
+  }
+  if (/pagesSelectionMode/.test(`${row}\n${toolbar}`)) {
+    failures.push("Logbook Page selection is still gated by temporary selection mode");
   }
 
   // Masthead Pages review surfaces may use checkboxes for acknowledgments.

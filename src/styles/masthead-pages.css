@@ -60,20 +60,125 @@
 
 .masthead-pages-field input,
 .masthead-pages-field select {
-  min-height: 34px;
-  border: 1px solid rgba(92, 153, 187, 0.22);
-  border-radius: 5px;
-  background: rgba(4, 18, 28, 0.9);
+  min-height: 40px;
+  border: 1px solid rgba(92, 153, 187, 0.24);
+  border-radius: 3px;
+  background-color: var(--control-raised, #081d2a);
   color: var(--ink);
-  padding: 6px 10px;
+  padding: 8px 34px 8px 10px;
+  transition: border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
+}
+
+.masthead-pages-field select {
+  appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, #91a8ba 50%),
+    linear-gradient(135deg, #91a8ba 50%, transparent 50%);
+  background-position:
+    calc(100% - 15px) 17px,
+    calc(100% - 10px) 17px;
+  background-repeat: no-repeat;
+  background-size: 5px 5px, 5px 5px;
+}
+
+.masthead-pages-field select:hover:not(:disabled),
+.masthead-pages-field input:hover:not(:disabled) {
+  border-color: rgba(112, 173, 205, 0.42);
+  background-color: var(--control-raised-hover, #0b2636);
+}
+
+.masthead-pages-field select:focus-visible,
+.masthead-pages-field input:focus-visible {
+  outline: 0;
+  border-color: rgba(116, 185, 224, 0.72);
+  box-shadow: 0 0 0 2px rgba(46, 167, 255, 0.18);
+}
+
+.masthead-pages-field select:disabled,
+.masthead-pages-field input:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.masthead-pages-field select option {
+  background: #071b28;
+  color: var(--ink);
 }
 
 .masthead-pages-checkbox {
   display: flex;
-  gap: 8px;
-  align-items: flex-start;
+  min-height: 40px;
+  gap: 10px;
+  align-items: center;
   color: var(--ink);
   font-size: 13px;
+  line-height: 1.4;
+}
+
+.masthead-checkbox-control {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  gap: 8px;
+  color: var(--body);
+  cursor: pointer;
+  font-size: 12px;
+  user-select: none;
+}
+
+.masthead-checkbox-control input[type="checkbox"] {
+  appearance: none;
+  display: grid;
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  place-content: center;
+  border: 1px solid rgba(112, 173, 205, 0.42);
+  border-radius: 3px;
+  background: #061925;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.36);
+  cursor: pointer;
+  transition: background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.masthead-checkbox-control input[type="checkbox"]::before {
+  content: "";
+  width: 10px;
+  height: 6px;
+  border-bottom: 2px solid #031019;
+  border-left: 2px solid #031019;
+  opacity: 0;
+  transform: translateY(-1px) rotate(-45deg) scale(0.65);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.masthead-checkbox-control input[type="checkbox"]:checked {
+  border-color: #4ea6d8;
+  background: #4ea6d8;
+  box-shadow: 0 0 0 3px rgba(46, 167, 255, 0.12);
+}
+
+.masthead-checkbox-control input[type="checkbox"]:checked::before {
+  opacity: 1;
+  transform: translateY(-1px) rotate(-45deg) scale(1);
+}
+
+.masthead-checkbox-control input[type="checkbox"]:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(116, 185, 224, 0.26);
+}
+
+.masthead-checkbox-control input[type="checkbox"]:disabled {
+  border-color: rgba(145, 168, 186, 0.18);
+  background: rgba(6, 25, 37, 0.52);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+.masthead-checkbox-control:has(input:disabled) {
+  color: var(--mute);
+  cursor: not-allowed;
 }
 
 .masthead-pages-help {
@@ -211,8 +316,62 @@
 }
 
 .masthead-pages-batch-dialog {
-  width: min(960px, 100%);
+  width: min(760px, 100%);
+  gap: 0;
+  border: 1px solid rgba(112, 173, 205, 0.22);
+  background: #071b28;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.46), inset 0 1px 0 rgba(190, 225, 245, 0.05);
 }
+
+.masthead-pages-batch-header {
+  align-items: center;
+  border-bottom: 1px solid rgba(194, 221, 241, 0.12);
+  padding-bottom: 14px;
+}
+
+.masthead-pages-batch-header h2 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.masthead-pages-batch-body {
+  gap: 0;
+  padding: 4px 4px 0 0;
+}
+
+.masthead-pages-batch-error {
+  border-left: 3px solid #d35b5b;
+  background: rgba(122, 34, 39, 0.16);
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.masthead-pages-batch-dialog .masthead-pages-review-step {
+  gap: 12px;
+  border: 0;
+  border-top: 1px solid rgba(194, 221, 241, 0.1);
+  border-radius: 0;
+  background: transparent;
+  padding: 16px 0;
+}
+
+.masthead-pages-batch-dialog .masthead-pages-batch-destination {
+  border-top: 0;
+}
+
+.masthead-pages-batch-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.masthead-pages-batch-dialog > .masthead-pages-review-actions {
+  justify-content: flex-end;
+  border-top: 1px solid rgba(194, 221, 241, 0.12);
+  padding-top: 14px;
+}
+
 
 .masthead-pages-batch-list {
   list-style: none;
@@ -233,22 +392,32 @@
   font-size: 13px;
 }
 
-.logbook-pages-selection-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding-top: 8px;
-}
-
 .logbook-col-select {
-  width: 36px;
+  width: 46px;
+  min-width: 46px;
+  padding-inline: 3px !important;
   text-align: center;
 }
 
-.logbook-row.is-ineligible {
-  opacity: 0.72;
+.logbook-row-checkbox {
+  justify-content: center;
+  width: 40px;
+}
+
+@media (max-width: 600px) {
+  .masthead-pages-review-backdrop {
+    align-items: end;
+    padding: 10px;
+  }
+
+  .masthead-pages-batch-dialog {
+    max-height: calc(100vh - 20px);
+    padding: 16px;
+  }
+
+  .masthead-pages-batch-fields {
+    grid-template-columns: 1fr;
+  }
 }
 
 .visually-hidden {

@@ -13,6 +13,7 @@ describe("MastheadPagesBatchReview", () => {
       publicLogbookId: "logbook-1",
       license: "all-rights-reserved",
       acknowledgeWarnings: false,
+      error: "Masthead Pages requires the desktop app.",
       logbooks: [
         {
           id: "logbook-1",
@@ -116,6 +117,44 @@ describe("MastheadPagesBatchReview", () => {
     expect(html).toContain("Ready Page");
     expect(html).toContain("Needs Review Page");
     expect(html).toContain("Blocked Page");
+    expect(html).toContain("Masthead Pages requires the desktop app.");
+    expect(html).not.toContain("Ready items are daemon-staged before transfer");
+    expect(html).not.toContain("Desktop unavailable");
+    expect(html).not.toContain("Connection");
+    expect(html).not.toContain('<p class="mono-label">Publish to Masthead Pages</p>');
+  });
+
+  test("keeps unavailable review customer-facing when Page details cannot load", () => {
+    const html = renderToStaticMarkup(
+      <MastheadPagesBatchReview
+        open
+        batch={{
+          phase: "error",
+          artifactIds: ["session_artifact:internal-id"],
+          items: [{ artifactId: "session_artifact:internal-id", selectedForPublish: false, outcome: { kind: "idle" } }],
+          logbooks: [],
+          publicLogbookId: "",
+          license: "all-rights-reserved",
+          acknowledgeWarnings: false,
+          error: "Masthead Pages requires the desktop app.",
+          gate: "desktop_unavailable"
+        }}
+        readyCount={0}
+        onClose={() => undefined}
+        onPublicLogbookIdChange={() => undefined}
+        onLicenseChange={() => undefined}
+        onAcknowledgeWarningsChange={() => undefined}
+        onItemSelectedChange={() => undefined}
+        onFinalize={() => undefined}
+        onConfirmPublish={() => undefined}
+      />
+    );
+
+    expect(html).toContain("Review 1 Page");
+    expect(html).toContain("Page 1");
+    expect(html).toContain("Not checked");
+    expect(html).not.toContain("session_artifact:internal-id");
+    expect(html).not.toContain("Desktop unavailable");
   });
 
   test("hides when closed", () => {

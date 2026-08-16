@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { LogbookFilterState, LogbookLoadState, LogbookSession } from "../../ui/HistoryPanel";
+import type { LogbookFilterState, LogbookLoadState } from "../../ui/HistoryPanel";
 import type { AppSurface } from "../../ui/ObservabilitySidebar";
 import {
   getLogbookArtifact,
@@ -16,7 +16,6 @@ import { logbookPageSearchFilters, readCachedLogbookPage, writeCachedLogbookPage
 import { CANONICAL_SESSION_DOSSIER_SCHEMA, isPublishedSessionDossierV1, toLogbookInspectorArtifact, type LogbookInspectorArtifact } from "./logbookInspectorModel";
 import {
   MASTHEAD_PAGES_BATCH_CAP,
-  selectEligibleCurrentPageIds,
   toggleSelectedId,
   type MastheadPagesSelectionScope
 } from "./mastheadPagesSelection";
@@ -64,15 +63,14 @@ export function useLogbookController({
   const [transcriptFilter, setTranscriptFilter] = useState<SessionTranscriptKindFilter>("all");
   /** Bound to the Logbook row id so a stale provenance session cannot load after selection changes. */
   const [provenanceTranscriptTarget, setProvenanceTranscriptTarget] = useState<{ artifactId: string; sessionId: string }>();
-  const [pagesSelectionMode, setPagesSelectionMode] = useState(false);
   const [selectedArtifactIds, setSelectedArtifactIds] = useState<string[]>([]);
   const [selectionScope, setSelectionScope] = useState<MastheadPagesSelectionScope>("none");
   const [batchReview, setBatchReview] = useState<MastheadPagesBatchReviewHandle | null>(null);
   const [selectionBusy, setSelectionBusy] = useState(false);
   const [selectionError, setSelectionError] = useState<string>();
   const pageCacheRef = useRef(new Map<string, LogbookSearchResult>());
+  const selectionRequestRef = useRef(0);
   const effectiveRetryKey = retryKey + externalRefreshKey;
-  const batchCap = MASTHEAD_PAGES_BATCH_CAP;
   const { logbook: logbookRevision } = useMastheadDataRevisions({
     active: activeSurface === "logbook",
     activeProjectionUrl,
@@ -269,7 +267,11 @@ export function useLogbookController({
   }, [activeProjectionUrl, activeSurface, provenanceTranscriptTarget, selectedSessionId, transcriptFilter]);
 
   const changeQuery = (nextQuery: string) => {
+    selectionRequestRef.current += 1;
+    setSelectionBusy(false);
     setQuery(nextQuery);
+    setSelectionScope((current) => current === "filtered" ? "manual" : current);
+    setSelectionError(undefined);
     setPageIndex(0);
     setResult(undefined);
     setError(undefined);
@@ -277,7 +279,11 @@ export function useLogbookController({
   };
 
   const changeFilters = (nextFilters: LogbookFilterState) => {
+    selectionRequestRef.current += 1;
+    setSelectionBusy(false);
     setFilters(nextFilters);
+    setSelectionScope((current) => current === "filtered" ? "manual" : current);
+    setSelectionError(undefined);
     setPageIndex(0);
     setResult(undefined);
     setError(undefined);
@@ -304,41 +310,48 @@ export function useLogbookController({
   };
 
   const changeSort = (nextSort: LogbookSort) => {
+    selectionRequestRef.current += 1;
+    setSelectionBusy(false);
     setSort(nextSort);
+    setSelectionScope((current) => current === "filtered" ? "manual" : current);
+    setSelectionError(undefined);
     setPageIndex(0);
     setResult(undefined);
     setSelectedSessionId(undefined);
   };
 
-  const enterPagesSelectionMode = useCallback(() => {
-    setPagesSelectionMode(true);
-    setSelectionError(undefined);
-    setBatchReview(null);
-  }, []);
-
-  const cancelPagesSelectionMode = useCallback(() => {
-    setPagesSelectionMode(false);
-    setSelectedArtifactIds([]);
-    setSelectionScope("none");
-    setSelectionError(undefined);
-    setSelectionBusy(false);
-    setBatchReview(null);
-  }, []);
-
   const setArtifactSelected = useCallback((artifactId: string, selected: boolean) => {
-    setSelectedArtifactIds((current) => toggleSelectedId(current, artifactId, selected, MASTHEAD_PAGES_BATCH_CAP));
-    setSelectionScope("manual");
-  }, []);
-
-  const selectCurrentPage = useCallback(() => {
-    const sessions: LogbookSession[] = result?.sessions ?? [];
-    setSelectedArtifactIds((current) => selectEligibleCurrentPageIds(sessions, current, MASTHEAD_PAGES_BATCH_CAP));
-    setSelectionScope("current_page");
-  }, [result?.sessions]);
-
-  const selectMatchingResults = useCallback(async () => {
-    setSelectionBusy(true);
+    selectionRequestRef.current += 1;
+    setSelectionBusy(false);
+    const nextIds = toggleSelectedId(selectedArtifactIds, artifactId, selected, MASTHEAD_PAGES_BATCH_CAP);
+    setSelectedArtifactIds(nextIds);
+    setSelectionScope(nextIds.length > 0 ? "manual" : "none");
     setSelectionError(undefined);
+  }, [selectedArtifactIds]);
+
+  const selectAllFilteredPages = useCallback(async (selected: boolean) => {
+    const requestId = ++selectionRequestRef.current;
+    setSelectionError(undefined);
+    setBatchReview(null);
+    if (!selected) {
+      setSelectionBusy(false);
+      setSelectedArtifactIds([]);
+      setSelectionScope("none");
+      return;
+    }
+
+    const kindFilters = Array.isArray(filters.kind)
+      ? filters.kind
+      : typeof filters.kind === "string"
+        ? [filters.kind]
+        : [];
+    if (kindFilters.length > 0 && !kindFilters.includes("session_dossier")) {
+      setSelectedArtifactIds([]);
+      setSelectionScope("none");
+      return;
+    }
+
+    setSelectionBusy(true);
     try {
       const projectFilter = Array.isArray(filters.project)
         ? filters.project[0]
@@ -355,29 +368,31 @@ export function useLogbookController({
         },
         activeProjectionUrl
       );
+      if (selectionRequestRef.current !== requestId) return;
       if (resolved.status === "incomplete") {
         setSelectedArtifactIds([]);
         setSelectionScope("none");
-        setBatchReview(null);
         setSelectionError(
           resolved.reason === "eligibility_backfill_incomplete"
-            ? "Matching Pages are still being indexed. Retry selection in a moment."
+            ? "Filtered Pages are still being indexed. Try again in a moment."
             : resolved.retryable
-              ? "Matching Pages could not be checked. Retry selection."
-              : "Matching Pages could not be checked. Repair the affected local Page before retrying."
+              ? "Could not select filtered Pages. Try again."
+              : "One or more filtered Pages must be repaired before they can be selected."
         );
         return;
       }
       const ids = resolved.artifactIds.slice(0, MASTHEAD_PAGES_BATCH_CAP);
-      // Snapshot immediately — never expand to future matches as filters change.
       setSelectedArtifactIds(ids);
-      setSelectionScope("matching");
-    } catch (resolveError: unknown) {
-      setSelectionError(resolveError instanceof Error ? resolveError.message : String(resolveError));
+      setSelectionScope(ids.length > 0 ? "filtered" : "none");
+    } catch {
+      if (selectionRequestRef.current !== requestId) return;
+      setSelectedArtifactIds([]);
+      setSelectionScope("none");
+      setSelectionError("Could not select filtered Pages. Try again.");
     } finally {
-      setSelectionBusy(false);
+      if (selectionRequestRef.current === requestId) setSelectionBusy(false);
     }
-  }, [activeProjectionUrl, filters.dateFrom, filters.dateTo, filters.project, query, resolveSelection]);
+  }, [activeProjectionUrl, filters.dateFrom, filters.dateTo, filters.kind, filters.project, query, resolveSelection]);
 
   const openBatchReview = useCallback(() => {
     if (selectedArtifactIds.length === 0) return;
@@ -389,18 +404,26 @@ export function useLogbookController({
   }, []);
 
   useEffect(() => {
-    if (activeSurface !== "logbook" && pagesSelectionMode) {
-      setPagesSelectionMode(false);
-      setSelectedArtifactIds([]);
-      setSelectionScope("none");
-      setBatchReview(null);
-    }
-  }, [activeSurface, pagesSelectionMode]);
+    selectionRequestRef.current += 1;
+    setSelectionBusy(false);
+    setSelectedArtifactIds([]);
+    setSelectionScope("none");
+    setSelectionError(undefined);
+    setBatchReview(null);
+  }, [activeProjectionUrl]);
+
+  useEffect(() => {
+    if (activeSurface === "logbook") return;
+    selectionRequestRef.current += 1;
+    setSelectedArtifactIds([]);
+    setSelectionScope("none");
+    setSelectionError(undefined);
+    setSelectionBusy(false);
+    setBatchReview(null);
+  }, [activeSurface]);
 
   return {
-    batchCap,
     batchReview,
-    cancelPagesSelectionMode,
     changeFilters,
     changePage,
     changeQuery,
@@ -410,19 +433,16 @@ export function useLogbookController({
     closeSession: () => setSelectedSessionId(undefined),
     detailError,
     detailLoading,
-    enterPagesSelectionMode,
     filterOptions,
     filters,
     loadState,
     openBatchReview,
+    allFilteredSelected: selectionScope === "filtered" && selectedArtifactIds.length > 0,
     pageIndex,
     pageSize: LOGBOOK_PAGE_SIZE,
-    pagesSelectionMode,
     query,
     refreshError: result ? error : undefined,
     retry: () => setRetryKey((current) => current + 1),
-    selectCurrentPage,
-    selectMatchingResults,
     selectSession: setSelectedSessionId,
     selectedArtifact,
     selectedArtifactIds,
@@ -430,6 +450,7 @@ export function useLogbookController({
     selectionBusy,
     selectionError,
     selectionScope,
+    selectAllFilteredPages,
     setArtifactSelected,
     sort,
     transcriptFilter

@@ -23,42 +23,46 @@ afterEach(() => {
 });
 
 describe("LogbookToolbar", () => {
-  test("shows temporary Masthead Pages selection controls only in selection mode", () => {
-    const idle = renderToStaticMarkup(
+  test("keeps one filtered Select all control and one compact Publish action visible", () => {
+    const html = renderToStaticMarkup(
       <LogbookToolbar
+        allFilteredSelected
         query=""
-        sort="recent"
-        onEnterPagesSelectionMode={() => undefined}
-        onFilterChange={() => undefined}
-        onQueryChange={() => undefined}
-        onSortChange={() => undefined}
-      />
-    );
-    expect(idle).toContain("Publish to Masthead Pages");
-    expect(idle).not.toContain("Cancel Masthead Pages selection");
-    expect(idle).not.toContain('type="checkbox"');
-
-    const active = renderToStaticMarkup(
-      <LogbookToolbar
-        query=""
-        sort="recent"
-        pagesSelectionMode
         selectedCount={3}
-        batchCap={500}
-        onCancelPagesSelectionMode={() => undefined}
-        onSelectCurrentPage={() => undefined}
-        onSelectMatchingResults={() => undefined}
+        sort="recent"
+        onAllFilteredSelectedChange={() => undefined}
         onOpenBatchReview={() => undefined}
         onFilterChange={() => undefined}
         onQueryChange={() => undefined}
         onSortChange={() => undefined}
       />
     );
-    expect(active).toContain("3 selected");
-    expect(active).toContain("Select current page");
-    expect(active).toContain("Select eligible matching results (up to 500)");
-    expect(active).toContain("Review 3 Pages");
-    expect(active).toContain("Cancel Masthead Pages selection");
+
+    expect(html).toContain('aria-label="Select all filtered eligible Pages"');
+    expect(html).toContain('aria-label="Publish selected Pages to Masthead Pages"');
+    expect(html).toContain(">Select all</span>");
+    expect(html).toContain(">Publish</button>");
+    expect(html).not.toContain("Select current page");
+    expect(html).not.toContain("Select eligible matching results");
+    expect(html).not.toContain("Cancel Masthead Pages selection");
+    expect(html).not.toContain("Publish to Masthead Pages</button>");
+  });
+
+  test("disables Publish until at least one Page is selected", () => {
+    const html = renderToStaticMarkup(
+      <LogbookToolbar
+        query=""
+        selectedCount={0}
+        sort="recent"
+        onAllFilteredSelectedChange={() => undefined}
+        onOpenBatchReview={() => undefined}
+        onFilterChange={() => undefined}
+        onQueryChange={() => undefined}
+        onSortChange={() => undefined}
+      />
+    );
+
+    expect(html).toMatch(/aria-label="Publish selected Pages to Masthead Pages"[^>]*disabled/);
   });
 
   test("renders Logbook filters as primary toolbar controls", () => {
@@ -120,8 +124,9 @@ describe("LogbookToolbar", () => {
       />
     );
 
-    expect(html).not.toContain("selected");
-    expect(html).not.toContain("Select page");
+    expect(html).toContain("Select all");
+    expect(html).toContain("Publish");
+    expect(html).not.toContain("Select current page");
     expect(html).not.toContain("Select all matching filter");
     expect(html).not.toContain("Enrich summaries");
     expect(html).not.toContain("Enrich full sessions");

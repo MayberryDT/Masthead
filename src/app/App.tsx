@@ -752,16 +752,12 @@ export function App() {
             onSessionSelect={logbook.selectSession}
             onSortChange={logbook.changeSort}
             onTranscriptFilterChange={logbook.changeTranscriptFilter}
-            pagesSelectionMode={logbook.pagesSelectionMode}
             selectedArtifactIds={logbook.selectedArtifactIds}
-            batchCap={logbook.batchCap}
+            allFilteredSelected={logbook.allFilteredSelected}
             selectionBusy={logbook.selectionBusy}
             selectionError={logbook.selectionError}
-            onEnterPagesSelectionMode={logbook.enterPagesSelectionMode}
-            onCancelPagesSelectionMode={logbook.cancelPagesSelectionMode}
-            onSelectCurrentPage={logbook.selectCurrentPage}
-            onSelectMatchingResults={() => {
-              void logbook.selectMatchingResults();
+            onAllFilteredSelectedChange={(selected) => {
+              void logbook.selectAllFilteredPages(selected);
             }}
             onOpenBatchReview={() => {
               const ids = [...logbook.selectedArtifactIds];
@@ -871,9 +867,6 @@ export function App() {
             onClose={() => {
               mastheadPages.closeBatchReview();
               logbook.closeBatchReview();
-            }}
-            onConnect={() => {
-              void mastheadPages.connect();
             }}
             onPublicLogbookIdChange={mastheadPages.setBatchPublicLogbookId}
             onLicenseChange={mastheadPages.setBatchLicense}
